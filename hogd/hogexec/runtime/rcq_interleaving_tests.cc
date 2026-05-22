@@ -62,74 +62,74 @@ protected:
     // Calldata-driven RCQ contract:
     //   method 0: each calldata byte → one queue entry
     //   method 1: consume calldata[0] entries (default 1)
-    auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &cd = ctx.handler().get_calldata();
-               auto key = make_storage_key("rcq0");
-               for (uint8_t val : cd) {
-                 auto res = ctx.handler().retrocausal_queue_insert(
-                     key, std::as_bytes(std::span(&val, 1)));
-                 if (!res.has_value())
-                   return res.error().to_invoke_error();
-               }
-               return {};
-             }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &cd = ctx.handler().get_calldata();
-               uint8_t count = cd.empty() ? 1 : cd[0];
-               auto key = make_storage_key("rcq0");
-               for (uint8_t i = 0; i < count; i++) {
-                 auto res = ctx.handler().retrocausal_queue_consume(key, false);
-                 if (!res.has_value())
-                   return res.error().to_invoke_error();
-               }
-               return {};
-             }},
-            // method 2: delete the RCQ key
-            {2,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("rcq0");
-               auto res = ctx.handler().delete_object(
-                   key, std::to_underlying(StorageDeltaFlags::None));
-               if (!res.has_value())
-                 return res.error().to_invoke_error();
-               return {};
-             }},
-            // method 3: set bytestring (type change from RCQ)
-            {3,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &cd = ctx.handler().get_calldata();
-               auto key = make_storage_key("rcq0");
-               auto res = ctx.handler().set_bytestring(
-                   key, std::as_bytes(std::span(cd)),
-                   std::to_underlying(StorageDeltaFlags::None));
-               if (!res.has_value())
-                 return res.error().to_invoke_error();
-               return {};
-             }},
-            // method 4: delete + recreate (delete then insert)
-            {4,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &cd = ctx.handler().get_calldata();
-               auto key = make_storage_key("rcq0");
-               auto del = ctx.handler().delete_object(
-                   key, std::to_underlying(StorageDeltaFlags::None));
-               if (!del.has_value())
-                 return del.error().to_invoke_error();
-               if (!del.value().has_value())
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               for (uint8_t val : cd) {
-                 auto ins = ctx.handler().retrocausal_queue_insert(
-                     key, std::as_bytes(std::span(&val, 1)));
-                 if (!ins.has_value())
-                   return ins.error().to_invoke_error();
-               }
-               return {};
-             }},
-        });
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto const &cd = ctx.handler().get_calldata();
+                  auto key = make_storage_key("rcq0");
+                  for (uint8_t val : cd) {
+                    auto res = ctx.handler().retrocausal_queue_insert(
+                        key, std::as_bytes(std::span(&val, 1)));
+                    if (!res.has_value())
+                      return res.error().to_invoke_error();
+                  }
+                  return {};
+                });
+    fns.emplace(1,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto const &cd = ctx.handler().get_calldata();
+                  uint8_t count = cd.empty() ? 1 : cd[0];
+                  auto key = make_storage_key("rcq0");
+                  for (uint8_t i = 0; i < count; i++) {
+                    auto res =
+                        ctx.handler().retrocausal_queue_consume(key, false);
+                    if (!res.has_value())
+                      return res.error().to_invoke_error();
+                  }
+                  return {};
+                });
+    // method 2: delete the RCQ key
+    fns.emplace(2,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto key = make_storage_key("rcq0");
+                  auto res = ctx.handler().delete_object(
+                      key, std::to_underlying(StorageDeltaFlags::None));
+                  if (!res.has_value())
+                    return res.error().to_invoke_error();
+                  return {};
+                });
+    // method 3: set bytestring (type change from RCQ)
+    fns.emplace(3,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto const &cd = ctx.handler().get_calldata();
+                  auto key = make_storage_key("rcq0");
+                  auto res = ctx.handler().set_bytestring(
+                      key, std::as_bytes(std::span(cd)),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!res.has_value())
+                    return res.error().to_invoke_error();
+                  return {};
+                });
+    // method 4: delete + recreate (delete then insert)
+    fns.emplace(4,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto const &cd = ctx.handler().get_calldata();
+                  auto key = make_storage_key("rcq0");
+                  auto del = ctx.handler().delete_object(
+                      key, std::to_underlying(StorageDeltaFlags::None));
+                  if (!del.has_value())
+                    return del.error().to_invoke_error();
+                  if (!del.value().has_value())
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  for (uint8_t val : cd) {
+                    auto ins = ctx.handler().retrocausal_queue_insert(
+                        key, std::as_bytes(std::span(&val, 1)));
+                    if (!ins.has_value())
+                      return ins.error().to_invoke_error();
+                  }
+                  return {};
+                });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
     context_ = std::make_unique<NativeContext>(std::move(contract_map));

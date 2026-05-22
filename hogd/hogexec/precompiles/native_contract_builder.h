@@ -21,10 +21,20 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
 namespace detail {
+
+template<typename Expected, typename Actual>
+struct TupleSerializesLike : std::false_type {};
+
+template<typename... Es, typename... As>
+requires (sizeof...(Es) == sizeof...(As))
+struct TupleSerializesLike<std::tuple<Es...>, std::tuple<As...>>
+  : std::bool_constant<(x23::serializes_like<As, Es> && ...)> {};
+
 template<typename T> struct NativeContractArgs;
 
 template<typename R, typename... Args>
@@ -99,7 +109,9 @@ public:
     using meta_t = ContractTraitMeta<ContractTrait>;
 
     using expected_args_t = meta_t::template args_t<Name>;
-    static_assert(std::is_same_v<args_t, expected_args_t>, "Argument mismatch");
+    static_assert(
+        detail::TupleSerializesLike<expected_args_t, args_t>::value,
+        "Argument mismatch (types must be same or serialize-equivalent)");
 
     using expected_return_t = meta_t::template return_t<Name>;
     if constexpr (std::is_void_v<return_t>) {
@@ -133,71 +145,78 @@ public:
     // TODO(geoff): figure out gas costs for native contracts like this
     constexpr static GasAmount kErrorGas = 0;
 
-    auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
-                         NativeSyscallContext &ctx) -> InvokeStatus<void> {
-      auto calldata = ctx.handler().get_calldata();
-      auto args = Serializer<Format>::template deserialize<args_t>(
-          std::as_bytes(std::span(calldata)));
-      if (!args.has_value()) {
-        ctx.consume_gas(kErrorGas);
-        return InvokeError{InvokeErrorCode::Deterministic};
-      }
-
-      // invoke the lambda, and return the error if there is one
-      auto return_value =
-          [&]<size_t... Is>(
-              std::index_sequence<Is...>) -> InvokeStatus<return_t> {
-        auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
-        return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
-          return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
-      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
-      if (!return_value.has_value()) {
-        return return_value.error();
-      }
-
-      // Now we check whether the return value is a plain value,
-      // or a variant of Result<T,E>
-
-      auto do_return = [&ctx](auto const &r) -> InvokeStatus<void> {
-        auto return_buffer = Serializer<Format>::serialize(r);
-        if (!return_buffer.has_value()) {
+    auto wrapped_f =
+        [f = std::forward<decltype(lambda)>(lambda)](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      try {
+        auto const &calldata = ctx.handler().get_calldata();
+        auto args = Serializer<Format>::template deserialize<args_t>(
+            std::as_bytes(std::span(calldata)));
+        if (!args.has_value()) {
+          ctx.consume_gas(kErrorGas);
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        ctx.handler().set_return_buffer(std::move(return_buffer.value()), false,
-                                        {});
-        return {};
-      };
 
-      // Serialize error as (u64 selector, CXS body) and set as revert buffer.
-      auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
-        auto buf = err_value.serialize();
-        ctx.handler().set_return_buffer(std::move(buf), true, {});
-        return {};
-      };
+        // invoke the lambda, and return the error if there is one
+        auto return_value =
+            [&]<size_t... Is>(
+                std::index_sequence<Is...>) -> InvokeStatus<return_t> {
+          auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
+          return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
+            return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
+          }(std::make_index_sequence<
+                     std::tuple_size_v<decltype(extra_args)>>());
+        }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+        if (!return_value.has_value()) {
+          return return_value.error();
+        }
 
-      if constexpr (is_contract_result_type<return_t>) {
-        auto const &r = return_value.value();
+        // Now we check whether the return value is a plain value,
+        // or a variant of Result<T,E>
 
-        if (r.is_ok()) {
-          // void is so annoying
-          if constexpr (std::is_same_v<decltype(r.ok()), void>) {
+        auto do_return = [&ctx](auto const &r) -> InvokeStatus<void> {
+          auto return_buffer = Serializer<Format>::serialize(r);
+          if (!return_buffer.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          ctx.handler().set_return_buffer(std::move(return_buffer.value()),
+                                          false, {});
+          return {};
+        };
+
+        // Serialize error as (u64 selector, CXS body) and set as revert buffer.
+        auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
+          auto buf = err_value.serialize();
+          ctx.handler().set_return_buffer(std::move(buf), true, {});
+          return {};
+        };
+
+        if constexpr (is_contract_result_type<return_t>) {
+          auto const &r = return_value.value();
+
+          if (r.is_ok()) {
+            // void is so annoying
+            if constexpr (std::is_same_v<decltype(r.ok()), void>) {
+              return do_return(std::tuple<>{});
+            }
+            else {
+              return do_return(r.ok());
+            }
+          }
+          return do_revert(r.err());
+        }
+        else {
+          // otherwise, return the received value
+          if constexpr (std::is_same_v<decltype(return_value.value()), void>) {
             return do_return(std::tuple<>{});
           }
           else {
-            return do_return(r.ok());
+            return do_return(return_value.value());
           }
         }
-        return do_revert(r.err());
-      }
-      else {
-        // otherwise, return the received value
-        if constexpr (std::is_same_v<decltype(return_value.value()), void>) {
-          return do_return(std::tuple<>{});
-        }
-        else {
-          return do_return(return_value.value());
-        }
+      } catch (...) {
+        error("unrecoverable: unexpected exception in native contract");
+        return InvokeError{InvokeErrorCode::Unrecoverable};
       }
     };
 

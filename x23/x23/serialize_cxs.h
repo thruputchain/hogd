@@ -513,6 +513,22 @@ struct CxsSerializer<X> {
   }
 };
 
+template<> struct CxsSerializer<x23::BufView> {
+  static void store(x23::Buf &buf, x23::BufView value)
+  {
+    CxsSerializer<uint32_t>::store(buf, value.size());
+    buf.append_range(value);
+  }
+  static void load(std::span<const uint8_t> &data, x23::BufView &value)
+  {
+    uint32_t size;
+    CxsSerializer<uint32_t>::load(data, size);
+    check_size(data, size);
+    value = x23::BufView(data.data(), size);
+    data = data.subspan(size);
+  }
+};
+
 template<is_xdr_cat<XdrCategory::kOpaqueArray> X> struct CxsSerializer<X> {
   static void store(x23::Buf &buf, const X &value) { buf.append_range(value); }
   static void load(std::span<const uint8_t> &data, X &value)

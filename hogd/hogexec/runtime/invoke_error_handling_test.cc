@@ -24,6 +24,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class InvokeErrorHandlingTest : public ::testing::TestWithParam<TestDB>,
@@ -69,130 +70,131 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
   // Callee: methods that return each InvokeError code. Orchestrator: invokes
   // those methods on the callee contract (no self-reentrance).
-  auto callee_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::None);
-           }},
-          {1,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::Deterministic);
-           }},
-          {2,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::OutOfGas);
-           }},
-          {3,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::Abandon);
-           }},
-          {4,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::ValidationFailure);
-           }},
-          {5,
-           [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::Unrecoverable);
-           }},
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
+  fns_callee.emplace(
+      0, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::None);
       });
-
-  auto orchestrator_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto r = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 0, UINT64_MAX, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Invoke 0 did not return success";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-
-             auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 1, UINT64_MAX, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r2.has_value() ||
-                 r2.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-               ADD_FAILURE() << "Invoke 1 did not return kDeterministicWasm";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-
-             // Out of gas in child becomes deterministic (handleable) error in
-             // caller
-             auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 2, 12345, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r3.has_value() ||
-                 r3.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-               ADD_FAILURE() << "Invoke 2 did not return out of gas";
-               return InvokeError{InvokeErrorCode::OutOfGas};
-             }
-
-             auto r4 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 3, UINT64_MAX, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (r4.has_value() ||
-                 r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
-               ADD_FAILURE() << "Invoke 3 did not return abort transaction";
-               return InvokeError{InvokeErrorCode::Abandon};
-             }
-
-             auto r5 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 4, UINT64_MAX, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (r5.has_value() ||
-                 r5.error() !=
-                     HostFnError{HostFnErrorCode::ValidationFailure}) {
-               ADD_FAILURE() << "Invoke 4 did not return validation failure";
-               return InvokeError{InvokeErrorCode::ValidationFailure};
-             }
-
-             auto r6 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 5, UINT64_MAX, Calldata{}, 0,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (r6.has_value() ||
-                 r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
-               ADD_FAILURE() << "Invoke 5 did not return unrecoverable";
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
-
-             return {};
-           }},
+  fns_callee.emplace(
+      1, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::Deterministic);
       });
+  fns_callee.emplace(
+      2, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::OutOfGas);
+      });
+  fns_callee.emplace(
+      3, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::Abandon);
+      });
+  fns_callee.emplace(
+      4, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::ValidationFailure);
+      });
+  fns_callee.emplace(
+      5, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return inner_func(InvokeErrorCode::Unrecoverable);
+      });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_orchestrator;
+  fns_orchestrator.emplace(
+      0,
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 0, UINT64_MAX, Calldata{}, 0,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Invoke 0 did not return success";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto r2 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 1, UINT64_MAX, Calldata{}, 0,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r2.has_value() ||
+            r2.value() !=
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+          ADD_FAILURE() << "Invoke 1 did not return kDeterministicWasm";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Out of gas in child becomes deterministic (handleable) error in
+        // caller
+        auto r3 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 2, 12345, Calldata{}, 0, std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        if (!r3.has_value() ||
+            r3.value() !=
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+          ADD_FAILURE() << "Invoke 2 did not return out of gas";
+          return InvokeError{InvokeErrorCode::OutOfGas};
+        }
+
+        auto r4 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 3, UINT64_MAX, Calldata{}, 0,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (r4.has_value() ||
+            r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
+          ADD_FAILURE() << "Invoke 3 did not return abort transaction";
+          return InvokeError{InvokeErrorCode::Abandon};
+        }
+
+        auto r5 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 4, UINT64_MAX, Calldata{}, 0,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (r5.has_value() ||
+            r5.error() != HostFnError{HostFnErrorCode::ValidationFailure}) {
+          ADD_FAILURE() << "Invoke 4 did not return validation failure";
+          return InvokeError{InvokeErrorCode::ValidationFailure};
+        }
+
+        auto r6 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, 5, UINT64_MAX, Calldata{}, 0,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (r6.has_value() ||
+            r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
+          ADD_FAILURE() << "Invoke 5 did not return unrecoverable";
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
+
+        return {};
+      });
+  auto orchestrator_contract =
+      std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(callee_contract));
@@ -239,114 +241,115 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
   auto target_xdr = make_native_contract(1);
   auto target_address = make_contract_address(1);
 
-  auto target_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_target;
+  fns_target.emplace(0,
+                     [](NativeSyscallContext & /*unused*/) noexcept
+                         -> InvokeStatus<void> { return {}; });
+  auto target_contract =
+      std::make_unique<NativeContract>(std::move(fns_target));
 
-  auto caller_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Valid flags should succeed
-             auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r1.has_value() ||
-                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Valid flag TryInvoke should succeed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // Valid flags should succeed
+        auto r1 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        if (!r1.has_value() ||
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Valid flag TryInvoke should succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::ReadOnly),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r2.has_value() ||
-                 r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Valid flag ReadOnly should succeed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        auto r2 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::ReadOnly), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Valid flag ReadOnly should succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             // Combined valid flags should succeed
-             auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke) |
-                       std::to_underlying(InvokeFlag::ReadOnly),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r3.has_value() ||
-                 r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE()
-                   << "Combined valid flags TryInvoke|ReadOnly should succeed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        // Combined valid flags should succeed
+        auto r3 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke) |
+                  std::to_underlying(InvokeFlag::ReadOnly),
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r3.has_value() ||
+            r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE()
+              << "Combined valid flags TryInvoke|ReadOnly should succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
-             auto r4 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{}, 0x4,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r4.has_value() ||
-                 r4.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE() << "Flag 0x4 should be rejected";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
+        auto r4 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{}, 0x4,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r4.has_value() ||
+            r4.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "Flag 0x4 should be rejected";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             // Arbitrary garbage bits
-             auto r5 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{}, 0xFF,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r5.has_value() ||
-                 r5.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE() << "Garbage flag bits 0xFF should be rejected";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        // Arbitrary garbage bits
+        auto r5 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{}, 0xFF,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r5.has_value() ||
+            r5.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "Garbage flag bits 0xFF should be rejected";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             // High bits set
-             auto r6 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{}, 0x7FFF'FFFF,
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
-             if (!r6.has_value() ||
-                 r6.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE() << "High flag bits should be rejected";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        // High bits set
+        auto r6 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              target_address, 0, UINT64_MAX, Calldata{}, 0x7FFF'FFFF,
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+        }();
+        if (!r6.has_value() ||
+            r6.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "High flag bits should be rejected";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(caller_contract));
@@ -385,29 +388,33 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);
   constexpr ContractAddress kCallerAddress = make_contract_address(1);
 
-  auto callee_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee2;
+  fns_callee2.emplace(0,
+                      [](NativeSyscallContext & /*unused*/) noexcept
+                          -> InvokeStatus<void> { return {}; });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee2));
 
-  auto caller_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0,
-                                 output_returned_auth_token_len = 0;
-             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 kCalleeAddress, 0, UINT64_MAX, Calldata{},
-                 std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                 output_return_buffer_len, output_returned_auth_token_len);
-             if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Invoke with an empty auth-token span failed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller2;
+  fns_caller2.emplace(
+      0,
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto r = ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, 0, UINT64_MAX, Calldata{},
+            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Invoke with an empty auth-token span failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller2));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(callee_contract));
@@ -446,4 +453,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

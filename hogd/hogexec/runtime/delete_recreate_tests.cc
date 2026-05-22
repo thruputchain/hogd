@@ -36,6 +36,7 @@
 #include "x23/format.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class DeleteRecreateTest : public ::testing::TestWithParam<TestDB>,
@@ -62,116 +63,114 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
       make_contract_address(1);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_storage = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Read the storage key, expecting it to be empty
-               std::vector<std::byte> buf(1024);
-               RuntimeMemoryLength len = 0;
-               auto [status, _g1] = syscall_BytestringGet_inner(
-                   ctx.handler(), key, std::as_writable_bytes(std::span(buf)),
-                   len);
-               if (!status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to get bytestring: " << status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-                 ADD_FAILURE() << "Expected storage key to be empty, but got: "
-                               << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_storage;
+    fns_storage.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Read the storage key, expecting it to be empty
+          std::vector<std::byte> buf(1024);
+          RuntimeMemoryLength len = 0;
+          auto [status, _g1] = syscall_BytestringGet_inner(
+              ctx.handler(), key, std::as_writable_bytes(std::span(buf)), len);
+          if (!status.has_value()) {
+            ADD_FAILURE() << "Failed to get bytestring: " << status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+            ADD_FAILURE() << "Expected storage key to be empty, but got: "
+                          << x23::show(status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               // Write a bytestring to the storage key
-               Bytestring bytestring = make_bytestring("hello");
-               auto [write_status, _g2] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span(bytestring)),
-                   std::to_underlying(StorageDeltaFlags::None));
-               if (!write_status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to write bytestring: " << write_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (write_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected write to succeed, but got: "
-                               << x23::show(write_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          // Write a bytestring to the storage key
+          Bytestring bytestring = make_bytestring("hello");
+          auto [write_status, _g2] = syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(bytestring)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!write_status.has_value()) {
+            ADD_FAILURE() << "Failed to write bytestring: "
+                          << write_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected write to succeed, but got: "
+                          << x23::show(write_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }},
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Delete the storage key
-               auto delete_status =
-                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
-               if (!delete_status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (delete_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected delete to succeed, but got: "
-                               << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          return {};
+        });
+    fns_storage.emplace(
+        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Delete the storage key
+          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          if (!delete_status.has_value()) {
+            ADD_FAILURE() << "Failed to delete object: "
+                          << delete_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (delete_status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected delete to succeed, but got: "
+                          << x23::show(delete_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_storage =
+        std::make_unique<NativeContract>(std::move(fns_storage));
 
-    auto native_contract_orchestrator = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_orchestrator;
+    fns_orchestrator.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r0 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r0.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r1 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 1, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r1.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r2 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r2.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_orchestrator =
+        std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_storage));
@@ -230,115 +229,116 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
       make_contract_address(1);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_storage = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Read the storage key, expecting it to be empty
-               int128_t current_set = 0;
-               bool current_set_opt = false;
-               int128_t current_add = 0;
-               auto status = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-                   key, true, current_set, current_set_opt, current_add);
-               if (!status.has_value()) {
-                 ADD_FAILURE() << "Failed to get nnint: " << status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-                 ADD_FAILURE() << "Expected storage key to be empty, but got: "
-                               << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_storage;
+    fns_storage.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Read the storage key, expecting it to be empty
+          int128_t current_set = 0;
+          bool current_set_opt = false;
+          int128_t current_add = 0;
+          auto status =
+              ctx.syscall<SyscallNo::kNonnegativeIntGet>(key, true, current_set,
+                                                         current_set_opt,
+                                                         current_add);
+          if (!status.has_value()) {
+            ADD_FAILURE() << "Failed to get nnint: " << status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+            ADD_FAILURE() << "Expected storage key to be empty, but got: "
+                          << x23::show(status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               // Write a nonnegative integer to the storage key
-               int128_t set_value = 42;
-               auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
-                   ctx.handler(), key, &set_value, 0,
-                   std::to_underlying(StorageDeltaFlags::None));
-               if (!write_status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to write nnint: " << write_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (write_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected write to succeed, but got: "
-                               << x23::show(write_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          // Write a nonnegative integer to the storage key
+          int128_t set_value = 42;
+          auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
+              ctx.handler(), key, &set_value, 0,
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!write_status.has_value()) {
+            ADD_FAILURE() << "Failed to write nnint: " << write_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected write to succeed, but got: "
+                          << x23::show(write_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }},
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Delete the storage key
-               auto delete_status =
-                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
-               if (!delete_status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (delete_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected delete to succeed, but got: "
-                               << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          return {};
+        });
+    fns_storage.emplace(
+        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Delete the storage key
+          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          if (!delete_status.has_value()) {
+            ADD_FAILURE() << "Failed to delete object: "
+                          << delete_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (delete_status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected delete to succeed, but got: "
+                          << x23::show(delete_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_storage =
+        std::make_unique<NativeContract>(std::move(fns_storage));
 
-    auto native_contract_orchestrator = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_orchestrator;
+    fns_orchestrator.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r0 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r0.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r1 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 1, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r1.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r2 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r2.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_orchestrator =
+        std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_storage));
@@ -398,115 +398,115 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       make_contract_address(1);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_storage = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Consume from the storage key, expecting it to be empty
-               std::vector<std::byte> buf(1024);
-               RuntimeMemoryLength written_len = 0;
-               auto [status, _g1] = syscall_RetrocausalQueueConsume_inner(
-                   ctx.handler(), key, false,
-                   std::as_writable_bytes(std::span(buf)), written_len);
-               if (!status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to consume from queue: " << status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-                 ADD_FAILURE() << "Expected queue to be empty, but got: "
-                               << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_storage;
+    fns_storage.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Consume from the storage key, expecting it to be empty
+          std::vector<std::byte> buf(1024);
+          RuntimeMemoryLength written_len = 0;
+          auto [status, _g1] = syscall_RetrocausalQueueConsume_inner(
+              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
+              written_len);
+          if (!status.has_value()) {
+            ADD_FAILURE() << "Failed to consume from queue: " << status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+            ADD_FAILURE() << "Expected queue to be empty, but got: "
+                          << x23::show(status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               // Insert an item into the queue
-               QueueEntry entry = make_bytestring("item");
-               auto [insert_status, _g2] = syscall_RetrocausalQueueInsert_inner(
-                   ctx.handler(), key, std::as_bytes(std::span(entry)));
-               if (!insert_status.has_value()) {
-                 ADD_FAILURE() << "Failed to insert into queue: "
-                               << insert_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (insert_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected insert to succeed, but got: "
-                               << x23::show(insert_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          // Insert an item into the queue
+          QueueEntry entry = make_bytestring("item");
+          auto [insert_status, _g2] = syscall_RetrocausalQueueInsert_inner(
+              ctx.handler(), key, std::as_bytes(std::span(entry)));
+          if (!insert_status.has_value()) {
+            ADD_FAILURE() << "Failed to insert into queue: "
+                          << insert_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (insert_status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected insert to succeed, but got: "
+                          << x23::show(insert_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }},
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               // Delete the storage key
-               auto delete_status =
-                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
-               if (!delete_status.has_value()) {
-                 ADD_FAILURE()
-                     << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (delete_status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Expected delete to succeed, but got: "
-                               << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          return {};
+        });
+    fns_storage.emplace(
+        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          // Delete the storage key
+          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          if (!delete_status.has_value()) {
+            ADD_FAILURE() << "Failed to delete object: "
+                          << delete_status.error();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (delete_status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Expected delete to succeed, but got: "
+                          << x23::show(delete_status.value());
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_storage =
+        std::make_unique<NativeContract>(std::move(fns_storage));
 
-    auto native_contract_orchestrator = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_orchestrator;
+    fns_orchestrator.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r0 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r0.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r1 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 1, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r1.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX, Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+          auto r2 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, 0, UINT64_MAX, Calldata{},
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
 
-               if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (!r2.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_orchestrator =
+        std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_storage));
@@ -558,32 +558,34 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   // Verify there's exactly one item by consuming: first consume should succeed,
   // second should fail
   auto make_verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               std::vector<std::byte> buf(1024);
-               RuntimeMemoryLength written_len = 0;
-               // First consume should succeed
-               auto [status1, _g1] = syscall_RetrocausalQueueConsume_inner(
-                   ctx.handler(), key, false,
-                   std::as_writable_bytes(std::span(buf)), written_len);
-               if (!status1.has_value() ||
-                   status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               // Second consume should fail (queue empty)
-               auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
-                   ctx.handler(), key, false,
-                   std::as_writable_bytes(std::span(buf)), written_len);
-               if (!status2.has_value() ||
-                   status2.value() !=
-                       SyscallErrorCode::
-                           kSyscallErrorCodeNoRetrocausalQueueEntry) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_verify;
+    fns_verify.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          std::vector<std::byte> buf(1024);
+          RuntimeMemoryLength written_len = 0;
+          // First consume should succeed
+          auto [status1, _g1] = syscall_RetrocausalQueueConsume_inner(
+              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
+              written_len);
+          if (!status1.has_value() ||
+              status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // Second consume should fail (queue empty)
+          auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
+              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
+              written_len);
+          if (!status2.has_value() ||
+              status2.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto native_contract_0 =
+        std::make_unique<NativeContract>(std::move(fns_verify));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_0));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -614,4 +616,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, DeleteRecreateTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

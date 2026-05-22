@@ -12,12 +12,15 @@
 #include <utility>
 #include <vector>
 
+#include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -42,6 +45,7 @@
 #include "x23/sockio.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
@@ -91,50 +95,51 @@ TEST_F(NativeContractTest, BasicInstantiate)
       static_cast<HogexecPrecompiledNativeContracts>(0);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return {};
-             }},
-            {1, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+    fns_0.emplace(0,
+                  [](NativeSyscallContext & /*unused*/) noexcept
+                      -> InvokeStatus<void> { return {}; });
+    fns_0.emplace(1,
+                  [](NativeSyscallContext & /*unused*/) noexcept
+                      -> InvokeStatus<void> {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  });
+    auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
     // Invokes another contract, returns the error code of the other contract
-    auto contract_1 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+    fns_1.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto const &calldata = ctx.handler().get_calldata();
 
-               if (calldata.size() !=
-                   sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               Runtime::MethodID invoked_id =
-                   *reinterpret_cast<const Runtime::MethodID *>(
-                       calldata.data());
-               ContractAddress invoked_addr;
-               std::memcpy(invoked_addr.data(),
-                           calldata.data() + sizeof(Runtime::MethodID),
-                           invoked_addr.size());
+          if (calldata.size() !=
+              sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          Runtime::MethodID invoked_id =
+              *reinterpret_cast<const Runtime::MethodID *>(calldata.data());
+          ContractAddress invoked_addr;
+          std::memcpy(invoked_addr.data(),
+                      calldata.data() + sizeof(Runtime::MethodID),
+                      invoked_addr.size());
 
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-                   invoked_addr, invoked_id,
-                   std::numeric_limits<GasAmount>::max(), Calldata{},
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+              invoked_addr, invoked_id, std::numeric_limits<GasAmount>::max(),
+              Calldata{}, std::to_underlying(InvokeFlag::None),
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
 
-               if (invoke_res) {
-                 return (invoke_res.value() ==
-                         SyscallErrorCode::kSyscallErrorCodeNone)
-                            ? InvokeStatus<void>{}
-                            : InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+          if (invoke_res) {
+            return (invoke_res.value() ==
+                    SyscallErrorCode::kSyscallErrorCodeNone)
+                       ? InvokeStatus<void>{}
+                       : InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
+    auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_0));
@@ -694,11 +699,11 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
       static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto deployer_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [](NativeSyscallContext & /*unused*/) noexcept
+                    -> InvokeStatus<void> { return {}; });
+    auto deployer_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(deployer_contract));
@@ -751,47 +756,49 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
 
   // Parent: TryInvoke the child, assert FrameReverted.
-  auto contract_parent = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             RuntimeMemoryLength output_returned_auth_token_len = 0;
-             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 kAddrChild, 0, ctx.gas_remaining(), Calldata{},
-                 std::to_underlying(InvokeFlag::TryInvoke),
-                 std::span<uint32_t>{}, output_return_buffer_len,
-                 output_returned_auth_token_len);
-             if (!r.has_value()) {
-               ADD_FAILURE()
-                   << "TryInvoke returned system error (lock probe reached "
-                      "banned key?)";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE() << "Expected FrameReverted, got "
-                             << static_cast<int32_t>(r.value());
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
+  fns_parent.emplace(
+      0,
+      [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength output_return_buffer_len = 0;
+        RuntimeMemoryLength output_returned_auth_token_len = 0;
+        auto r = ctx.syscall<SyscallNo::kInvoke>(
+            kAddrChild, 0, ctx.gas_remaining(), Calldata{},
+            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!r.has_value()) {
+          ADD_FAILURE()
+              << "TryInvoke returned system error (lock probe reached "
+                 "banned key?)";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+          ADD_FAILURE() << "Expected FrameReverted, got "
+                        << static_cast<int32_t>(r.value());
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto contract_parent =
+      std::make_unique<NativeContract>(std::move(fns_parent));
 
   // Child: write to the banned key, then manually revert.
-  auto contract_child = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto data = make_bytestring("child_write");
-             constexpr StorageKeyContractData kKey{};
-             auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), kKey, std::as_bytes(std::span(data)),
-                 std::to_underlying(StorageDeltaFlags::None));
-             if (!res.has_value() ||
-                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto data = make_bytestring("child_write");
+        constexpr StorageKeyContractData kKey{};
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), kKey, std::as_bytes(std::span(data)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        return {};
+      });
+  auto contract_child = std::make_unique<NativeContract>(std::move(fns_child));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_parent));
@@ -835,4 +842,74 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   ASSERT_TRUE(res.is_root_success());
 }
 
+TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
+{
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+  auto runtime_context = make_hogexec_precompiles_context();
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim;
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      GenesisConfigurationLoader::kDeployContractAddress,
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 0,
+                           .contract_type = contract.contract_type()});
+
+  // Forge calldata: valid SHA256Hash + SHA256Hash + ContractEntrypointID,
+  // then a Calldata field whose CXS length header claims 32 MiB but
+  // the buffer is only a few bytes longer than the header.
+  using itc_meta = ContractTraitMeta<initial_token_claim::InitialTokenClaim>;
+
+  SHA256Hash hash{};
+  SHA256Hash nonce{};
+  ContractEntrypointID entrypoint{};
+
+  // Serialize the fixed-size args as valid CXS prefix.
+  // For fixed-size opaque arrays, CXS serialization is raw bytes.
+  auto prefix =
+      Serializer<itc_meta::kSerializationFormat>::serialize(hash, nonce,
+                                                            entrypoint);
+  ASSERT_TRUE(prefix.has_value());
+
+  // Append a CXS-encoded length claiming 32 MiB.
+  // CXS compact-uint encoding for a uint32 value:
+  //   header byte 0xBF (kCxsHeader4Byte) + 4 bytes little-endian value.
+  constexpr uint32_t kFakeSize = 32 * 1024 * 1024;
+  uint8_t cxs_len_bytes[5];
+  cxs_len_bytes[0] = 0xBF; // CXS header for 4-byte unsigned integer
+  std::memcpy(cxs_len_bytes + 1, &kFakeSize, sizeof(kFakeSize));
+
+  Calldata forged;
+  forged.append_range(
+      prefix.value()); // NOLINT(bugprone-unchecked-optional-access)
+  forged.append(std::begin(cxs_len_bytes), std::end(cxs_len_bytes));
+  // Don't append the claimed 32 MiB — the buffer is truncated
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address =
+                      GenesisConfigurationLoader::kDeployContractAddress,
+                  .entrypoint = itc_meta::entrypoint<"claim_initial_tokens">(),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = std::move(forged),
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  // This must NOT throw std::bad_alloc. The zero-copy BufView
+  // deserialization path validates the declared size against the
+  // actual input buffer via check_size(), which throws CxsBadInput
+  // (caught by serialize_calldata.h), returning a deterministic error.
+  EXPECT_NO_THROW({
+    auto res = handler.root_invoke();
+    // Should be a deterministic error (deserialization failure), not a crash
+    EXPECT_FALSE(res.result_.has_value());
+  });
+}
+
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
