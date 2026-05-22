@@ -32,7 +32,7 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
   const std::filesystem::path path =
       std::filesystem::path(tmp_dir.directory()) / "health";
 
-  Health::instance().set_status(Health::Status::kOk)();
+  Health::instance().set_status(Health::Status::kStarting)();
   Health::instance().set_current_block_height(0)();
   Health::instance().dump_to_file(path.string())();
 
@@ -55,7 +55,7 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *status = parsed->find("status");
   ASSERT_NE(status, nullptr);
-  EXPECT_EQ(status->as_string(), "ok");
+  EXPECT_EQ(status->as_string(), "starting");
 
   const json::Value *current_block_height =
       parsed->find("current_block_height");
@@ -85,7 +85,7 @@ TEST(HealthTest, SettersUpdateDumpedJsonHealthState)
   ASSERT_NE(current_block_height, nullptr);
   EXPECT_EQ(current_block_height->as_integer(), 123);
 
-  Health::instance().set_status(Health::Status::kOk)();
+  Health::instance().set_status(Health::Status::kStarting)();
   Health::instance().set_current_block_height(0)();
 }
 

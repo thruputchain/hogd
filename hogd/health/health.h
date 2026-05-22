@@ -57,7 +57,7 @@ private:
   }
 
   mutable x23::CoroLock lock_;
-  Status status_ = Status::kOk;
+  Status status_ = Status::kStarting;
   Timestamp last_updated_timestamp_;
   BlockHeight current_block_height_ = 0;
 };
