@@ -1,7 +1,9 @@
+#include <chrono>
 #include <future>
 #include <gtest/gtest.h>
 #include <memory>
 #include <set>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1245,6 +1247,28 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
+
+// Regression test for issue #1619: auth_data_changed called with height H+1
+// while height H is still in progress should wait, not crash.
+TEST(Mempool, OutOfOrderAuthDataChangedWaitsInsteadOfCrashing)
+{
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
+
+  // Fire height 2 first on a background thread. Before the fix, this crashes
+  // at CHECK_EQ(2, auth_data_height_ + 1) since auth_data_height_ == 0.
+  // After the fix, it waits for auth_data_height_ to reach 1.
+  std::thread t([&] { server.mempool_coord_rpc().auth_data_changed(2, {})(); });
+
+  // Let height 2 enter the wait before we send height 1.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  server.mempool_coord_rpc().auth_data_changed(1, {})();
+
+  t.join();
+
+  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), 2);
 }
 
 } // namespace hogd

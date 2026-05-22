@@ -1948,7 +1948,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
 
-  CHECK_EQ(height, auth_data_height_.load() + 1);
+  co_await wait_for_auth_data(height - 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
