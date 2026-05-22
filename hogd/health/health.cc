@@ -5,6 +5,13 @@
 
 namespace hogd {
 
+Health &
+Health::instance()
+{
+  static Health health;
+  return health;
+}
+
 void
 Health::dump_to_file(const char *path) const
 {

@@ -14,8 +14,10 @@ public:
     kOk,
   };
 
-  Health() = default;
   ~Health() = default;
+
+  // Returns the [Health] singleton instance.
+  static Health &instance();
 
   void dump_to_file(const char *path = "health") const;
 
@@ -26,6 +28,9 @@ public:
   Health &operator=(Health &&) = delete;
 
 private:
+  // [Health] should only be used via a singleton instance.
+  Health() = default;
+
   struct Timestamp {
     std::chrono::system_clock::time_point timestamp =
         std::chrono::system_clock::now();
