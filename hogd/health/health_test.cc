@@ -1,12 +1,12 @@
 #include "hogd/health/health.h"
 
-#include "hogd/base/json.h"
-#include "hogd/base/test.h"
-
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
+#include "hogd/base/json.h"
+#include "hogd/base/test.h"
 #include "gtest/gtest.h"
 
 namespace hogd {
@@ -43,8 +43,8 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *timestamp = parsed->find("last_updated_timestamp");
   ASSERT_NE(timestamp, nullptr);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   ASSERT_TRUE(timestamp->as_string().has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_FALSE(timestamp->as_string()->empty());
 
   const json::Value *status = parsed->find("status");

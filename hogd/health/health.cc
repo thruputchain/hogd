@@ -1,17 +1,55 @@
 #include "hogd/health/health.h"
 
+#include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <format>
 #include <fstream>
-#include <iterator>
 #include <string>
+#include <system_error>
 
 #include "hogd/base/json.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 
+#include <unistd.h>
+
 namespace hogd {
+namespace {
+
+std::filesystem::path
+make_temp_path(const std::filesystem::path &path)
+{
+  static std::atomic<uint64_t> next_temp_file_id{0};
+  std::filesystem::path temp_path = path;
+  temp_path += std::format(".tmp.{}.{}", getpid(), next_temp_file_id++);
+  return temp_path;
+}
+
+void
+write_file_atomically(const std::string &path, const std::string &contents)
+{
+  const std::filesystem::path final_path(path);
+  const std::filesystem::path temp_path = make_temp_path(final_path);
+
+  {
+    std::ofstream out(temp_path);
+    if (!out) {
+      x23::panic("failed to open health temp file {}", temp_path.string());
+    }
+    out << contents << '\n';
+    if (!out) {
+      x23::panic("failed to write health temp file {}", temp_path.string());
+    }
+  }
+
+  std::error_code ec;
+  std::filesystem::rename(temp_path, final_path, ec);
+  CHECK(!ec);
+}
+
+} // namespace
 
 Health &
 Health::instance()
@@ -36,8 +74,7 @@ Health::dump_to_file(const std::string &path) const
 
   g.reset();
 
-  std::ofstream out(path);
-  out << buffer << '\n';
+  write_file_atomically(path, buffer);
   co_return;
 }
 
