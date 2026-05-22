@@ -228,9 +228,9 @@ impl WasmtimeContext {
         let engine = self.engine();
         let module = match Module::new(engine, contract_data) {
             Ok(m) => m,
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(debug_assertions)]
-                eprintln!("Contract verification failed: {}", e);
+                eprintln!("Contract verification failed: {}", _e);
                 return InvokeErrorCode::Deterministic;
             }
         };
