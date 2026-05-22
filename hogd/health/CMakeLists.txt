@@ -1,0 +1,9 @@
+add_library(
+  health
+  health.cc
+)
+target_link_libraries(
+  health
+  base
+  hogd
+)
