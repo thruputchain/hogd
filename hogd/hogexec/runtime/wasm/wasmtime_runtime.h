@@ -83,7 +83,7 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const &contract) const override;
+  InvokeErrorCode verify_contract(Contract const &contract) const override;
 
 private:
   void *wasmtime_context_ptr_ = nullptr;

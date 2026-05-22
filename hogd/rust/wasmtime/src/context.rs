@@ -9,6 +9,7 @@ use wasmtime::{Engine, ExternType, InstancePre, Linker, Module};
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
+use common::InvokeErrorCode;
 use common::SystemErrorCode;
 
 use crate::global_context::WasmtimeGlobalContext;
@@ -223,14 +224,14 @@ impl WasmtimeContext {
         Ok(Some(instance_pre))
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
         let engine = self.engine();
         let module = match Module::new(engine, contract_data) {
             Ok(m) => m,
             Err(e) => {
                 #[cfg(debug_assertions)]
                 eprintln!("Contract verification failed: {}", e);
-                return false;
+                return InvokeErrorCode::Deterministic;
             }
         };
         if !check_memory_limit(&module) {
@@ -238,12 +239,12 @@ impl WasmtimeContext {
             eprintln!(
                 "Contract verification failed: memory limit check failed"
             );
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         if !validate_imports(&module, self.global_context.imports()) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: import validation failed");
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         let config = groundhog_wasm_meter::Config {
             max_imported_functions: 1,
@@ -253,9 +254,14 @@ impl WasmtimeContext {
         if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: wasm-meter: {e}");
-            return false;
+            return match e {
+                groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
+                    InvokeErrorCode::Unrecoverable
+                }
+                _ => InvokeErrorCode::Deterministic,
+            };
         }
-        true
+        InvokeErrorCode::None
     }
 }
 
@@ -311,15 +317,15 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> bool {
+) -> i32 {
     debug_assert!(!p.is_null());
     if contract_data_p.is_null() {
         #[cfg(debug_assertions)]
         eprintln!("Contract verification failed: null contract data pointer");
-        return false;
+        return InvokeErrorCode::Deterministic.0;
     }
     let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-    unsafe { (*context).verify_contract(wasm) }
+    unsafe { (*context).verify_contract(wasm) }.0
 }

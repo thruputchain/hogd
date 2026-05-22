@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 
@@ -29,12 +30,12 @@ MultiplexedContext::make_new_runtime(
                                             syscall_handler);
 }
 
-bool
+InvokeErrorCode
 MultiplexedContext::verify_contract(Contract const &contract) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
-    return false;
+    return InvokeErrorCode::Deterministic;
   }
   return it->second.first->verify_contract(contract);
 }
