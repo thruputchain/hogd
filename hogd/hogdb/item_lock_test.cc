@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <barrier>
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <thread>
