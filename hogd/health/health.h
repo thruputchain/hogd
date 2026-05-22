@@ -5,6 +5,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -19,7 +20,7 @@ public:
   // Returns the [Health] singleton instance.
   static Health &instance();
 
-  void dump_to_file(const char *path = "health") const;
+  void dump_to_file(const std::string &path) const;
 
   // Disable copy and move.
   Health(const Health &) = delete;
@@ -40,9 +41,23 @@ private:
 
   Status status_ = Status::kOk;
   Timestamp last_updated_timestamp_;
+  BlockHeight current_block_height_ = 0;
 };
 
 } // namespace hogd
+
+template<>
+struct std::formatter<hogd::Health::Status> : std::formatter<const char *> {
+  template<typename FormatContext>
+  auto format(hogd::Health::Status status, FormatContext &ctx) const
+  {
+    switch (status) {
+    case hogd::Health::Status::kOk:
+      return std::formatter<const char *>::format("ok", ctx);
+    }
+    __builtin_unreachable();
+  }
+};
 
 template<>
 struct std::formatter<hogd::Health::Timestamp>
