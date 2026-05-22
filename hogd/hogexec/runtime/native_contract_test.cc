@@ -45,6 +45,7 @@
 #include "x23/sockio.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
@@ -94,50 +95,51 @@ TEST_F(NativeContractTest, BasicInstantiate)
       static_cast<HogexecPrecompiledNativeContracts>(0);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return {};
-             }},
-            {1, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+    fns_0.emplace(0,
+                  [](NativeSyscallContext & /*unused*/) noexcept
+                      -> InvokeStatus<void> { return {}; });
+    fns_0.emplace(1,
+                  [](NativeSyscallContext & /*unused*/) noexcept
+                      -> InvokeStatus<void> {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  });
+    auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
     // Invokes another contract, returns the error code of the other contract
-    auto contract_1 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+    fns_1.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto const &calldata = ctx.handler().get_calldata();
 
-               if (calldata.size() !=
-                   sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               Runtime::MethodID invoked_id =
-                   *reinterpret_cast<const Runtime::MethodID *>(
-                       calldata.data());
-               ContractAddress invoked_addr;
-               std::memcpy(invoked_addr.data(),
-                           calldata.data() + sizeof(Runtime::MethodID),
-                           invoked_addr.size());
+          if (calldata.size() !=
+              sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          Runtime::MethodID invoked_id =
+              *reinterpret_cast<const Runtime::MethodID *>(calldata.data());
+          ContractAddress invoked_addr;
+          std::memcpy(invoked_addr.data(),
+                      calldata.data() + sizeof(Runtime::MethodID),
+                      invoked_addr.size());
 
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-                   invoked_addr, invoked_id,
-                   std::numeric_limits<GasAmount>::max(), Calldata{},
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+              invoked_addr, invoked_id, std::numeric_limits<GasAmount>::max(),
+              Calldata{}, std::to_underlying(InvokeFlag::None),
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
 
-               if (invoke_res) {
-                 return (invoke_res.value() ==
-                         SyscallErrorCode::kSyscallErrorCodeNone)
-                            ? InvokeStatus<void>{}
-                            : InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+          if (invoke_res) {
+            return (invoke_res.value() ==
+                    SyscallErrorCode::kSyscallErrorCodeNone)
+                       ? InvokeStatus<void>{}
+                       : InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
+    auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_0));
@@ -697,11 +699,11 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
       static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto deployer_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [](NativeSyscallContext & /*unused*/) noexcept
+                    -> InvokeStatus<void> { return {}; });
+    auto deployer_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(deployer_contract));
@@ -754,47 +756,49 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
 
   // Parent: TryInvoke the child, assert FrameReverted.
-  auto contract_parent = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             RuntimeMemoryLength output_returned_auth_token_len = 0;
-             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 kAddrChild, 0, ctx.gas_remaining(), Calldata{},
-                 std::to_underlying(InvokeFlag::TryInvoke),
-                 std::span<uint32_t>{}, output_return_buffer_len,
-                 output_returned_auth_token_len);
-             if (!r.has_value()) {
-               ADD_FAILURE()
-                   << "TryInvoke returned system error (lock probe reached "
-                      "banned key?)";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE() << "Expected FrameReverted, got "
-                             << static_cast<int32_t>(r.value());
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
+  fns_parent.emplace(
+      0,
+      [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength output_return_buffer_len = 0;
+        RuntimeMemoryLength output_returned_auth_token_len = 0;
+        auto r = ctx.syscall<SyscallNo::kInvoke>(
+            kAddrChild, 0, ctx.gas_remaining(), Calldata{},
+            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!r.has_value()) {
+          ADD_FAILURE()
+              << "TryInvoke returned system error (lock probe reached "
+                 "banned key?)";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+          ADD_FAILURE() << "Expected FrameReverted, got "
+                        << static_cast<int32_t>(r.value());
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto contract_parent =
+      std::make_unique<NativeContract>(std::move(fns_parent));
 
   // Child: write to the banned key, then manually revert.
-  auto contract_child = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto data = make_bytestring("child_write");
-             constexpr StorageKeyContractData kKey{};
-             auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), kKey, std::as_bytes(std::span(data)),
-                 std::to_underlying(StorageDeltaFlags::None));
-             if (!res.has_value() ||
-                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto data = make_bytestring("child_write");
+        constexpr StorageKeyContractData kKey{};
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), kKey, std::as_bytes(std::span(data)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        return {};
+      });
+  auto contract_child = std::make_unique<NativeContract>(std::move(fns_child));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_parent));
@@ -878,7 +882,8 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   std::memcpy(cxs_len_bytes + 1, &kFakeSize, sizeof(kFakeSize));
 
   Calldata forged;
-  forged.append_range(prefix.value()); // NOLINT(bugprone-unchecked-optional-access)
+  forged.append_range(
+      prefix.value()); // NOLINT(bugprone-unchecked-optional-access)
   forged.append(std::begin(cxs_len_bytes), std::end(cxs_len_bytes));
   // Don't append the claimed 32 MiB — the buffer is truncated
 
@@ -906,4 +911,5 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   });
 }
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

@@ -33,6 +33,7 @@
 #include "x23/vec.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                public NativeContractTestFramework {
@@ -45,197 +46,199 @@ public:
 protected:
   void SetUp() override
   {
-    std::unique_ptr<NativeContract> native_contract = std::make_unique<
-        NativeContract>(std::unordered_map<Runtime::MethodID,
-                                           NativeContract::function_t>{
-        {0,
-         [this](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::Foo foo{0xABCD};
-           roundtrip_test<"roundtrip_foo">(foo, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [this](
+                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  bool success = false;
+                  ::cxs_test::Foo foo{0xABCD};
+                  roundtrip_test<"roundtrip_foo">(foo, ctx.handler(), success);
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-           return {};
-         }},
-        {1,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
-           roundtrip_test<"roundtrip_senum">(senum, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           return {};
-         }},
-        {2,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
-           sunion.pos() = 5;
-           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           sunion.d(static_cast<::cxs_test::senum>(0)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           return {};
-         }},
-        {3,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           int32_t value = -1;
-           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           value = 1;
-           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           value = 0;
-           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           value = std::numeric_limits<int32_t>::max();
-           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           value = std::numeric_limits<int32_t>::min();
-           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           return {};
-         }},
-        {4,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
-           sunion.neg() = true;
-           roundtrip_test<"roundtrip_sunion_no_void">(sunion, ctx.handler(),
-                                                      success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           return {};
-         }},
-        {5,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::uunion uunion(1);
-           uunion.one() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           uunion.d(2);
-           uunion.two() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           uunion.d(4);
-           uunion.four() = "hello";
-           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           return {};
-         }},
-        {6,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::uunion_bool uunion_bool{true};
-           uunion_bool.one() = false;
-           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
-                                                   success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           uunion_bool.d(false);
-           uunion_bool.two() = true;
-           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
-                                                   success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-           return {};
-         }},
-        {7,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           ::cxs_test::test_recursive test_recursive;
-
-           // empty
-           test_recursive.elem = "hello";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
-                                                      ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           // with a box ptr
-           test_recursive.next.emplace();
-           test_recursive.next->elem = "world";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
-                                                      ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           // with some elements in a vec
-           test_recursive.nextvec.emplace_back();
-           test_recursive.nextvec.emplace_back();
-           test_recursive.nextvec.back().elem = "goodbye";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
-                                                      ctx.handler(), success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           return {};
-         }},
-        // Methods 8, 9, 10 removed: Error, ContractError, StorageError types
-        // were removed/restructured in SDK Exceptions PR (#101).
-        {11,
-         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           bool success = false;
-           x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
-           roundtrip_test<"roundtrip_opaque_vector">(vec, ctx.handler(),
-                                                     success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           roundtrip_test<"roundtrip_opaque_slice">(vec, ctx.handler(),
+                  return {};
+                });
+    fns.emplace(1,
+                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  bool success = false;
+                  ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
+                  roundtrip_test<"roundtrip_senum">(senum, ctx.handler(),
                                                     success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+    fns.emplace(
+        2, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          bool success = false;
+          ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
+          sunion.pos() = 5;
+          roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          sunion.d(static_cast<::cxs_test::senum>(0)); // default case
+          roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
+          roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    fns.emplace(
+        3, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          bool success = false;
+          int32_t value = -1;
+          roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-           return {};
-         }},
+          value = 1;
+          roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-    });
+          value = 0;
+          roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = std::numeric_limits<int32_t>::max();
+          roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = std::numeric_limits<int32_t>::min();
+          roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+    fns.emplace(
+        4, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          bool success = false;
+          ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
+          sunion.neg() = true;
+          roundtrip_test<"roundtrip_sunion_no_void">(sunion, ctx.handler(),
+                                                     success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    fns.emplace(
+        5, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          bool success = false;
+          ::cxs_test::uunion uunion(1);
+          uunion.one() = true;
+          roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uunion.d(2);
+          uunion.two() = true;
+          roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uunion.d(4);
+          uunion.four() = "hello";
+          roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+    fns.emplace(6,
+                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  bool success = false;
+                  ::cxs_test::uunion_bool uunion_bool{true};
+                  uunion_bool.one() = false;
+                  roundtrip_test<"roundtrip_uunion_bool">(uunion_bool,
+                                                          ctx.handler(),
+                                                          success);
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  uunion_bool.d(false);
+                  uunion_bool.two() = true;
+                  roundtrip_test<"roundtrip_uunion_bool">(uunion_bool,
+                                                          ctx.handler(),
+                                                          success);
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+    fns.emplace(
+        7, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          bool success = false;
+          ::cxs_test::test_recursive test_recursive;
+
+          // empty
+          test_recursive.elem = "hello";
+          roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                     ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          // with a box ptr
+          test_recursive.next.emplace();
+          test_recursive.next->elem = "world";
+          roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                     ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          // with some elements in a vec
+          test_recursive.nextvec.emplace_back();
+          test_recursive.nextvec.emplace_back();
+          test_recursive.nextvec.back().elem = "goodbye";
+          roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                     ctx.handler(), success);
+          if (!success) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+    // Methods 8, 9, 10 removed: Error, ContractError, StorageError types
+    // were removed/restructured in SDK Exceptions PR (#101).
+    fns.emplace(11,
+                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  bool success = false;
+                  x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
+                  roundtrip_test<"roundtrip_opaque_vector">(vec, ctx.handler(),
+                                                            success);
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+
+                  roundtrip_test<"roundtrip_opaque_slice">(vec, ctx.handler(),
+                                                           success);
+                  if (!success) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+
+                  return {};
+                });
+    std::unique_ptr<NativeContract> native_contract =
+        std::make_unique<NativeContract>(std::move(fns));
 
     auto cxs_contract = hogd::load_contract("cxs_roundtrip.wasm");
     write_contract(cxs_contract);
@@ -518,4 +521,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
                          test_db_to_string);
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

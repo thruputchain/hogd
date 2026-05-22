@@ -28,6 +28,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 class SelectiveDeploymentTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
@@ -92,23 +93,25 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   }();
 
   // Create a native contract that will deploy only the first contract
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [contract_1_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Deploy only the first contract
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(0,
+                [contract_1_hash](
+                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  // Deploy only the first contract
 
-             auto deploy_result =
-                 ctx.handler().deploy_contract(kDeployNonce, contract_1_hash);
-             if (!deploy_result.has_value()) {
-               return deploy_result.error().to_invoke_error();
-             }
-             if (!deploy_result.value().has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+                  auto deploy_result =
+                      ctx.handler().deploy_contract(kDeployNonce,
+                                                    contract_1_hash);
+                  if (!deploy_result.has_value()) {
+                    return deploy_result.error().to_invoke_error();
+                  }
+                  if (!deploy_result.value().has_value()) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-             return {};
-           }}});
+                  return {};
+                });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   NativeContext native_context(std::move(contract_map));
@@ -192,24 +195,25 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
 
   // Create a native contract that will attempt to deploy the native token
   auto make_context = [native_token_hash]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [native_token_hash](
-                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Attempt to deploy the native token contract - should fail
-               ContractAddress deploy_addr;
-               auto syscall_res =
-                   ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
-                                                           native_token_hash,
-                                                           deploy_addr);
-               if (!syscall_res.has_value() ||
-                   syscall_res.value() !=
-                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+    fns_0.emplace(
+        0,
+        [native_token_hash](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Attempt to deploy the native token contract - should fail
+          ContractAddress deploy_addr;
+          auto syscall_res =
+              ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
+                                                      native_token_hash,
+                                                      deploy_addr);
+          if (!syscall_res.has_value() ||
+              syscall_res.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_0));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -273,20 +277,24 @@ TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
     return nonce;
   }();
 
-  auto native_deployer = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [malformed_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto deploy_result =
-                 ctx.handler().deploy_contract(kDeployNonce, malformed_hash);
-             if (!deploy_result.has_value()) {
-               return deploy_result.error().to_invoke_error();
-             }
-             if (!deploy_result.value().has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_deployer;
+  fns_deployer.emplace(0,
+                       [malformed_hash](NativeSyscallContext &ctx) noexcept
+                           -> InvokeStatus<void> {
+                         auto deploy_result =
+                             ctx.handler().deploy_contract(kDeployNonce,
+                                                           malformed_hash);
+                         if (!deploy_result.has_value()) {
+                           return deploy_result.error().to_invoke_error();
+                         }
+                         if (!deploy_result.value().has_value()) {
+                           return InvokeError{InvokeErrorCode::Deterministic};
+                         }
+                         return {};
+                       });
+  auto native_deployer =
+      std::make_unique<NativeContract>(std::move(fns_deployer));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_deployer));
@@ -344,20 +352,24 @@ TEST_P(SelectiveDeploymentTest,
     return nonce;
   }();
 
-  auto native_deployer = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [malformed_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto deploy_result =
-                 ctx.handler().deploy_contract(kDeployNonce, malformed_hash);
-             if (!deploy_result.has_value()) {
-               return deploy_result.error().to_invoke_error();
-             }
-             if (!deploy_result.value().has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_deployer;
+  fns_deployer.emplace(0,
+                       [malformed_hash](NativeSyscallContext &ctx) noexcept
+                           -> InvokeStatus<void> {
+                         auto deploy_result =
+                             ctx.handler().deploy_contract(kDeployNonce,
+                                                           malformed_hash);
+                         if (!deploy_result.has_value()) {
+                           return deploy_result.error().to_invoke_error();
+                         }
+                         if (!deploy_result.value().has_value()) {
+                           return InvokeError{InvokeErrorCode::Deterministic};
+                         }
+                         return {};
+                       });
+  auto native_deployer =
+      std::make_unique<NativeContract>(std::move(fns_deployer));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_deployer));
@@ -412,4 +424,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

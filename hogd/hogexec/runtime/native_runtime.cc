@@ -31,7 +31,6 @@ NativeContract::find_function(Runtime::MethodID method) const
 }
 
 std::pair<InvokeStatus<void>, GasAmount>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
                        uint64_t gas_limit) const noexcept

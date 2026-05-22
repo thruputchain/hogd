@@ -26,6 +26,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
@@ -46,18 +47,18 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Create a native contract with a method that calls the syscall
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto status =
-                 ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto status =
+        ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
 
-             if (!status.has_value() ||
-                 status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+    if (!status.has_value() ||
+        status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -106,38 +107,39 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
   auto [public_key, _] = ed25519_keygen();
 
   // Create a native contract with a method that calls both syscalls
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // 1. Set a public key at index 0
-             int32_t key_scheme =
-                 std::to_underlying(CryptographicScheme::Ed25519);
-             uint32_t key_weight = 5;
-             std::span<const std::byte> key_bytes(
-                 reinterpret_cast<const std::byte *>(public_key.data()),
-                 public_key.size());
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [public_key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // 1. Set a public key at index 0
+        int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
+        uint32_t key_weight = 5;
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(public_key.data()),
+            public_key.size());
 
-             auto pk_status =
-                 ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
-                     0, &key_scheme, key_bytes, &key_weight);
+        auto pk_status =
+            ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(0, &key_scheme,
+                                                                 key_bytes,
+                                                                 &key_weight);
 
-             if (!pk_status.has_value() ||
-                 pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (!pk_status.has_value() ||
+            pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             // 2. Set required weight
-             auto weight_status =
-                 ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{3});
+        // 2. Set required weight
+        auto weight_status =
+            ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{3});
 
-             if (!weight_status.has_value() ||
-                 weight_status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (!weight_status.has_value() ||
+            weight_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -189,22 +191,22 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // scheme=null, weight!=null — should be rejected
-             uint32_t key_weight = 5;
-             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
-                 0, static_cast<const int32_t *>(nullptr),
-                 std::span<const std::byte>{}, &key_weight);
-             if (!status.has_value() ||
-                 status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE() << "scheme=null, weight!=null should be rejected";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // scheme=null, weight!=null — should be rejected
+    uint32_t key_weight = 5;
+    auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+        0, static_cast<const int32_t *>(nullptr), std::span<const std::byte>{},
+        &key_weight);
+    if (!status.has_value() ||
+        status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+      ADD_FAILURE() << "scheme=null, weight!=null should be rejected";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -239,25 +241,26 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
 
   auto [public_key, _] = ed25519_keygen();
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // scheme=null, bytes not empty — should be rejected
-             std::span<const std::byte> key_bytes(
-                 reinterpret_cast<const std::byte *>(public_key.data()),
-                 public_key.size());
-             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
-                 0, static_cast<const int32_t *>(nullptr), key_bytes,
-                 static_cast<const uint32_t *>(nullptr));
-             if (!status.has_value() ||
-                 status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE()
-                   << "scheme=null, bytes not empty should be rejected";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [public_key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // scheme=null, bytes not empty — should be rejected
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(public_key.data()),
+            public_key.size());
+        auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+            0, static_cast<const int32_t *>(nullptr), key_bytes,
+            static_cast<const uint32_t *>(nullptr));
+        if (!status.has_value() ||
+            status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "scheme=null, bytes not empty should be rejected";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -292,39 +295,42 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
 
   auto [public_key, _] = ed25519_keygen();
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          // Method 0: Register a key
-          {0,
-           [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             int32_t key_scheme =
-                 std::to_underlying(CryptographicScheme::Ed25519);
-             uint32_t key_weight = 5;
-             std::span<const std::byte> key_bytes(
-                 reinterpret_cast<const std::byte *>(public_key.data()),
-                 public_key.size());
-             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
-                 0, &key_scheme, key_bytes, &key_weight);
-             if (!status.has_value() ||
-                 status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Failed to register key";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }},
-          // Method 1: Delete the key via all-null args
-          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
-                 0, static_cast<const int32_t *>(nullptr),
-                 std::span<const std::byte>{},
-                 static_cast<const uint32_t *>(nullptr));
-             if (!status.has_value() ||
-                 status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "Failed to delete key";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      // Method 0: Register a key
+      0,
+      [public_key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
+        uint32_t key_weight = 5;
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(public_key.data()),
+            public_key.size());
+        auto status =
+            ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(0, &key_scheme,
+                                                                 key_bytes,
+                                                                 &key_weight);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to register key";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  fns.emplace(
+      // Method 1: Delete the key via all-null args
+      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+            0, static_cast<const int32_t *>(nullptr),
+            std::span<const std::byte>{},
+            static_cast<const uint32_t *>(nullptr));
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to delete key";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -394,4 +400,5 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

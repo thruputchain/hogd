@@ -34,6 +34,7 @@
 #include "x23/vec.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class TracingTest : public ::testing::Test, public NativeContractTestFramework {
@@ -275,25 +276,25 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
   auto contract_0_addr = make_contract_address(0);
   auto target_addr = make_contract_address(1); // No deployment
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0,
-                                 output_returned_auth_token_len = 0;
-             Calldata calldata{};
-             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 target_addr, 0, UINT64_MAX, std::as_bytes(std::span(calldata)),
-                 0, std::span<uint32_t>{}, output_return_buffer_len,
-                 output_returned_auth_token_len);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
+    Calldata calldata{};
+    auto r = ctx.syscall<SyscallNo::kInvoke>(target_addr, 0, UINT64_MAX,
+                                             std::as_bytes(std::span(calldata)),
+                                             0, std::span<uint32_t>{},
+                                             output_return_buffer_len,
+                                             output_returned_auth_token_len);
 
-             if (!r.has_value() ||
-                 r.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+    if (!r.has_value() ||
+        r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+      ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -352,32 +353,37 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   auto callee_addr = make_contract_address(1);
 
   // Callee contract: method 0 returns a deterministic error
-  auto callee_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }}});
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
+  fns_callee.emplace(
+      0, [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
 
   // Caller contract: method 0 invokes callee method 0
-  auto caller_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0,
-                                 output_returned_auth_token_len = 0;
-             Calldata calldata{};
-             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 callee_addr, 0, UINT64_MAX, std::as_bytes(std::span(calldata)),
-                 0, std::span<uint32_t>{}, output_return_buffer_len,
-                 output_returned_auth_token_len);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        Calldata calldata{};
+        auto r =
+            ctx.syscall<SyscallNo::kInvoke>(callee_addr, 0, UINT64_MAX,
+                                            std::as_bytes(std::span(calldata)),
+                                            0, std::span<uint32_t>{},
+                                            output_return_buffer_len,
+                                            output_returned_auth_token_len);
 
-             if (!r.has_value() ||
-                 r.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-               ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(caller_contract));
@@ -450,36 +456,43 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   ContractAddress addr_caller = make_contract_address(1);
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto contract_writer = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "Failed to set bytestring";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_writer;
+    fns_writer.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("test");
+          auto [res, _gas] = syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(calldata)),
+              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set bytestring";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto contract_writer =
+        std::make_unique<NativeContract>(std::move(fns_writer));
 
-    auto contract_caller = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               Calldata args = {'t', 'e', 's', 't'};
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
-                   addr_writer, 0, UINT64_MAX, std::as_bytes(std::span(args)),
-                   std::to_underlying(InvokeFlag::TryInvoke),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_caller;
+    fns_caller.emplace(
+        0,
+        [addr_writer](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          Calldata args = {'t', 'e', 's', 't'};
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
+              addr_writer, 0, UINT64_MAX, std::as_bytes(std::span(args)),
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
 
-               return {};
-             }}});
+          return {};
+        });
+    auto contract_caller =
+        std::make_unique<NativeContract>(std::move(fns_caller));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_writer));
@@ -566,4 +579,5 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
             InvocationFrameStatusCode::Return);
 }
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

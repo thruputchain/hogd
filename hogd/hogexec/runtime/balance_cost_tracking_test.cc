@@ -30,6 +30,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class BalanceCostTrackingTest : public ::testing::Test,
@@ -85,25 +86,25 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   // Create a contract that will transfer tokens
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, g] = native_token_client.invoke_opt<"transfer">(
-                 ctx.handler(), kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kTransferAmount)));
-             ctx.consume_gas(g);
+    auto [r_transfer, g] = native_token_client.invoke_opt<"transfer">(
+        ctx.handler(), kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kTransferAmount)));
+    ctx.consume_gas(g);
 
-             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-                 !r_transfer.value().value().has_value() ||
-                 !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 1;
@@ -170,39 +171,38 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   // Create a contract that will transfer tokens
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-                 ctx.handler(), kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+    auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
+        ctx.handler(), kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
-             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-                 !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }},
-          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    return {};
+  });
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-                 ctx.handler(), kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+    auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
+        ctx.handler(), kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
-             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-                 !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 1;
@@ -299,86 +299,88 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   int128_t kSecondTransferAmount = 1;
 
   // Create a contract that orchestrates the transfers
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kFirstTransferAmount, kSecondTransferAmount](
-               NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_addr =
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
-             using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0,
+              [kFirstTransferAmount, kSecondTransferAmount](
+                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                auto native_token_addr =
+                    GenesisConfigurationLoader::kPresetNativeTokenAddress;
+                using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-             // 1. Try to transfer (balance_cost - 1) in try_invoke frame -
-             // should fail because insufficient to cover balance cost
-             auto calldata1 = erc20_meta::make_calldata<"transfer">(
-                 kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
-             auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata1,
-                   std::to_underlying(InvokeFlag::TryInvoke),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
+                // 1. Try to transfer (balance_cost - 1) in try_invoke frame -
+                // should fail because insufficient to cover balance cost
+                auto calldata1 = erc20_meta::make_calldata<"transfer">(
+                    kReceiverAddr,
+                    make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+                auto r1 = [&]() {
+                  RuntimeMemoryLength output_return_buffer_len = 0,
+                                      output_returned_auth_token_len = 0;
+                  return ctx.syscall<SyscallNo::kInvoke>(
+                      native_token_addr,
+                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      UINT64_MAX, calldata1,
+                      std::to_underlying(InvokeFlag::TryInvoke),
+                      std::span<uint32_t>{}, output_return_buffer_len,
+                      output_returned_auth_token_len);
+                }();
 
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             // Should fail in try_invoke (insufficient funds for balance cost)
-             if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+                if (!r1.has_value()) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                // Should fail in try_invoke (insufficient funds for balance
+                // cost)
+                if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-             // 2. Call transfer with same arguments, NOT in try_invoke frame -
-             // should succeed (creates the balance)
-             auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata1, std::to_underlying(InvokeFlag::None),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
+                // 2. Call transfer with same arguments, NOT in try_invoke frame
+                // - should succeed (creates the balance)
+                auto r2 = [&]() {
+                  RuntimeMemoryLength output_return_buffer_len = 0,
+                                      output_returned_auth_token_len = 0;
+                  return ctx.syscall<SyscallNo::kInvoke>(
+                      native_token_addr,
+                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      UINT64_MAX, calldata1,
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{}, output_return_buffer_len,
+                      output_returned_auth_token_len);
+                }();
 
-             if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+                if (!r2.has_value()) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-             // 3. Call transfer again with remainder (1), in try_invoke frame -
-             // should succeed
-             auto calldata2 = erc20_meta::make_calldata<"transfer">(
-                 kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
-             auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata2,
-                   std::to_underlying(InvokeFlag::TryInvoke),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
-             }();
+                // 3. Call transfer again with remainder (1), in try_invoke
+                // frame - should succeed
+                auto calldata2 = erc20_meta::make_calldata<"transfer">(
+                    kReceiverAddr,
+                    make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+                auto r3 = [&]() {
+                  RuntimeMemoryLength output_return_buffer_len = 0,
+                                      output_returned_auth_token_len = 0;
+                  return ctx.syscall<SyscallNo::kInvoke>(
+                      native_token_addr,
+                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      UINT64_MAX, calldata2,
+                      std::to_underlying(InvokeFlag::TryInvoke),
+                      std::span<uint32_t>{}, output_return_buffer_len,
+                      output_returned_auth_token_len);
+                }();
 
-             if (!r3.has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+                if (!r3.has_value()) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-             return {};
-           }}});
+                return {};
+              });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 1;
@@ -446,60 +448,57 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   static int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_addr =
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
-             using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_addr =
+        GenesisConfigurationLoader::kPresetNativeTokenAddress;
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-             // Overspend via transfer: records deferred-negative delta on
-             // sender, returns local success.
-             auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
-                 kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kTransferAmount)));
-             auto r_transfer = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata_transfer,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    // Overspend via transfer: records deferred-negative delta on
+    // sender, returns local success.
+    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
+    auto r_transfer = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
+          calldata_transfer, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_transfer.has_value() ||
-                 r_transfer.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "overspending transfer did not return success";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() ||
+        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "overspending transfer did not return success";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             // Reading sender's balance must now surface as a deterministic
-             // error (inner Deterministic becomes DeterministicWasm to caller).
-             auto calldata_get = erc20_meta::make_calldata<"get_balance">();
-             auto r_get = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
-                   UINT64_MAX, calldata_get,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    // Reading sender's balance must now surface as a deterministic
+    // error (inner Deterministic becomes DeterministicWasm to caller).
+    auto calldata_get = erc20_meta::make_calldata<"get_balance">();
+    auto r_get = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"get_balance">()), UINT64_MAX,
+          calldata_get, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_get.has_value() ||
-                 r_get.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-               ADD_FAILURE() << "get_balance after overspend did not return "
-                                "kDeterministicWasm";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_get.has_value() ||
+        r_get.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+      ADD_FAILURE() << "get_balance after overspend did not return "
+                       "kDeterministicWasm";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 11;
@@ -550,57 +549,54 @@ TEST_F(BalanceCostTrackingTest,
   static int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_addr =
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
-             using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_addr =
+        GenesisConfigurationLoader::kPresetNativeTokenAddress;
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-             auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
-                 kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kTransferAmount)));
-             auto r_transfer = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata_transfer,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
+    auto r_transfer = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
+          calldata_transfer, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_transfer.has_value() ||
-                 r_transfer.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "overspending transfer did not return success";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() ||
+        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "overspending transfer did not return success";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             auto calldata_get =
-                 erc20_meta::make_calldata<"get_balance_of">(kSenderAddr);
-             auto r_get = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"get_balance_of">()),
-                   UINT64_MAX, calldata_get,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    auto calldata_get =
+        erc20_meta::make_calldata<"get_balance_of">(kSenderAddr);
+    auto r_get = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"get_balance_of">()), UINT64_MAX,
+          calldata_get, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_get.has_value() ||
-                 r_get.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-               ADD_FAILURE() << "get_balance_of after overspend did not return "
-                                "kDeterministicWasm";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_get.has_value() ||
+        r_get.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+      ADD_FAILURE() << "get_balance_of after overspend did not return "
+                       "kDeterministicWasm";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 12;
@@ -650,55 +646,53 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   static int128_t kInitialBalance = kTransferAmount + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
-  auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto native_token_addr =
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
-             using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_addr =
+        GenesisConfigurationLoader::kPresetNativeTokenAddress;
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-             auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
-                 kReceiverAddr,
-                 make_amount(static_cast<uint128_t>(kTransferAmount)));
-             auto r_transfer = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata_transfer,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
+    auto r_transfer = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
+          calldata_transfer, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_transfer.has_value() ||
-                 r_transfer.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "transfer did not return success";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_transfer.has_value() ||
+        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "transfer did not return success";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             auto calldata_get = erc20_meta::make_calldata<"get_balance">();
-             auto r_get = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_token_addr,
-                   sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
-                   UINT64_MAX, calldata_get,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
+    auto calldata_get = erc20_meta::make_calldata<"get_balance">();
+    auto r_get = [&]() {
+      RuntimeMemoryLength output_return_buffer_len = 0,
+                          output_returned_auth_token_len = 0;
+      return ctx.syscall<SyscallNo::kInvoke>(
+          native_token_addr,
+          sdk_method_id(erc20_meta::entrypoint<"get_balance">()), UINT64_MAX,
+          calldata_get, std::to_underlying(InvokeFlag::None),
+          std::span<uint32_t>{}, output_return_buffer_len,
+          output_returned_auth_token_len);
+    }();
 
-             if (!r_get.has_value() ||
-                 r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "get_balance after non-overspend did not "
-                                "return success";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!r_get.has_value() ||
+        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "get_balance after non-overspend did not "
+                       "return success";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr int32_t kSenderNativeId = 13;
@@ -734,4 +728,5 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

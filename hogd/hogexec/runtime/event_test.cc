@@ -29,6 +29,7 @@
 #include "x23/vec.h"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class EventTest : public ::testing::Test, public NativeContractTestFramework {
@@ -66,90 +67,96 @@ TEST_F(EventTest, EventSuccess)
   ContractAddress addr_emitter = make_contract_address(0xFF);
   ContractAddress addr_orchestrator = make_contract_address(0xFE);
 
-  auto native_contract_emitter = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             const std::string event_data = "test 0 topics";
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_emitter;
+  fns_emitter.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        const std::string event_data = "test 0 topics";
 
-             auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 std::as_bytes(std::span(event_data)));
-             if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
+        auto status = ctx.syscall<SyscallNo::kLogEvent>(
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            std::as_bytes(std::span(event_data)));
+        if (!status.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
 
-             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }},
-          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             const std::string event_data = "test 1 topic";
+        return {};
+      });
+  fns_emitter.emplace(
+      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        const std::string event_data = "test 1 topic";
 
-             SHA256Hash topic = sha256(std::string("topic"));
+        SHA256Hash topic = sha256(std::string("topic"));
 
-             auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                 &topic, static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 std::as_bytes(std::span(event_data)));
-             if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
+        auto status = ctx.syscall<SyscallNo::kLogEvent>(
+            &topic, static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            std::as_bytes(std::span(event_data)));
+        if (!status.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
 
-             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_emitter =
+      std::make_unique<NativeContract>(std::move(fns_emitter));
 
-  auto native_contract_orchestrator = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto status = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_emitter, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
-             [[maybe_unused]] auto gas = GasAmount{0};
-             if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_orchestrator;
+  fns_orchestrator.emplace(
+      0,
+      [addr_emitter](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto status = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              addr_emitter, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        [[maybe_unused]] auto gas = GasAmount{0};
+        if (!status.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
 
-             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             auto status2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_emitter, 1, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
-             [[maybe_unused]] auto gas2 = GasAmount{0};
-             if (!status2.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
+        auto status2 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              addr_emitter, 1, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        [[maybe_unused]] auto gas2 = GasAmount{0};
+        if (!status2.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
 
-             if (status2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        if (status2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             if (!ctx.consume_gas(gas + gas2)) {
-               return InvokeError{InvokeErrorCode::OutOfGas};
-             }
+        if (!ctx.consume_gas(gas + gas2)) {
+          return InvokeError{InvokeErrorCode::OutOfGas};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_orchestrator =
+      std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_emitter));
@@ -212,60 +219,63 @@ TEST_F(EventTest, EventSuccess)
 
 TEST_F(EventTest, BadEventInputs)
 {
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             SHA256Hash topic0 = sha256(std::string("topic"));
-             SHA256Hash topic1 = sha256(std::string("topic"));
-             SHA256Hash topic2 = sha256(std::string("topic"));
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        SHA256Hash topic0 = sha256(std::string("topic"));
+        SHA256Hash topic1 = sha256(std::string("topic"));
+        SHA256Hash topic2 = sha256(std::string("topic"));
 
-             x23::Vec<uint8_t> too_long_event;
-             too_long_event.resize(kMaxEventLength + 1);
+        x23::Vec<uint8_t> too_long_event;
+        too_long_event.resize(kMaxEventLength + 1);
 
-             {
-               auto [status, gas] = syscall_LogEvent_inner(
-                   ctx.handler(), nullptr, &topic1, nullptr,
-                   std::as_bytes(std::span("test bad topic organization")));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+        {
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), nullptr, &topic1, nullptr,
+                                     std::as_bytes(std::span(
+                                         "test bad topic organization")));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             {
-               auto [status, gas] = syscall_LogEvent_inner(
-                   ctx.handler(), &topic0, nullptr, &topic2,
-                   std::as_bytes(std::span("test bad topic organization")));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+        {
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic0, nullptr, &topic2,
+                                     std::as_bytes(std::span(
+                                         "test bad topic organization")));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             {
-               auto [status, gas] = syscall_LogEvent_inner(
-                   ctx.handler(), nullptr, nullptr, nullptr,
-                   std::as_bytes(std::span(too_long_event)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+        {
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr, nullptr,
+                                     std::as_bytes(std::span(too_long_event)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -311,45 +321,47 @@ TEST_F(EventTest, BadEventInputs)
 
 TEST_F(EventTest, EventLengthIncludesTopics)
 {
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             SHA256Hash topic = sha256(std::string("topic"));
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        SHA256Hash topic = sha256(std::string("topic"));
 
-             x23::Vec<uint8_t> max_event_data;
-             max_event_data.resize(kMaxEventLength - topic.size());
+        x23::Vec<uint8_t> max_event_data;
+        max_event_data.resize(kMaxEventLength - topic.size());
 
-             {
-               auto [status, gas] = syscall_LogEvent_inner(
-                   ctx.handler(), &topic, nullptr, nullptr,
-                   std::as_bytes(std::span(max_event_data)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+        {
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
+                                     std::as_bytes(std::span(max_event_data)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             x23::Vec<uint8_t> too_long_event_data;
-             too_long_event_data.resize(max_event_data.size() + 1);
-             {
-               auto [status, gas] = syscall_LogEvent_inner(
-                   ctx.handler(), &topic, nullptr, nullptr,
-                   std::as_bytes(std::span(too_long_event_data)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+        x23::Vec<uint8_t> too_long_event_data;
+        too_long_event_data.resize(max_event_data.size() + 1);
+        {
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
+                                     std::as_bytes(
+                                         std::span(too_long_event_data)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+          if (status.value() !=
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -394,40 +406,42 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
 TEST_F(EventTest, EventCountPerTransactionLimit)
 {
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             const std::string event_data = "event-count-limit";
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(0,
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  const std::string event_data = "event-count-limit";
 
-             for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
-               auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   std::as_bytes(std::span(event_data)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+                  for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+                    auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                        static_cast<SHA256Hash const *>(nullptr),
+                        static_cast<SHA256Hash const *>(nullptr),
+                        static_cast<SHA256Hash const *>(nullptr),
+                        std::as_bytes(std::span(event_data)));
+                    if (!status.has_value()) {
+                      return InvokeError{InvokeErrorCode::Unrecoverable};
+                    }
+                    if (status.value() !=
+                        SyscallErrorCode::kSyscallErrorCodeNone) {
+                      return InvokeError{InvokeErrorCode::Deterministic};
+                    }
+                  }
 
-             auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 std::as_bytes(std::span(event_data)));
-             if (!overflow_status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
-             if (overflow_status.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+                  auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+                      static_cast<SHA256Hash const *>(nullptr),
+                      static_cast<SHA256Hash const *>(nullptr),
+                      static_cast<SHA256Hash const *>(nullptr),
+                      std::as_bytes(std::span(event_data)));
+                  if (!overflow_status.has_value()) {
+                    return InvokeError{InvokeErrorCode::Unrecoverable};
+                  }
+                  if (overflow_status.value() !=
+                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-             return {};
-           }}});
+                  return {};
+                });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -477,78 +491,82 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
   ContractAddress addr_child = make_contract_address(0xFF);
   ContractAddress addr_parent = make_contract_address(0xFE);
 
-  auto native_contract_child = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             const std::string event_data = "child-event-count-limit";
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        const std::string event_data = "child-event-count-limit";
 
-             for (uint32_t i = 0; i < kChildEventCount; ++i) {
-               auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   std::as_bytes(std::span(event_data)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+        for (uint32_t i = 0; i < kChildEventCount; ++i) {
+          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 static_cast<SHA256Hash const *>(nullptr),
-                 std::as_bytes(std::span(event_data)));
-             if (!overflow_status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
-             if (overflow_status.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            std::as_bytes(std::span(event_data)));
+        if (!overflow_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
+        if (overflow_status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_child =
+      std::make_unique<NativeContract>(std::move(fns_child));
 
-  auto native_contract_parent = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [addr_child](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             const std::string event_data = "parent-event-count-limit";
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
+  fns_parent.emplace(
+      0,
+      [addr_child](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        const std::string event_data = "parent-event-count-limit";
 
-             for (uint32_t i = 0; i < kParentEventCount; ++i) {
-               auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   std::as_bytes(std::span(event_data)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-             }
+        for (uint32_t i = 0; i < kParentEventCount; ++i) {
+          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-             auto invoke_status = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0,
-                                   output_returned_auth_token_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_child, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
-             }();
-             if (!invoke_status.has_value()) {
-               return InvokeError{InvokeErrorCode::Unrecoverable};
-             }
-             if (invoke_status.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+        auto invoke_status = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              addr_child, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
+        }();
+        if (!invoke_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
+        if (invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-             return {};
-           }}});
+        return {};
+      });
+  auto native_contract_parent =
+      std::make_unique<NativeContract>(std::move(fns_parent));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_child));
@@ -615,233 +633,237 @@ TEST_F(EventTest, EventWithRevertingFrames)
   auto make_context =
       [addr_emitter, addr_manual_revert,
        addr_deterministic]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_emitter = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_emitter;
+    fns_emitter.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto const &calldata = ctx.handler().get_calldata();
 
-               auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   static_cast<SHA256Hash const *>(nullptr),
-                   std::as_bytes(std::span(calldata)));
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(calldata)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_emitter =
+        std::make_unique<NativeContract>(std::move(fns_emitter));
 
-    auto native_contract_manual_revert = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               std::string test_data = "method1_event";
-               Calldata calldata(test_data.begin(), test_data.end());
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_manual_revert;
+    fns_manual_revert.emplace(
+        0,
+        [addr_emitter](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          std::string test_data = "method1_event";
+          Calldata calldata(test_data.begin(), test_data.end());
 
-               auto status = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_emitter, 0, UINT64_MAX, calldata,
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
-               [[maybe_unused]] auto gas = GasAmount{0};
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          auto status = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                addr_emitter, 0, UINT64_MAX, calldata,
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
+          [[maybe_unused]] auto gas = GasAmount{0};
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               if (!ctx.consume_gas(gas)) {
-                 return InvokeError{InvokeErrorCode::OutOfGas};
-               }
+          if (!ctx.consume_gas(gas)) {
+            return InvokeError{InvokeErrorCode::OutOfGas};
+          }
 
-               ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-               return {};
-             }}});
+          ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+          return {};
+        });
+    auto native_contract_manual_revert =
+        std::make_unique<NativeContract>(std::move(fns_manual_revert));
 
-    auto native_contract_deterministic = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               std::string test_data = "method2_event";
-               Calldata calldata(test_data.begin(), test_data.end());
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_deterministic;
+    fns_deterministic.emplace(
+        0,
+        [addr_emitter](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          std::string test_data = "method2_event";
+          Calldata calldata(test_data.begin(), test_data.end());
 
-               auto status = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_emitter, 0, UINT64_MAX, calldata,
-                     std::to_underlying(InvokeFlag::None),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
-               [[maybe_unused]] auto gas = GasAmount{0};
-               if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          auto status = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                addr_emitter, 0, UINT64_MAX, calldata,
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
+          }();
+          [[maybe_unused]] auto gas = GasAmount{0};
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               if (!ctx.consume_gas(gas)) {
-                 return InvokeError{InvokeErrorCode::OutOfGas};
-               }
+          if (!ctx.consume_gas(gas)) {
+            return InvokeError{InvokeErrorCode::OutOfGas};
+          }
 
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
+    auto native_contract_deterministic =
+        std::make_unique<NativeContract>(std::move(fns_deterministic));
 
-    auto native_contract_orchestrator = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [addr_emitter, addr_manual_revert, addr_deterministic](
-                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               {
-                 std::string test_data = "first_event";
-                 Calldata calldata(test_data.begin(), test_data.end());
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_orchestrator;
+    fns_orchestrator.emplace(
+        0,
+        [addr_emitter, addr_manual_revert, addr_deterministic](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          {
+            std::string test_data = "first_event";
+            Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0,
-                                       output_returned_auth_token_len = 0;
-                   return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX, calldata,
-                       std::to_underlying(InvokeFlag::None),
-                       std::span<uint32_t>{}, output_return_buffer_len,
-                       output_returned_auth_token_len);
-                 }();
-                 [[maybe_unused]] auto gas = GasAmount{0};
-                 if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::Unrecoverable};
-                 }
+            auto status = [&]() {
+              RuntimeMemoryLength output_return_buffer_len = 0,
+                                  output_returned_auth_token_len = 0;
+              return ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, 0, UINT64_MAX, calldata,
+                  std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                  output_return_buffer_len, output_returned_auth_token_len);
+            }();
+            [[maybe_unused]] auto gas = GasAmount{0};
+            if (!status.has_value()) {
+              return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
 
-                 if (status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::Deterministic};
-                 }
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
 
-                 if (!ctx.consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::OutOfGas};
-                 }
-               }
+            if (!ctx.consume_gas(gas)) {
+              return InvokeError{InvokeErrorCode::OutOfGas};
+            }
+          }
 
-               {
-                 auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0,
-                                       output_returned_auth_token_len = 0;
-                   return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_manual_revert, 0, UINT64_MAX, Calldata{},
-                       std::to_underlying(InvokeFlag::None),
-                       std::span<uint32_t>{}, output_return_buffer_len,
-                       output_returned_auth_token_len);
-                 }();
-                 [[maybe_unused]] auto gas = GasAmount{0};
-                 if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::Unrecoverable};
-                 }
+          {
+            auto status = [&]() {
+              RuntimeMemoryLength output_return_buffer_len = 0,
+                                  output_returned_auth_token_len = 0;
+              return ctx.syscall<SyscallNo::kInvoke>(
+                  addr_manual_revert, 0, UINT64_MAX, Calldata{},
+                  std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                  output_return_buffer_len, output_returned_auth_token_len);
+            }();
+            [[maybe_unused]] auto gas = GasAmount{0};
+            if (!status.has_value()) {
+              return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
 
-                 if (status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-                   return InvokeError{InvokeErrorCode::Deterministic};
-                 }
+            if (status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
 
-                 if (!ctx.consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::OutOfGas};
-                 }
-               }
+            if (!ctx.consume_gas(gas)) {
+              return InvokeError{InvokeErrorCode::OutOfGas};
+            }
+          }
 
-               {
-                 std::string test_data = "second_event";
-                 Calldata calldata(test_data.begin(), test_data.end());
+          {
+            std::string test_data = "second_event";
+            Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0,
-                                       output_returned_auth_token_len = 0;
-                   return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX, calldata,
-                       std::to_underlying(InvokeFlag::None),
-                       std::span<uint32_t>{}, output_return_buffer_len,
-                       output_returned_auth_token_len);
-                 }();
-                 [[maybe_unused]] auto gas = GasAmount{0};
-                 if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::Unrecoverable};
-                 }
+            auto status = [&]() {
+              RuntimeMemoryLength output_return_buffer_len = 0,
+                                  output_returned_auth_token_len = 0;
+              return ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, 0, UINT64_MAX, calldata,
+                  std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                  output_return_buffer_len, output_returned_auth_token_len);
+            }();
+            [[maybe_unused]] auto gas = GasAmount{0};
+            if (!status.has_value()) {
+              return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
 
-                 if (status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::Deterministic};
-                 }
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
 
-                 if (!ctx.consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::OutOfGas};
-                 }
-               }
+            if (!ctx.consume_gas(gas)) {
+              return InvokeError{InvokeErrorCode::OutOfGas};
+            }
+          }
 
-               {
-                 auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0,
-                                       output_returned_auth_token_len = 0;
-                   return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_deterministic, 0, UINT64_MAX, Calldata{},
-                       std::to_underlying(InvokeFlag::None),
-                       std::span<uint32_t>{}, output_return_buffer_len,
-                       output_returned_auth_token_len);
-                 }();
-                 [[maybe_unused]] auto gas = GasAmount{0};
-                 if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::Unrecoverable};
-                 }
+          {
+            auto status = [&]() {
+              RuntimeMemoryLength output_return_buffer_len = 0,
+                                  output_returned_auth_token_len = 0;
+              return ctx.syscall<SyscallNo::kInvoke>(
+                  addr_deterministic, 0, UINT64_MAX, Calldata{},
+                  std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                  output_return_buffer_len, output_returned_auth_token_len);
+            }();
+            [[maybe_unused]] auto gas = GasAmount{0};
+            if (!status.has_value()) {
+              return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
 
-                 if (status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-                   return InvokeError{InvokeErrorCode::Deterministic};
-                 }
+            if (status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
 
-                 if (!ctx.consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::OutOfGas};
-                 }
-               }
+            if (!ctx.consume_gas(gas)) {
+              return InvokeError{InvokeErrorCode::OutOfGas};
+            }
+          }
 
-               {
-                 std::string test_data = "third_event";
-                 Calldata calldata(test_data.begin(), test_data.end());
+          {
+            std::string test_data = "third_event";
+            Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0,
-                                       output_returned_auth_token_len = 0;
-                   return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX, calldata,
-                       std::to_underlying(InvokeFlag::None),
-                       std::span<uint32_t>{}, output_return_buffer_len,
-                       output_returned_auth_token_len);
-                 }();
-                 [[maybe_unused]] auto gas = GasAmount{0};
-                 if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::Unrecoverable};
-                 }
+            auto status = [&]() {
+              RuntimeMemoryLength output_return_buffer_len = 0,
+                                  output_returned_auth_token_len = 0;
+              return ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, 0, UINT64_MAX, calldata,
+                  std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                  output_return_buffer_len, output_returned_auth_token_len);
+            }();
+            [[maybe_unused]] auto gas = GasAmount{0};
+            if (!status.has_value()) {
+              return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
 
-                 if (status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::Deterministic};
-                 }
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
 
-                 if (!ctx.consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::OutOfGas};
-                 }
-               }
+            if (!ctx.consume_gas(gas)) {
+              return InvokeError{InvokeErrorCode::OutOfGas};
+            }
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto native_contract_orchestrator =
+        std::make_unique<NativeContract>(std::move(fns_orchestrator));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_emitter));
@@ -943,4 +965,5 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

@@ -35,6 +35,7 @@
 //
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
@@ -90,43 +91,40 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   client_t client(contract_addr_);
 
   // Create a native contract that calls the WASM contract to test manual revert
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Call test_basic_manual_revert with should_revert=true
-             auto [res, _gas] =
-                 client.invoke_opt<"test_basic_manual_revert">(ctx.handler(),
-                                                               true);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Call test_basic_manual_revert with should_revert=true
+    auto [res, _gas] =
+        client.invoke_opt<"test_basic_manual_revert">(ctx.handler(), true);
 
-             auto result = check_result(res);
+    auto result = check_result(res);
 
-             if (!result.is_err()) {
-               ADD_FAILURE()
-                   << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!result.is_err()) {
+      ADD_FAILURE() << "Function call should have returned a contract error";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             // The manual revert should have succeeded (no error)
-             // and storage should be reverted (tested by check_storage_exists)
-             auto [storage_check, _gas2] =
-                 client.invoke_opt<"check_storage_exists">(ctx.handler());
+    // The manual revert should have succeeded (no error)
+    // and storage should be reverted (tested by check_storage_exists)
+    auto [storage_check, _gas2] =
+        client.invoke_opt<"check_storage_exists">(ctx.handler());
 
-             // Storage should not exist due to manual revert
-             if (!storage_check.has_value() ||
-                 !storage_check.value().has_value() ||
-                 !storage_check.value().value().has_value() ||
-                 !storage_check.value().value().value().is_ok()) {
-               ADD_FAILURE() << "Function call encountered unexpected error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (storage_check.value().value().value().ok()) {
-               ADD_FAILURE() << "Storage check should have returned false "
-                                "(revert should wipe changes)";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    // Storage should not exist due to manual revert
+    if (!storage_check.has_value() || !storage_check.value().has_value() ||
+        !storage_check.value().value().has_value() ||
+        !storage_check.value().value().value().is_ok()) {
+      ADD_FAILURE() << "Function call encountered unexpected error";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    if (storage_check.value().value().value().ok()) {
+      ADD_FAILURE() << "Storage check should have returned false "
+                       "(revert should wipe changes)";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -182,36 +180,34 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   client_t client(contract_addr_);
 
   // Create a native contract that calls the WASM contract without revert
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Call test_basic_manual_revert with should_revert=false
-             auto [res, _gas] =
-                 client.invoke_opt<"test_basic_manual_revert">(ctx.handler(),
-                                                               false);
-             if (!res.has_value() || !res.value().has_value() ||
-                 !res.value().value().has_value() ||
-                 !res.value().value().value().is_ok()) {
-               ADD_FAILURE() << "Function call should have succeeded";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Call test_basic_manual_revert with should_revert=false
+    auto [res, _gas] =
+        client.invoke_opt<"test_basic_manual_revert">(ctx.handler(), false);
+    if (!res.has_value() || !res.value().has_value() ||
+        !res.value().value().has_value() ||
+        !res.value().value().value().is_ok()) {
+      ADD_FAILURE() << "Function call should have succeeded";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             // Storage should exist because no revert occurred
-             auto [storage_check, _gas2] =
-                 client.invoke_opt<"check_storage_exists">(ctx.handler());
-             if (!storage_check.has_value() ||
-                 !storage_check.value().has_value() ||
-                 !storage_check.value().value().has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    // Storage should exist because no revert occurred
+    auto [storage_check, _gas2] =
+        client.invoke_opt<"check_storage_exists">(ctx.handler());
+    if (!storage_check.has_value() || !storage_check.value().has_value() ||
+        !storage_check.value().value().has_value()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             // Storage should exist (no revert)
-             if (!storage_check.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    // Storage should exist (no revert)
+    if (!storage_check.value().value().value().is_ok()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -264,23 +260,21 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
   client_t client(contract_addr_);
 
   // Create a native contract that tests nested manual revert
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Call test_nested_manual_revert with child_should_revert=true
-             auto [res, _gas] =
-                 client.invoke_opt<"test_nested_manual_revert">(ctx.handler(),
-                                                                true);
-             auto result = check_result(res);
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Call test_nested_manual_revert with child_should_revert=true
+    auto [res, _gas] =
+        client.invoke_opt<"test_nested_manual_revert">(ctx.handler(), true);
+    auto result = check_result(res);
 
-             if (!result.is_err()) {
-               ADD_FAILURE()
-                   << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+    if (!result.is_err()) {
+      ADD_FAILURE() << "Function call should have returned a contract error";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             return {};
-           }}});
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -337,24 +331,26 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
   // Test error types 1-4 (should all trigger manual revert)
   for (uint32_t error_type = 1; error_type <= 4; ++error_type) {
     // Create a native contract that calls the WASM contract's error type method
-    auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [&, error_type](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call test_error_type_revert with specific error type
-               auto [res, _gas] =
-                   client.invoke_opt<"test_error_type_revert">(ctx.handler(),
-                                                               error_type);
-               auto result = check_result(res);
-               if (!result.is_err()) {
-                 ADD_FAILURE()
-                     << "Function call should have returned a contract error";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(
+        0,
+        [&,
+         error_type](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Call test_error_type_revert with specific error type
+          auto [res, _gas] =
+              client.invoke_opt<"test_error_type_revert">(ctx.handler(),
+                                                          error_type);
+          auto result = check_result(res);
+          if (!result.is_err()) {
+            ADD_FAILURE()
+                << "Function call should have returned a contract error";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               // All error types should succeed via manual revert
-               return {};
-             }}});
+          // All error types should succeed via manual revert
+          return {};
+        });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
@@ -413,22 +409,21 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 
   // Create a native contract that calls test_error_type_revert with
   // error_type=0
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Call test_error_type_revert with error_type=0 (no error)
-             auto [res, _gas] =
-                 client.invoke_opt<"test_error_type_revert">(ctx.handler(), 0U);
-             auto result = check_result(res);
-             if (!result.is_ok()) {
-               ADD_FAILURE()
-                   << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Call test_error_type_revert with error_type=0 (no error)
+    auto [res, _gas] =
+        client.invoke_opt<"test_error_type_revert">(ctx.handler(), 0U);
+    auto result = check_result(res);
+    if (!result.is_ok()) {
+      ADD_FAILURE() << "Function call should have returned a contract error";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-             // Should succeed normally without manual revert
-             return {};
-           }}});
+    // Should succeed normally without manual revert
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -484,23 +479,24 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
   // Test with should_revert=true (storage should be reverted)
   {
-    auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call test_storage_manual_revert with should_revert=true
-               auto [res, _gas] =
-                   client.invoke_opt<"test_storage_manual_revert">(
-                       ctx.handler(), true);
-               auto result = check_result(res);
-               if (!result.is_err()) {
-                 ADD_FAILURE()
-                     << "Function call should have returned a contract error";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(
+        0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Call test_storage_manual_revert with should_revert=true
+          auto [res, _gas] =
+              client.invoke_opt<"test_storage_manual_revert">(ctx.handler(),
+                                                              true);
+          auto result = check_result(res);
+          if (!result.is_err()) {
+            ADD_FAILURE()
+                << "Function call should have returned a contract error";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               // Should succeed via manual revert
-               return {};
-             }}});
+          // Should succeed via manual revert
+          return {};
+        });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
@@ -542,22 +538,23 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
   // Test with should_revert=false (storage should be preserved)
   {
-    auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call test_storage_manual_revert with should_revert=false
-               auto [res, _gas] =
-                   client.invoke_opt<"test_storage_manual_revert">(
-                       ctx.handler(), false);
-               auto result = check_result(res);
-               if (!result.is_ok()) {
-                 ADD_FAILURE() << "Function call should have succeeded";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  // Call test_storage_manual_revert with should_revert=false
+                  auto [res, _gas] =
+                      client.invoke_opt<"test_storage_manual_revert">(
+                          ctx.handler(), false);
+                  auto result = check_result(res);
+                  if (!result.is_ok()) {
+                    ADD_FAILURE() << "Function call should have succeeded";
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-               // Should succeed normally
-               return {};
-             }}});
+                  // Should succeed normally
+                  return {};
+                });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
@@ -603,4 +600,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertWasmTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
