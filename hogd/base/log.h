@@ -339,6 +339,8 @@ format_arg(T &&t)
   }
 }
 
+} // namespace hogd
+
 #ifdef __APPLE__
 inline auto
 gettid()
@@ -346,6 +348,8 @@ gettid()
   return std::this_thread::get_id();
 }
 #endif
+
+namespace hogd {
 
 #define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
   do {                                                                         \
