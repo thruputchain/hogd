@@ -1,14 +1,16 @@
 add_library(
   hogd_dev
-  dev_account_bootstrap.cc
+  bootstrap_accounts.cc
   hogd_dev_node.cc
   hogd_dev_tmp_dir.cc
+  runtime_manifest.cc
 )
 target_link_libraries(
   hogd_dev
   auth
   base
   contract_loader
+  crypto
   event
   exec_interface
   genesis

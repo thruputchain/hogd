@@ -1,5 +1,7 @@
-#include <array>
-#include <cstddef>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -9,18 +11,15 @@
 #include <print>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 
-#include "hogd/base/json.h"
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
-#include "hogd/base/string.h"
-#include "hogd/hogd_dev/dev_account_bootstrap.h"
+#include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -81,57 +80,13 @@ wait_for_shutdown(const ShutdownSignals &signals)
 }
 // NOLINTEND(misc-include-cleaner)
 
-template<std::size_t N>
-std::string
-format_hex(std::array<std::uint8_t, N> const &bytes)
-{
-  return std::format("0x{}", encode_hex(std::as_bytes(std::span(bytes))));
-}
-
-std::string
-build_readiness_payload(const HogdDevNode &node)
-{
-  std::string buffer;
-  json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("status", "ready");
-    w.field("network_id", "groundhog-local");
-    w.object_field("endpoints", [&](json::Writer &w) {
-      w.field("scheduler", format_advertised_address(node.bind_host(),
-                                                     node.scheduler_port()));
-      w.field("read",
-              format_advertised_address(node.bind_host(), node.read_port()));
-      w.field("gateway",
-              format_advertised_address(node.bind_host(), node.gateway_port()));
-      w.field("view_gateway",
-              format_advertised_address(node.bind_host(),
-                                        node.view_gateway_port()));
-    });
-    if (!node.dev_accounts().empty()) {
-      w.array_field("dev_accounts", [&](json::Writer &w) {
-        for (DevAccountMetadata const &account : node.dev_accounts()) {
-          CHECK_LE(account.storage_tokens,
-                   static_cast<std::uint64_t>(
-                       std::numeric_limits<std::int64_t>::max()));
-          w.object([&](json::Writer &w) {
-            w.field("index", static_cast<std::int64_t>(account.index));
-            w.field("address", format_hex(account.address));
-            w.field("public_key", format_hex(account.public_key));
-            w.field("initial_storage_tokens",
-                    static_cast<std::int64_t>(account.storage_tokens));
-          });
-        }
-      });
-    }
-  });
-  return buffer;
-}
-
 void
 emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 {
+  RuntimeManifestPointer manifest = write_hogd_dev_runtime_manifest(node);
   switch (sink) {
   case ReadinessSink::kStdout:
-    std::println("{}", build_readiness_payload(node));
+    std::println("{}", manifest.readiness_payload);
     std::fflush(stdout);
   }
 }
@@ -139,7 +94,7 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
               ReadinessSink readiness_sink,
-              DevAccountBootstrapConfig const &bootstrap_config)
+              BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
 
@@ -153,6 +108,27 @@ hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
   return EXIT_SUCCESS;
 }
 
+bool
+is_wildcard_listen_host(std::string_view host)
+{
+  if (host.size() >= 2 && host.front() == '[' && host.back() == ']') {
+    host = host.substr(1, host.size() - 2);
+  }
+
+  std::string host_string(host);
+  in_addr ipv4{};
+  if (inet_pton(AF_INET, host_string.c_str(), &ipv4) == 1) {
+    return ipv4.s_addr == INADDR_ANY;
+  }
+
+  in6_addr ipv6{};
+  if (inet_pton(AF_INET6, host_string.c_str(), &ipv6) == 1) {
+    return IN6_IS_ADDR_UNSPECIFIED(&ipv6);
+  }
+
+  return false;
+}
+
 } // namespace
 
 } // namespace hogd
@@ -163,7 +139,7 @@ struct HogdDevOptions {
   std::string listen_host = "127.0.0.1";
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
-  hogd::DevAccountBootstrapConfig bootstrap_config;
+  hogd::BootstrapAccountConfig bootstrap_config;
 };
 
 void
@@ -239,13 +215,13 @@ parse_u32(const std::string &value, std::string_view name)
 }
 
 std::uint32_t
-parse_dev_account_count(const std::string &value)
+parse_bootstrap_account_count(const std::string &value)
 {
   std::uint32_t count = parse_u32(value, "dev account count");
-  if (count > hogd::kMaxDevAccounts) {
+  if (count > hogd::kMaxBootstrapAccounts) {
     throw std::runtime_error(
         std::format("Invalid dev account count: {} exceeds maximum {}", value,
-                    hogd::kMaxDevAccounts));
+                    hogd::kMaxBootstrapAccounts));
   }
   return count;
 }
@@ -280,6 +256,10 @@ parse_args(int argc, char *argv[])
     }
     if (arg == "--listen-host" && i + 1 < argc) {
       options.listen_host = argv[++i];
+      if (hogd::is_wildcard_listen_host(options.listen_host)) {
+        throw std::runtime_error(
+            "Invalid listen host: wildcard addresses cannot be advertised");
+      }
       continue;
     }
     if (arg == "--scheduler-port" && i + 1 < argc) {
@@ -296,7 +276,7 @@ parse_args(int argc, char *argv[])
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
-      options.bootstrap_config.count = parse_dev_account_count(argv[++i]);
+      options.bootstrap_config.count = parse_bootstrap_account_count(argv[++i]);
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
@@ -332,7 +312,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogd-dev!");
 
-  return hogd::hogd_dev_init(std::move(options.listen_host),
-                             options.scheduler_port, options.readiness_sink,
-                             options.bootstrap_config);
+  try {
+    return hogd::hogd_dev_init(std::move(options.listen_host),
+                               options.scheduler_port, options.readiness_sink,
+                               options.bootstrap_config);
+  } catch (const std::exception &error) {
+    hogd::error("hogd-dev failed before readiness: {}", error.what());
+    return EXIT_FAILURE;
+  }
 }

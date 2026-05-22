@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/dev_account_bootstrap.h"
+#include "hogd/hogd_dev/bootstrap_accounts.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -48,16 +48,16 @@ derive_wallet_nonce(std::string_view seed, std::uint32_t index)
 } // namespace
 
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
-derive_dev_account_keypair(std::string_view seed, std::uint32_t index)
+derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 {
   SHA256Hash secret_seed = derive_account_secret_seed(seed, index);
   return ed25519_keygen_from_seed(std::as_bytes(std::span(secret_seed)));
 }
 
-DevAccountBootstrapArtifact
-build_dev_account_bootstrap_artifact(DevAccountBootstrapConfig const &config)
+BootstrapAccountArtifact
+build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
 {
-  CHECK_LE(config.count, kMaxDevAccounts);
+  CHECK_LE(config.count, kMaxBootstrapAccounts);
 
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
@@ -66,11 +66,11 @@ build_dev_account_bootstrap_artifact(DevAccountBootstrapConfig const &config)
   const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
 
   GenesisConfigurationBuilder builder;
-  std::vector<DevAccountMetadata> accounts;
+  std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(config.count);
 
   for (std::uint32_t i = 0; i < config.count; ++i) {
-    auto keypair = derive_dev_account_keypair(config.seed, i);
+    auto keypair = derive_bootstrap_account_keypair(config.seed, i);
     const Ed25519PublicKey &public_key = keypair.first;
     SHA256Hash nonce = derive_wallet_nonce(config.seed, i);
     ContractAddress address =
@@ -82,15 +82,16 @@ build_dev_account_bootstrap_artifact(DevAccountBootstrapConfig const &config)
                                wallet_meta::make_calldata<"initialize">(
                                    public_key),
                                static_cast<int128_t>(config.storage_tokens));
-    accounts.push_back(DevAccountMetadata{
+    accounts.push_back(BootstrapAccountMetadata{
         .index = i,
         .address = address,
         .public_key = public_key,
+        .initial_storage_tokens = config.storage_tokens,
         .storage_tokens = config.storage_tokens,
     });
   }
 
-  return DevAccountBootstrapArtifact{
+  return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(StorageCostModel::default_cost_model()),
       .initialization_txs = builder.make_unfurl_genesis_transactions(),
