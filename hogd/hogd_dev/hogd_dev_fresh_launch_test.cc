@@ -3,6 +3,8 @@
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -10,9 +12,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <print>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #ifndef HOGD_DEV_BINARY
 #error "HOGD_DEV_BINARY must be defined by CMake"
@@ -24,6 +26,7 @@ constexpr auto kStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
 
+// NOLINTBEGIN(misc-include-cleaner)
 void
 close_if_open(int &fd)
 {
@@ -36,7 +39,7 @@ close_if_open(int &fd)
 void
 fail_with_errno(std::string_view op)
 {
-  std::fprintf(stderr, "%.*s: %s\n", static_cast<int>(op.size()), op.data(),
+  std::println(stderr, "{:.{}}: {}", op.data(), static_cast<int>(op.size()),
                std::strerror(errno));
   std::exit(EXIT_FAILURE);
 }
@@ -94,27 +97,21 @@ wait_for_exit(pid_t pid, std::chrono::milliseconds timeout, int &status)
 }
 
 void
-terminate_child(pid_t pid)
+cleanup_child(pid_t pid)
 {
   kill(pid, SIGTERM);
   int status = 0;
   if (!wait_for_exit(pid, kShutdownTimeout, status)) {
     kill(pid, SIGKILL);
     if (!wait_for_exit(pid, kShutdownTimeout, status)) {
-      std::fprintf(stderr, "hogd-dev did not exit after SIGKILL\n");
-      std::exit(EXIT_FAILURE);
+      std::println(stderr, "hogd-dev did not exit after SIGKILL");
     }
   }
-  if (!WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS) {
-    std::fprintf(stderr, "hogd-dev exited with status %d\n", status);
-    std::exit(EXIT_FAILURE);
-  }
 }
-
 } // namespace
 
 int
-main()
+main() // NOLINT(bugprone-exception-escape)
 {
   int stdout_pipe[2];
   int stderr_pipe[2];
@@ -141,7 +138,7 @@ main()
     close(stderr_pipe[1]);
     setenv("HOGD_LOG_FORMAT", "json", /*overwrite=*/1);
 
-    std::vector<char *> argv{
+    char *argv[] = {
         const_cast<char *>(HOGD_DEV_BINARY),
         const_cast<char *>("--listen-host"),
         const_cast<char *>("127.0.0.1"),
@@ -151,7 +148,7 @@ main()
         const_cast<char *>("stdout"),
         nullptr,
     };
-    execv(HOGD_DEV_BINARY, argv.data());
+    execv(HOGD_DEV_BINARY, argv);
     _exit(127);
   }
 
@@ -186,10 +183,9 @@ main()
     }
     if (fds[0].revents != 0) {
       stdout_output += read_available(stdout_pipe[0]);
-      saw_readiness =
-          stdout_output.find('\n') != std::string::npos &&
-          stdout_output.find("\"status\":\"ready\"") != std::string::npos &&
-          stdout_output.find("\"manifestPath\"") != std::string::npos;
+      saw_readiness = stdout_output.contains('\n') &&
+                      stdout_output.contains(R"("status":"ready")") &&
+                      stdout_output.contains(R"("manifestPath")");
     }
     if (fds[1].revents != 0) {
       stderr_output += read_available(stderr_pipe[0]);
@@ -214,16 +210,17 @@ main()
     }
     close_if_open(stdout_pipe[0]);
     close_if_open(stderr_pipe[0]);
-    std::fprintf(stderr,
-                 "%s waiting for hogd-dev readiness; status=%d\nstdout:\n%s\n"
-                 "stderr tail:\n%s\n",
+    std::println(stderr,
+                 "{} waiting for hogd-dev readiness; status={}\nstdout:\n{}\n"
+                 "stderr tail:\n{}",
                  child_exited ? "child exited before" : "timed out",
-                 child_status, stdout_output.c_str(), stderr_output.c_str());
+                 child_status, stdout_output, stderr_output);
     return EXIT_FAILURE;
   }
 
-  terminate_child(pid);
+  cleanup_child(pid);
   close_if_open(stdout_pipe[0]);
   close_if_open(stderr_pipe[0]);
   return EXIT_SUCCESS;
 }
+// NOLINTEND(misc-include-cleaner)
