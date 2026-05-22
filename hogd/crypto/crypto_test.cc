@@ -41,6 +41,38 @@ TEST(SHA256, IncrementalMatchesOneShot)
   EXPECT_EQ(multi_chunk_hasher.finalize(), sha256(msg_bytes));
 }
 
+TEST(SHA256, IncrementalConcatEquivalence)
+{
+  std::vector<uint8_t> a = {0x10, 0x20, 0x30};
+  std::vector<uint8_t> b = {0x40, 0x50, 0x60, 0x70};
+  std::vector<uint8_t> ab = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70};
+
+  auto a_bytes = std::as_bytes(std::span(a));
+  auto b_bytes = std::as_bytes(std::span(b));
+  auto ab_bytes = std::as_bytes(std::span(ab));
+
+  SHA256Hasher incremental;
+  incremental.update(a_bytes);
+  incremental.update(b_bytes);
+  EXPECT_EQ(incremental.finalize(), sha256(ab_bytes));
+
+  SHA256Hasher with_leading_empty;
+  with_leading_empty.update(std::span<const std::byte>{});
+  with_leading_empty.update(ab_bytes);
+  EXPECT_EQ(with_leading_empty.finalize(), sha256(ab_bytes));
+
+  SHA256Hasher with_trailing_empty;
+  with_trailing_empty.update(ab_bytes);
+  with_trailing_empty.update(std::span<const std::byte>{});
+  EXPECT_EQ(with_trailing_empty.finalize(), sha256(ab_bytes));
+
+  SHA256Hasher with_middle_empty;
+  with_middle_empty.update(a_bytes);
+  with_middle_empty.update(std::span<const std::byte>{});
+  with_middle_empty.update(b_bytes);
+  EXPECT_EQ(with_middle_empty.finalize(), sha256(ab_bytes));
+}
+
 TEST(Blake3, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};

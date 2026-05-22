@@ -43,12 +43,18 @@ public:
 
   void update(std::span<const std::byte> buf)
   {
+    if (buf.empty()) {
+      return;
+    }
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     SHA256_Update(&ctx_, buf.data(), buf.size());
   }
 
   void update(x23::BufView buf)
   {
+    if (buf.empty()) {
+      return;
+    }
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     SHA256_Update(&ctx_, buf.data(), buf.size());
   }
