@@ -33,7 +33,7 @@ NativeContract::find_function(Runtime::MethodID method) const
 std::pair<InvokeStatus<void>, GasAmount>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
-                       uint64_t gas_limit) const
+                       uint64_t gas_limit) const noexcept
 {
   const auto *fn = find_function(method);
   if (fn == nullptr)

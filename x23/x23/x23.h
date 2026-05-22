@@ -86,6 +86,11 @@ template<size_t N, typename A> struct xdr_meta<Vec<std::uint8_t, N, A>> {
   static constexpr XdrCategory category = XdrCategory::kOpaqueVec;
 };
 
+template<> struct xdr_meta<BufView> {
+  static constexpr XdrCategory category = XdrCategory::kOpaqueVec;
+  static constexpr auto type_name = "BufView";
+};
+
 template<size_t N> struct xdr_meta<std::array<std::uint8_t, N>> {
   static constexpr XdrCategory category = XdrCategory::kOpaqueArray;
 };

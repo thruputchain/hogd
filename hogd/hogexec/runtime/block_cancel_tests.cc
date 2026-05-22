@@ -26,6 +26,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // Tests to make sure that cancelling a block in the db is handled gracefully.
 
@@ -53,11 +54,11 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
 {
   // Create a simple native contract that does nothing
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return {};
-             }}});
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [](NativeSyscallContext & /*unused*/) noexcept
+                    -> InvokeStatus<void> { return {}; });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -103,43 +104,50 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
   ContractAddress addr_caller = make_contract_address(1);
 
   auto make_context = [addr_writer]() -> std::unique_ptr<RuntimeContext> {
-    auto contract_writer = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(StorageDeltaFlags::None));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_writer;
+    fns_writer.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto key = make_storage_key("test");
+          auto [res, _gas] = syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span{"hello"}),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-               return {};
-             }}});
+          return {};
+        });
+    auto contract_writer =
+        std::make_unique<NativeContract>(std::move(fns_writer));
 
-    auto contract_caller = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0,
-                                     output_returned_auth_token_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_writer, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     std::span<uint32_t>{}, output_return_buffer_len,
-                     output_returned_auth_token_len);
-               }();
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_caller;
+    fns_caller.emplace(
+        0,
+        [addr_writer](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r0 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                addr_writer, 0, UINT64_MAX, ctx.handler().get_calldata(),
+                std::to_underlying(InvokeFlag::TryInvoke),
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
+          }();
 
-               if (r0.has_value() ||
-                   r0.error().code() != HostFnErrorCode::Abandon) {
-                 ADD_FAILURE() << "Unexpected return value from try_invoke: "
-                               << r0.error().error_code().message();
-                 return InvokeError{InvokeErrorCode::Unrecoverable};
-               }
+          if (r0.has_value() || r0.error().code() != HostFnErrorCode::Abandon) {
+            ADD_FAILURE() << "Unexpected return value from try_invoke: "
+                          << r0.error().error_code().message();
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-               return InvokeError{InvokeErrorCode::Abandon};
-             }}});
+          return InvokeError{InvokeErrorCode::Abandon};
+        });
+    auto contract_caller =
+        std::make_unique<NativeContract>(std::move(fns_caller));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_writer));
@@ -181,4 +189,5 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
   ASSERT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});
 }
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

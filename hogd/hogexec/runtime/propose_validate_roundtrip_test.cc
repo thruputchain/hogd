@@ -35,6 +35,7 @@
 #include "types.hh"
 
 namespace hogd {
+// NOLINTBEGIN(bugprone-exception-escape)
 
 // End-to-end test: run a transaction in proposal mode, capture the
 // NondeterministicProposalData, then replay in validation mode and verify
@@ -76,13 +77,12 @@ protected:
 
   // Build a NativeContract from a list of method lambdas.
   // Methods are assigned IDs 0, 1, 2, ... in order.
-  static std::unique_ptr<NativeContract>
-  make_contract(std::initializer_list<NativeContract::function_t> methods)
+  template<typename... Fns>
+  static std::unique_ptr<NativeContract> make_contract(Fns &&...fns)
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> map;
     Runtime::MethodID id = 0;
-    for (const auto &m : methods)
-      map.emplace(id++, m);
+    (map.emplace(id++, std::forward<Fns>(fns)), ...);
     return std::make_unique<NativeContract>(std::move(map));
   }
 
@@ -91,7 +91,7 @@ protected:
                                                       std::string_view value)
   {
     return [k = std::string(key_name), v = std::string(value)](
-               NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
       auto key = make_storage_key(k);
       auto [ws, _wg] = syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
@@ -110,11 +110,11 @@ protected:
       std::initializer_list<std::pair<std::string_view, std::string_view>>
           entries)
   {
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> methods;
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     Runtime::MethodID id = 0;
     for (auto [key, value] : entries)
-      methods.emplace(id++, make_write_method(key, value));
-    return std::make_unique<NativeContract>(std::move(methods));
+      fns.emplace(id++, make_write_method(key, value));
+    return std::make_unique<NativeContract>(std::move(fns));
   }
 
   // Build a NativeContext from contracts A and B.
@@ -173,9 +173,9 @@ protected:
   static std::unique_ptr<NativeContext> make_noop_context()
   {
     auto noop = make_contract(
-        {[](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+        [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
           return {};
-        }});
+        });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(noop));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -188,8 +188,8 @@ protected:
   //   method 1: consume calldata[0] entries (default 1)
   static std::unique_ptr<RuntimeContext> make_rcq_context()
   {
-    auto contract = make_contract({
-        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+    auto contract = make_contract(
+        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
@@ -200,7 +200,7 @@ protected:
           }
           return {};
         },
-        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto const &cd = ctx.handler().get_calldata();
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
@@ -210,8 +210,7 @@ protected:
               return res.error().to_invoke_error();
           }
           return {};
-        },
-    });
+        });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -287,8 +286,8 @@ protected:
 // (deterministic errors skip lock acquisition entirely).
 TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 {
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
           return InvokeError{InvokeErrorCode::Deterministic};
         if (auto r = try_invoke_b(ctx, kWriteWorld); !r.has_value())
@@ -304,7 +303,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
         return {};
-      }});
+      });
 
   auto native_context =
       make_ab_context(std::move(contract_a),
@@ -331,12 +330,12 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 {
   // A: single try_invoke of B.write_hello → produces 1 nondeterministic bit.
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
           return InvokeError{InvokeErrorCode::Deterministic};
         return {};
-      }});
+      });
 
   auto native_context =
       make_ab_context(std::move(contract_a),
@@ -369,8 +368,8 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   // A: try_invoke B.write_hello, then conditionally try_invoke B.write_world.
   // Both succeed in proposal → 2 bits.  Flipping bit 0 makes validator
   // skip the second try_invoke → 1 of 2 bits consumed → failure.
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto r0 = try_invoke_b(ctx, kWriteHello);
         if (!r0.has_value())
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -380,7 +379,7 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
             return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
-      }});
+      });
 
   auto native_context =
       make_ab_context(std::move(contract_a),
@@ -579,7 +578,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
 
   // Custom contract: single method that inserts then consumes.
   auto contract = make_contract(
-      {[&consumed_values](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      [&consumed_values](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
         consumed_values.clear();
         for (uint8_t val : {10, 20}) {
@@ -596,7 +596,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
             consumed_values.push_back(r.value().value()[0]);
         }
         return {};
-      }});
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract));
   auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
@@ -911,7 +911,8 @@ TEST_P(ProposeValidateRoundtripTest,
   };
 
   auto contract_a = make_contract(
-      {[make_index_calldata](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      [make_index_calldata](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           RuntimeMemoryLength output_return_buffer_len = 0,
@@ -931,10 +932,11 @@ TEST_P(ProposeValidateRoundtripTest,
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
-      }});
+      });
 
   auto contract_b = make_contract(
-      {[make_depth_poc_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      [make_depth_poc_key](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto const &calldata = ctx.handler().get_calldata();
         if (calldata.size() != 2) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -950,7 +952,7 @@ TEST_P(ProposeValidateRoundtripTest,
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
-      }});
+      });
 
   auto native_context =
       make_ab_context(std::move(contract_a), std::move(contract_b));
@@ -1004,8 +1006,8 @@ TEST_P(ProposeValidateRoundtripTest,
   // A is tolerant: it does NOT propagate child failures, so a single dangling
   // proposal bit reaches finalize_after_root_frame instead of short-circuiting
   // in A's logic.
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -1019,11 +1021,11 @@ TEST_P(ProposeValidateRoundtripTest,
           }
         }
         return {};
-      }});
-  auto contract_b =
-      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+      });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         return {};
-      }});
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1054,8 +1056,8 @@ TEST_P(ProposeValidateRoundtripTest,
 
 TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 {
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -1068,11 +1070,11 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
           }
         }
         return {};
-      }});
-  auto contract_b =
-      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+      });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         return {};
-      }});
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1103,8 +1105,8 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 {
   static constexpr uint32_t kAttempts = 2 * kMaxSavepointDepth;
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kAttempts; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -1118,11 +1120,11 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
           }
         }
         return {};
-      }});
-  auto contract_b =
-      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+      });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         return {};
-      }});
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1173,8 +1175,8 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   write_deployment(kAddrC, native_contract_c_xdr);
   setup_grant_storage_token(kAddrC, 1'000'000'000);
 
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         RuntimeMemoryLength out_ret = 0, out_auth = 0;
         auto r = ctx.syscall<SyscallNo::kInvoke>(
             kAddrB, 0, UINT64_MAX, Calldata{},
@@ -1187,9 +1189,9 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
-      }});
-  auto contract_b =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kChildCap; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -1204,11 +1206,11 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
           }
         }
         return {};
-      }});
-  auto contract_c =
-      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+      });
+  auto contract_c = make_contract(
+      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         return {};
-      }});
+      });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
@@ -1252,15 +1254,15 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 TEST_P(ProposeValidateRoundtripTest,
        DeterministicRootErrorSkipsExtraProposalBitCheck)
 {
-  auto contract_a =
-      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto r = try_invoke_b(ctx, kWriteHello);
         if (!r.has_value())
           return InvokeError{InvokeErrorCode::Deterministic};
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
         return InvokeError{InvokeErrorCode::Deterministic};
-      }});
+      });
 
   auto native_context =
       make_ab_context(std::move(contract_a),
@@ -1398,9 +1400,9 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
                               ExecResult expected_result) {
     auto make_error_context = [root_error] {
       auto contract_a = make_contract(
-          {[root_error](NativeSyscallContext & /*unused*/)
-               -> InvokeStatus<void> { return InvokeError{root_error}; }});
-      return make_ab_context(std::move(contract_a), make_contract({}));
+          [root_error](NativeSyscallContext & /*unused*/) noexcept
+              -> InvokeStatus<void> { return InvokeError{root_error}; });
+      return make_ab_context(std::move(contract_a), make_contract());
     };
 
     {
@@ -1448,4 +1450,5 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 
+// NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

@@ -30,7 +30,6 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -40,7 +39,7 @@ namespace {
 
 StorageKeyContractData
 calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
-                      ContractEntrypointID entrypoint, Calldata const &calldata)
+                      ContractEntrypointID entrypoint, x23::BufView calldata)
 {
   // Create the key data: "Initial Deployment" || hash || nonce || entrypoint ||
   // calldata
@@ -127,7 +126,7 @@ make_native_initial_token_claim_contract()
   builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
       [](NativeSyscallContext &ctx, SHA256Hash hash, SHA256Hash nonce,
          ContractEntrypointID entrypoint,
-         Calldata calldata) -> InvokeStatus<void> {
+         x23::BufView calldata) -> InvokeStatus<void> {
         trace("initial token claim claim_initial_tokens");
 
         // Create storage key: sha256("Initial Deployment" || hash || nonce ||

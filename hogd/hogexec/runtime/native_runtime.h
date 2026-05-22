@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <string_view>
 #include <unordered_map>
@@ -11,6 +10,7 @@
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/unique_function.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -50,7 +50,8 @@ class NativeSyscallContext;
 
 class NativeContract {
 public:
-  using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
+  using function_t =
+      UniqueFunction<InvokeStatus<void>(NativeSyscallContext &) const noexcept>;
   using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
@@ -72,7 +73,7 @@ public:
 
   std::pair<InvokeStatus<void>, GasAmount>
   invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
-         uint64_t gas_limit) const;
+         uint64_t gas_limit) const noexcept;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
