@@ -15,6 +15,7 @@ namespace hogd {
 class Health {
 public:
   enum class Status {
+    kStarting,
     kOk,
     kError,
   };
@@ -69,6 +70,8 @@ struct std::formatter<hogd::Health::Status> : std::formatter<const char *> {
   auto format(hogd::Health::Status status, FormatContext &ctx) const
   {
     switch (status) {
+    case hogd::Health::Status::kStarting:
+      return std::formatter<const char *>::format("starting", ctx);
     case hogd::Health::Status::kOk:
       return std::formatter<const char *>::format("ok", ctx);
     case hogd::Health::Status::kError:
