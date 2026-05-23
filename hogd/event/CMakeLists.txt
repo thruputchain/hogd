@@ -18,6 +18,7 @@ add_library(event STATIC $<TARGET_OBJECTS:event_objects>)
 target_link_libraries(
   event
   hogd
+  health
   merkle
 )
 
@@ -34,6 +35,7 @@ add_executable(
 target_link_libraries(
   event_exec
   event
+  health
   hogd
 )
 

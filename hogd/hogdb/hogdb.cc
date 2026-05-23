@@ -26,6 +26,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/health/health.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -67,6 +68,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
            uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
            uint16_t gateway_port)
 {
+  Health::instance().start_service();
+
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
   if (!lsn) {
@@ -109,6 +112,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       return EXIT_FAILURE;
     }
     ctx.set_tip(*tip);
+    Health::instance().set_current_block_height(tip->height)();
     if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
       ctx.initialize_cost_model(*cost_model);
     }
@@ -121,6 +125,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     CHECK_EQ(db_hash, DbHash{});
     ctx.set_tip(
         DbTip{.height = -1, .id = std::numeric_limits<BlockTXID>::max()});
+    Health::instance().set_current_block_height(-1)();
   }
 
   HogDBStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
@@ -182,6 +187,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
 
   // block forever
+  Health::instance().set_status(Health::Status::kOk)();
   info("hogdb initialization complete.");
   std::promise<void>().get_future().wait();
 

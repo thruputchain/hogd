@@ -3,6 +3,7 @@
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/event/status.h"
+#include "hogd/health/health.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -69,6 +70,7 @@ EventMempoolRpc::eventsched_close_block(BlockID block_id,
     co_return EventBlockResult{to_rpc_error(r.error().code())};
   }
   info("eventsched_close_block: block_id={} done", block_id);
+  co_await Health::instance().set_current_block_height(block_height);
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = r.value();
   co_return result;

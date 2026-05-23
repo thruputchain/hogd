@@ -16,6 +16,7 @@ add_executable(
 target_link_libraries(
   hogexec
   exec_interface
+  health
   hogd
   runtime
   precompiles

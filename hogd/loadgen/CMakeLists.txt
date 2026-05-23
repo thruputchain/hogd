@@ -45,6 +45,7 @@ add_executable(
 target_link_libraries(
   loadgen_server
   loadgen
+  health
   hogd
 )
 

@@ -32,6 +32,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/health/health.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -189,6 +190,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
        encode_base64(std::as_bytes(std::span(committed_tip.db_hash))),
        committed_tip.height, *lsn);
   CHECK_NE(committed_tip.height, -1);
+  Health::instance().set_current_block_height(committed_tip.height)();
   return {};
 }
 

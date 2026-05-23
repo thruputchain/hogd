@@ -15,6 +15,7 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
+#include "hogd/health/health.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
@@ -40,6 +41,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
            const std::string &work_directory, uint16_t exec_port,
            uint16_t indexer_port, uint16_t mempool_port)
 {
+  Health::instance().start_service();
+
   // Start the event servers.
   EventRPCContext ctx(work_directory);
   EventExecServer exec_server(ctx);
@@ -77,6 +80,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   CHECK_EQ(client.schedevent_intro_event(card), RPCError::kRPCNone);
 
   // The event server is initialized. Now block forever.
+  Health::instance().set_status(Health::Status::kOk)();
   info("event initialization complete.");
   std::promise<void>().get_future().wait();
 

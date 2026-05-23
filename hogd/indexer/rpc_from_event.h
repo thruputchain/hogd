@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hogd/base/log.h"
+#include "hogd/health/health.h"
 #include "hogd/indexer/db.h"
 #include "indexer.hh"
 #include "types.hh"
@@ -28,6 +29,7 @@ public:
     // Careful! If we change this function to use [co_await], but sure to copy
     // the [tx_events] parameter above rather than keep it as a reference.
     CHECK(db_.consume_events(block_height, tx_events).has_value());
+    co_await Health::instance().set_current_block_height(block_height);
     co_return;
   }
 
