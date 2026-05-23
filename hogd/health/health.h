@@ -99,7 +99,10 @@ private:
   void worker()
   {
     while (!should_exit_) {
-      dump_to_file()();
+      [](Health &health) -> x23::Async<void> {
+        co_await default_coropoll().pool_.bg();
+        co_await health.dump_to_file();
+      }(*this);
       std::this_thread::sleep_for(kDefaultWritePeriod);
     }
   }
