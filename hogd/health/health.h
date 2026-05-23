@@ -100,6 +100,8 @@ private:
   {
     while (!should_exit_) {
       [](Health &health) -> x23::Async<void> {
+        // We want the [dump_to_file()] coroutine to run inside the x23 thread
+        // pool, so we call [default_coropoll().pool_.bg()].
         co_await default_coropoll().pool_.bg();
         co_await health.dump_to_file();
       }(*this);
