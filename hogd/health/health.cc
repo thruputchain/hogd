@@ -75,6 +75,8 @@ Health::dump_to_file(std::optional<std::filesystem::path> opt_path) const
   x23::CoroGuard g;
   co_await g(lock_);
 
+  update_timestamp();
+
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("process_name", process_name_);
@@ -108,7 +110,6 @@ Health::set_status(Status status)
   x23::CoroGuard g;
   co_await g(lock_);
 
-  update_timestamp();
   status_ = status;
 
   co_await g.reset_and_return();
@@ -120,7 +121,6 @@ Health::set_current_block_height(BlockHeight current_block_height)
   x23::CoroGuard g;
   co_await g(lock_);
 
-  update_timestamp();
   current_block_height_ = current_block_height;
 
   co_await g.reset_and_return();
