@@ -1744,6 +1744,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
   }
+  scheduler_->set_current_block(last_committed_block_.height);
+
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
       snapshot_handles.push_back(abandon_snapshot(cache.block_id));

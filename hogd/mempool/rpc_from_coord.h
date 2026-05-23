@@ -26,6 +26,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/health/health.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -396,6 +397,7 @@ private:
         auth_data_height_.store(-1);
       }
     }
+    Health::instance().set_current_block_height(last_committed_block_.height);
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
          "block_hash = {}, events_hash = {}, db_hash = {}",
          last_committed_block_.height, last_committed_block_.id,
@@ -412,6 +414,7 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     ready_.store(true, std::memory_order_release);
+    Health::instance().set_status(Health::Status::kOk);
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,

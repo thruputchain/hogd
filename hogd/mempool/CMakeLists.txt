@@ -10,6 +10,7 @@ target_link_libraries(
   base
   crypto
   exec_interface
+  health
   hogd
   hogdb
   merkle

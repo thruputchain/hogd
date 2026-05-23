@@ -16,6 +16,7 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/health/health.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
@@ -40,6 +41,9 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
   Registration &registration = Registration::registration();
 
   info("NETWORK ID={:#x}", network_id);
+
+  // Start the health service.
+  Health::instance().start_service();
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
