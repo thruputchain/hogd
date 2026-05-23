@@ -57,7 +57,8 @@ public:
   // Start the health service.
   void start_service()
   {
-    instance().worker_thread_ = std::thread(&Health::worker, this);
+    CHECK(!worker_thread_.has_value());
+    worker_thread_ = std::thread(&Health::worker, this);
   }
 
   x23::Async<void> dump_to_file(

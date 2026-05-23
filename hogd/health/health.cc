@@ -79,6 +79,8 @@ Health::dump_to_file(std::optional<std::filesystem::path> opt_path) const
             static_cast<std::int64_t>(current_block_height_));
   });
 
+  g.reset();
+
   std::filesystem::path path;
   if (opt_path.has_value()) {
     path = *opt_path;
@@ -90,7 +92,6 @@ Health::dump_to_file(std::optional<std::filesystem::path> opt_path) const
   }
   write_file_atomically(path, buffer);
 
-  g.reset();
   co_return;
 }
 
