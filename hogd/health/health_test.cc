@@ -34,7 +34,7 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
 
   Health::instance().set_status(Health::Status::kStarting)();
   Health::instance().set_current_block_height(0)();
-  Health::instance().dump_to_file(path.string())();
+  Health::instance().dump_to_file(path)();
 
   const std::string contents = read_file(path);
   ASSERT_FALSE(contents.empty());
@@ -71,7 +71,7 @@ TEST(HealthTest, SettersUpdateDumpedJsonHealthState)
 
   Health::instance().set_status(Health::Status::kError)();
   Health::instance().set_current_block_height(123)();
-  Health::instance().dump_to_file(path.string())();
+  Health::instance().dump_to_file(path)();
 
   auto parsed = json::parse(read_file(path));
   ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
