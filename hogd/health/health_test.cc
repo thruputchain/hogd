@@ -85,6 +85,7 @@ TEST_F(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *process_name = parsed->find("process_name");
   ASSERT_NE(process_name, nullptr);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(process_name->as_string().has_value());
   EXPECT_FALSE(process_name->as_string()->empty());
 
@@ -93,7 +94,6 @@ TEST_F(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *timestamp = parsed->find("last_updated_timestamp");
   ASSERT_NE(timestamp, nullptr);
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(timestamp->as_string().has_value());
   EXPECT_FALSE(timestamp->as_string()->empty());
   const std::string_view timestamp_value = *timestamp->as_string();
@@ -104,6 +104,26 @@ TEST_F(HealthTest, DumpToFileWritesJsonHealthState)
 
   expect_json_string_field(*parsed, "status", "starting");
   expect_json_integer_field(*parsed, "current_block_height", -1);
+}
+
+TEST_F(HealthTest, DumpToFileCreatesParentDirectories)
+{
+  TmpDir tmp_dir;
+  const std::filesystem::path path =
+      std::filesystem::path(tmp_dir.directory()) / "nested" / "health" /
+      "status.json";
+
+  ASSERT_FALSE(std::filesystem::exists(path.parent_path()));
+
+  Health::instance().set_status(Health::Status::kOk)();
+  Health::instance().set_current_block_height(321)();
+  Health::instance().dump_to_file(path)();
+
+  ASSERT_TRUE(std::filesystem::exists(path));
+  auto parsed = json::parse(read_file(path));
+  ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
+  expect_json_string_field(*parsed, "status", "ok");
+  expect_json_integer_field(*parsed, "current_block_height", 321);
 }
 
 TEST_F(HealthTest, SettersUpdateDumpedJsonHealthState)

@@ -104,7 +104,7 @@ read_process_name()
     name->pop_back();
   }
   return *name;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
   const char *name = getprogname();
   CHECK(name);
   return std::string(name);

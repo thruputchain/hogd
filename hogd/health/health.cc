@@ -34,8 +34,14 @@ void
 write_file_atomically(const std::filesystem::path &path,
                       const std::string &contents)
 {
-  const std::filesystem::path final_path(path);
-  const std::filesystem::path temp_path = make_temp_path(final_path);
+  std::error_code ec;
+  if (const std::filesystem::path parent_path = path.parent_path();
+      !parent_path.empty()) {
+    std::filesystem::create_directories(parent_path, ec);
+    CHECK(!ec);
+  }
+
+  const std::filesystem::path temp_path = make_temp_path(path);
 
   {
     std::ofstream out(temp_path);
@@ -48,8 +54,8 @@ write_file_atomically(const std::filesystem::path &path,
     }
   }
 
-  std::error_code ec;
-  std::filesystem::rename(temp_path, final_path, ec);
+  ec.clear();
+  std::filesystem::rename(temp_path, path, ec);
   CHECK(!ec);
 }
 
