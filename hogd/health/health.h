@@ -22,7 +22,7 @@ namespace hogd {
 // Example:
 // Call this to start the health service. Some executables, such as tests, will
 // not want to run the health service.
-// Health::instance().start_health_service();
+// Health::instance().start_service();
 //
 // Update the health status:
 // Health::instance().set_status(Health::Status::kOk);
@@ -55,7 +55,7 @@ public:
   static Health &instance();
 
   // Start the health service.
-  void start_health_service()
+  void start_service()
   {
     instance().worker_thread_ = std::thread(&Health::worker, this);
   }
