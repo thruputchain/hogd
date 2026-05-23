@@ -12,6 +12,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/health/health.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
 #include "x23/sockio.h"
@@ -24,6 +25,8 @@ int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
              int nthreads, uint16_t mempool_port)
 {
+  Health::instance().start_service();
+
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
     throw std::runtime_error(
@@ -43,6 +46,7 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
   info("PORT hogexec.mempool={}", actual_mempool_port);
 
   // block forever
+  Health::instance().set_status(Health::Status::kOk)();
   info("hogexec initialization complete.");
   std::promise<void>().get_future().wait();
 

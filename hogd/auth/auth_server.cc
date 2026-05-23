@@ -17,6 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/health/health.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -134,6 +135,7 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   }
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
+  co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
     co_await mempool_client_->mempoolauth_auth_data_changed(height,
@@ -158,6 +160,7 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
     if (initialized) {
       info("initializing auth server to height {}", current_height);
       current_height_futex_.broadcast(&default_threadpool());
+      co_await Health::instance().set_current_block_height(current_height);
     }
     else {
       info("auth server already initialized to height {} by concurrent "

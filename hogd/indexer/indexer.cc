@@ -11,6 +11,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/health/health.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -30,11 +31,14 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t event_port,
              uint16_t block_explorer_port)
 {
+  Health::instance().start_service();
+
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(path);
   if (!db_status) {
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
   }
   IndexDB &db = db_status.value();
+  Health::instance().set_current_block_height(db.latest_block())();
 
   // Create the RPC server that the event server talks to.
   RpcServer<IndexerEventRpc> event(db);
@@ -63,6 +67,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);
 
   // The indexer is initialized. Now block forever.
+  Health::instance().set_status(Health::Status::kOk)();
   info("indexer initialization complete.");
   std::promise<void>().get_future().wait();
 

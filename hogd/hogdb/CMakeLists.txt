@@ -44,6 +44,7 @@ target_link_libraries(
   hogdb
   ramdb
   hogd
+  health
   genesis
   storage_cost
 )
@@ -57,6 +58,7 @@ set_property(TARGET hogdb_exec PROPERTY OUTPUT_NAME hogdb)
 target_link_libraries(
   hogdb_exec
   hogdb
+  health
 )
 add_dependencies(hogdb_exec all_wasm_contracts)
 

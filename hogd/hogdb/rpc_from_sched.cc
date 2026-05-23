@@ -32,6 +32,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/health/health.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -233,6 +234,8 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
       commit_block(id, block_hash, events_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+
+  co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
 
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
   result.db_hash() = ctx_.get_tip().db_hash;
@@ -450,6 +453,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   auto ret =
       to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
                                 events_hash, r.value(), db_hash));
+  if (ret == DbSchedResult::DbSchedResultOK) {
+    co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
+  }
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.
   DbHash full_hash = ctx_.get_db().compute_full_db_hash();

@@ -16,6 +16,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/health/health.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
@@ -30,6 +31,8 @@ int
 auth_init(const std::string &mempool_address, const std::string &bind_ip,
           uint16_t db_port, uint16_t mempool_port)
 {
+  Health::instance().start_service();
+
   x23::HostPort host_port;
   if (!host_port.parse(mempool_address)) {
     throw std::runtime_error(
@@ -80,6 +83,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 
   auth_server.subscribe_to_auth_data_changes(auth_card)();
 
+  Health::instance().set_status(Health::Status::kOk)();
   info("auth server initialization complete.");
   std::promise<void>().get_future().wait();
   return EXIT_SUCCESS;

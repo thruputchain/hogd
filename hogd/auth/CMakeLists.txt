@@ -6,6 +6,7 @@ add_library(auth
 
 target_link_libraries(auth
     hogd
+    health
     auth_claim
 )
 
@@ -29,5 +30,6 @@ add_executable(
 target_link_libraries(
   auth_exec
   auth
+  health
 )
 set_property(TARGET auth_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
