@@ -34,6 +34,7 @@ void
 write_file_atomically(const std::filesystem::path &path,
                       const std::string &contents)
 {
+  // Create the parent directories in [path] if they do not already exist.
   std::error_code ec;
   if (const std::filesystem::path parent_path = path.parent_path();
       !parent_path.empty()) {
@@ -42,7 +43,6 @@ write_file_atomically(const std::filesystem::path &path,
   }
 
   const std::filesystem::path temp_path = make_temp_path(path);
-
   {
     std::ofstream out(temp_path);
     if (!out) {
