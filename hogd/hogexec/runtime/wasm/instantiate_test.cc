@@ -45,17 +45,8 @@ TEST_P(InstantiateTest, InstantiateFail)
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_instantiate_fail.wasm");
-  make_syscall_handler(contract);
-  auto deployed_contract_hash = DeployedContractHash{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler());
-  ASSERT_TRUE(runtime.has_value());
-  EXPECT_FALSE(runtime.value());
+  EXPECT_EQ(get_context()->verify_contract(contract),
+            InvokeErrorCode::Deterministic);
 }
 
 TEST_P(InstantiateTest, InstantiateUnexportedMemory)

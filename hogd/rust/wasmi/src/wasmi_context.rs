@@ -391,6 +391,40 @@ impl WasmiContext {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
+        let config = groundhog_wasm_meter::Config {
+            max_imported_functions: 1,
+            reject_floats: true,
+            ..groundhog_wasm_meter::Config::default()
+        };
+        let module_info = match groundhog_wasm_meter::verify(contract_data, &config) {
+            Ok(info) => info,
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: wasm-meter: {e}");
+                return match e {
+                    groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
+                        InvokeErrorCode::Unrecoverable
+                    }
+                    _ => InvokeErrorCode::Deterministic,
+                };
+            }
+        };
+        if module_info.memories.len() != 1 {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: expected 1 memory, found {}",
+                module_info.memories.len()
+            );
+            return InvokeErrorCode::Deterministic;
+        }
+        if module_info.memories[0].initial_pages > 1 {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: initial memory {} pages exceeds limit of 1",
+                module_info.memories[0].initial_pages
+            );
+            return InvokeErrorCode::Deterministic;
+        }
         let engine = Self::new_engine();
         let module = match Module::new(&engine, contract_data) {
             Ok(m) => m,
@@ -411,21 +445,6 @@ impl WasmiContext {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: import validation failed");
             return InvokeErrorCode::Deterministic;
-        }
-        let config = groundhog_wasm_meter::Config {
-            max_imported_functions: 1,
-            reject_floats: true,
-            ..groundhog_wasm_meter::Config::default()
-        };
-        if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
-            #[cfg(debug_assertions)]
-            eprintln!("Contract verification failed: wasm-meter: {e}");
-            return match e {
-                groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
-                    InvokeErrorCode::Unrecoverable
-                }
-                _ => InvokeErrorCode::Deterministic,
-            };
         }
         InvokeErrorCode::None
     }
