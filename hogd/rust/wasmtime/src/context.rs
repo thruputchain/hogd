@@ -230,19 +230,20 @@ impl WasmtimeContext {
             reject_floats: true,
             ..groundhog_wasm_meter::Config::default()
         };
-        let module_info = match groundhog_wasm_meter::verify(contract_data, &config) {
-            Ok(info) => info,
-            Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Contract verification failed: wasm-meter: {e}");
-                return match e {
-                    groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
-                        InvokeErrorCode::Unrecoverable
-                    }
+        let module_info =
+            match groundhog_wasm_meter::verify(contract_data, &config) {
+                Ok(info) => info,
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("Contract verification failed: wasm-meter: {e}");
+                    return match e {
+                    groundhog_wasm_meter::Error::InternalResourceExhausted(
+                        _,
+                    ) => InvokeErrorCode::Unrecoverable,
                     _ => InvokeErrorCode::Deterministic,
                 };
-            }
-        };
+                }
+            };
         if module_info.memories.len() != 1 {
             #[cfg(debug_assertions)]
             eprintln!(
