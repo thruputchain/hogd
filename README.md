@@ -166,4 +166,3 @@ curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 cargo install --force cbindgen
 ./scripts/fetch.sh
 ```
-

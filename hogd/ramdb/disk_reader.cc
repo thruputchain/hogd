@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -313,7 +314,15 @@ load_log_file(
         uncommitted_off = r.offset();
       }
 
-      size_t to_skip = hdr.key_len + hdr.value_len;
+      // kNormal/kTombstone records are written with the loglet's
+      // alignof(ItemHeader) padding (see Loglet::alloc), so the on-disk
+      // payload length is align_up(kv_bytes, alignof(ItemHeader)). kCommit
+      // records are written without that trailing padding (commit_buf is
+      // sizeof(ItemHeader) + sizeof(uint32_t)), so the unpadded kv_bytes is
+      // the right skip there.
+      size_t to_skip = hdr.storage == ItemStorage::kCommit
+                           ? hdr.kv_bytes()
+                           : align_up(hdr.kv_bytes(), alignof(ItemHeader));
       ErrnoStatus<size_t> ret = r.skip(to_skip);
       if (!ret) {
         info("failure while skipping {} bytes in {}", to_skip, file.path_);
