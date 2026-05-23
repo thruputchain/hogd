@@ -190,7 +190,6 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
        encode_base64(std::as_bytes(std::span(committed_tip.db_hash))),
        committed_tip.height, *lsn);
   CHECK_NE(committed_tip.height, -1);
-  Health::instance().set_current_block_height(committed_tip.height)();
   return {};
 }
 
@@ -235,6 +234,8 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
       commit_block(id, block_hash, events_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+
+  co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
 
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
   result.db_hash() = ctx_.get_tip().db_hash;
@@ -452,6 +453,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   auto ret =
       to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
                                 events_hash, r.value(), db_hash));
+  if (ret == DbSchedResult::DbSchedResultOK) {
+    co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
+  }
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.
   DbHash full_hash = ctx_.get_db().compute_full_db_hash();
