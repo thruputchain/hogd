@@ -194,6 +194,8 @@ public:
     CHECK_EQ(last_committed_block_.height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
     scheduler_->set_current_block(last_committed_block_.height);
+    co_await Health::instance().set_current_block_height(
+        last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
 
     co_return ret;
@@ -397,8 +399,6 @@ private:
         auth_data_height_.store(-1);
       }
     }
-    co_await Health::instance().set_current_block_height(
-        last_committed_block_.height);
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
          "block_hash = {}, events_hash = {}, db_hash = {}",
          last_committed_block_.height, last_committed_block_.id,
@@ -408,6 +408,8 @@ private:
 
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.height, db_sched_client_);
+    co_await Health::instance().set_current_block_height(
+        last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
 
