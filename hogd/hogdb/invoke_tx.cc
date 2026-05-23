@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <expected>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -506,14 +507,32 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
 HogDBStatus<void>
 InvokeTX::sync_balance_locks()
 {
-  for (const auto &[addr, vec] : balance_deltas_) {
-    if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
-      auto status = update_balance_lock(addr);
+  if constexpr (is_debug_build()) {
+    std::vector<const Address *> addrs;
+    for (const auto &[addr, vec] : balance_deltas_) {
+      if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
+        addrs.push_back(&addr);
+      }
+    }
+    std::shuffle(addrs.begin(), addrs.end(),
+                 std::mt19937{std::random_device{}()});
+    for (const auto *addr : addrs) {
+      auto status = update_balance_lock(*addr);
       if (!status) {
         return status.error();
       }
     }
-  };
+  }
+  else {
+    for (const auto &[addr, vec] : balance_deltas_) {
+      if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
+        auto status = update_balance_lock(addr);
+        if (!status) {
+          return status.error();
+        }
+      }
+    }
+  }
 
   assert_is_valid();
   return {};
