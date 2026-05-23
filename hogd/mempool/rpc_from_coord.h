@@ -397,7 +397,8 @@ private:
         auth_data_height_.store(-1);
       }
     }
-    Health::instance().set_current_block_height(last_committed_block_.height);
+    co_await Health::instance().set_current_block_height(
+        last_committed_block_.height);
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
          "block_hash = {}, events_hash = {}, db_hash = {}",
          last_committed_block_.height, last_committed_block_.id,
@@ -414,7 +415,7 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     ready_.store(true, std::memory_order_release);
-    Health::instance().set_status(Health::Status::kOk);
+    co_await Health::instance().set_status(Health::Status::kOk);
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,

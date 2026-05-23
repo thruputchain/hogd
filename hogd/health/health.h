@@ -118,7 +118,7 @@ private:
   std::string executable_path_;
   Status status_ = Status::kStarting;
   Timestamp last_updated_timestamp_;
-  BlockHeight current_block_height_ = 0;
+  BlockHeight current_block_height_ = -1;
 };
 
 } // namespace hogd
