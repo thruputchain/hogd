@@ -60,4 +60,7 @@ struct ProcessStats {
 // read_proc_stat returns Linux-specific statistics about resource usage.
 ErrnoStatus<ProcessStats> read_process_stats();
 
+// returns the process's name.
+std::string read_process_name();
+
 } // namespace hogd

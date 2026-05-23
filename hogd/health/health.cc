@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <system_error>
 
@@ -31,11 +32,18 @@ make_temp_path(const std::filesystem::path &path)
 }
 
 void
-write_file_atomically(const std::string &path, const std::string &contents)
+write_file_atomically(const std::filesystem::path &path,
+                      const std::string &contents)
 {
-  const std::filesystem::path final_path(path);
-  const std::filesystem::path temp_path = make_temp_path(final_path);
+  // Create the parent directories in [path] if they do not already exist.
+  std::error_code ec;
+  if (const std::filesystem::path parent_path = path.parent_path();
+      !parent_path.empty()) {
+    std::filesystem::create_directories(parent_path, ec);
+    CHECK(!ec);
+  }
 
+  const std::filesystem::path temp_path = make_temp_path(path);
   {
     std::ofstream out(temp_path);
     if (!out) {
@@ -47,8 +55,8 @@ write_file_atomically(const std::string &path, const std::string &contents)
     }
   }
 
-  std::error_code ec;
-  std::filesystem::rename(temp_path, final_path, ec);
+  ec.clear();
+  std::filesystem::rename(temp_path, path, ec);
   CHECK(!ec);
 }
 
@@ -62,13 +70,16 @@ Health::instance()
 }
 
 x23::Async<void>
-Health::dump_to_file(const std::string &path) const
+Health::dump_to_file(std::optional<std::filesystem::path> opt_path) const
 {
   x23::CoroGuard g;
   co_await g(lock_);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
+    w.field("process_name", process_name_);
+    w.field("pid", pid_);
+    w.field("executable_path", executable_path_);
     w.field("last_updated_timestamp", last_updated_timestamp_.format());
     w.field("status", std::format("{}", status_));
     w.field("current_block_height",
@@ -77,7 +88,17 @@ Health::dump_to_file(const std::string &path) const
 
   g.reset();
 
+  std::filesystem::path path;
+  if (opt_path.has_value()) {
+    path = *opt_path;
+  }
+  else {
+    path = std::filesystem::path(CMAKE_ROOT_BINARY_DIR);
+    path = path / "health";
+    path = path / std::to_string(pid_);
+  }
   write_file_atomically(path, buffer);
+
   co_return;
 }
 

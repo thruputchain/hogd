@@ -2,6 +2,9 @@
 #include <print>
 
 extern "C" {
+#ifdef __APPLE__
+#include <stdlib.h>
+#endif // defined(__APPLE__)
 #ifdef __linux__
 #include <sched.h>
 #endif // defined(__linux__)
@@ -15,6 +18,7 @@ extern "C" {
 #include <vector>
 
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -87,6 +91,25 @@ read_process_stats()
   }
 #else  // defined(__linux__)
   return Errno(ENOENT);
+#endif // defined(__linux__)
+}
+
+std::string
+read_process_name()
+{
+#ifdef __linux__
+  ErrnoStatus<std::string> name = read_sys_file("/proc/self/comm");
+  CHECK(name.has_value());
+  if (!name->empty() && name->back() == '\n') {
+    name->pop_back();
+  }
+  return *name;
+#elifdef __APPLE__
+  const char *name = getprogname();
+  CHECK(name);
+  return std::string(name);
+#else  // defined(__linux__)
+  CHECK(false);
 #endif // defined(__linux__)
 }
 
