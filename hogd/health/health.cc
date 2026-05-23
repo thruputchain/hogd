@@ -70,7 +70,7 @@ Health::instance()
 }
 
 x23::Async<void>
-Health::dump_to_file(std::optional<std::filesystem::path> opt_path) const
+Health::dump_to_file(std::optional<std::filesystem::path> opt_path)
 {
   x23::CoroGuard g;
   co_await g(lock_);
