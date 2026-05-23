@@ -133,20 +133,25 @@ impl WasmtimeGlobalContext {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
         let num_slots: u32 = 1024;
         let table_size: usize = 64;
+
+        // Winch does not support runtime bounds checks (signals_based_traps = false)
+        // so we ban memory.grow, so as to eliminate syscalls on the hot path.
+        let memory_size: usize = page_size;
+
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
                 .max_unused_warm_slots(0)
                 .total_core_instances(num_slots)
                 .total_memories(num_slots)
                 .total_tables(num_slots)
-                .linear_memory_keep_resident(page_size * 2)
-                .max_memory_size(page_size * 2)
+                .linear_memory_keep_resident(memory_size)
+                .max_memory_size(memory_size)
                 .table_keep_resident(table_size)
                 .table_elements(table_size)
                 //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
-        let compiler = wasmtime::Strategy::Cranelift;
+        let compiler = wasmtime::Strategy::Winch;
 
         let mut config = Config::default();
         config
@@ -196,7 +201,7 @@ impl WasmtimeGlobalContext {
             // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
             .memory_init_cow(false)
             .memory_guard_size(0)
-            .memory_reservation(2 * page_size as u64)
+            .memory_reservation(memory_size as u64)
             .memory_reservation_for_growth(0)
             .guard_before_linear_memory(false)
             .memory_may_move(false)
