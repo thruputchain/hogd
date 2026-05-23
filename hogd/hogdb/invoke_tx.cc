@@ -507,14 +507,6 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
 HogDBStatus<void>
 InvokeTX::sync_balance_locks()
 {
-  auto do_lock = [&](const Address &addr) -> HogDBStatus<void> {
-    auto status = update_balance_lock(addr);
-    if (!status) {
-      return status.error();
-    }
-    return {};
-  };
-
   if constexpr (is_debug_build()) {
     std::vector<const Address *> addrs;
     for (const auto &[addr, vec] : balance_deltas_) {
@@ -525,18 +517,18 @@ InvokeTX::sync_balance_locks()
     std::shuffle(addrs.begin(), addrs.end(),
                  std::mt19937{std::random_device{}()});
     for (const auto *addr : addrs) {
-      auto res = do_lock(*addr);
-      if (!res) {
-        return res.error();
+      auto status = update_balance_lock(*addr);
+      if (!status) {
+        return status.error();
       }
     }
   }
   else {
     for (const auto &[addr, vec] : balance_deltas_) {
       if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
-        auto res = do_lock(addr);
-        if (!res) {
-          return res.error();
+        auto status = update_balance_lock(addr);
+        if (!status) {
+          return status.error();
         }
       }
     }
