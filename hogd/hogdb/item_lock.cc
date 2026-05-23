@@ -96,61 +96,42 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
 {
   bool did_finalize = false;
 
-  auto lock_state = lock_state_.load(std::memory_order_acquire);
-  // Release-acquire ensures that if lock_state_ != kUncommitted,
-  // then the current thread will never read lock_change_ as ExclusiveLock.
-  CHECK_NE(lock_state, kFinalizedPermamentExclusiveLock);
+  if (change.is_exclusive()) {
+    std::unique_lock<x23::TestLock> lock(lock_);
+    CHECK_EQ(pending_refcount_, 1U);
 
-  if (lock_state == kUncommitted) {
-    // We only need to acquire the lock here if change_ is an exclusive change.
-    // In that case, we wind up changing the variant of lock_contents_.
-    // It's not possible for a method to call commit_change concurrently,
-    // if we're committing an exclusive change.
-    if (change.is_exclusive()) {
-      std::unique_lock<x23::TestLock> lock(lock_);
-      CHECK_EQ(pending_refcount_, 1U);
+    prepare_lock_contents(&change, ctx, lock);
 
-      // The workflow for downgrading from exclusive to nonexclusive is to
-      // initialize the lock as the proper type, but with no changes applied.
-      // Then apply the change (which must succeed).
-      // This is the same workflow as when attempting to lock the first change
-      // on the item.
-      prepare_lock_contents(&change, ctx, lock);
+    std::visit(
+        [&](auto &lock) -> void {
+          using lock_t = std::decay_t<decltype(lock)>;
+          if constexpr (std::is_same_v<lock_t, std::monostate> ||
+                        std::is_same_v<lock_t, ExclusiveLock>) {
+            panic("bad exclusive state");
+          }
+          else {
+            using change_type = typename lock_t::change_type;
+            auto const *inner = change.get_inner<change_type>();
+            CHECK_CONST_PTR(inner);
+            auto r = lock.try_atomic_change_lock(nullptr, inner, ctx);
+            CHECK(r.has_value());
+          }
+        },
+        lock_contents_);
 
-      std::visit(
-          [&](auto &lock) -> void {
-            using lock_t = std::decay_t<decltype(lock)>;
-            if constexpr (std::is_same_v<lock_t, std::monostate> ||
-                          std::is_same_v<lock_t, ExclusiveLock>) {
-              panic("bad exclusive state");
-            }
-            else {
-              using change_type = typename lock_t::change_type;
-              auto const *inner = change.get_inner<change_type>();
-              CHECK_CONST_PTR(inner);
-              auto r = lock.try_atomic_change_lock(nullptr, inner, ctx);
-              CHECK(r.has_value());
-            }
-          },
-          lock_contents_);
-    }
-
-    // If change_ is not exclusive, then there may be
-    // There may be a transaction that does not read that Finalized write,
-    // and enters the try_atomic_change_lock state after reading kUncommitted
-    // and acquires the lock there.  However, because we will not call
-    // commit_change without first increasing pending_refcount_, any concurrent
-    // calls to try_atomic_change_lock will not change the variant/reset the
-    // variant of lock_contents_.
-
-    if (change.is_permanent_exclusive()) {
-      lock_state_.store(kFinalizedPermamentExclusiveLock,
-                        std::memory_order_release);
-    }
-    else {
-      lock_state_.store(kFinalized, std::memory_order_release);
-    }
+    auto target_state = change.is_permanent_exclusive()
+                            ? kFinalizedPermamentExclusiveLock
+                            : kFinalized;
+    auto old_state =
+        lock_state_.exchange(target_state, std::memory_order_acq_rel);
+    CHECK_EQ(old_state, kUncommitted);
     did_finalize = true;
+  }
+  else {
+    auto old_state =
+        lock_state_.exchange(kFinalized, std::memory_order_acq_rel);
+    CHECK_NE(old_state, kFinalizedPermamentExclusiveLock);
+    did_finalize = (old_state == kUncommitted);
   }
 
   // Now we are in kFinalized state or kFinalizedPermamentExclusiveLock state.

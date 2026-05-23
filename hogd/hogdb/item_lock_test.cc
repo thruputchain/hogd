@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <barrier>
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <thread>
@@ -838,6 +840,181 @@ TEST(ItemLockTest, RCQNarrowMaxInsertCountTracksAcrossMultipleNarrows)
 
   auto r2 = c3.narrow(c2);
   ASSERT_TRUE(r2.has_value());
+}
+
+TEST(ItemLockTest, ConcurrentNonexclusiveCommitSingleFinalizer)
+{
+  constexpr size_t kThreads = 64;
+  constexpr size_t kAttempts = 500;
+  constexpr int128_t kSnapshotCost = 50'000;
+
+  auto ctx = make_dummy_context();
+
+  for (size_t attempt = 0; attempt < kAttempts; ++attempt) {
+    ItemLock lock(kSnapshotCost);
+
+    auto deletion = make_deletion_change();
+    for (size_t i = 0; i < kThreads; ++i) {
+      auto res = lock.try_atomic_change_lock(nullptr, &deletion, ctx);
+      ASSERT_TRUE(res.has_value());
+      ASSERT_EQ(*res, 0);
+    }
+
+    std::barrier sync(static_cast<std::ptrdiff_t>(kThreads));
+    std::vector<int128_t> costs(kThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (size_t i = 0; i < kThreads; ++i) {
+      threads.emplace_back([&, i]() {
+        sync.arrive_and_wait();
+        costs[i] = lock.commit_change(deletion, ctx);
+      });
+    }
+
+    for (auto &t : threads) {
+      t.join();
+    }
+
+    int finalizer_count = 0;
+    for (size_t i = 0; i < kThreads; ++i) {
+      if (costs[i] == -kSnapshotCost) {
+        ++finalizer_count;
+      }
+      else {
+        EXPECT_EQ(costs[i], 0) << "attempt=" << attempt << " thread=" << i;
+      }
+    }
+    EXPECT_EQ(finalizer_count, 1) << "attempt=" << attempt;
+  }
+}
+
+TEST(ItemLockTest, ExclusiveCommitBasic)
+{
+  auto ctx = make_dummy_context();
+
+  auto first = make_nnint_change(100, 10);
+  auto second = make_nnint_change(200, 20);
+  EXPECT_TRUE(second.narrow(first).has_value());
+  ASSERT_TRUE(second.is_exclusive());
+
+  ItemLock lock(0);
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, ctx);
+  ASSERT_TRUE(r1.has_value());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, ctx);
+  ASSERT_TRUE(r2.has_value());
+
+  EXPECT_EQ(lock.commit_change(second, ctx), kTestCostModel.kBaseItemCost);
+}
+
+TEST(ItemLockTest, PermanentExclusiveCommitBasic)
+{
+  auto ctx = make_dummy_context();
+
+  auto change = make_nnint_change(100, 10);
+  change.set_permanent_exclusive();
+  ASSERT_TRUE(change.is_permanent_exclusive());
+
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto r = lock.try_atomic_change_lock(nullptr, &change, ctx);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(*r, -1000);
+
+  EXPECT_EQ(lock.commit_change(change, ctx), -1000);
+}
+
+TEST(ItemLockTest, ExclusiveCommitWhileReservationsRace)
+{
+  constexpr size_t kReaders = 32;
+  constexpr size_t kAttempts = 200;
+
+  auto ctx = make_dummy_context();
+
+  for (size_t attempt = 0; attempt < kAttempts; ++attempt) {
+    ItemLock lock(0);
+
+    auto first = make_nnint_change(100, 10);
+    auto second = make_nnint_change(200, 20);
+    EXPECT_TRUE(second.narrow(first).has_value());
+    ASSERT_TRUE(second.is_exclusive());
+
+    auto r1 = lock.try_atomic_change_lock(nullptr, &first, ctx);
+    ASSERT_TRUE(r1.has_value());
+    auto r2 = lock.try_atomic_change_lock(&first, &second, ctx);
+    ASSERT_TRUE(r2.has_value());
+
+    std::atomic<bool> stop = false;
+    std::atomic<size_t> reservation_attempts = 0;
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+
+    for (size_t i = 0; i < kReaders; ++i) {
+      readers.emplace_back([&]() {
+        auto probe = make_nnint_change(50, 5);
+        while (!stop.load(std::memory_order_acquire)) {
+          auto res = lock.try_atomic_change_lock(nullptr, &probe, ctx);
+          reservation_attempts.fetch_add(1, std::memory_order_relaxed);
+          if (res.has_value()) {
+            [[maybe_unused]] auto release =
+                lock.try_atomic_change_lock(&probe, nullptr, ctx);
+          }
+        }
+      });
+    }
+
+    auto cost = lock.commit_change(second, ctx);
+    stop.store(true, std::memory_order_release);
+
+    for (auto &t : readers) {
+      t.join();
+    }
+
+    EXPECT_EQ(cost, kTestCostModel.kBaseItemCost) << "attempt=" << attempt;
+  }
+}
+
+TEST(ItemLockTest, PermanentExclusiveCommitWhileReservationsRace)
+{
+  constexpr size_t kReaders = 32;
+  constexpr size_t kAttempts = 200;
+
+  auto ctx = make_dummy_context();
+
+  for (size_t attempt = 0; attempt < kAttempts; ++attempt) {
+    ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+
+    auto change = make_nnint_change(100, 10);
+    change.set_permanent_exclusive();
+
+    auto r = lock.try_atomic_change_lock(nullptr, &change, ctx);
+    ASSERT_TRUE(r.has_value());
+
+    std::atomic<bool> stop = false;
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+
+    for (size_t i = 0; i < kReaders; ++i) {
+      readers.emplace_back([&]() {
+        auto probe = make_nnint_change(50, 5);
+        while (!stop.load(std::memory_order_acquire)) {
+          auto res = lock.try_atomic_change_lock(nullptr, &probe, ctx);
+          if (res.has_value()) {
+            [[maybe_unused]] auto release =
+                lock.try_atomic_change_lock(&probe, nullptr, ctx);
+          }
+        }
+      });
+    }
+
+    auto cost = lock.commit_change(change, ctx);
+    stop.store(true, std::memory_order_release);
+
+    for (auto &t : readers) {
+      t.join();
+    }
+
+    EXPECT_EQ(cost, -1000) << "attempt=" << attempt;
+  }
 }
 
 } // namespace hogd
