@@ -1744,9 +1744,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
   }
-  scheduler_->set_current_block(last_committed_block_.height);
-  co_await Health::instance().set_current_block_height(
-      last_committed_block_.height);
 
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
@@ -1856,6 +1853,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   validated_block_cache_.clear();
 
   scheduler_->increment_current_block();
+  co_await Health::instance().set_current_block_height(
+      last_committed_block_.height);
   record_stage(stage_finalize);
   emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
                     return_to_runqueue.size(), remove_from_scheduler_size);
