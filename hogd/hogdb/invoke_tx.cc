@@ -516,16 +516,16 @@ InvokeTX::sync_balance_locks()
   };
 
   if constexpr (is_debug_build()) {
-    std::vector<Address> addrs;
+    std::vector<const Address *> addrs;
     for (const auto &[addr, vec] : balance_deltas_) {
       if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
-        addrs.push_back(addr);
+        addrs.push_back(&addr);
       }
     }
-    std::shuffle(
-        addrs.begin(), addrs.end(), std::mt19937{std::random_device{}()});
-    for (const auto &addr : addrs) {
-      auto res = do_lock(addr);
+    std::shuffle(addrs.begin(), addrs.end(),
+                 std::mt19937{std::random_device{}()});
+    for (const auto *addr : addrs) {
+      auto res = do_lock(*addr);
       if (!res) {
         return res.error();
       }
