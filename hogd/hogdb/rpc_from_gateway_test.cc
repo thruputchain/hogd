@@ -143,7 +143,7 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
                                            std::to_underlying(
                                                StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
 
     auto db_hash = block_tx.get().close(base_hash);

@@ -182,7 +182,7 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
   bal_stats.back().total_locked_storage_amount += cost;
 }
 
-void
+HogDBStatus<void>
 InvokeTX::commit()
 {
   assert_is_valid();
@@ -197,7 +197,9 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-      CHECK(cost_change.has_value());
+      if (!cost_change.has_value()) {
+        return cost_change.error();
+      }
       CHECK_EQ(*cost_change, 0);
       CHECK_EQ(vec.back().locked_storage_cost, 0);
     }
@@ -208,12 +210,9 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && !key.is_address_balance()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-
       if (!cost_change.has_value()) {
-        CHECK(block_.get().is_invalidated());
-        break;
+        return cost_change.error();
       }
-
       CHECK_LE(*cost_change, vec.back().locked_storage_cost);
       // NONDETERMINISTIC: Compute the amount of storage tokens that can be
       // released after this transaction commits.
@@ -227,6 +226,7 @@ InvokeTX::commit()
   }
   changes_.clear();
   balance_deltas_.clear();
+  return {};
 }
 
 void

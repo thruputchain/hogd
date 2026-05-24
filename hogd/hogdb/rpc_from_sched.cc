@@ -432,7 +432,10 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     error("failed to sync balance locks: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;
   }
-  itx->commit();
+  if (auto cr = itx->commit(); !cr) {
+    error("failed to commit invoke tx: {}", cr.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
   auto db_hash_result = r.value()->get().close(base_hash);
   if (!db_hash_result) [[unlikely]] {
     error("genesis close failed: {}", db_hash_result.error());
