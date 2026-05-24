@@ -23,7 +23,7 @@ public:
   }
 
   static int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                                const Deletion & /*unused*/,
+                                Deletion & /*unused*/,
                                 const LockContext & /*ctx*/)
   {
     if (did_finalize) {

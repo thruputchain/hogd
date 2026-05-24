@@ -100,7 +100,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 
 int128_t
 AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
-                        const PointerItem<AuthDataItem> &after,
+                        PointerItem<AuthDataItem> &after,
                         const LockContext &ctx)
 {
   std::unique_lock<x23::TestLock> ul(lock_);

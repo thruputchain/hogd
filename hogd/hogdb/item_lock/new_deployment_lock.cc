@@ -33,7 +33,7 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
 
 int128_t
 NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
-                                 const DeployedContractData & /*unused*/,
+                                 DeployedContractData & /*unused*/,
                                  const LockContext &ctx) const
 {
   if (did_finalize) {
