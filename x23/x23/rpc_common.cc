@@ -33,8 +33,10 @@ RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
     peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
     if (active())
       log_message("local address {}", show_addr(local_addr(peerfd)));
+  } catch (const std::exception &e) {
+    peername_ = std::format("(fd {}, peer lookup failed: {})", peerfd, e.what());
   } catch (...) {
-    peername_ = std::format("(fd {})", peerfd);
+    peername_ = std::format("(fd {}, peer lookup failed)", peerfd);
   }
 }
 
