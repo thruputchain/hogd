@@ -3480,8 +3480,7 @@ TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
       1;
   consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
-  ASSERT_TRUE(
-      itx.request_retrocausal_queue(key, consuming_delta, kNoFlags));
+  ASSERT_TRUE(itx.request_retrocausal_queue(key, consuming_delta, kNoFlags));
   ASSERT_TRUE(itx.sync_balance_locks());
 
   // Commit succeeds on a non-stale block.
