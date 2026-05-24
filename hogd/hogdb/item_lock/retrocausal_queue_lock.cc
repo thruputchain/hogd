@@ -355,8 +355,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
 int128_t
 RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
-                                    int128_t snapshot_cost,
-                                    change_type &change,
+                                    int128_t snapshot_cost, change_type &change,
                                     const LockContext &ctx)
 {
   std::unique_lock<std::mutex> lock(mtx_);

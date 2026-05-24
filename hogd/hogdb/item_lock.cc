@@ -143,11 +143,9 @@ ItemLock::commit_change(ItemChange change, const LockContext &ctx)
           panic("bad finalized state");
         }
         else {
-          auto *inner =
-              change.get_inner<typename lock_t::change_type>();
+          auto *inner = change.get_inner<typename lock_t::change_type>();
           CHECK_CONST_PTR(inner);
-          return lock.commit_change(did_finalize, snapshot_cost_,
-                                    *inner, ctx);
+          return lock.commit_change(did_finalize, snapshot_cost_, *inner, ctx);
         }
       },
       lock_contents_);
