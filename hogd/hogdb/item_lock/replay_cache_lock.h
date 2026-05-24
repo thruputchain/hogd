@@ -72,6 +72,7 @@ private:
   // metadata and ctx.block_height, both of which are constant within a block.
   mutable std::atomic<uint64_t> cached_pruned_count_{0};
   mutable std::once_flag pruned_count_once_flag_;
+  mutable std::atomic<BlockHeight> pruned_count_block_height_{0};
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;
