@@ -545,7 +545,7 @@ RCQBenchmark::run_sequential()
         if (auto ret = tx.sync_balance_locks(); !ret)
           fail(ret.error());
         if (auto ret = tx.commit(); !ret)
-      fail(ret.error());
+          fail(ret.error());
         tx.release_blocktx_reference();
       };
 
@@ -628,7 +628,7 @@ RCQBenchmark::run_sequential()
         if (auto ret = tx.sync_balance_locks(); !ret)
           fail(ret.error());
         if (auto ret = tx.commit(); !ret)
-      fail(ret.error());
+          fail(ret.error());
         tx.release_blocktx_reference();
       };
 
@@ -722,7 +722,7 @@ RCQBenchmark::run_concurrent()
             if (auto ret = tx.sync_balance_locks(); !ret)
               fail(ret.error());
             if (auto ret = tx.commit(); !ret)
-      fail(ret.error());
+              fail(ret.error());
             tx.release_blocktx_reference();
             committed_counts_ptr->at(q).fetch_add(1, std::memory_order_release);
           }
@@ -793,7 +793,7 @@ RCQBenchmark::run_concurrent()
             if (auto ret = tx.sync_balance_locks(); !ret)
               fail(ret.error());
             if (auto ret = tx.commit(); !ret)
-      fail(ret.error());
+              fail(ret.error());
             tx.release_blocktx_reference();
           }
           atomic_fetch_max(block_consume_done_ns,
