@@ -22,6 +22,8 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
@@ -541,4 +543,32 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
+
+TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
+{
+  AuthCard empty_protocol_card = AuthCard{.protocol = Protocol{},
+                                          .upid = {},
+                                          .address_for_db =
+                                              auth_card_.address_for_db,
+                                          .address_for_mempool = ""};
+
+  AuthCard wrong_protocol_card = AuthCard{.protocol = "wrong/000000000000",
+                                          .upid = {},
+                                          .address_for_db =
+                                              auth_card_.address_for_db,
+                                          .address_for_mempool = ""};
+
+  RPCContext ctx(std::move(db_), nullptr);
+  HogDBAuthRpc rpc(ctx);
+
+  DBAuthIntroResult empty_result = rpc.dbauth_intro(empty_protocol_card)();
+  EXPECT_EQ(empty_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
+  EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
+  EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
+}
+
 } // namespace hogd

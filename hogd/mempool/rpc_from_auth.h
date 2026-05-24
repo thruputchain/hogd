@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstring>
+#include <string_view>
 #include <utility>
 
 #include "auth_card.hh"
@@ -34,7 +34,7 @@ public:
   {
     info("got {}, expected {}", card.protocol.c_str(),
          version::kHogdProtocol());
-    if (strcmp(card.protocol.c_str(), version::kHogdProtocol()) != 0) {
+    if (std::string_view(card.protocol) != std::string_view(version::kHogdProtocol())) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 

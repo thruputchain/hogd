@@ -2,7 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstring>
+#include <string_view>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -79,7 +79,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(Protocol const &protocol)
 {
-  if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
+  if (std::string_view(protocol) != std::string_view(version::kHogdProtocol())) {
     return ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol;
   }
   return ViewGatewayIntroOutcome::ViewGatewayIntroSuccess;

@@ -4,7 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstring>
+#include <string_view>
 #include <memory>
 #include <utility>
 
@@ -43,7 +43,7 @@ public:
   static x23::Async<SchedGatewayIntroOutcome>
   schedgateway_intro(Protocol protocol)
   {
-    if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
+    if (std::string_view(protocol) != std::string_view(version::kHogdProtocol())) {
       co_return SchedGatewayIntroOutcome::SchedGatewayIntroMismatchedProtocol;
     }
     co_return SchedGatewayIntroOutcome::SchedGatewayIntroSuccess;
