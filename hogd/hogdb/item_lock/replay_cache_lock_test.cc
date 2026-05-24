@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -745,6 +746,54 @@ TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
   ASSERT_EQ(2U, out->nonces.size());
   EXPECT_EQ(42U, out->nonces[0]);
   EXPECT_EQ(100U, out->nonces[1]);
+}
+
+// ReplayCacheData::nonces must be unsigned — Uniquifier::nonce is uint64_t
+// and binary_search / set_union rely on matching sort semantics.
+static_assert(
+    std::is_unsigned_v<decltype(ReplayCacheData{}.nonces)::value_type>,
+    "ReplayCacheData::nonces must be unsigned to match Uniquifier::nonce");
+
+TEST_F(ReplayCacheLockTest, HighBitNonces)
+{
+  // Verify that nonces spanning the full uint64 range are correctly handled
+  // by binary_search (duplicate detection) and set_union (merge).
+  constexpr uint64_t kSmall = 10;
+  constexpr uint64_t kMidHigh = (uint64_t{1} << 63) + 50;
+  constexpr uint64_t kHigh = UINT64_MAX - 5;
+
+  ReplayCacheLock lock;
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheData base;
+  base.nonces = {kSmall, kMidHigh, kHigh};
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base);
+  auto ctx = make_dummy_context(height_);
+
+  // Each base nonce must be detected as a duplicate.
+  for (uint64_t nonce : {kSmall, kMidHigh, kHigh}) {
+    PointerItem<ReplayCacheIt> item(u(height_ + 1, nonce));
+    auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
+    ASSERT_FALSE(r.has_value()) << "nonce " << nonce << " should conflict";
+    EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
+  }
+
+  // New nonces in both halves of the uint64 range must be accepted.
+  constexpr uint64_t kNewLow = 20;
+  constexpr uint64_t kNewHigh = (uint64_t{1} << 63) + 100;
+  PointerItem<ReplayCacheIt> add_low(u(height_ + 1, kNewLow));
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &add_low, ctx).has_value());
+  PointerItem<ReplayCacheIt> add_high(u(height_ + 1, kNewHigh));
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &add_high, ctx).has_value());
+
+  // build_result must produce a correctly sorted merge.
+  auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
+  ASSERT_TRUE(out.has_value());
+  ASSERT_EQ(5U, out->nonces.size());
+  EXPECT_EQ(kSmall, out->nonces[0]);
+  EXPECT_EQ(kNewLow, out->nonces[1]);
+  EXPECT_EQ(kMidHigh, out->nonces[2]);
+  EXPECT_EQ(kNewHigh, out->nonces[3]);
+  EXPECT_EQ(kHigh, out->nonces[4]);
 }
 
 TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
