@@ -3,7 +3,6 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -94,8 +93,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_basic_manual_revert with should_revert=true
-    auto [res, _gas] =
-        client.invoke_opt<"test_basic_manual_revert">(ctx.handler(), true);
+    auto res = client.invoke_opt<"test_basic_manual_revert">(ctx, true);
 
     auto result = check_result(res);
 
@@ -106,8 +104,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
 
     // The manual revert should have succeeded (no error)
     // and storage should be reverted (tested by check_storage_exists)
-    auto [storage_check, _gas2] =
-        client.invoke_opt<"check_storage_exists">(ctx.handler());
+    auto storage_check = client.invoke_opt<"check_storage_exists">(ctx);
 
     // Storage should not exist due to manual revert
     if (!storage_check.has_value() || !storage_check.value().has_value() ||
@@ -183,8 +180,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_basic_manual_revert with should_revert=false
-    auto [res, _gas] =
-        client.invoke_opt<"test_basic_manual_revert">(ctx.handler(), false);
+    auto res = client.invoke_opt<"test_basic_manual_revert">(ctx, false);
     if (!res.has_value() || !res.value().has_value() ||
         !res.value().value().has_value() ||
         !res.value().value().value().is_ok()) {
@@ -193,8 +189,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
     }
 
     // Storage should exist because no revert occurred
-    auto [storage_check, _gas2] =
-        client.invoke_opt<"check_storage_exists">(ctx.handler());
+    auto storage_check = client.invoke_opt<"check_storage_exists">(ctx);
     if (!storage_check.has_value() || !storage_check.value().has_value() ||
         !storage_check.value().value().has_value()) {
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -263,8 +258,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_nested_manual_revert with child_should_revert=true
-    auto [res, _gas] =
-        client.invoke_opt<"test_nested_manual_revert">(ctx.handler(), true);
+    auto res = client.invoke_opt<"test_nested_manual_revert">(ctx, true);
     auto result = check_result(res);
 
     if (!result.is_err()) {
@@ -337,9 +331,8 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
         [&,
          error_type](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           // Call test_error_type_revert with specific error type
-          auto [res, _gas] =
-              client.invoke_opt<"test_error_type_revert">(ctx.handler(),
-                                                          error_type);
+          auto res =
+              client.invoke_opt<"test_error_type_revert">(ctx, error_type);
           auto result = check_result(res);
           if (!result.is_err()) {
             ADD_FAILURE()
@@ -412,8 +405,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_error_type_revert with error_type=0 (no error)
-    auto [res, _gas] =
-        client.invoke_opt<"test_error_type_revert">(ctx.handler(), 0U);
+    auto res = client.invoke_opt<"test_error_type_revert">(ctx, 0U);
     auto result = check_result(res);
     if (!result.is_ok()) {
       ADD_FAILURE() << "Function call should have returned a contract error";
@@ -483,9 +475,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     fns.emplace(
         0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           // Call test_storage_manual_revert with should_revert=true
-          auto [res, _gas] =
-              client.invoke_opt<"test_storage_manual_revert">(ctx.handler(),
-                                                              true);
+          auto res = client.invoke_opt<"test_storage_manual_revert">(ctx, true);
           auto result = check_result(res);
           if (!result.is_err()) {
             ADD_FAILURE()
@@ -542,9 +532,9 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     fns.emplace(0,
                 [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   // Call test_storage_manual_revert with should_revert=false
-                  auto [res, _gas] =
-                      client.invoke_opt<"test_storage_manual_revert">(
-                          ctx.handler(), false);
+                  auto res =
+                      client.invoke_opt<"test_storage_manual_revert">(ctx,
+                                                                      false);
                   auto result = check_result(res);
                   if (!result.is_ok()) {
                     ADD_FAILURE() << "Function call should have succeeded";

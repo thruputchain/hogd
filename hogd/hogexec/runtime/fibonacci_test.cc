@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -121,8 +120,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
       [](NativeSyscallContext &ctx, uint32_t input,
          uint32_t expect) -> InvokeStatus<void> {
         fib_client_t client(kFibContractAddr);
-        auto [decoded, _gas] =
-            client.template invoke_opt<"fibonacci">(ctx.handler(), input);
+        auto decoded = client.template invoke_opt<"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
