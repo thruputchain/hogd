@@ -3428,10 +3428,10 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
 
-  insert_only_tx.abort();
+  ASSERT_TRUE(insert_only_tx.commit());
   insert_only_tx.release_blocktx_reference();
 
-  consuming_tx.abort();
+  ASSERT_FALSE(consuming_tx.commit());
   consuming_tx.release_blocktx_reference();
 }
 

@@ -199,6 +199,8 @@ InvokeTX::commit()
       auto cost_change =
           block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
+        changes_.clear();
+        balance_deltas_.clear();
         return cost_change.error();
       }
       CHECK_EQ(*cost_change, 0);
@@ -213,6 +215,8 @@ InvokeTX::commit()
       auto cost_change =
           block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
+        changes_.clear();
+        balance_deltas_.clear();
         return cost_change.error();
       }
       CHECK_LE(*cost_change, vec.back().locked_storage_cost);
