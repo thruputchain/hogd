@@ -230,9 +230,7 @@ ReplayCacheLock::try_atomic_change_lock(
     return HogDBError{HogDBCode::kConflict};
   }
 
-  if (conflicts_.contains(UniquifierHelper::to_uint128(addition))) {
-    return HogDBError{HogDBCode::kConflict};
-  }
+  auto addition_key = UniquifierHelper::to_uint128(addition);
 
   // Check if this nonce already exists in the base data for this height.
   auto r = get_base(ctx, addition.block_expiry_height);
@@ -258,7 +256,7 @@ ReplayCacheLock::try_atomic_change_lock(
     return HogDBError{HogDBCode::kConflict};
   }
 
-  if (!conflicts_.try_insert(UniquifierHelper::to_uint128(addition))) {
+  if (!conflicts_.try_insert(addition_key)) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
     return HogDBError{HogDBCode::kConflict};
   }
