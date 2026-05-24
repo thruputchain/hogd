@@ -92,16 +92,6 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
   return ExecResult::ExecResultUnrecoverable;
 }
 
-namespace {
-template<auto... Flags, typename FlagSet>
-constexpr bool
-validate_flags(FlagSet flags)
-{
-  constexpr FlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
-  return (flags & kAllowedFlags) == flags;
-}
-} // namespace
-
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
@@ -487,9 +477,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
                           Calldata calldata, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids)
 {
-  if (!validate_flags<InvokeFlag::TryInvoke, InvokeFlag::ReadOnly>(flags)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
-  }
+  CHECK(validate_invoke_flags(flags));
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
@@ -1054,7 +1042,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1164,7 +1152,7 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1190,7 +1178,7 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
