@@ -194,15 +194,17 @@ InvokeTX::commit()
   // Account deletion will break this invariant — when it lands, this
   // loop will need refund handling and release_balance will need to
   // handle the case where the balance lock is not yet finalized.
+  HogDBError commit_error{HogDBCode::kInternal};
+  bool failed = false;
+
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
       auto cost_change =
           block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
-        block_.get().poison();
-        changes_.clear();
-        balance_deltas_.clear();
-        return cost_change.error();
+        commit_error = cost_change.error();
+        failed = true;
+        break;
       }
       CHECK_EQ(*cost_change, 0);
       CHECK_EQ(vec.back().locked_storage_cost, 0);
@@ -211,29 +213,36 @@ InvokeTX::commit()
 
   // Phase 2: commit non-balance keys. These may produce storage refunds
   // that are credited to the (now-finalized) balance locks.
-  for (auto &[key, vec] : changes_) {
-    if (!vec.empty() && !key.is_address_balance()) {
-      auto cost_change =
-          block_.get().commit_change(key, std::move(vec.back().change));
-      if (!cost_change.has_value()) {
-        block_.get().poison();
-        changes_.clear();
-        balance_deltas_.clear();
-        return cost_change.error();
-      }
-      CHECK_LE(*cost_change, vec.back().locked_storage_cost);
-      // NONDETERMINISTIC: Compute the amount of storage tokens that can be
-      // released after this transaction commits.
-      int128_t released_cost = vec.back().locked_storage_cost - *cost_change;
-      CHECK_GE(released_cost, 0);
+  if (!failed) {
+    for (auto &[key, vec] : changes_) {
+      if (!vec.empty() && !key.is_address_balance()) {
+        auto cost_change =
+            block_.get().commit_change(key, std::move(vec.back().change));
+        if (!cost_change.has_value()) {
+          commit_error = cost_change.error();
+          failed = true;
+          break;
+        }
+        CHECK_LE(*cost_change, vec.back().locked_storage_cost);
+        // NONDETERMINISTIC: Compute the amount of storage tokens that can be
+        // released after this transaction commits.
+        int128_t released_cost = vec.back().locked_storage_cost - *cost_change;
+        CHECK_GE(released_cost, 0);
 
-      if (released_cost > 0) {
-        block_.get().release_balance(key.get_address(), released_cost);
+        if (released_cost > 0) {
+          block_.get().release_balance(key.get_address(), released_cost);
+        }
       }
     }
   }
+
   changes_.clear();
   balance_deltas_.clear();
+
+  if (failed) {
+    block_.get().poison();
+    return commit_error;
+  }
   return {};
 }
 
