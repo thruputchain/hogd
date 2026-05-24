@@ -37,7 +37,7 @@ public:
   InvokeTX(InvokeTX &&other) noexcept = default;
 
   // commit commits pending changes to the BlockTX.
-  void commit();
+  HogDBStatus<void> commit();
   // abort rolls back pending changes to the BlockTX.
   void abort();
 

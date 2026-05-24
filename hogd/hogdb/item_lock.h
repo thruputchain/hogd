@@ -69,7 +69,10 @@ public:
   // Must be less than or equal to the storage cost returned by
   // try_atomic_change_lock for that change.
   // change must be non-null.
-  int128_t commit_change(ItemChange change, const LockContext &ctx);
+  // Returns an error if the exclusive commit path re-validates against a
+  // live DAO that was mutated by a sibling block commit.
+  HogDBStatus<int128_t> commit_change(ItemChange change,
+                                      const LockContext &ctx);
 
   void add_committed_balance_credit(int128_t delta);
 

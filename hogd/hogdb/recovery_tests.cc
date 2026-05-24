@@ -102,7 +102,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     cleanup.release();
     ASSERT_TRUE(itx->sync_balance_locks().has_value());
 
-    itx->commit();
+    ASSERT_TRUE(itx->commit());
     ctx.close_invoke_tx(1, 1, itx);
 
     auto *btx = ctx.get_block_tx(1, false);
