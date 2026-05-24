@@ -760,8 +760,8 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
-    auto r_balance = native_token_client.invoke_opt<"get_balance_of">(
-        ctx, kReceiverAddr);
+    auto r_balance =
+        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
 
     if (!r_balance.has_value() || !r_balance.value().has_value() ||
         !r_balance.value().value().has_value() ||
@@ -804,8 +804,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  EXPECT_EQ(observed_receiver_balance,
-            static_cast<uint128_t>(kTransferAmount));
+  EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(kTransferAmount));
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -857,8 +856,8 @@ TEST_F(BalanceCostTrackingTest,
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
-    auto r_balance = native_token_client.invoke_opt<"get_balance_of">(
-        ctx, kReceiverAddr);
+    auto r_balance =
+        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
 
     if (!r_balance.has_value() || !r_balance.value().has_value() ||
         !r_balance.value().value().has_value() ||
@@ -901,8 +900,7 @@ TEST_F(BalanceCostTrackingTest,
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  EXPECT_EQ(observed_receiver_balance,
-            static_cast<uint128_t>(balance_cost));
+  EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(balance_cost));
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
