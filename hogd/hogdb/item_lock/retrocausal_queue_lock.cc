@@ -5,6 +5,7 @@
 #include <cassert>
 #include <expected>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -355,7 +356,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 int128_t
 RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                     int128_t snapshot_cost,
-                                    const change_type &change,
+                                    change_type &change,
                                     const LockContext &ctx)
 {
   std::unique_lock<std::mutex> lock(mtx_);
@@ -390,44 +391,47 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                    ? snapshot_cost
                                    : calculate_cost();
 
-  auto const &delta = change.delta();
+  auto &delta = change.delta_;
+
+  const size_t elements_added = delta.insert.added_entries.size();
+  const bool has_consume = delta.consume != nullptr;
+  const size_t current_consumed_count =
+      has_consume ? delta.consume->current_block_consumed.size() : 0;
 
   // Release excess reservation from self-consume high-water mark.
-  size_t excess_reserved =
-      change.max_insert_count() - delta.insert.added_entries.size();
+  size_t excess_reserved = change.max_insert_count() - elements_added;
   if (excess_reserved > 0) {
     reserved_entry_count_.fetch_sub(excess_reserved, std::memory_order_relaxed);
   }
 
-  // Apply inserts
-  size_t elements_added = 0;
-  if (!delta.insert.added_entries.empty()) {
-    added_entries_.insert(added_entries_.end(),
-                          delta.insert.added_entries.begin(),
-                          delta.insert.added_entries.end());
-    elements_added += delta.insert.added_entries.size();
-
-    // Track each inserted entry against pending consumes.
-    for (auto const &entry : delta.insert.added_entries) {
-      ++consumed_set_balance_[entry];
-    }
+  // Track accounting while entries are still readable.
+  for (auto const &entry : delta.insert.added_entries) {
+    ++consumed_set_balance_[entry];
   }
-
-  // Apply consume
-  if (delta.consume) {
-    CHECK(!consume_delta_.has_value());
-    consume_delta_ = *delta.consume;
-
-    // Track each consumed current-block entry against pending inserts.
+  if (has_consume) {
     for (auto const &entry : delta.consume->current_block_consumed) {
       --consumed_set_balance_[entry];
     }
   }
 
+  // Move inserts into lock-owned state.
+  if (!delta.insert.added_entries.empty()) {
+    added_entries_.insert(
+        added_entries_.end(),
+        std::make_move_iterator(delta.insert.added_entries.begin()),
+        std::make_move_iterator(delta.insert.added_entries.end()));
+  }
+
+  // Move consume delta into lock-owned state.
+  if (has_consume) {
+    CHECK(!consume_delta_.has_value());
+    consume_delta_.emplace(std::move(*delta.consume));
+  }
+
   int64_t element_delta =
       static_cast<int64_t>(elements_added) - change.consumed_past_entries_;
-  if (delta.consume) {
-    element_delta -= delta.consume->current_block_consumed.size();
+  if (has_consume) {
+    element_delta -= current_consumed_count;
   }
   committed_element_count_delta_ += element_delta;
 

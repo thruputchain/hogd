@@ -65,7 +65,7 @@ public:
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.
   // returns the increase in committed storage cost.
-  int128_t commit_change(const ItemKey &key, ItemChange const &change);
+  int128_t commit_change(const ItemKey &key, ItemChange change);
 
   void release_balance(const Address &addr, int128_t delta);
 

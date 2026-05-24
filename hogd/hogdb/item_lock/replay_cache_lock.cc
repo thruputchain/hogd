@@ -275,7 +275,7 @@ ReplayCacheLock::try_atomic_change_lock(
 
 int128_t
 ReplayCacheLock::commit_change(bool /*did_finalize*/, int128_t snapshot_cost,
-                               const PointerItem<ReplayCacheIt> & /*after*/,
+                               PointerItem<ReplayCacheIt> & /*after*/,
                                const LockContext &ctx)
 {
   assert(meta_.load(std::memory_order_acquire) != nullptr);

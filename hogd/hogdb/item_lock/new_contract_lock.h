@@ -21,7 +21,7 @@ public:
                                                const NewContractData *after,
                                                const LockContext &ctx);
   static int128_t commit_change(bool /*unused*/, int128_t /*unused*/,
-                                const NewContractData & /*unused*/,
+                                NewContractData & /*unused*/,
                                 const LockContext & /*ctx*/)
   {
     return 0;

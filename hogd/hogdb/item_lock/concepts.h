@@ -39,13 +39,13 @@ template<typename Lock>
 concept item_lock_unsized =
     requires { typename Lock::change_type; } &&
     requires(Lock lock, const Lock::change_type *before,
-             const Lock::change_type *after, const LockContext &ctx,
-             bool finalize, int128_t snapshot_cost) {
+             const Lock::change_type *after, Lock::change_type &after_mut,
+             const LockContext &ctx, bool finalize, int128_t snapshot_cost) {
       {
         lock.try_atomic_change_lock(before, after, ctx)
       } -> std::same_as<HogDBStatus<int128_t>>;
       {
-        lock.commit_change(finalize, snapshot_cost, *after, ctx)
+        lock.commit_change(finalize, snapshot_cost, after_mut, ctx)
       } -> std::same_as<int128_t>;
     } &&
     requires(Lock const &lock, const LockContext &ctx, ChangeSet &changes) {

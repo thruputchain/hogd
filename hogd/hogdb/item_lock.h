@@ -69,7 +69,7 @@ public:
   // Must be less than or equal to the storage cost returned by
   // try_atomic_change_lock for that change.
   // change must be non-null.
-  int128_t commit_change(const ItemChange &change, const LockContext &ctx);
+  int128_t commit_change(ItemChange change, const LockContext &ctx);
 
   void add_committed_balance_credit(int128_t delta);
 
