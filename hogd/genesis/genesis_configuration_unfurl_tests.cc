@@ -427,11 +427,11 @@ TEST_F(GenesisConfigurationUnfurlTest,
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
 
   GenesisConfigurationBuilder builder;
-  builder.add_initial_config(
-      fibonacci_contract, fibonacci_nonce,
-      fibonacci_meta_t::entrypoint<"fibonacci">(),
-      fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
-      int128_t{1'000'000'000});
+  builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
+                             fibonacci_meta_t::entrypoint<"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                                 uint32_t{0}),
+                             int128_t{1'000'000'000});
   auto genesis_configuration =
       builder.build(StorageCostModel::default_cost_model());
 

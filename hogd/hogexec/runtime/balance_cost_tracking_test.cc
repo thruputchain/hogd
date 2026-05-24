@@ -91,10 +91,9 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto [r_transfer, g] = native_token_client.invoke_opt<"transfer">(
-        ctx.handler(), kReceiverAddr,
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kTransferAmount)));
-    ctx.consume_gas(g);
 
     if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
         !r_transfer.value().value().has_value() ||
@@ -176,8 +175,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-        ctx.handler(), kReceiverAddr,
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
     if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
@@ -191,8 +190,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-        ctx.handler(), kReceiverAddr,
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
     if (!r_transfer.has_value() || !r_transfer.value().has_value() ||

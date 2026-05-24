@@ -158,8 +158,7 @@ make_native_initial_token_claim_contract()
                             *allocation & 0xffffffffffffffffULL);
 
         auto transfer_result =
-            native_token_client.invoke_opt<"transfer">(ctx,
-                                                       receiver_addr,
+            native_token_client.invoke_opt<"transfer">(ctx, receiver_addr,
                                                        allocation_tuple);
 
         if (!transfer_result.has_value() ||

@@ -47,8 +47,8 @@ public:
   template<StringLiteral Name,
            InvokeFlagSet Flags = std::to_underlying(InvokeFlag::None)>
   auto invoke_opt(NativeSyscallContext &ctx, auto &&...args)
-      -> HostFnStatus<SyscallStatus<std::optional<
-             typename trait_meta_t::template return_t<Name>>>>
+      -> HostFnStatus<SyscallStatus<
+          std::optional<typename trait_meta_t::template return_t<Name>>>>
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
@@ -64,10 +64,8 @@ public:
         contract_address_,
         sdk_method_id(trait_meta_t::template entrypoint<Name>()),
         static_cast<GasAmount>(UINT64_MAX),
-        std::as_bytes(std::span(calldata.data(), calldata.size())),
-        Flags,
-        std::span<const std::byte>{},
-        output_return_buffer_len,
+        std::as_bytes(std::span(calldata.data(), calldata.size())), Flags,
+        std::span<const std::byte>{}, output_return_buffer_len,
         output_returned_auth_token_len);
 
     if (!invoke_result.has_value()) {
@@ -100,9 +98,8 @@ public:
 
     trace("Received return buffer: {}", x23::show(*unwrapped_return_buffer));
 
-    bool manually_reverted =
-        invoke_result.value() ==
-        SyscallErrorCode::kSyscallErrorCodeFrameReverted;
+    bool manually_reverted = invoke_result.value() ==
+                             SyscallErrorCode::kSyscallErrorCodeFrameReverted;
 
     auto return_value =
         trait_meta_t::template decode_return<Name>(return_span,

@@ -2548,9 +2548,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
         uint128_t amount = write_cost;
 
-        auto [r_transfer, g_transfer] =
-            native_token_client.invoke_opt<"transfer">(ctx.handler(),
-                                                       receiver_addr,
+        auto r_transfer =
+            native_token_client.invoke_opt<"transfer">(ctx, receiver_addr,
                                                        make_amount(amount));
 
         auto transfer_result = check_result(r_transfer);
@@ -2574,8 +2573,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto [r_balance, g_balance] =
-            native_token_client.invoke_opt<"get_balance">(ctx.handler());
+        auto r_balance = native_token_client.invoke_opt<"get_balance">(ctx);
         auto balance_result = check_result(r_balance);
         if (!balance_result.is_ok()) {
           return InvokeError{InvokeErrorCode::Deterministic};
