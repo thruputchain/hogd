@@ -67,6 +67,12 @@ private:
 
   mutable std::atomic<int32_t> pending_new_heights_{0};
 
+  // Cached result of count_pruned_replay_cache_entries, computed once per block
+  // on the first commit_change call. The value depends only on the snapshot
+  // metadata and ctx.block_height, both of which are constant within a block.
+  mutable std::atomic<uint64_t> cached_pruned_count_{0};
+  mutable std::once_flag pruned_count_once_flag_;
+
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;
 };

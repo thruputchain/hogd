@@ -281,9 +281,14 @@ ReplayCacheLock::commit_change(bool /*did_finalize*/, int128_t snapshot_cost,
   assert(meta_.load(std::memory_order_acquire) != nullptr);
   auto &meta = **get_meta(nullptr);
 
+  std::call_once(pruned_count_once_flag_, [this, &meta, &ctx]() {
+    uint64_t pruned =
+        count_pruned_replay_cache_entries(meta, ctx.block_height);
+    CHECK_LE(pruned, static_cast<uint64_t>(meta.size));
+    cached_pruned_count_.store(pruned, std::memory_order_relaxed);
+  });
   uint64_t pruned_count =
-      count_pruned_replay_cache_entries(meta, ctx.block_height);
-  CHECK_LE(pruned_count, static_cast<uint64_t>(meta.size));
+      cached_pruned_count_.load(std::memory_order_relaxed);
 
   uint64_t live_size_after_gc = static_cast<uint64_t>(meta.size) - pruned_count;
   uint64_t committed_additions_before =
