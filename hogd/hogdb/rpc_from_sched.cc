@@ -152,6 +152,8 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   // Invalidate siblings BEFORE updating the dbtip below. The publication guard
   // also blocks new snapshots from opening after this invalidation until the
   // tip has been updated to match the newly committed data.
+  // Sibling invalidation is not rolled back on commit failure; if commit()
+  // fails the DB state is unrecoverable and all open blocks are invalid.
   {
     RPCContext::CommitPublicationGuard publication_guard(ctx_, id);
 
