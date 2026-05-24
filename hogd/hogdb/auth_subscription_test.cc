@@ -558,6 +558,15 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
 
+  std::string nul_suffixed(version::kHogdProtocol());
+  nul_suffixed.push_back('\0');
+  nul_suffixed += "suffix";
+  AuthCard nul_protocol_card =
+      AuthCard{.protocol = Protocol(nul_suffixed.data(), nul_suffixed.size()),
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
+
   RPCContext ctx(std::move(db_), nullptr);
   HogDBAuthRpc rpc(ctx);
 
@@ -566,6 +575,9 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
 
   DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
   EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult nul_result = rpc.dbauth_intro(nul_protocol_card)();
+  EXPECT_EQ(nul_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
   DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
