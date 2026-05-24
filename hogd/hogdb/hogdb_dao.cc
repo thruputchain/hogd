@@ -229,7 +229,8 @@ HogDBDAO::read_address_metadata(const Address &addr)
 
   DeployedContractHash deployed_contract_hash;
   try {
-    x23::deserialize(&deployed_contract_hash, x23::BufViewEnd(std::span(encoded)));
+    x23::deserialize(
+        &deployed_contract_hash, x23::BufViewEnd(std::span(encoded)));
   } catch (x23::XdrException &e) {
     return HogDBError(HogDBCode::kInternal);
   }
