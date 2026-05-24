@@ -746,7 +746,7 @@ TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
       auto res = lock.try_atomic_change_lock(nullptr, &change_a, ctx);
       if (res.has_value()) {
         committed.store(true, std::memory_order_relaxed);
-        (void)lock.commit_change(change_a, ctx);
+        ASSERT_TRUE(lock.commit_change(change_a, ctx).has_value());
       }
       finalized_ready.store(true, std::memory_order_relaxed);
     });

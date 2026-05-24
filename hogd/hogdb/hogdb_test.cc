@@ -607,7 +607,7 @@ TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
 
   LockContext ctx(&db_, current_height, rckey, &cost_model_);
   ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &c, ctx));
-  (void)lock.commit_change(c, ctx);
+  ASSERT_TRUE(lock.commit_change(c, ctx).has_value());
 
   auto changes = db_.create_changeset();
   ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
@@ -3371,11 +3371,11 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
 
   DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
     auto trigger_seed = make_insert_delta(0x11);
-    ASSERT_TRUE(itx.request_retrocausal_queue(trigger_key, trigger_seed,
-                                              kNoFlags));
+    ASSERT_TRUE(
+        itx.request_retrocausal_queue(trigger_key, trigger_seed, kNoFlags));
     auto control_seed = make_insert_delta(0x22);
-    ASSERT_TRUE(itx.request_retrocausal_queue(control_key, control_seed,
-                                              kNoFlags));
+    ASSERT_TRUE(
+        itx.request_retrocausal_queue(control_key, control_seed, kNoFlags));
   });
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(control_key));
