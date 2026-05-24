@@ -147,6 +147,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
           id);
     return HogDBError(HogDBCode::kInternal);
   }
+  x23::Defer _d([&] { ctx_.remove_shutdown_block_tx(id); });
 
   // Invalidate siblings BEFORE updating the dbtip below. The publication guard
   // also blocks new snapshots from opening after this invalidation until the
@@ -167,10 +168,6 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
       // where some core invariant is violated.
       return HogDBError(HogDBCode::kInternal);
     }
-
-    // Releases the reference to the blocktx acquried above
-    // destroy the block TX.
-    ctx_.remove_shutdown_block_tx(id);
 
     ret = ctx_.update_dbtip(id, block_hash, events_hash, db_hash);
     if (!ret)
