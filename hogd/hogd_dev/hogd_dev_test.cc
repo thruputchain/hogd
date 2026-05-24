@@ -900,8 +900,11 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
 
 TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
+  // Disable LeakSanitizer so its print_suppressions output (which is
+  // non-JSON) does not pollute stderr when running under ASAN.
   HogdDevProcess process =
-      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"}});
+      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
+                                 {"LSAN_OPTIONS", "detect_leaks=0"}});
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
