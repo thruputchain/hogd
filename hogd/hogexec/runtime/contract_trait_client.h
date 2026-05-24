@@ -13,9 +13,11 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "invoke_flag.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -44,10 +46,9 @@ public:
 
   template<StringLiteral Name,
            InvokeFlagSet Flags = std::to_underlying(InvokeFlag::None)>
-  auto invoke_opt(SystemCallHandler &handler, auto &&...args)
-      -> std::pair<HostFnStatus<SyscallStatus<std::optional<
-                       typename trait_meta_t::template return_t<Name>>>>,
-                   uint64_t>
+  auto invoke_opt(NativeSyscallContext &ctx, auto &&...args)
+      -> HostFnStatus<SyscallStatus<std::optional<
+             typename trait_meta_t::template return_t<Name>>>>
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
@@ -55,32 +56,40 @@ public:
           encode_hex(std::as_bytes(
               std::span(trait_meta_t::template entrypoint<Name>().data(), 8))),
           Name.get(), x23::show(calldata));
-    auto res =
-        handler.invoke(contract_address_,
-                       sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-                       UINT64_MAX, calldata, Flags, {});
-    SystemStatus<SyscallErrorCode> host_fn_res = res.first;
 
-    if (!host_fn_res.has_value()) {
-      trace("Invoke SystemStatus error: {}", host_fn_res.error());
-      return std::pair{host_fn_res.error().to_host_fn_error(), res.second};
+    RuntimeMemoryLength output_return_buffer_len{};
+    RuntimeMemoryLength output_returned_auth_token_len{};
+
+    auto invoke_result = ctx.template syscall<SyscallNo::kInvoke>(
+        contract_address_,
+        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
+        static_cast<GasAmount>(UINT64_MAX),
+        std::as_bytes(std::span(calldata.data(), calldata.size())),
+        Flags,
+        std::span<const std::byte>{},
+        output_return_buffer_len,
+        output_returned_auth_token_len);
+
+    if (!invoke_result.has_value()) {
+      trace("Invoke HostFnError: {}", invoke_result.error());
+      return invoke_result.error();
     }
 
-    if (host_fn_res.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
-        host_fn_res.value() !=
+    if (invoke_result.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
+        invoke_result.value() !=
             SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-      trace("Invoke SyscallStatus error: {}", host_fn_res.value());
-      return std::pair{SyscallError{host_fn_res.value()}, res.second};
+      trace("Invoke SyscallStatus error: {}", invoke_result.value());
+      return SyscallError{invoke_result.value()};
     }
 
-    auto return_buffer = handler.get_return_buffer();
+    auto return_buffer = ctx.handler().get_return_buffer();
     if (!return_buffer.has_value()) {
-      return {return_buffer.error().to_host_fn_error(), res.second};
+      return return_buffer.error().to_host_fn_error();
     }
     assert(*return_buffer);
     if (!(*return_buffer).has_value()) {
       trace("No return buffer available: {}", return_buffer.value().error());
-      return std::pair{(*return_buffer).error(), res.second};
+      return (*return_buffer).error();
     }
     assert(**return_buffer);
     auto const *unwrapped_return_buffer = **return_buffer;
@@ -92,16 +101,17 @@ public:
     trace("Received return buffer: {}", x23::show(*unwrapped_return_buffer));
 
     bool manually_reverted =
-        host_fn_res.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted;
+        invoke_result.value() ==
+        SyscallErrorCode::kSyscallErrorCodeFrameReverted;
 
     auto return_value =
         trait_meta_t::template decode_return<Name>(return_span,
                                                    manually_reverted);
     if (!return_value.has_value()) {
       trace("Invoke Error: Decode Return Failed");
-      return std::pair{std::nullopt, res.second};
+      return std::nullopt;
     }
-    return std::pair{return_value.value(), res.second};
+    return return_value.value();
   }
 
 private:

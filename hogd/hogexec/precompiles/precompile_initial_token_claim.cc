@@ -157,8 +157,8 @@ make_native_initial_token_claim_contract()
             std::make_tuple(*allocation >> 64,
                             *allocation & 0xffffffffffffffffULL);
 
-        auto [transfer_result, gas_used] =
-            native_token_client.invoke_opt<"transfer">(ctx.handler(),
+        auto transfer_result =
+            native_token_client.invoke_opt<"transfer">(ctx,
                                                        receiver_addr,
                                                        allocation_tuple);
 

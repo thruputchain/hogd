@@ -418,6 +418,38 @@ TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
   ASSERT_FALSE(res.is_root_success());
 }
 
+TEST_F(GenesisConfigurationUnfurlTest,
+       TracedInitialTokenClaimDirectChildInvocation)
+{
+  auto fibonacci_contract = load_contract("fibonacci.wasm");
+  auto fibonacci_nonce = make_nonce(0);
+
+  using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
+
+  GenesisConfigurationBuilder builder;
+  builder.add_initial_config(
+      fibonacci_contract, fibonacci_nonce,
+      fibonacci_meta_t::entrypoint<"fibonacci">(),
+      fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
+      int128_t{1'000'000'000});
+  auto genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+
+  auto unfurl_txns = builder.make_unfurl_genesis_transactions();
+  ASSERT_EQ(unfurl_txns.size(), 1);
+
+  run_genesis_initialization(genesis_configuration);
+
+  auto handler =
+      make_new_system_call_handler(unfurl_txns[0].tx, *wasm_runtime_context_);
+  handler.enable_tracing();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
