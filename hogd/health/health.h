@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -99,7 +100,12 @@ private:
   void worker()
   {
     while (!should_exit_) {
-      dump_to_file()();
+      [](Health &health) -> x23::Async<void> {
+        // We want the [dump_to_file()] coroutine to run inside the x23 thread
+        // pool, so we call [default_coropoll().pool_.bg()].
+        co_await default_coropoll().pool_.bg();
+        co_await health.dump_to_file();
+      } (*this)();
       std::this_thread::sleep_for(kDefaultWritePeriod);
     }
   }
