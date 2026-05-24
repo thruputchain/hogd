@@ -220,15 +220,16 @@ HogDBStatus<DeployedContractHash>
 HogDBDAO::read_address_metadata(const Address &addr)
 {
   auto key = make_address_key(addr, Prefix::kAddressMetadata);
-  HogDBStatus<OwningSpan<const std::byte>> raw =
-      db_.get_if_type(std::as_bytes(std::span(key)), 0);
-
-  if (!raw)
-    return raw.error();
+  constexpr size_t kSize = x23::detail::size_of_fixed<DeployedContractHash>();
+  std::array<std::byte, kSize> encoded{};
+  HogDBStatus<void> ret =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0, encoded);
+  if (!ret)
+    return ret.error();
 
   DeployedContractHash deployed_contract_hash;
   try {
-    x23::deserialize(&deployed_contract_hash, x23::BufViewEnd(*raw));
+    x23::deserialize(&deployed_contract_hash, x23::BufViewEnd(std::span(encoded)));
   } catch (x23::XdrException &e) {
     return HogDBError(HogDBCode::kInternal);
   }
