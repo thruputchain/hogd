@@ -211,9 +211,7 @@ InvokeTX::commit()
 
       if (!cost_change.has_value()) {
         CHECK(block_.get().is_invalidated());
-        changes_.clear();
-        balance_deltas_.clear();
-        return;
+        break;
       }
 
       CHECK_LE(*cost_change, vec.back().locked_storage_cost);
