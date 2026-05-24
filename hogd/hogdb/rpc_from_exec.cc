@@ -149,6 +149,13 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
       return to_rpc_error(r.error());
     }
   }
+
+  if (ctx_.is_snapshot_read_stale(block)) {
+    itx->abort();
+    ctx_.close_invoke_tx(block, tx, itx);
+    return RPCError::kRPCBadBlockID;
+  }
+
   itx->commit();
   ctx_.close_invoke_tx(block, tx, itx);
 

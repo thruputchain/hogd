@@ -560,7 +560,8 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, r2.value());
 
     auto commit_cost = lock2.commit_change(c3, ctx);
-    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
+    ASSERT_TRUE(commit_cost.has_value());
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *commit_cost);
     auto changes = db_.create_changeset();
     ASSERT_TRUE(lock2.stage_committed_changes(ctx, changes));
     ASSERT_TRUE(db_.apply(changes));
@@ -3347,6 +3348,88 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
     itx_a.abort();
     itx_a.release_blocktx_reference();
   }
+}
+
+TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr auto kExclusiveFlags =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  Address trigger_addr = make_address(kAddress + 18);
+  Address control_addr = make_address(kAddress + 19);
+  ItemKey trigger_key = make_key(kAddress + 18, 1);
+  ItemKey control_key = make_key(kAddress + 19, 1);
+  setup_contract_address(trigger_addr);
+  setup_contract_address(control_addr);
+
+  auto make_insert_delta = [](uint8_t byte) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{byte});
+    return delta;
+  };
+
+  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+    auto trigger_seed = make_insert_delta(0x11);
+    ASSERT_TRUE(itx.request_retrocausal_queue(trigger_key, trigger_seed,
+                                              kNoFlags));
+    auto control_seed = make_insert_delta(0x22);
+    ASSERT_TRUE(itx.request_retrocausal_queue(control_key, control_seed,
+                                              kNoFlags));
+  });
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(trigger_key));
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(control_key));
+
+  PerThreadARC<BlockTX> stale_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX insert_only_tx(stale_block_tx);
+  ASSERT_TRUE(insert_only_tx.request_deletion(control_key, kExclusiveFlags));
+  auto control_delta = make_insert_delta(0x33);
+  ASSERT_TRUE(insert_only_tx.request_retrocausal_queue(control_key,
+                                                       control_delta,
+                                                       kNoFlags));
+  ASSERT_TRUE(insert_only_tx.sync_balance_locks());
+
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX consuming_tx(stale_block_tx);
+  ASSERT_TRUE(consuming_tx.request_deletion(trigger_key, kExclusiveFlags));
+  auto consuming_delta = make_insert_delta(0x44);
+  consuming_delta.consume.emplace();
+  consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
+      1;
+  consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  ASSERT_TRUE(consuming_tx.request_retrocausal_queue(trigger_key,
+                                                     consuming_delta,
+                                                     kNoFlags));
+  ASSERT_TRUE(consuming_tx.sync_balance_locks());
+
+  PerThreadARC<BlockTX> sibling_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
+  {
+    InvokeTX sibling_tx(sibling_block_tx);
+    ASSERT_TRUE(sibling_tx.request_deletion(trigger_key, kNoFlags));
+    ASSERT_TRUE(sibling_tx.request_deletion(control_key, kNoFlags));
+    ASSERT_TRUE(sibling_tx.sync_balance_locks());
+    sibling_tx.commit();
+    sibling_tx.release_blocktx_reference();
+  }
+
+  ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
+  stale_block_tx.get().invalidate();
+  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
+  ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
+
+  insert_only_tx.commit();
+  insert_only_tx.release_blocktx_reference();
+
+  consuming_tx.commit();
+  consuming_tx.release_blocktx_reference();
 }
 
 } // namespace hogd

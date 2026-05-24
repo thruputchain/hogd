@@ -91,7 +91,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   return handle_try_atomic_from_pending(before, after, ctx_with_snapshot, lock);
 }
 
-int128_t
+HogDBStatus<int128_t>
 ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
 {
   bool did_finalize = false;
@@ -102,8 +102,8 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
 
     prepare_lock_contents(&change, ctx, lock);
 
-    std::visit(
-        [&](auto &lock) -> void {
+    auto admission_result = std::visit(
+        [&](auto &lock) -> HogDBStatus<int128_t> {
           using lock_t = std::decay_t<decltype(lock)>;
           if constexpr (std::is_same_v<lock_t, std::monostate> ||
                         std::is_same_v<lock_t, ExclusiveLock>) {
@@ -113,11 +113,14 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
             using change_type = typename lock_t::change_type;
             auto const *inner = change.get_inner<change_type>();
             CHECK_CONST_PTR(inner);
-            auto r = lock.try_atomic_change_lock(nullptr, inner, ctx);
-            CHECK(r.has_value());
+            return lock.try_atomic_change_lock(nullptr, inner, ctx);
           }
         },
         lock_contents_);
+
+    if (!admission_result.has_value()) {
+      return admission_result.error();
+    }
 
     auto target_state = change.is_permanent_exclusive()
                             ? kFinalizedPermamentExclusiveLock

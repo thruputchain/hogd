@@ -81,7 +81,8 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     auto r = do_lock(*lock, change, ctx);
     CHECK(r.has_value());
-    lock->commit_change(change, ctx);
+    auto cr = lock->commit_change(change, ctx);
+    CHECK(cr.has_value());
   }
 }
 
@@ -170,7 +171,7 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   do_unlock_item(*lock, change, ctx);
 }
 
-int128_t
+HogDBStatus<int128_t>
 BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
@@ -180,7 +181,10 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
-    lock->commit_change(change, ctx);
+    auto r = lock->commit_change(change, ctx);
+    if (!r.has_value()) {
+      return r.error();
+    }
     return 0;
   }
   auto *lock = item_locks_.get(key);

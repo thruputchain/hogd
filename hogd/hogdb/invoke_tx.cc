@@ -197,7 +197,8 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-      CHECK_EQ(cost_change, 0);
+      CHECK(cost_change.has_value());
+      CHECK_EQ(*cost_change, 0);
       CHECK_EQ(vec.back().locked_storage_cost, 0);
     }
   }
@@ -207,10 +208,18 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && !key.is_address_balance()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-      CHECK_LE(cost_change, vec.back().locked_storage_cost);
+
+      if (!cost_change.has_value()) {
+        CHECK(block_.get().is_invalidated());
+        changes_.clear();
+        balance_deltas_.clear();
+        return;
+      }
+
+      CHECK_LE(*cost_change, vec.back().locked_storage_cost);
       // NONDETERMINISTIC: Compute the amount of storage tokens that can be
       // released after this transaction commits.
-      int128_t released_cost = vec.back().locked_storage_cost - cost_change;
+      int128_t released_cost = vec.back().locked_storage_cost - *cost_change;
       CHECK_GE(released_cost, 0);
 
       if (released_cost > 0) {

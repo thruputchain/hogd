@@ -868,7 +868,9 @@ TEST(ItemLockTest, ConcurrentNonexclusiveCommitSingleFinalizer)
     for (size_t i = 0; i < kThreads; ++i) {
       threads.emplace_back([&, i]() {
         sync.arrive_and_wait();
-        costs[i] = lock.commit_change(deletion, ctx);
+        auto r = lock.commit_change(deletion, ctx);
+        ASSERT_TRUE(r.has_value());
+        costs[i] = *r;
       });
     }
 
