@@ -12,6 +12,7 @@
 // invalid C++. There is no config workaround of which I am aware.
 // Rather than post-processing the output, we maintain these types by hand.
 
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -34,14 +35,14 @@ union PublicKey {
     static_assert(std::is_trivially_copyable_v<Ed25519PublicKey>);
   };
 
-  struct {
-    Tag tag;
-  };
+  Tag tag;
   PublicKey_Ed25519_Body ed25519;
 };
 
 static_assert(std::is_trivially_copyable_v<PublicKey>);
+static_assert(std::is_standard_layout_v<PublicKey>);
 static_assert(sizeof(PublicKey) == sizeof(hogd::PublicKey));
+static_assert(offsetof(PublicKey, tag) == 0);
 
 struct PubkeyAccountPreimage {
   PublicKey pubkey;
@@ -73,15 +74,15 @@ union AuthClaim {
     PubkeyAccountPreimage pubkey_preimage;
   };
 
-  struct {
-    Tag tag;
-  };
+  Tag tag;
   AuthClaim_kSourceAddressAuthData_Body k_source_address_auth_data;
   AuthClaim_kPubkeySignature_Body k_pubkey_signature;
 };
 
 static_assert(std::is_trivially_copyable_v<AuthClaim>);
+static_assert(std::is_standard_layout_v<AuthClaim>);
 static_assert(sizeof(AuthClaim) == sizeof(hogd::AuthClaim));
+static_assert(offsetof(AuthClaim, tag) == 0);
 
 // NOLINTEND(readability-identifier-naming)
 
