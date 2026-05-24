@@ -1042,7 +1042,8 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
+          input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1152,7 +1153,8 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
+          input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1178,7 +1180,8 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(flags)) {
+  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
+          flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
