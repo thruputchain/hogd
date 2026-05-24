@@ -157,7 +157,6 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
   }
 
   if (auto r = itx->commit(); !r.has_value()) {
-    itx->abort();
     ctx_.close_invoke_tx(block, tx, itx);
     return to_rpc_error(r.error());
   }
