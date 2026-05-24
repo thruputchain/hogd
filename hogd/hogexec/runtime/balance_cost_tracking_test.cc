@@ -725,6 +725,198 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 }
 
+// Regression test for #1807: in-transaction get_balance_of on a fresh receiver
+// returns the gross transfer amount. The committed balance after block
+// advancement is reduced by balance_cost. This is the intended optimistic
+// execution semantic — runtime reads reflect pending deltas, and HogDB applies
+// storage costs only at commit time.
+TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
+{
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  constexpr static ContractAddress kSenderAddr = make_contract_address(210);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(211);
+
+  static int128_t kTransferAmount = balance_cost + 42;
+  setup_grant_storage_token(kSenderAddr, kTransferAmount + 1);
+
+  static uint128_t observed_receiver_balance = 0;
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kTransferAmount)));
+
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      ADD_FAILURE() << "transfer to fresh receiver failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto r_balance =
+        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
+
+    if (!r_balance.has_value() || !r_balance.value().has_value() ||
+        !r_balance.value().value().has_value() ||
+        !r_balance.value().value().value().is_ok()) {
+      ADD_FAILURE() << "get_balance_of fresh receiver failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto ok = r_balance.value().value().value().ok();
+    observed_receiver_balance =
+        (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 20;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(kTransferAmount));
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  auto receiver_balance_addrkey =
+      make_free_native_token_balance_addrkey(kReceiverAddr);
+  auto receiver_balance_opt =
+      lookup_storage_item_from_db(receiver_balance_addrkey);
+  ASSERT_TRUE(receiver_balance_opt.has_value());
+  int128_t committed_balance = from_xdr(receiver_balance_opt.value().nnint());
+  EXPECT_EQ(committed_balance, kTransferAmount - balance_cost);
+}
+
+// Regression test for #1807: transferring exactly balance_cost to a fresh
+// receiver. The in-tx readback shows balance_cost (gross), but the committed
+// balance is 0 because the entire transfer covers the new row's storage cost.
+TEST_F(BalanceCostTrackingTest,
+       FreshReceiverExactCostTransferReadsGrossCommitsZero)
+{
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  constexpr static ContractAddress kSenderAddr = make_contract_address(212);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(213);
+
+  static int128_t kTransferAmount = 0;
+  kTransferAmount = balance_cost;
+  setup_grant_storage_token(kSenderAddr, balance_cost + 1);
+
+  static uint128_t observed_receiver_balance = 0;
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kTransferAmount)));
+
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      ADD_FAILURE() << "transfer to fresh receiver failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto r_balance =
+        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
+
+    if (!r_balance.has_value() || !r_balance.value().has_value() ||
+        !r_balance.value().value().has_value() ||
+        !r_balance.value().value().value().is_ok()) {
+      ADD_FAILURE() << "get_balance_of fresh receiver failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto ok = r_balance.value().value().value().ok();
+    observed_receiver_balance =
+        (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 21;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(balance_cost));
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  auto receiver_balance_addrkey =
+      make_free_native_token_balance_addrkey(kReceiverAddr);
+  auto receiver_balance_opt =
+      lookup_storage_item_from_db(receiver_balance_addrkey);
+  ASSERT_TRUE(receiver_balance_opt.has_value());
+  int128_t committed_balance = from_xdr(receiver_balance_opt.value().nnint());
+  EXPECT_EQ(committed_balance, 0);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
