@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include "hogd/indexer/db.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -16,7 +18,8 @@ public:
   static x23::Async<IndexerBlockExplorerIntroOutcome>
   indexer_block_explorer_intro(Protocol protocol)
   {
-    if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
+    if (std::string_view(protocol) !=
+        std::string_view(version::kHogdProtocol())) {
       co_return IndexerBlockExplorerIntroOutcome::IntroMismatchedProtocol;
     }
     co_return IndexerBlockExplorerIntroOutcome::IntroSuccess;

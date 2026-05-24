@@ -28,6 +28,8 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/mock_authdb_rpc.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -541,4 +543,44 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
+
+TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
+{
+  AuthCard empty_protocol_card =
+      AuthCard{.protocol = Protocol{},
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
+
+  AuthCard wrong_protocol_card =
+      AuthCard{.protocol = "wrong/000000000000",
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
+
+  std::string nul_suffixed(version::kHogdProtocol());
+  nul_suffixed.push_back('\0');
+  nul_suffixed += "suffix";
+  AuthCard nul_protocol_card =
+      AuthCard{.protocol = Protocol(nul_suffixed.data(), nul_suffixed.size()),
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
+
+  RPCContext ctx(std::move(db_), nullptr);
+  HogDBAuthRpc rpc(ctx);
+
+  DBAuthIntroResult empty_result = rpc.dbauth_intro(empty_protocol_card)();
+  EXPECT_EQ(empty_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
+  EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult nul_result = rpc.dbauth_intro(nul_protocol_card)();
+  EXPECT_EQ(nul_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+
+  DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
+  EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
+}
+
 } // namespace hogd
