@@ -3428,11 +3428,70 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
 
+  // Insert-only exclusive RCQ commit succeeds even on a stale block because
+  // the re-validation has no past-block consume to check against the DAO.
   ASSERT_TRUE(insert_only_tx.commit());
   insert_only_tx.release_blocktx_reference();
 
-  ASSERT_FALSE(consuming_tx.commit());
+  // Consuming exclusive RCQ commit fails: the re-validation reads deleted
+  // RCQ blocks from the live DAO.
+  auto r = consuming_tx.commit();
+  ASSERT_FALSE(r.has_value());
   consuming_tx.release_blocktx_reference();
+
+  // The failed commit poisons the BlockTX.
+  ASSERT_TRUE(stale_block_tx.get().is_poisoned());
+
+  // A poisoned BlockTX refuses to close or commit.
+  ASSERT_FALSE(stale_block_tx.get().close(parent_hash).has_value());
+}
+
+TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr auto kExclusiveFlags =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  Address addr = make_address(kAddress + 20);
+  ItemKey key = make_key(kAddress + 20, 1);
+  setup_contract_address(addr);
+
+  auto make_insert_delta = [](uint8_t byte) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{byte});
+    return delta;
+  };
+
+  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+    auto seed = make_insert_delta(0x11);
+    ASSERT_TRUE(itx.request_retrocausal_queue(key, seed, kNoFlags));
+  });
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
+
+  // Exclusive RCQ delete + recreate with consume on a non-stale block.
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx(block_tx);
+  ASSERT_TRUE(itx.request_deletion(key, kExclusiveFlags));
+  auto consuming_delta = make_insert_delta(0x22);
+  consuming_delta.consume.emplace();
+  consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
+      1;
+  consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  ASSERT_TRUE(
+      itx.request_retrocausal_queue(key, consuming_delta, kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+
+  // Commit succeeds on a non-stale block.
+  ASSERT_TRUE(itx.commit());
+  itx.release_blocktx_reference();
+
+  // Block is not poisoned, close and commit succeed.
+  ASSERT_FALSE(block_tx.get().is_poisoned());
+  ASSERT_TRUE(block_tx.get().close(parent_hash));
+  ASSERT_TRUE(block_tx.get().commit());
 }
 
 } // namespace hogd
