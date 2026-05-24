@@ -71,7 +71,7 @@ public:
   // change must be non-null.
   // Returns an error if the exclusive commit path re-validates against a
   // live DAO that was mutated by a sibling block commit.
-  HogDBStatus<int128_t> commit_change(const ItemChange &change,
+  HogDBStatus<int128_t> commit_change(ItemChange change,
                                       const LockContext &ctx);
 
   void add_committed_balance_credit(int128_t delta);

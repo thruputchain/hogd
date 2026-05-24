@@ -196,7 +196,8 @@ InvokeTX::commit()
   // handle the case where the balance lock is not yet finalized.
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
-      auto cost_change = block_.get().commit_change(key, vec.back().change);
+      auto cost_change =
+          block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
         return cost_change.error();
       }
@@ -209,7 +210,8 @@ InvokeTX::commit()
   // that are credited to the (now-finalized) balance locks.
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && !key.is_address_balance()) {
-      auto cost_change = block_.get().commit_change(key, vec.back().change);
+      auto cost_change =
+          block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
         return cost_change.error();
       }

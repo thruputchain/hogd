@@ -81,7 +81,7 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     auto r = do_lock(*lock, change, ctx);
     CHECK(r.has_value());
-    auto cr = lock->commit_change(change, ctx);
+    auto cr = lock->commit_change(std::move(change), ctx);
     CHECK(cr.has_value());
   }
 }
@@ -172,7 +172,7 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 }
 
 HogDBStatus<int128_t>
-BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
+BlockTX::commit_change(const ItemKey &key, ItemChange change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
@@ -181,7 +181,7 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
-    auto r = lock->commit_change(change, ctx);
+    auto r = lock->commit_change(std::move(change), ctx);
     if (!r.has_value()) {
       return r.error();
     }
@@ -191,7 +191,7 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  return lock->commit_change(change, ctx);
+  return lock->commit_change(std::move(change), ctx);
 }
 
 HogDBStatus<std::optional<QueueEntry>>

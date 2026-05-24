@@ -75,8 +75,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto [res, _gas] =
-        client_.invoke_opt<"read_only_bytestring_set">(ctx.handler(), false);
+    auto res = client_.invoke_opt<"read_only_bytestring_set">(ctx, false);
     if (!check_result(res)) {
       return InvokeError{InvokeErrorCode::Deterministic};
     }
@@ -84,10 +83,9 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
     return {};
   });
   fns.emplace(1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto [res, _gas] =
+    auto res =
         client_.invoke_opt<"read_only_bytestring_set",
-                           std::to_underlying(InvokeFlag::ReadOnly)>(
-            ctx.handler(), true);
+                           std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
     if (!check_result(res)) {
       return InvokeError{InvokeErrorCode::Deterministic};
     }
@@ -162,8 +160,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto [res, _gas] =
-        client_.invoke_opt<"read_only_log_event">(ctx.handler(), false);
+    auto res = client_.invoke_opt<"read_only_log_event">(ctx, false);
     if (!check_result(res)) {
       return InvokeError{InvokeErrorCode::Deterministic};
     }
@@ -171,10 +168,9 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
     return {};
   });
   fns.emplace(1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto [res, _gas] =
+    auto res =
         client_.invoke_opt<"read_only_log_event",
-                           std::to_underlying(InvokeFlag::ReadOnly)>(
-            ctx.handler(), true);
+                           std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
     if (!check_result(res)) {
       return InvokeError{InvokeErrorCode::Deterministic};
     }
@@ -381,9 +377,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto [res, _gas] = native_token_client.invoke_opt<
+        auto res = native_token_client.invoke_opt<
             "get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
-            ctx.handler(), kObserverAddr);
+            ctx, kObserverAddr);
         if (!res.has_value() || !res.value().has_value() ||
             !res.value().value().has_value() ||
             !res.value().value().value().is_ok()) {
@@ -397,9 +393,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
       });
   fns_caller.emplace(
       1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto [res, _gas] = native_token_client.invoke_opt<
+        auto res = native_token_client.invoke_opt<
             "transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
-            ctx.handler(), kReceiverAddr, make_amount(transfer_amount));
+            ctx, kReceiverAddr, make_amount(transfer_amount));
         // The invoke should fail because modify_native_token_balance
         // returns InvalidSyscallInput in read-only mode, which causes
         // the transfer to return a deterministic error. The frame
@@ -413,8 +409,8 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
       });
   fns_caller.emplace(
       2, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto [res, _gas] = native_token_client.invoke_opt<"transfer">(
-            ctx.handler(), kReceiverAddr, make_amount(transfer_amount));
+        auto res = native_token_client.invoke_opt<"transfer">(
+            ctx, kReceiverAddr, make_amount(transfer_amount));
         if (!res.has_value() || !res.value().has_value() ||
             !res.value().value().has_value() ||
             !res.value().value().value().is_ok()) {

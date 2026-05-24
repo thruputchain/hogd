@@ -25,7 +25,7 @@ public:
     return this->get()->try_atomic_change_lock(before, after, ctx);
   }
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                         const change_type &after, const LockContext &ctx)
+                         change_type &after, const LockContext &ctx)
   {
     return this->get()->commit_change(did_finalize, snapshot_cost, after, ctx);
   }

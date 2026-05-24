@@ -67,8 +67,7 @@ public:
   // returns the increase in committed storage cost.
   // Returns an error if the exclusive commit path reads a live DAO that was
   // mutated by a sibling block commit (stale block).
-  HogDBStatus<int128_t> commit_change(const ItemKey &key,
-                                      ItemChange const &change);
+  HogDBStatus<int128_t> commit_change(const ItemKey &key, ItemChange change);
 
   void release_balance(const Address &addr, int128_t delta);
 
