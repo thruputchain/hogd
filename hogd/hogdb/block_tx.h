@@ -46,6 +46,12 @@ public:
     return invalidated_.load(std::memory_order_acquire);
   }
 
+  void poison() { poisoned_.store(true, std::memory_order_release); }
+  bool is_poisoned() const
+  {
+    return poisoned_.load(std::memory_order_acquire);
+  }
+
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
@@ -119,6 +125,7 @@ private:
   BlockHeight block_height_;
   std::optional<ChangeSet> changeset_;
   std::atomic<bool> invalidated_{false};
+  std::atomic<bool> poisoned_{false};
   const BlockExecutionMode mode_;
 
   HogDBStatus<void> stage_locks(ChangeSet &changes);

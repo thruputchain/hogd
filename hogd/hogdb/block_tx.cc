@@ -256,6 +256,9 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   if (!changeset_.has_value() ||
       mode_ == BlockExecutionMode::kBlockExecutionModeViewing) {
     return HogDBError(mode_ == BlockExecutionMode::kBlockExecutionModeViewing
@@ -324,6 +327,9 @@ BlockTX::commit(WorkerPool &pool)
 HogDBStatus<void>
 BlockTX::close_skip_hash_for_testing()
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
   if (auto r = stage_locks(changes); !r) {
     return r;
@@ -335,6 +341,9 @@ BlockTX::close_skip_hash_for_testing()
 HogDBStatus<DbHash>
 BlockTX::close(const DbHash &base_hash)
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
   if (auto r = stage_locks(changes); !r) {
     return r.error();

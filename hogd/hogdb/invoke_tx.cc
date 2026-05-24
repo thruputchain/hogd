@@ -199,6 +199,7 @@ InvokeTX::commit()
       auto cost_change =
           block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
+        block_.get().poison();
         changes_.clear();
         balance_deltas_.clear();
         return cost_change.error();
@@ -215,6 +216,7 @@ InvokeTX::commit()
       auto cost_change =
           block_.get().commit_change(key, std::move(vec.back().change));
       if (!cost_change.has_value()) {
+        block_.get().poison();
         changes_.clear();
         balance_deltas_.clear();
         return cost_change.error();
