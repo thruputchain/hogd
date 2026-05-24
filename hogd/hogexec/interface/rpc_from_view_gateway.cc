@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <mutex>
