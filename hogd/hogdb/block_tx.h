@@ -47,10 +47,7 @@ public:
   }
 
   void poison() { poisoned_.store(true, std::memory_order_release); }
-  bool is_poisoned() const
-  {
-    return poisoned_.load(std::memory_order_acquire);
-  }
+  bool is_poisoned() const { return poisoned_.load(std::memory_order_acquire); }
 
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.

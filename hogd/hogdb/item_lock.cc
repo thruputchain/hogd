@@ -119,7 +119,7 @@ ItemLock::commit_change(ItemChange change, const LockContext &ctx)
         lock_contents_);
 
     if (!admission_result.has_value()) {
-      return admission_result.error();
+      return HogDBError{HogDBCode::kStaleBlock};
     }
 
     auto target_state = change.is_permanent_exclusive()
