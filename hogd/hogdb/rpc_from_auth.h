@@ -28,7 +28,8 @@ public:
 
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    if (std::string_view(card.protocol) != std::string_view(version::kHogdProtocol())) {
+    if (std::string_view(card.protocol) !=
+        std::string_view(version::kHogdProtocol())) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
     if (!co_await ctx_.get_auth_change_subscription_manager()

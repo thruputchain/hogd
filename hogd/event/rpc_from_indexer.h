@@ -24,7 +24,8 @@ public:
   // in turn will send the indexer's address to the event server?
   x23::Async<void> event_indexer_intro(IndexerCard card)
   {
-    CHECK_EQ(std::string_view(card.protocol), std::string_view(version::kHogdProtocol()));
+    CHECK_EQ(std::string_view(card.protocol),
+             std::string_view(version::kHogdProtocol()));
     indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);

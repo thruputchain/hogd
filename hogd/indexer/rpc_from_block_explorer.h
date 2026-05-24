@@ -18,7 +18,8 @@ public:
   static x23::Async<IndexerBlockExplorerIntroOutcome>
   indexer_block_explorer_intro(Protocol protocol)
   {
-    if (std::string_view(protocol) != std::string_view(version::kHogdProtocol())) {
+    if (std::string_view(protocol) !=
+        std::string_view(version::kHogdProtocol())) {
       co_return IndexerBlockExplorerIntroOutcome::IntroMismatchedProtocol;
     }
     co_return IndexerBlockExplorerIntroOutcome::IntroSuccess;

@@ -22,14 +22,14 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/mock_authdb_rpc.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -546,17 +546,17 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
 
 TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
 {
-  AuthCard empty_protocol_card = AuthCard{.protocol = Protocol{},
-                                          .upid = {},
-                                          .address_for_db =
-                                              auth_card_.address_for_db,
-                                          .address_for_mempool = ""};
+  AuthCard empty_protocol_card =
+      AuthCard{.protocol = Protocol{},
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
 
-  AuthCard wrong_protocol_card = AuthCard{.protocol = "wrong/000000000000",
-                                          .upid = {},
-                                          .address_for_db =
-                                              auth_card_.address_for_db,
-                                          .address_for_mempool = ""};
+  AuthCard wrong_protocol_card =
+      AuthCard{.protocol = "wrong/000000000000",
+               .upid = {},
+               .address_for_db = auth_card_.address_for_db,
+               .address_for_mempool = ""};
 
   RPCContext ctx(std::move(db_), nullptr);
   HogDBAuthRpc rpc(ctx);

@@ -1,8 +1,8 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 
 #include <cstddef>
-#include <string_view>
 #include <span>
+#include <string_view>
 #include <utility>
 
 // generated x23 headers
@@ -145,7 +145,8 @@ read_one_item(HogDBDAO &db, AddressAndKey const &addrkey)
 DbGatewayIntroOutcome
 HogDBGatewayRpc::dbgateway_intro(Protocol const &protocol)
 {
-  if (std::string_view(protocol) != std::string_view(version::kHogdProtocol())) {
+  if (std::string_view(protocol) !=
+      std::string_view(version::kHogdProtocol())) {
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;

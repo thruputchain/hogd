@@ -2,10 +2,10 @@
 
 #include <atomic>
 #include <cstdint>
-#include <string_view>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -79,7 +79,8 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(Protocol const &protocol)
 {
-  if (std::string_view(protocol) != std::string_view(version::kHogdProtocol())) {
+  if (std::string_view(protocol) !=
+      std::string_view(version::kHogdProtocol())) {
     return ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol;
   }
   return ViewGatewayIntroOutcome::ViewGatewayIntroSuccess;
