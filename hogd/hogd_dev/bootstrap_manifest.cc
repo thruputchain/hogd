@@ -19,7 +19,8 @@
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/manifest_common.h"
+#include "hogd/hogd_dev/manifest_hex.h"
+#include "hogd/hogd_dev/manifest_parse.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/version.h"
 

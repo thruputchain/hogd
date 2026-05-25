@@ -4,6 +4,7 @@ add_library(
   bootstrap_manifest.cc
   hogd_dev_node.cc
   hogd_dev_tmp_dir.cc
+  manifest_parse.cc
   runtime_manifest.cc
 )
 target_link_libraries(

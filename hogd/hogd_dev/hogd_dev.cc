@@ -22,7 +22,7 @@
 #include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogd_dev/bootstrap_manifest.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
-#include "hogd/hogd_dev/manifest_common.h"
+#include "hogd/hogd_dev/manifest_parse.h"
 #include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/init.h"
 
