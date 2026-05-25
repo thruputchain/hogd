@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -453,8 +454,7 @@ TEST_F(SyscallErrorHandlingTest,
                       std::span<uint32_t>{});
 
   NativeSyscallContext ctx(handler, 10000);
-  auto status =
-      ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
+  auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
