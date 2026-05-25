@@ -958,6 +958,18 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
   advance_block();
 }
 
+TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  // Transaction A: non-peek consume on absent key — no entry found, commits ok.
+  ASSERT_TRUE(invoke_contract(1, {1}));
+
+  // Transaction B (same block): write bytestring to same key — must not
+  // conflict against the empty RCQ delta from transaction A.
+  ASSERT_TRUE(invoke_contract(5, {0xAA}));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
