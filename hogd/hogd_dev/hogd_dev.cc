@@ -264,6 +264,10 @@ parse_bootstrap_account_count(const std::string &value)
 std::uint64_t
 parse_u64(const std::string &value, std::string_view name)
 {
+  if (value.empty() || value.front() == '+' || value.front() == '-' ||
+      static_cast<unsigned char>(value.front()) <= ' ') {
+    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  }
   std::size_t pos = 0;
   std::uint64_t parsed = 0;
   try {
@@ -425,12 +429,11 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
   require_string_value(require_string_field(dev_wallet, "profile", "devWallet"),
                        kDevWalletProfile, "devWallet.profile");
 
-  auto wallet_contract = wallet_meta::load_wasm();
-  CHECK(wallet_contract != nullptr);
-  const std::string wallet_hash = hex_string(sha256(*wallet_contract));
-
   if (std::optional<std::string_view> content_hash =
           optional_string_field(dev_wallet, "contentHash", "devWallet")) {
+    auto wallet_contract = wallet_meta::load_wasm();
+    CHECK(wallet_contract != nullptr);
+    const std::string wallet_hash = hex_string(sha256(*wallet_contract));
     require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
   }
   if (std::optional<std::string_view> deploy_entrypoint =
@@ -499,8 +502,11 @@ bootstrap_config_from_manifest(std::filesystem::path const &path)
   const std::int64_t count =
       require_integer_field(accounts, "count", "bootstrapAccounts");
   if (count < 0 ||
-      std::cmp_greater(count, std::numeric_limits<std::uint32_t>::max())) {
-    throw std::runtime_error("Invalid bootstrap manifest account count");
+      std::cmp_greater(count, hogd::kMaxBootstrapAccounts)) {
+    throw std::runtime_error(
+        std::format("bootstrap manifest bootstrapAccounts.count {} exceeds "
+                    "maximum {}",
+                    count, hogd::kMaxBootstrapAccounts));
   }
   std::string seed =
       std::string(require_string_field(accounts, "seed", "bootstrapAccounts"));
@@ -509,7 +515,7 @@ bootstrap_config_from_manifest(std::filesystem::path const &path)
         "bootstrap manifest bootstrapAccounts.seed must not be empty");
   }
   hogd::BootstrapAccountConfig config{
-      .count = parse_bootstrap_account_count(std::to_string(count)),
+      .count = static_cast<std::uint32_t>(count),
       .seed = std::move(seed),
       .storage_tokens =
           parse_u64(std::string(require_string_field(
