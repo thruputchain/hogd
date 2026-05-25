@@ -113,7 +113,7 @@ hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
   install_signal_handler();
 
   HogdDevNode node(std::move(listen_host), requested_scheduler_port,
-                   std::move(runtime_network_id), std::move(bootstrap_config));
+                   std::move(runtime_network_id), bootstrap_config);
   emit_readiness(node, readiness_sink);
   info("hogd-dev initialization complete.");
 
@@ -465,6 +465,8 @@ bootstrap_config_from_manifest(std::filesystem::path const &path)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
+  // Additive optional fields do not bump schemaVersion, so exact-match is
+  // correct under the additive-only contract.
   if (schema_version != 1) {
     throw std::runtime_error(std::format(
         "unsupported bootstrap manifest schemaVersion {}, expected 1",
@@ -500,10 +502,15 @@ bootstrap_config_from_manifest(std::filesystem::path const &path)
       std::cmp_greater(count, std::numeric_limits<std::uint32_t>::max())) {
     throw std::runtime_error("Invalid bootstrap manifest account count");
   }
+  std::string seed =
+      std::string(require_string_field(accounts, "seed", "bootstrapAccounts"));
+  if (seed.empty()) {
+    throw std::runtime_error(
+        "bootstrap manifest bootstrapAccounts.seed must not be empty");
+  }
   hogd::BootstrapAccountConfig config{
       .count = parse_bootstrap_account_count(std::to_string(count)),
-      .seed = std::string(
-          require_string_field(accounts, "seed", "bootstrapAccounts")),
+      .seed = std::move(seed),
       .storage_tokens =
           parse_u64(std::string(require_string_field(
                         accounts, "initialStorageTokens", "bootstrapAccounts")),

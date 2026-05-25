@@ -777,6 +777,7 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   HogdDevProcess process = HogdDevProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
+  EXPECT_EQ(readiness.network_id, "groundhog-local");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
   EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
@@ -1231,7 +1232,7 @@ TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestConflictDoesNotReadManifest)
+TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
 {
   HogdDevProcess process = HogdDevProcess::start({
       "--bootstrap-manifest",
@@ -1292,6 +1293,33 @@ TEST(HogdDev, BootstrapManifestRejectsMismatchedDevWalletHash)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find("devWallet.contentHash"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  const std::string manifest =
+      bootstrap_manifest_json(1, "", "42",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "bootstrapAccounts.seed must not be empty"),
             std::string::npos);
 }
 
