@@ -44,6 +44,9 @@ namespace hogd {
 
 namespace {
 
+static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
+              "ordinary literal encoding must be ASCII-compatible");
+
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
