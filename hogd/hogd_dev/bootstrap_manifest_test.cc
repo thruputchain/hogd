@@ -9,12 +9,14 @@
 
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <gtest/gtest.h>
 #include <ios>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
