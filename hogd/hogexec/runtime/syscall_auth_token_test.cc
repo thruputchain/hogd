@@ -1885,6 +1885,21 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(out_auth_len, sizeof(uint32_t));
 
+        // Verify the returned token ID matches what we forwarded.
+        std::array<std::byte, 256> return_buf{};
+        RuntimeMemoryLength return_written_len = 0;
+        std::array<std::byte, 256> auth_token_buf{};
+        RuntimeMemoryLength auth_token_written_len = 0;
+        auto get_res = ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::span<std::byte>{return_buf}, return_written_len,
+            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(auth_token_written_len, sizeof(uint32_t));
+        uint32_t returned_id = 0;
+        std::memcpy(&returned_id, auth_token_buf.data(), sizeof(uint32_t));
+        EXPECT_EQ(returned_id, token_id);
+
         // Token was explicitly returned — caller still owns it.
         auto reuse_res = ctx.syscall<SyscallNo::kInvoke>(
             kConsumerAddress, 0, UINT64_MAX, Calldata{}, 0,
