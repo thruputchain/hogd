@@ -47,6 +47,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/hogd_dev/manifest_hex.h"
 #include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -744,9 +745,9 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("artifactHint", "./dev-wallet.wasm");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
-              hex_string(wallet_meta::entrypoint<"initialize">()));
+              entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
       w.field("doActionEntrypoint",
-              hex_string(wallet_meta::entrypoint<"do_action">()));
+              entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
     });
     w.object_field("bootstrapAccounts", [&](json::Writer &w) {
       w.field("count", static_cast<std::int64_t>(count));
@@ -832,9 +833,9 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "built_contracts/dev_wallet.wasm");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            hex_string(wallet_meta::entrypoint<"initialize">()));
+            entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            hex_string(wallet_meta::entrypoint<"do_action">()));
+            entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);

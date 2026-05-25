@@ -2,7 +2,6 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -50,7 +49,9 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   // manifest path itself is a symlink, open() fails with ELOOP rather than
   // transparently following it. fstat() then operates on the same inode the fd
   // pins, so a racing rename/replace cannot redirect us at a different file.
-  const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  const int fd =
+      ::open(path.c_str(),
+             O_RDONLY | O_NOFOLLOW | O_CLOEXEC); // NOLINT(misc-include-cleaner)
   if (fd < 0) {
     const int err = errno;
     // ELOOP from O_NOFOLLOW means the final component was a symlink. We
@@ -87,7 +88,7 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   std::string bytes(kMaxBootstrapManifestBytes + 1, '\0');
   std::size_t total = 0;
   while (total < bytes.size()) {
-    const ssize_t n = ::read(fd, bytes.data() + total, bytes.size() - total);
+    const auto n = ::read(fd, bytes.data() + total, bytes.size() - total);
     if (n < 0) {
       if (errno == EINTR) {
         continue;
