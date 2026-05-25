@@ -1570,6 +1570,92 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   EXPECT_TRUE(close_res.has_value());
 }
 
+TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
+{
+  static constexpr ContractAddress kOuterAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kChildAddr =
+      NativeContractTestFramework::make_contract_address(11);
+  static constexpr ContractAddress kConsumerAddr =
+      NativeContractTestFramework::make_contract_address(12);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+
+  // Method 0 (read-only child at kChildAddr): does nothing, token is dropped.
+  fns.emplace(0,
+              [](NativeSyscallContext & /*ctx*/) noexcept
+                  -> InvokeStatus<void> { return {}; });
+
+  // Method 2 (consumer at kConsumerAddr): should never be reached.
+  fns.emplace(
+      2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "Consumer should never be invoked";
+        return {};
+      });
+
+  // Method 1 (outer at kOuterAddr): forwards the token to read-only child,
+  // then tries to reuse it.
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Token id 0 is the first (and only) forwarded token from the query.
+    std::array<uint32_t, 1> forwarded{0};
+    RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
+
+    // Forward token to read-only child.
+    auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+        kChildAddr, 0, UINT64_MAX, Calldata{},
+        std::to_underlying(InvokeFlag::ReadOnly),
+        std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
+    if (!invoke_res.has_value()) {
+      ADD_FAILURE() << "read-only invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+    // Token is now gone. Attempting to forward it again must fail.
+    auto reuse_res =
+        ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr, 2, UINT64_MAX,
+                                        Calldata{}, 0,
+                                        std::span<uint32_t const>{forwarded},
+                                        out_ret_len, out_auth_len);
+    if (!reuse_res.has_value()) {
+      ADD_FAILURE() << "reuse invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(reuse_res.value(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+    return {};
+  });
+
+  NativeViewSetup setup(std::move(fns));
+
+  deploy_native(kOuterAddr);
+  deploy_native(kChildAddr);
+  deploy_native(kConsumerAddr);
+
+  Invocation invocation{
+      .invoked_address = kOuterAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kParentAddr,
+                .expiry_height = 1'000'000,
+                .root_node = {.consumer_address = kChildAddr,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query, *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
