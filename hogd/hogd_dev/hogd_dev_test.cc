@@ -776,6 +776,18 @@ write_test_bootstrap_manifest(std::string_view contents)
   return path;
 }
 
+std::filesystem::path
+missing_test_bootstrap_manifest_path()
+{
+  std::filesystem::path path =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-bootstrap-manifest-missing-{}-{}.json", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+  return path;
+}
+
 TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
 {
   HogdDevProcess process = HogdDevProcess::start();
@@ -1238,9 +1250,10 @@ TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
 
 TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
 {
+  std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
   HogdDevProcess process = HogdDevProcess::start({
       "--bootstrap-manifest",
-      "/tmp/missing-hogd-dev-bootstrap-manifest.json",
+      missing_path.string(),
       "--dev-accounts",
       "1",
   });
@@ -1258,9 +1271,10 @@ TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
 
 TEST(HogdDev, BootstrapManifestConflictDetectedBeforeShorthandParsing)
 {
+  std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
   HogdDevProcess process = HogdDevProcess::start({
       "--bootstrap-manifest",
-      "/tmp/missing-hogd-dev-bootstrap-manifest.json",
+      missing_path.string(),
       "--dev-accounts",
       "not-a-count",
   });
