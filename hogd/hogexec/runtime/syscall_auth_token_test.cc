@@ -1735,10 +1735,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   // Read-only child: receives the token but does not consume or return it.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
-  fns_child.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  fns_child.emplace(0,
+                    [](NativeSyscallContext & /*ctx*/) noexcept
+                        -> InvokeStatus<void> { return {}; });
   auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
 
   // Caller: mints a token, forwards it to the read-only child, then tries
@@ -1769,8 +1768,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
             std::to_underlying(InvokeFlag::ReadOnly),
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         // The token was dropped by the read-only child. Attempting to
         // forward it again must fail — the caller no longer owns it.
@@ -1830,10 +1828,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
   // Consumer: no-op, just proves the caller still owns the token.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_consumer;
-  fns_consumer.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  fns_consumer.emplace(0,
+                       [](NativeSyscallContext & /*ctx*/) noexcept
+                           -> InvokeStatus<void> { return {}; });
   auto consumer_contract =
       std::make_unique<NativeContract>(std::move(fns_consumer));
 
@@ -1848,9 +1845,8 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         std::array<uint32_t, 1> returned_ids{token_id};
         auto auth_bytes =
             std::as_bytes(std::span<const uint32_t>{returned_ids});
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{},
-                                            false, auth_bytes);
+        auto ret = ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{},
+                                                   false, auth_bytes);
         EXPECT_FALSE(ret.has_value());
         return {};
       });
@@ -1886,8 +1882,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
             std::to_underlying(InvokeFlag::ReadOnly),
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(out_auth_len, sizeof(uint32_t));
 
         // Token was explicitly returned — caller still owns it.
@@ -1895,8 +1890,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
             kConsumerAddress, 0, UINT64_MAX, Calldata{}, 0,
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(reuse_res.has_value());
-        EXPECT_EQ(reuse_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(reuse_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         return {};
       });
@@ -1994,8 +1988,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
             std::to_underlying(InvokeFlag::ReadOnly),
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         return {};
       });
@@ -2070,8 +2063,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotMintToken)
             std::to_underlying(InvokeFlag::ReadOnly),
             std::span<uint32_t const>{}, out_ret_len, out_auth_len);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         return {};
       });
@@ -2118,10 +2110,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
   // Consumer: no-op, proves the caller still owns the token.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_consumer;
-  fns_consumer.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  fns_consumer.emplace(0,
+                       [](NativeSyscallContext & /*ctx*/) noexcept
+                           -> InvokeStatus<void> { return {}; });
   auto consumer_contract =
       std::make_unique<NativeContract>(std::move(fns_consumer));
 
@@ -2168,8 +2159,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
             kConsumerAddress, 0, UINT64_MAX, Calldata{}, 0,
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(reuse_res.has_value());
-        EXPECT_EQ(reuse_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(reuse_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         return {};
       });
@@ -2220,10 +2210,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
   // Consumer: no-op, proves the caller still owns the token.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_consumer;
-  fns_consumer.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  fns_consumer.emplace(0,
+                       [](NativeSyscallContext & /*ctx*/) noexcept
+                           -> InvokeStatus<void> { return {}; });
   auto consumer_contract =
       std::make_unique<NativeContract>(std::move(fns_consumer));
 
@@ -2273,8 +2262,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
             kConsumerAddress, 0, UINT64_MAX, Calldata{}, 0,
             std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
         EXPECT_TRUE(reuse_res.has_value());
-        EXPECT_EQ(reuse_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(reuse_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         return {};
       });

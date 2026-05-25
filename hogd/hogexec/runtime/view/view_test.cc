@@ -1585,50 +1585,49 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   // Method 0 (read-only child at kChildAddr): does nothing, token is dropped.
   fns.emplace(0,
-              [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-                return {};
-              });
+              [](NativeSyscallContext & /*ctx*/) noexcept
+                  -> InvokeStatus<void> { return {}; });
 
   // Method 2 (consumer at kConsumerAddr): should never be reached.
-  fns.emplace(2,
-              [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-                ADD_FAILURE() << "Consumer should never be invoked";
-                return {};
-              });
+  fns.emplace(
+      2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "Consumer should never be invoked";
+        return {};
+      });
 
   // Method 1 (outer at kOuterAddr): forwards the token to read-only child,
   // then tries to reuse it.
-  fns.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Token id 0 is the first (and only) forwarded token from the query.
-        std::array<uint32_t, 1> forwarded{0};
-        RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    // Token id 0 is the first (and only) forwarded token from the query.
+    std::array<uint32_t, 1> forwarded{0};
+    RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
 
-        // Forward token to read-only child.
-        auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddr, 0, UINT64_MAX, Calldata{},
-            std::to_underlying(InvokeFlag::ReadOnly),
-            std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
-        if (!invoke_res.has_value()) {
-          ADD_FAILURE() << "read-only invoke syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeNone);
+    // Forward token to read-only child.
+    auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+        kChildAddr, 0, UINT64_MAX, Calldata{},
+        std::to_underlying(InvokeFlag::ReadOnly),
+        std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
+    if (!invoke_res.has_value()) {
+      ADD_FAILURE() << "read-only invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-        // Token is now gone. Attempting to forward it again must fail.
-        auto reuse_res = ctx.syscall<SyscallNo::kInvoke>(
-            kConsumerAddr, 2, UINT64_MAX, Calldata{}, 0,
-            std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
-        if (!reuse_res.has_value()) {
-          ADD_FAILURE() << "reuse invoke syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        EXPECT_EQ(reuse_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    // Token is now gone. Attempting to forward it again must fail.
+    auto reuse_res =
+        ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr, 2, UINT64_MAX,
+                                        Calldata{}, 0,
+                                        std::span<uint32_t const>{forwarded},
+                                        out_ret_len, out_auth_len);
+    if (!reuse_res.has_value()) {
+      ADD_FAILURE() << "reuse invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(reuse_res.value(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
-        return {};
-      });
+    return {};
+  });
 
   NativeViewSetup setup(std::move(fns));
 
