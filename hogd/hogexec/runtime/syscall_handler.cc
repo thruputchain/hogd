@@ -1355,16 +1355,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                             execution_mode_data_);
   }
 
-  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    auto entry = load_next_queue_entry(*queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
-    item_view->sync_retrocausally_consumed(*queue_item);
-    return entry;
-  }
-
-  // For views not yet converted to RCQ, probe with a local item first.
-  // Only persist into the view if an entry is found, so that a no-op
-  // consume on an absent key does not pin the storage type.
+  // For unmodified keys, probe with a local item first. Only persist
+  // into the view if an entry is found, so that a no-op consume on an
+  // absent key does not pin the storage type.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
@@ -1385,6 +1378,15 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     return entry;
   }
 
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    auto entry = load_next_queue_entry(*queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
+    item_view->sync_retrocausally_consumed(*queue_item);
+    return entry;
+  }
+
+  // Same treatment for deleted keys: a no-op consume should leave the
+  // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
     UnmodifiedItem unmodified_item;
     auto load_status = unmodified_item.load(snapshot_cache_, addrkey);

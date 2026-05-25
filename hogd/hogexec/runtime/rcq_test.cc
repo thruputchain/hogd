@@ -23,6 +23,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
@@ -182,6 +183,66 @@ protected:
                   }
                   return {};
                 });
+    fns.emplace(6, // Delete rcq0 key
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto r = ctx.syscall<SyscallNo::kDeleteObject>(
+                      make_storage_key("rcq0"),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!r.has_value() ||
+                      r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+    fns.emplace(
+        7, // Delete rcq0 key, then consume (expect no entry)
+        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+              make_storage_key("rcq0"),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r2.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    fns.emplace(
+        8, // Delete rcq0 key, consume (expect no entry), set bytestring
+        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+              make_storage_key("rcq0"),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r2.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto const &calldata = ctx.handler().get_calldata();
+          auto r3 = ctx.syscall<SyscallNo::kBytestringSet>(
+              make_storage_key("rcq0"),
+              std::as_bytes(std::span(calldata)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -968,6 +1029,43 @@ TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
   // Transaction B (same block): write bytestring to same key — must not
   // conflict against the empty RCQ delta from transaction A.
   ASSERT_TRUE(invoke_contract(5, {0xAA}));
+}
+
+TEST_P(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  ASSERT_TRUE(insert({1}));
+
+  advance_block();
+
+  // Transaction A: delete + consume(nothing) in one transaction.
+  ASSERT_TRUE(invoke_contract(7, {}));
+
+  // Transaction B (same block): plain delete of same key — must not
+  // conflict against the delete + empty consume from transaction A.
+  ASSERT_TRUE(invoke_contract(6, {}));
+}
+
+TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  ASSERT_TRUE(insert({1}));
+
+  advance_block();
+
+  // Delete + consume(nothing) + set_bytestring in one transaction.
+  // The empty consume must not create an RCQ, so the bytestring write
+  // on the same key within the same transaction should succeed.
+  ASSERT_TRUE(invoke_contract(8, {0xBB}));
+
+  advance_block();
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+  auto item = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(item->type(), StorageItemType::kItemTypeBytestring);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
