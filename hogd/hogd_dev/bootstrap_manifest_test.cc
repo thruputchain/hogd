@@ -9,7 +9,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <fstream>
