@@ -824,8 +824,7 @@ TEST(HogdDev, HelpPrintsBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--help"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(exit_timeout());
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -848,8 +847,7 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   HogdDevProcess process =
       HogdDevProcess::start({"--scheduler-port", "not-a-port"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(exit_timeout());
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -870,8 +868,7 @@ TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--readiness", "stderr"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(exit_timeout());
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -897,8 +894,7 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
     HogdDevProcess process =
         HogdDevProcess::start({"--listen-host", std::string(host)});
 
-    std::optional<int> status =
-        process.wait_for_exit_for_test(exit_timeout());
+    std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
     if (!status.has_value()) {
       FAIL() << "hogd-dev did not exit";
       return;
