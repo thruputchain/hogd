@@ -114,7 +114,8 @@ public:
                 return;
               }
               p.set_value();
-            } else {
+            }
+            else {
               Ret ret;
               try {
                 ret = fn();
