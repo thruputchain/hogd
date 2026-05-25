@@ -26,6 +26,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/hogd_dev/manifest_common.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
@@ -41,19 +42,6 @@ constexpr std::string_view kStorageCostModelHashTag =
     "groundhog-storage-cost-model-v1";
 constexpr int kManifestTempOpenFlags =
     O_WRONLY | O_CREAT | O_TRUNC; // NOLINT(misc-include-cleaner)
-
-std::string
-hex_string(std::span<const std::byte> bytes)
-{
-  return std::format("0x{}", encode_hex(bytes));
-}
-
-template<std::size_t N>
-std::string
-hex_string(std::array<std::uint8_t, N> const &bytes)
-{
-  return hex_string(std::as_bytes(std::span(bytes)));
-}
 
 std::string
 int128_to_decimal(int128_t value)
@@ -109,12 +97,6 @@ storage_cost_model_hash(StorageCostModel const &model)
   hash_field(hasher, int128_to_decimal(model.kReplayCacheCostPerEntry));
   hash_field(hasher, int128_to_decimal(model.kBalanceCost));
   return hasher.finalize();
-}
-
-std::string
-entrypoint_hex(ContractEntrypointID const &entrypoint)
-{
-  return hex_string(std::as_bytes(std::span(entrypoint)));
 }
 
 void

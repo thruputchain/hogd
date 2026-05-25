@@ -6,35 +6,25 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
-#include <ios>
-#include <iterator>
 #include <limits>
 #include <optional>
 #include <print>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
-#include "built_contracts/dev_wallet.h"
-#include "hogd/base/json.h"
 #include "hogd/base/log.h"
-#include "hogd/base/string.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/hogd_dev/bootstrap_manifest.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/hogd_dev/manifest_common.h"
 #include "hogd/hogd_dev/runtime_manifest.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
-#include "hogd/version.h"
 
 namespace hogd {
 
@@ -157,23 +147,12 @@ struct HogdDevOptions {
   hogd::BootstrapAccountConfig bootstrap_config;
 };
 
-struct BootstrapManifestConfig {
-  std::string network_id;
-  hogd::BootstrapAccountConfig bootstrap_config;
-};
-
 struct OptionSources {
   bool bootstrap_manifest = false;
   bool dev_accounts = false;
   bool dev_account_seed = false;
   bool dev_account_tokens = false;
 };
-
-constexpr std::size_t kMaxBootstrapManifestBytes = 64 * 1024;
-constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
-constexpr std::string_view kBootstrapProfile = "local-dev";
-constexpr std::string_view kDevWalletProfile = "hogd-dev-default";
-constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
 void
 print_usage(FILE *stream, char *argv[])
@@ -261,273 +240,6 @@ parse_bootstrap_account_count(const std::string &value)
   return count;
 }
 
-std::uint64_t
-parse_u64(const std::string &value, std::string_view name)
-{
-  if (value.empty() || value.front() == '+' || value.front() == '-' ||
-      static_cast<unsigned char>(value.front()) <= ' ') {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  std::size_t pos = 0;
-  std::uint64_t parsed = 0;
-  try {
-    parsed = std::stoull(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  if (pos != value.size() ||
-      parsed > static_cast<std::uint64_t>(
-                   std::numeric_limits<std::int64_t>::max())) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  return parsed;
-}
-
-std::string
-hex_string(std::span<const std::byte> bytes)
-{
-  return std::format("0x{}", hogd::encode_hex(bytes));
-}
-
-template<std::size_t N>
-std::string
-hex_string(std::array<std::uint8_t, N> const &bytes)
-{
-  return hex_string(std::as_bytes(std::span(bytes)));
-}
-
-std::string
-entrypoint_hex(ContractEntrypointID const &entrypoint)
-{
-  return hex_string(std::as_bytes(std::span(entrypoint)));
-}
-
-std::string
-read_bootstrap_manifest_file(std::filesystem::path const &path)
-{
-  std::error_code status_error;
-  const std::filesystem::file_status status =
-      std::filesystem::symlink_status(path, status_error);
-  if (status_error) {
-    throw std::runtime_error(
-        std::format("failed to stat bootstrap manifest {}: {}", path.string(),
-                    status_error.message()));
-  }
-  if (std::filesystem::is_symlink(status) ||
-      !std::filesystem::is_regular_file(status)) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest must be a regular file: {}",
-                    path.string()));
-  }
-
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    throw std::runtime_error(
-        std::format("failed to open bootstrap manifest: {}", path.string()));
-  }
-
-  std::string bytes(kMaxBootstrapManifestBytes + 1, '\0');
-  input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-  bytes.resize(static_cast<std::size_t>(input.gcount()));
-  if (bytes.size() > kMaxBootstrapManifestBytes) {
-    throw std::runtime_error(std::format("bootstrap manifest exceeds {} bytes",
-                                         kMaxBootstrapManifestBytes));
-  }
-  if (input.bad()) {
-    throw std::runtime_error(
-        std::format("failed to read bootstrap manifest: {}", path.string()));
-  }
-  return bytes;
-}
-
-const json::Value &
-require_object_field(const json::Value &parent, std::string_view key,
-                     std::string_view context)
-{
-  const json::Value *field = parent.find(key);
-  if (field == nullptr) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest missing {}.{}", context, key));
-  }
-  if (field->type() != json::Value::Type::kObject) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest field {}.{} is not an object", context,
-                    key));
-  }
-  return *field;
-}
-
-std::string_view
-require_string_field(const json::Value &parent, std::string_view key,
-                     std::string_view context)
-{
-  const json::Value *field = parent.find(key);
-  if (field == nullptr) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest missing {}.{}", context, key));
-  }
-  std::optional<std::string_view> value = field->as_string();
-  if (!value.has_value()) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest field {}.{} is not a string", context,
-                    key));
-  }
-  return *value;
-}
-
-std::optional<std::string_view>
-optional_string_field(const json::Value &parent, std::string_view key,
-                      std::string_view context)
-{
-  const json::Value *field = parent.find(key);
-  if (field == nullptr) {
-    return std::nullopt;
-  }
-  std::optional<std::string_view> value = field->as_string();
-  if (!value.has_value()) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest field {}.{} is not a string", context,
-                    key));
-  }
-  return value;
-}
-
-std::int64_t
-require_integer_field(const json::Value &parent, std::string_view key,
-                      std::string_view context)
-{
-  const json::Value *field = parent.find(key);
-  if (field == nullptr) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest missing {}.{}", context, key));
-  }
-  std::optional<std::int64_t> value = field->as_integer();
-  if (!value.has_value()) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest field {}.{} is not an integer", context,
-                    key));
-  }
-  return *value;
-}
-
-void
-require_string_value(std::string_view actual, std::string_view expected,
-                     std::string_view field)
-{
-  if (actual != expected) {
-    throw std::runtime_error(
-        std::format("unsupported bootstrap manifest {} '{}', expected '{}'",
-                    field, actual, expected));
-  }
-}
-
-void
-validate_dev_wallet_assertions(const json::Value &dev_wallet)
-{
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-  require_string_value(require_string_field(dev_wallet, "profile", "devWallet"),
-                       kDevWalletProfile, "devWallet.profile");
-
-  if (std::optional<std::string_view> content_hash =
-          optional_string_field(dev_wallet, "contentHash", "devWallet")) {
-    auto wallet_contract = wallet_meta::load_wasm();
-    CHECK(wallet_contract != nullptr);
-    const std::string wallet_hash = hex_string(sha256(*wallet_contract));
-    require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
-  }
-  if (std::optional<std::string_view> deploy_entrypoint =
-          optional_string_field(dev_wallet, "deployEntrypoint", "devWallet")) {
-    require_string_value(*deploy_entrypoint,
-                         entrypoint_hex(
-                             wallet_meta::entrypoint<"initialize">()),
-                         "devWallet.deployEntrypoint");
-  }
-  if (std::optional<std::string_view> do_action_entrypoint =
-          optional_string_field(dev_wallet, "doActionEntrypoint",
-                                "devWallet")) {
-    require_string_value(*do_action_entrypoint,
-                         entrypoint_hex(wallet_meta::entrypoint<"do_action">()),
-                         "devWallet.doActionEntrypoint");
-  }
-}
-
-BootstrapManifestConfig
-bootstrap_config_from_manifest(std::filesystem::path const &path)
-{
-  std::string bytes = read_bootstrap_manifest_file(path);
-  std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
-  if (!parsed.has_value()) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest JSON parse failed at {}: {}",
-                    parsed.error().offset, parsed.error().message));
-  }
-  if (parsed->type() != json::Value::Type::kObject) {
-    throw std::runtime_error("bootstrap manifest root is not an object");
-  }
-
-  const std::int64_t schema_version =
-      require_integer_field(*parsed, "schemaVersion", "root");
-  // Additive optional fields do not bump schemaVersion, so exact-match is
-  // correct under the additive-only contract.
-  if (schema_version != 1) {
-    throw std::runtime_error(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 1",
-        schema_version));
-  }
-  require_string_value(require_string_field(*parsed, "kind", "root"),
-                       kBootstrapManifestKind, "kind");
-  std::string network_id =
-      std::string(require_string_field(*parsed, "networkId", "root"));
-  if (network_id.empty()) {
-    throw std::runtime_error("bootstrap manifest networkId must not be empty");
-  }
-  require_string_value(require_string_field(*parsed, "profile", "root"),
-                       kBootstrapProfile, "profile");
-  if (std::optional<std::string_view> protocol =
-          optional_string_field(*parsed, "protocol", "root")) {
-    require_string_value(*protocol, version::kHogdProtocol(), "protocol");
-  }
-
-  validate_dev_wallet_assertions(
-      require_object_field(*parsed, "devWallet", "root"));
-  const json::Value &storage_cost_model =
-      require_object_field(*parsed, "storageCostModel", "root");
-  require_string_value(require_string_field(storage_cost_model, "profile",
-                                            "storageCostModel"),
-                       kStorageCostModelProfile, "storageCostModel.profile");
-
-  const json::Value &accounts =
-      require_object_field(*parsed, "bootstrapAccounts", "root");
-  const std::int64_t count =
-      require_integer_field(accounts, "count", "bootstrapAccounts");
-  if (count < 0 ||
-      std::cmp_greater(count, hogd::kMaxBootstrapAccounts)) {
-    throw std::runtime_error(
-        std::format("bootstrap manifest bootstrapAccounts.count {} exceeds "
-                    "maximum {}",
-                    count, hogd::kMaxBootstrapAccounts));
-  }
-  std::string seed =
-      std::string(require_string_field(accounts, "seed", "bootstrapAccounts"));
-  if (seed.empty()) {
-    throw std::runtime_error(
-        "bootstrap manifest bootstrapAccounts.seed must not be empty");
-  }
-  hogd::BootstrapAccountConfig config{
-      .count = static_cast<std::uint32_t>(count),
-      .seed = std::move(seed),
-      .storage_tokens =
-          parse_u64(std::string(require_string_field(
-                        accounts, "initialStorageTokens", "bootstrapAccounts")),
-                    "bootstrap manifest initialStorageTokens"),
-  };
-  return {
-      .network_id = std::move(network_id),
-      .bootstrap_config = std::move(config),
-  };
-}
-
 void
 reject_manifest_shorthand_conflicts(OptionSources const &sources)
 {
@@ -596,15 +308,15 @@ parse_args(int argc, char *argv[])
     if (arg == "--dev-account-tokens" && i + 1 < argc) {
       sources.dev_account_tokens = true;
       options.bootstrap_config.storage_tokens =
-          parse_u64(argv[++i], "dev account tokens");
+          hogd::parse_u64(argv[++i], "dev account tokens");
       continue;
     }
     usage(argv);
   }
   reject_manifest_shorthand_conflicts(sources);
   if (bootstrap_manifest_path.has_value()) {
-    BootstrapManifestConfig manifest_config =
-        bootstrap_config_from_manifest(*bootstrap_manifest_path);
+    hogd::BootstrapManifestConfig manifest_config =
+        hogd::load_bootstrap_manifest(*bootstrap_manifest_path);
     options.runtime_network_id = std::move(manifest_config.network_id);
     options.bootstrap_config = std::move(manifest_config.bootstrap_config);
   }

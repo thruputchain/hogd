@@ -1,6 +1,7 @@
 add_library(
   hogd_dev
   bootstrap_accounts.cc
+  bootstrap_manifest.cc
   hogd_dev_node.cc
   hogd_dev_tmp_dir.cc
   runtime_manifest.cc
