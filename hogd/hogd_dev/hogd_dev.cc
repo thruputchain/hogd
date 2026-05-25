@@ -6,8 +6,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <limits>
+#include <optional>
 #include <print>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
@@ -18,7 +20,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/hogd_dev/bootstrap_manifest.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/hogd_dev/manifest_parse.h"
 #include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/init.h"
 
@@ -81,9 +85,11 @@ wait_for_shutdown(const ShutdownSignals &signals)
 // NOLINTEND(misc-include-cleaner)
 
 void
-emit_readiness(const HogdDevNode &node, ReadinessSink sink)
+emit_readiness(const HogdDevNode &node, ReadinessSink sink,
+               std::string_view runtime_network_id)
 {
-  RuntimeManifestPointer manifest = write_hogd_dev_runtime_manifest(node);
+  RuntimeManifestPointer manifest =
+      write_hogd_dev_runtime_manifest(node, runtime_network_id);
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{}", manifest.readiness_payload);
@@ -93,14 +99,14 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
-              ReadinessSink readiness_sink,
+              ReadinessSink readiness_sink, std::string_view runtime_network_id,
               BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
 
   HogdDevNode node(std::move(listen_host), requested_scheduler_port,
-                   std::move(bootstrap_config));
-  emit_readiness(node, readiness_sink);
+                   bootstrap_config);
+  emit_readiness(node, readiness_sink, runtime_network_id);
   info("hogd-dev initialization complete.");
 
   ShutdownSignals shutdown_signals = block_shutdown_signal();
@@ -137,9 +143,17 @@ namespace {
 
 struct HogdDevOptions {
   std::string listen_host = "127.0.0.1";
+  std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   hogd::BootstrapAccountConfig bootstrap_config;
+};
+
+struct OptionSources {
+  bool bootstrap_manifest = false;
+  bool dev_accounts = false;
+  bool dev_account_seed = false;
+  bool dev_account_tokens = false;
 };
 
 void
@@ -156,6 +170,8 @@ Options:
                                  [default: 0]
   --readiness stdout             Emit one readiness JSON line on stdout
                                  [default: stdout]
+  --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
+                                 dev-account shorthand flags are conflicts.
   --dev-accounts <count>         Deterministic dev accounts to bootstrap
                                  [default: 0]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
@@ -184,14 +200,8 @@ usage(char *argv[])
 std::uint16_t
 parse_port(const std::string &value)
 {
-  std::size_t pos = 0;
-  std::uint64_t port = 0;
-  try {
-    port = std::stoul(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  if (pos != value.size() || port > 65535) {
+  const std::uint64_t port = hogd::parse_u64(value, "port");
+  if (port > 65535) {
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
   return static_cast<std::uint16_t>(port);
@@ -200,15 +210,8 @@ parse_port(const std::string &value)
 std::uint32_t
 parse_u32(const std::string &value, std::string_view name)
 {
-  std::size_t pos = 0;
-  std::uint64_t parsed = 0;
-  try {
-    parsed = std::stoull(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  if (pos != value.size() ||
-      parsed > std::numeric_limits<std::uint32_t>::max()) {
+  const std::uint64_t parsed = hogd::parse_u64(value, name);
+  if (parsed > std::numeric_limits<std::uint32_t>::max()) {
     throw std::runtime_error(std::format("Invalid {}: {}", name, value));
   }
   return static_cast<std::uint32_t>(parsed);
@@ -226,28 +229,28 @@ parse_bootstrap_account_count(const std::string &value)
   return count;
 }
 
-std::uint64_t
-parse_u64(const std::string &value, std::string_view name)
+void
+reject_manifest_shorthand_conflicts(OptionSources const &sources)
 {
-  std::size_t pos = 0;
-  std::uint64_t parsed = 0;
-  try {
-    parsed = std::stoull(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  if (!sources.bootstrap_manifest) {
+    return;
   }
-  if (pos != value.size() ||
-      parsed > static_cast<std::uint64_t>(
-                   std::numeric_limits<std::int64_t>::max())) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  if (sources.dev_accounts || sources.dev_account_seed ||
+      sources.dev_account_tokens) {
+    throw std::runtime_error(
+        "--bootstrap-manifest conflicts with dev-account shorthand flags");
   }
-  return parsed;
 }
 
 HogdDevOptions
 parse_args(int argc, char *argv[])
 {
   HogdDevOptions options;
+  OptionSources sources;
+  std::optional<std::filesystem::path> bootstrap_manifest_path;
+  std::optional<std::string> dev_accounts_value;
+  std::optional<std::string> dev_account_seed_value;
+  std::optional<std::string> dev_account_tokens_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -275,20 +278,53 @@ parse_args(int argc, char *argv[])
       options.readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
     }
+    if (arg == "--bootstrap-manifest" && i + 1 < argc) {
+      if (sources.bootstrap_manifest) {
+        throw std::runtime_error(
+            "--bootstrap-manifest specified more than once");
+      }
+      sources.bootstrap_manifest = true;
+      bootstrap_manifest_path = std::filesystem::path(argv[++i]);
+      continue;
+    }
     if (arg == "--dev-accounts" && i + 1 < argc) {
-      options.bootstrap_config.count = parse_bootstrap_account_count(argv[++i]);
+      sources.dev_accounts = true;
+      dev_accounts_value = argv[++i];
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
-      options.bootstrap_config.seed = argv[++i];
+      sources.dev_account_seed = true;
+      dev_account_seed_value = argv[++i];
       continue;
     }
     if (arg == "--dev-account-tokens" && i + 1 < argc) {
-      options.bootstrap_config.storage_tokens =
-          parse_u64(argv[++i], "dev account tokens");
+      sources.dev_account_tokens = true;
+      dev_account_tokens_value = argv[++i];
       continue;
     }
     usage(argv);
+  }
+  reject_manifest_shorthand_conflicts(sources);
+  if (dev_accounts_value.has_value()) {
+    options.bootstrap_config.count =
+        parse_bootstrap_account_count(*dev_accounts_value);
+  }
+  if (dev_account_seed_value.has_value()) {
+    if (dev_account_seed_value->empty()) {
+      throw std::runtime_error(
+          "Invalid dev account seed: seed must not be empty");
+    }
+    options.bootstrap_config.seed = std::move(*dev_account_seed_value);
+  }
+  if (dev_account_tokens_value.has_value()) {
+    options.bootstrap_config.storage_tokens =
+        hogd::parse_u64(*dev_account_tokens_value, "dev account tokens");
+  }
+  if (bootstrap_manifest_path.has_value()) {
+    hogd::BootstrapManifestConfig manifest_config =
+        hogd::load_bootstrap_manifest(*bootstrap_manifest_path);
+    options.runtime_network_id = std::move(manifest_config.network_id);
+    options.bootstrap_config = std::move(manifest_config.bootstrap_config);
   }
   return options;
 }
@@ -315,6 +351,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   try {
     return hogd::hogd_dev_init(std::move(options.listen_host),
                                options.scheduler_port, options.readiness_sink,
+                               options.runtime_network_id,
                                options.bootstrap_config);
   } catch (const std::exception &error) {
     hogd::error("hogd-dev failed before readiness: {}", error.what());
