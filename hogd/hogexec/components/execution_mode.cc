@@ -107,8 +107,7 @@ ValidationModeData::get_observed_queue_entries(AddressAndKey const &addrkey,
   auto it = queue_entry_observations_.find(addrkey);
   CHECK(it != queue_entry_observations_.end());
   CHECK_LE(count, static_cast<uint32_t>(it->second.size()));
-  return x23::Vec<QueueEntry>(it->second.begin(),
-                              it->second.begin() + count);
+  return x23::Vec<QueueEntry>(it->second.begin(), it->second.begin() + count);
 }
 
 bool

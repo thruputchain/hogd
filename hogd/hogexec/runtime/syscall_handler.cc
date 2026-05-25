@@ -1207,8 +1207,8 @@ queue_entry_from_span(std::span<const std::byte> span)
 
 x23::Vec<QueueEntry>
 get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
-                                  SnapshotStorageItem const &base_item,
-                                  AddressAndKey const &addrkey, uint32_t count)
+                                   SnapshotStorageItem const &base_item,
+                                   AddressAndKey const &addrkey, uint32_t count)
 {
   if (auto *vd = std::get_if<ValidationModeData>(&execution_mode_data)) {
     return vd->get_observed_queue_entries(addrkey, count);
@@ -1343,8 +1343,9 @@ SystemCallHandler::retrocausal_queue_insert(
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  auto queue_item = retrocausal_queue_item_from_view(
-      item_view, addrkey, snapshot_cache_, execution_mode_data_);
+  auto queue_item =
+      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_,
+                                       execution_mode_data_);
   if (!queue_item.has_value()) {
     return queue_item.error();
   }
@@ -1371,8 +1372,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                             execution_mode_data_);
   }
 
-  auto queue_item = retrocausal_queue_item_from_view(
-      item_view, addrkey, snapshot_cache_, execution_mode_data_);
+  auto queue_item =
+      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_,
+                                       execution_mode_data_);
   if (!queue_item.has_value()) {
     return queue_item.error();
   }

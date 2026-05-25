@@ -109,8 +109,8 @@ public:
   std::optional<Nondeterministic<QueueEntry>>
   consume_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index);
 
-  x23::Vec<QueueEntry>
-  get_observed_queue_entries(AddressAndKey const &addrkey, uint32_t count) const;
+  x23::Vec<QueueEntry> get_observed_queue_entries(AddressAndKey const &addrkey,
+                                                  uint32_t count) const;
 
   // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;
@@ -176,8 +176,8 @@ public:
                                                                     index);
   }
 
-  x23::Vec<QueueEntry>
-  get_observed_queue_entries(AddressAndKey const &addrkey, uint32_t count) const
+  x23::Vec<QueueEntry> get_observed_queue_entries(AddressAndKey const &addrkey,
+                                                  uint32_t count) const
   {
     auto entries =
         partial_validation_data_.get_observed_queue_entries(addrkey, count);

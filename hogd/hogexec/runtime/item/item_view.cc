@@ -137,8 +137,7 @@ NNIntItem::validate() const
 
 RetrocausalQueueItem
 RetrocausalQueueItem::make_fully_consumed_item(
-    const SnapshotStorageItem &base_item,
-    x23::Vec<QueueEntry> consumed_entries)
+    const SnapshotStorageItem &base_item, x23::Vec<QueueEntry> consumed_entries)
 {
   auto retrocausally_consumed_count =
       static_cast<uint32_t>(consumed_entries.size());

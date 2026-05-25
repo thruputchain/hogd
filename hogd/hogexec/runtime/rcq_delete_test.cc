@@ -1978,8 +1978,8 @@ protected:
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
           auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-              kStorageKey, false,
-              std::as_writable_bytes(std::span(&out, 1)), written_len);
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "consume failed";
@@ -2020,16 +2020,16 @@ protected:
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
             auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false,
-                std::as_writable_bytes(std::span(&out, 1)), written_len);
+                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+                written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "consume failed";
               return InvokeError{InvokeErrorCode::Deterministic};
             }
             if (written_len != 4 || out != expected) {
-              ADD_FAILURE() << "consume: expected " << expected << " got "
-                            << out;
+              ADD_FAILURE()
+                  << "consume: expected " << expected << " got " << out;
               return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
@@ -2064,16 +2064,16 @@ protected:
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
             auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false,
-                std::as_writable_bytes(std::span(&out, 1)), written_len);
+                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+                written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "consume failed";
               return false;
             }
             if (written_len != 4 || out != expected) {
-              ADD_FAILURE() << "consume: expected " << expected << " got "
-                            << out;
+              ADD_FAILURE()
+                  << "consume: expected " << expected << " got " << out;
               return false;
             }
             return true;
@@ -2130,8 +2130,7 @@ protected:
     return std::make_unique<NativeContext>(std::move(contract_map));
   }
 
-  constexpr static ContractAddress kContractAddress2 =
-      make_contract_address(1);
+  constexpr static ContractAddress kContractAddress2 = make_contract_address(1);
 
   static AddressAndKey get_queue_addrkey_for(ContractAddress const &addr)
   {
@@ -3307,8 +3306,7 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
   {
-    auto handler =
-        make_new_system_call_handler(tx_delete_recreate, *context_);
+    auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
     handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     delete_recreate_proposal_data = handler.get_proposal_data();
@@ -3321,15 +3319,17 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   {
-    auto handler = make_new_system_call_handler_validation(
-        tx_insert, *context_, insert_proposal_data);
+    auto handler =
+        make_new_system_call_handler_validation(tx_insert, *context_,
+                                                insert_proposal_data);
     handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
   {
-    auto handler = make_new_system_call_handler_validation(
-        tx_delete_recreate, *context_, delete_recreate_proposal_data);
+    auto handler =
+        make_new_system_call_handler_validation(tx_delete_recreate, *context_,
+                                                delete_recreate_proposal_data);
     handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
