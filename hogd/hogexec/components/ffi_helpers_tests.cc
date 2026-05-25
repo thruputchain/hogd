@@ -38,6 +38,24 @@ TEST(FFIHelpers, SourceAddressClaimRoundtrip)
   ASSERT_EQ(a, *b);
 }
 
+TEST(FFIHelpers, PubkeySignatureClaimRoundtrip)
+{
+  AuthClaim a(AuthClaimType::kPubkeySignature);
+  a.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
+  for (size_t i = 0; i < 32; i++) {
+    a.pubkey_preimage().pubkey.ed25519()[i] = static_cast<uint8_t>(i + 1);
+  }
+  a.pubkey_preimage().nonce = 42;
+  auto b = roundtrip_auth_claim(a);
+  ASSERT_TRUE(b.has_value());
+  ASSERT_EQ(a, *b);
+
+  a.pubkey_preimage().nonce = 0;
+  b = roundtrip_auth_claim(a);
+  ASSERT_TRUE(b.has_value());
+  ASSERT_EQ(a, *b);
+}
+
 TEST(FFIHelpers, PublicKeyRoundtrip)
 {
   generated::PublicKey ffi_pk{};
