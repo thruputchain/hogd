@@ -38,7 +38,6 @@ namespace hogd {
 class HogdDevNode {
 public:
   HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-              std::string runtime_network_id = "groundhog-local",
               BootstrapAccountConfig const &bootstrap_config = {});
   ~HogdDevNode();
 
@@ -48,7 +47,6 @@ public:
   HogdDevNode &operator=(HogdDevNode &&) = delete;
 
   std::string const &bind_host() const { return bind_host_; }
-  std::string const &runtime_network_id() const { return runtime_network_id_; }
   // The supervisor calls this the scheduler endpoint; hogd exposes it through
   // the coordinator-facing SchedulerCoord1 RPC server.
   std::uint16_t scheduler_port() const { return mempool_coord_server_.port(); }
@@ -100,7 +98,6 @@ private:
   void prepare_for_failed_construction() noexcept;
 
   std::string bind_host_;
-  std::string runtime_network_id_;
   BootstrapAccountConfig bootstrap_config_;
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;

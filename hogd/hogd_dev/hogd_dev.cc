@@ -85,9 +85,11 @@ wait_for_shutdown(const ShutdownSignals &signals)
 // NOLINTEND(misc-include-cleaner)
 
 void
-emit_readiness(const HogdDevNode &node, ReadinessSink sink)
+emit_readiness(const HogdDevNode &node, ReadinessSink sink,
+               std::string_view runtime_network_id)
 {
-  RuntimeManifestPointer manifest = write_hogd_dev_runtime_manifest(node);
+  RuntimeManifestPointer manifest =
+      write_hogd_dev_runtime_manifest(node, runtime_network_id);
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{}", manifest.readiness_payload);
@@ -103,8 +105,8 @@ hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
   install_signal_handler();
 
   HogdDevNode node(std::move(listen_host), requested_scheduler_port,
-                   std::move(runtime_network_id), bootstrap_config);
-  emit_readiness(node, readiness_sink);
+                   bootstrap_config);
+  emit_readiness(node, readiness_sink, runtime_network_id);
   info("hogd-dev initialization complete.");
 
   ShutdownSignals shutdown_signals = block_shutdown_signal();
@@ -141,7 +143,8 @@ namespace {
 
 struct HogdDevOptions {
   std::string listen_host = "127.0.0.1";
-  std::string runtime_network_id = "groundhog-local";
+  std::string runtime_network_id =
+      std::string(hogd::kDefaultRuntimeNetworkId);
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   hogd::BootstrapAccountConfig bootstrap_config;
