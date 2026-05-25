@@ -1,7 +1,6 @@
 #include "hogd/hogd_dev/runtime_manifest.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
@@ -14,14 +13,12 @@
 #include <utility>
 
 #include "built_contracts/dev_wallet.h"
-#include "contract.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/status.h"
-#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"

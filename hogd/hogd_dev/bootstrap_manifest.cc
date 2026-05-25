@@ -8,13 +8,11 @@
 #include <fstream>
 #include <ios>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include <array>
 
 #include "built_contracts/dev_wallet.h"
 #include "hogd/base/json.h"

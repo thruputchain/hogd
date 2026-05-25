@@ -10,7 +10,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include "contract.hh"
 #include "hogd/base/string.h"
