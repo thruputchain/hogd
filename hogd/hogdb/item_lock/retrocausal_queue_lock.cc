@@ -6,6 +6,7 @@
 #include <expected>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -358,6 +359,12 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                     int128_t snapshot_cost, change_type &change,
                                     const LockContext &ctx)
 {
+  // Dedup observation counts outside the lock (allocation + O(n log n) insert).
+  std::map<QueueEntry, uint32_t> obs_counts;
+  for (auto const &entry : change.delta_.observed_concurrent_entries) {
+    ++obs_counts[entry];
+  }
+
   std::unique_lock<std::mutex> lock(mtx_);
 
   auto r = get_meta(nullptr);
@@ -412,11 +419,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
       ++entry_tracking_[entry].consume_count;
     }
   }
-  // TODO(geoff) fix — O(n^2) but bounded by kRetrocausalQueueBlockEntriesMaxLen.
-  for (auto const &entry : delta.observed_concurrent_entries) {
-    auto count = static_cast<uint32_t>(
-        std::count(delta.observed_concurrent_entries.begin(),
-                   delta.observed_concurrent_entries.end(), entry));
+  for (auto const &[entry, count] : obs_counts) {
     auto &t = entry_tracking_[entry];
     t.observe_count = std::max(t.observe_count, count);
   }
@@ -452,8 +455,7 @@ RetrocausalQueueLock::has_unmatched_entries() const
 {
   return std::ranges::any_of(entry_tracking_, [](auto const &kv) {
     auto const &t = kv.second;
-    return t.consume_count > t.insert_count ||
-           t.observe_count > t.insert_count;
+    return t.consume_count > t.insert_count || t.observe_count > t.insert_count;
   });
 }
 
