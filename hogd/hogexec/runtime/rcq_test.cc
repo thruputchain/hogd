@@ -194,55 +194,53 @@ protected:
                   }
                   return {};
                 });
-    fns.emplace(
-        7, // Delete rcq0 key, then consume (expect no entry)
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          uint32_t out = 0;
-          RuntimeMemoryLength written_len = 0;
-          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-              make_storage_key("rcq0"), false,
-              std::as_writable_bytes(std::span(&out, 1)), written_len);
-          if (!r2.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          return {};
-        });
-    fns.emplace(
-        8, // Delete rcq0 key, consume (expect no entry), set bytestring
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          uint32_t out = 0;
-          RuntimeMemoryLength written_len = 0;
-          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-              make_storage_key("rcq0"), false,
-              std::as_writable_bytes(std::span(&out, 1)), written_len);
-          if (!r2.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          auto const &calldata = ctx.handler().get_calldata();
-          auto r3 = ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"),
-              std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          return {};
-        });
+    fns.emplace(7, // Delete rcq0 key, then consume (expect no entry)
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+                      make_storage_key("rcq0"),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!r1.has_value() ||
+                      r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  uint32_t out = 0;
+                  RuntimeMemoryLength written_len = 0;
+                  auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                      make_storage_key("rcq0"), false,
+                      std::as_writable_bytes(std::span(&out, 1)), written_len);
+                  if (!r2.has_value()) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+    fns.emplace(8, // Delete rcq0 key, consume (expect no entry), set bytestring
+                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+                      make_storage_key("rcq0"),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!r1.has_value() ||
+                      r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  uint32_t out = 0;
+                  RuntimeMemoryLength written_len = 0;
+                  auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                      make_storage_key("rcq0"), false,
+                      std::as_writable_bytes(std::span(&out, 1)), written_len);
+                  if (!r2.has_value()) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  auto const &calldata = ctx.handler().get_calldata();
+                  auto r3 = ctx.syscall<SyscallNo::kBytestringSet>(
+                      make_storage_key("rcq0"),
+                      std::as_bytes(std::span(calldata)),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!r3.has_value() ||
+                      r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
