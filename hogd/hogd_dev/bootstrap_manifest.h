@@ -8,10 +8,8 @@
 
 namespace hogd {
 
-// Default human protocol label stamped into the runtime manifest's
-// `networkId` field when no bootstrap manifest overrides it. The CLI's
-// default and the node-construction call site reference this shared
-// constant so they cannot drift apart.
+// Network id stamped into the runtime manifest's `networkId` field when
+// no bootstrap manifest overrides it.
 inline constexpr std::string_view kDefaultRuntimeNetworkId = "groundhog-local";
 
 struct BootstrapManifestConfig {
