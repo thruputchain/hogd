@@ -67,3 +67,79 @@ impl LinkEntry {
         self.fn_pointer
     }
 }
+
+pub fn verify_contract_meter(
+    contract_data: &[u8],
+    host_imports: &[LinkEntry],
+) -> InvokeErrorCode {
+    let config = groundhog_wasm_meter::Config {
+        max_imported_functions: 1,
+        reject_floats: true,
+        ..groundhog_wasm_meter::Config::default()
+    };
+    let module_info = match groundhog_wasm_meter::verify(contract_data, &config)
+    {
+        Ok(info) => info,
+        Err(e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("Contract verification failed: wasm-meter: {e}");
+            return match e {
+                groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
+                    InvokeErrorCode::Unrecoverable
+                }
+                _ => InvokeErrorCode::Deterministic,
+            };
+        }
+    };
+    if module_info.memories.len() != 1 {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "Contract verification failed: expected 1 memory, found {}",
+            module_info.memories.len()
+        );
+        return InvokeErrorCode::Deterministic;
+    }
+    if module_info.memories[0].initial_pages > 1 {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "Contract verification failed: initial memory {} pages exceeds limit of 1",
+            module_info.memories[0].initial_pages
+        );
+        return InvokeErrorCode::Deterministic;
+    }
+    if module_info.memories[0].export_name != Some("memory") {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "Contract verification failed: memory not exported as \"memory\""
+        );
+        return InvokeErrorCode::Deterministic;
+    }
+    for import in &module_info.imports {
+        let entry = host_imports.iter().find(|e| {
+            e.module() == import.module && e.function() == import.name
+        });
+        match entry {
+            Some(e) => {
+                if import.n_params != e.nargs() as usize {
+                    eprintln!(
+                        "rejecting contract — import {}::{} arity mismatch: contract declares {} params, host registers {} (likely SDK/runtime ABI mismatch)",
+                        import.module,
+                        import.name,
+                        import.n_params,
+                        e.nargs()
+                    );
+                    return InvokeErrorCode::Deterministic;
+                }
+            }
+            None => {
+                eprintln!(
+                    "rejecting contract — unknown host import {}::{} (likely SDK/runtime ABI mismatch)",
+                    import.module,
+                    import.name
+                );
+                return InvokeErrorCode::Deterministic;
+            }
+        }
+    }
+    InvokeErrorCode::None
+}
