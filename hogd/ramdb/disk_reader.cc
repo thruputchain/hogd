@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
+#include <cstddef>
 #include <format>
 #include <functional>
 #include <limits>
@@ -151,10 +152,13 @@ struct SafeItemHeader {
 
 static_assert(sizeof(SafeItemHeader) == sizeof(ItemHeader));
 static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
-static_assert(offsetof(SafeItemHeader, storage) == offsetof(ItemHeader, storage));
+static_assert(offsetof(SafeItemHeader, storage) ==
+              offsetof(ItemHeader, storage));
 static_assert(offsetof(SafeItemHeader, type) == offsetof(ItemHeader, type));
-static_assert(offsetof(SafeItemHeader, key_len) == offsetof(ItemHeader, key_len));
-static_assert(offsetof(SafeItemHeader, value_len) == offsetof(ItemHeader, value_len));
+static_assert(offsetof(SafeItemHeader, key_len) ==
+              offsetof(ItemHeader, key_len));
+static_assert(offsetof(SafeItemHeader, value_len) ==
+              offsetof(ItemHeader, value_len));
 static_assert(offsetof(SafeItemHeader, lsn) == offsetof(ItemHeader, lsn));
 static_assert(offsetof(SafeItemHeader, _padding_garbage_next_pointer) ==
               offsetof(ItemHeader, next));
