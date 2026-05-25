@@ -1,20 +1,24 @@
 #include "hogd/hogd_dev/bootstrap_manifest.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
-#include <ios>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
 #include "built_contracts/dev_wallet.h"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
@@ -41,37 +45,66 @@ constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 std::string
 read_bootstrap_manifest_file(std::filesystem::path const &path)
 {
-  std::error_code status_error;
-  const std::filesystem::file_status status =
-      std::filesystem::symlink_status(path, status_error);
-  if (status_error) {
+  // Open with O_NOFOLLOW to close the TOCTOU window: if `path` resolves to a
+  // symlink, open() itself fails with ELOOP rather than transparently
+  // following. fstat() then operates on the same inode the fd pins, so a
+  // racing rename/replace cannot redirect us at a different file.
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) {
+    const int err = errno;
+    // ELOOP from O_NOFOLLOW means the final component was a symlink. We
+    // surface this with the same "must be a regular file" message we used
+    // for the symlink_status-rejection path so existing assertions still
+    // match.
+    if (err == ELOOP) {
+      throw std::runtime_error(
+          std::format("bootstrap manifest must be a regular file: {}",
+                      path.string()));
+    }
     throw std::runtime_error(
-        std::format("failed to stat bootstrap manifest {}: {}", path.string(),
-                    status_error.message()));
+        std::format("failed to open bootstrap manifest: {}: {}", path.string(),
+                    std::strerror(err)));
   }
-  if (std::filesystem::is_symlink(status) ||
-      !std::filesystem::is_regular_file(status)) {
+  UniqueFd fd_guard(fd);
+
+  struct stat st {};
+  if (::fstat(fd, &st) < 0) {
+    const int err = errno;
     throw std::runtime_error(
-        std::format("bootstrap manifest must be a regular file: {}",
-                    path.string()));
+        std::format("failed to stat bootstrap manifest: {}: {}", path.string(),
+                    std::strerror(err)));
+  }
+  if (!S_ISREG(st.st_mode)) {
+    throw std::runtime_error(std::format(
+        "bootstrap manifest must be a regular file: {}", path.string()));
   }
 
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    throw std::runtime_error(
-        std::format("failed to open bootstrap manifest: {}", path.string()));
-  }
-
+  // Read up to kMaxBootstrapManifestBytes + 1 bytes; the +1 lets us detect
+  // oversize files without trusting st.st_size (which can be stale or, for
+  // some fs types, zero for nonzero content).
   std::string bytes(kMaxBootstrapManifestBytes + 1, '\0');
-  input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-  bytes.resize(static_cast<std::size_t>(input.gcount()));
+  std::size_t total = 0;
+  while (total < bytes.size()) {
+    const ssize_t n =
+        ::read(fd, bytes.data() + total, bytes.size() - total);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      const int err = errno;
+      throw std::runtime_error(
+          std::format("failed to read bootstrap manifest: {}: {}",
+                      path.string(), std::strerror(err)));
+    }
+    if (n == 0) {
+      break;
+    }
+    total += static_cast<std::size_t>(n);
+  }
+  bytes.resize(total);
   if (bytes.size() > kMaxBootstrapManifestBytes) {
     throw std::runtime_error(std::format("bootstrap manifest exceeds {} bytes",
                                          kMaxBootstrapManifestBytes));
-  }
-  if (input.bad()) {
-    throw std::runtime_error(
-        std::format("failed to read bootstrap manifest: {}", path.string()));
   }
   return bytes;
 }

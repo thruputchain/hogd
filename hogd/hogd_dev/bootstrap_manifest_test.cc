@@ -493,6 +493,48 @@ TEST(BootstrapManifest, RejectsOversizedManifest)
   expect_throws_with(path, "exceeds");
 }
 
+// A dangling symlink (target does not exist) is a regression test for the
+// O_NOFOLLOW switch: under the previous stat-then-open implementation,
+// symlink_status() would succeed on the link itself and the failure mode
+// would be "failed to stat" (well, it actually reported the link as a
+// symlink, so the message would still be "must be a regular file"; the
+// real bite was the TOCTOU window between stat and open). With the
+// O_NOFOLLOW open, the very first syscall fails with ELOOP, which we map
+// to "must be a regular file" -- the existing assertion needle still
+// fires, but now via a single race-free syscall.
+TEST(BootstrapManifest, RejectsDanglingSymlink)
+{
+  std::filesystem::path missing_target =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-bootstrap-manifest-missing-target-{}-{}.json",
+                  getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  // Make doubly sure the target does not exist.
+  std::error_code ec;
+  std::filesystem::remove(missing_target, ec);
+
+  std::filesystem::path symlink_path =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-bootstrap-manifest-dangling-{}-{}.json", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::filesystem::create_symlink(missing_target, symlink_path);
+  Defer link_cleanup([symlink_path] {
+    std::error_code ec;
+    std::filesystem::remove(symlink_path, ec);
+  });
+
+  expect_throws_with(symlink_path, "must be a regular file");
+}
+
+// /dev/null is a character device: open() succeeds without follow, but
+// fstat() reports S_ISCHR, so the explicit S_ISREG check on the fd rejects
+// it. This exercises the post-open inode check that the stat-then-open
+// implementation also had but at a different layer.
+TEST(BootstrapManifest, RejectsCharacterDeviceAsManifest)
+{
+  expect_throws_with("/dev/null", "must be a regular file");
+}
+
 TEST(BootstrapManifest, RejectsSymlink)
 {
   ManifestBuilder builder;
