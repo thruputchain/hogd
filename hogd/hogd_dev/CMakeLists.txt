@@ -83,6 +83,29 @@ gtest_discover_tests(
 )
 
 add_executable(
+  bootstrap_manifest_test
+  bootstrap_manifest_test.cc
+)
+target_include_directories(
+  bootstrap_manifest_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  bootstrap_manifest_test
+  contract_loader
+  crypto
+  hogd_dev
+  GTest::gtest
+)
+add_dependencies(
+  bootstrap_manifest_test
+  all_wasm_contracts
+  all_wasm_headers
+)
+gtest_discover_tests(bootstrap_manifest_test)
+
+add_executable(
   hogd_dev_fresh_launch_test
   hogd_dev_fresh_launch_test.cc
 )
