@@ -18,7 +18,7 @@
 namespace hogd {
 
 // Uses SipHash24 with a random key (generated at construction) to defend
-// against adversarial hash collision attacks on consumed_set_balance_.
+// against adversarial hash collision attacks on entry_tracking_.
 struct QueueEntryHasher {
   mutable SipHash24 hasher;
 
@@ -95,18 +95,24 @@ private:
   // in commit_change.
   ssize_t committed_element_count_delta_{0};
 
-  // Tracks the balance between inserted and consumed current-block entries
-  // across all committed TXs. Incremented for each inserted entry, decremented
-  // for each consumed entry in current_block_consumed. At block close, any
-  // entry with a negative count was consumed but never inserted — indicating
-  // a malicious proposer.
-  std::unordered_map<QueueEntry, int64_t, QueueEntryHasher>
-      consumed_set_balance_;
+  struct EntryTracking {
+    uint32_t insert_count = 0;
+    uint32_t consume_count = 0;
+    uint32_t observe_count = 0;
+  };
+
+  // Tracks per-entry insert, consume, and observe counts across all committed
+  // TXs in the current block. insert_count and consume_count are summed across
+  // TXs; observe_count is the max across any single TX (different TXs observe
+  // the same concurrent pool). At block close, every entry must have
+  // insert_count >= consume_count and insert_count >= observe_count.
+  std::unordered_map<QueueEntry, EntryTracking, QueueEntryHasher>
+      entry_tracking_;
 
   // Returns true if any consumed current-block entry was not matched by an
-  // insert across all committed TXs. Called by stage_committed_changes()
-  // at block close time to detect malicious proposer fabrication.
-  bool has_unmatched_consumes() const;
+  // insert, or any observed entry was never inserted. Called by
+  // stage_committed_changes() at block close time.
+  bool has_unmatched_entries() const;
 
   mutable std::mutex mtx_;
 };

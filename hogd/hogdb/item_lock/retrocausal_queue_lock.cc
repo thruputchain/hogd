@@ -376,9 +376,9 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     // try_atomic_change_lock already accounts for the worst case where a
     // concurrent consume empties the queue before the inserter commits.
     //
-    // The real data-integrity invariant is the consumed_set check in
-    // write_committed_change, which verifies at end-of-block that all
-    // consumed entries were matched by inserts.
+    // The real data-integrity invariant is the entry_tracking_ check in
+    // stage_committed_changes, which verifies at end-of-block that all
+    // consumed and observed entries were matched by inserts.
     live_entries = std::max(live_entries, int64_t{0});
 
     return ctx.cost_model->get_retrocausal_queue_cost(
@@ -403,14 +403,22 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     reserved_entry_count_.fetch_sub(excess_reserved, std::memory_order_relaxed);
   }
 
-  // Track accounting while entries are still readable.
+  // Track per-entry accounting while entries are still readable.
   for (auto const &entry : delta.insert.added_entries) {
-    ++consumed_set_balance_[entry];
+    ++entry_tracking_[entry].insert_count;
   }
   if (has_consume) {
     for (auto const &entry : delta.consume->current_block_consumed) {
-      --consumed_set_balance_[entry];
+      ++entry_tracking_[entry].consume_count;
     }
+  }
+  // TODO(geoff) fix — O(n^2) but bounded by kRetrocausalQueueBlockEntriesMaxLen.
+  for (auto const &entry : delta.observed_concurrent_entries) {
+    auto count = static_cast<uint32_t>(
+        std::count(delta.observed_concurrent_entries.begin(),
+                   delta.observed_concurrent_entries.end(), entry));
+    auto &t = entry_tracking_[entry];
+    t.observe_count = std::max(t.observe_count, count);
   }
 
   // Move inserts into lock-owned state.
@@ -440,10 +448,13 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 }
 
 bool
-RetrocausalQueueLock::has_unmatched_consumes() const
+RetrocausalQueueLock::has_unmatched_entries() const
 {
-  return std::ranges::any_of(consumed_set_balance_,
-                             [](auto const &kv) { return kv.second < 0; });
+  return std::ranges::any_of(entry_tracking_, [](auto const &kv) {
+    auto const &t = kv.second;
+    return t.consume_count > t.insert_count ||
+           t.observe_count > t.insert_count;
+  });
 }
 
 HogDBStatus<void>
@@ -452,12 +463,12 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
 {
   CHECK(ctx.dao != nullptr);
 
-  // The consumed_set_balance_ was maintained incrementally in commit_change().
-  // Every consumed entry must have a matching insert (non-negative balance).
-  // A negative balance means a consumed entry was never inserted — indicating
-  // a malicious proposer. Return an error before any DAO mutation so the block
+  // The entry_tracking_ was maintained incrementally in commit_change().
+  // Every consumed entry must have a matching insert, and every observed
+  // entry must have been inserted at least once. A violation indicates a
+  // malicious proposer. Return an error before any DAO mutation so the block
   // can be safely rejected.
-  if (has_unmatched_consumes()) {
+  if (has_unmatched_entries()) {
     return HogDBError{HogDBCode::kInvalidExecutorBehavior};
   }
 
@@ -496,7 +507,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
         remaining_entries.push_back(entry);
       }
     }
-    // consumed_set was already validated by has_unmatched_consumes() in
+    // consumed_set was already validated by has_unmatched_entries() in
     // stage_committed_changes(). This CHECK guards against logic errors
     // in the filtering — it should never fire.
     CHECK(consumed_set.empty());
