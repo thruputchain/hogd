@@ -1,7 +1,5 @@
-use wasmi::core::ValType;
 use wasmi::{
-    Caller, CompilationMode, Config, Engine, Error, ExternType, Linker, Module,
-    StackLimits,
+    Caller, CompilationMode, Config, Engine, Error, Linker, Module, StackLimits,
 };
 
 use core::ffi::c_void;
@@ -10,7 +8,6 @@ use core::slice;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::wasmi_debug_log as debug_log;
 use crate::wasmi_error::TrampolineError;
-use crate::wasmi_runtime::check_memory_limit;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
@@ -78,68 +75,6 @@ impl WasmiGlobalContext {
     pub fn entries(&self) -> &Vec<LinkEntry> {
         &self.entries
     }
-}
-
-fn validate_imports(module: &Module, entries: &[LinkEntry]) -> bool {
-    let manifest: std::collections::HashMap<(&str, &str), u8> = entries
-        .iter()
-        .map(|e| ((e.module(), e.function()), e.nargs()))
-        .collect();
-
-    for import in module.imports() {
-        let key = (import.module(), import.name());
-        let expected_nargs = match manifest.get(&key) {
-            Some(n) => *n as usize,
-            None => {
-                eprintln!(
-                    "wasmi: rejecting contract — unknown host import {}::{} (likely SDK/runtime ABI mismatch)",
-                    import.module(),
-                    import.name()
-                );
-                return false;
-            }
-        };
-        let func_ty = match import.ty() {
-            ExternType::Func(f) => f,
-            other => {
-                eprintln!(
-                    "wasmi: rejecting contract — import {}::{} declared as non-function: {other:?}",
-                    import.module(),
-                    import.name()
-                );
-                return false;
-            }
-        };
-        let params = func_ty.params();
-        let results = func_ty.results();
-        if params.len() != expected_nargs {
-            eprintln!(
-                "wasmi: rejecting contract — import {}::{} arity mismatch: contract declares {} params, host registers {} (likely SDK/runtime ABI mismatch)",
-                import.module(),
-                import.name(),
-                params.len(),
-                expected_nargs
-            );
-            return false;
-        }
-        if !params.iter().all(|p| *p == ValType::I64) {
-            eprintln!(
-                "wasmi: rejecting contract — import {}::{} param-type mismatch: contract types {params:?}, host requires all-i64",
-                import.module(),
-                import.name()
-            );
-            return false;
-        }
-        if results.len() != 1 || results[0] != ValType::I32 {
-            eprintln!(
-                "wasmi: rejecting contract — import {}::{} result-type mismatch: contract results {results:?}, host requires single i32",
-                import.module(),
-                import.name()
-            );
-            return false;
-        }
-    }
-    true
 }
 
 pub struct WasmiContext {
@@ -391,63 +326,16 @@ impl WasmiContext {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
-        let config = groundhog_wasm_meter::Config {
-            max_imported_functions: 1,
-            reject_floats: true,
-            ..groundhog_wasm_meter::Config::default()
-        };
-        let module_info =
-            match groundhog_wasm_meter::verify(contract_data, &config) {
-                Ok(info) => info,
-                Err(e) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("Contract verification failed: wasm-meter: {e}");
-                    return match e {
-                    groundhog_wasm_meter::Error::InternalResourceExhausted(
-                        _,
-                    ) => InvokeErrorCode::Unrecoverable,
-                    _ => InvokeErrorCode::Deterministic,
-                };
-                }
-            };
-        if module_info.memories.len() != 1 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: expected 1 memory, found {}",
-                module_info.memories.len()
-            );
-            return InvokeErrorCode::Deterministic;
-        }
-        if module_info.memories[0].initial_pages > 1 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: initial memory {} pages exceeds limit of 1",
-                module_info.memories[0].initial_pages
-            );
-            return InvokeErrorCode::Deterministic;
-        }
         let engine = Self::new_engine();
-        let module = match Module::new(&engine, contract_data) {
-            Ok(m) => m,
-            Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Contract verification failed: {}", e);
-                return InvokeErrorCode::Deterministic;
-            }
-        };
-        if !check_memory_limit(&module) {
+        if let Err(_e) = Module::validate(&engine, contract_data) {
             #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: memory limit check failed"
-            );
+            eprintln!("Contract verification failed: {}", _e);
             return InvokeErrorCode::Deterministic;
         }
-        if !validate_imports(&module, self.global_context.entries()) {
-            #[cfg(debug_assertions)]
-            eprintln!("Contract verification failed: import validation failed");
-            return InvokeErrorCode::Deterministic;
-        }
-        InvokeErrorCode::None
+        common::verify_contract_meter(
+            contract_data,
+            self.global_context.entries(),
+        )
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);

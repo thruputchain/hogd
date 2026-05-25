@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 hogexec-internal = { workspace = true }
+groundhog-wasm-meter = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]
