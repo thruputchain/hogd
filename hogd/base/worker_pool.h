@@ -99,37 +99,37 @@ public:
     std::promise<Ret> promise;
     std::future<Ret> future = promise.get_future();
 
-    std::scoped_lock g(lock_);
-    pending_jobs_.fetch_add(1, std::memory_order_relaxed);
-    jobs_.emplace(
-        [p = std::move(promise), fn = std::forward<Func>(func)] mutable {
-          // handle void return values
-          if constexpr (std::is_void_v<Ret>) {
-            try {
-              fn();
-            } catch (...) {
-              warn("exception in worker_pool::submit(); rethrowing");
-              p.set_exception(std::current_exception());
-              return;
+    bool should_notify;
+    {
+      std::scoped_lock g(lock_);
+      pending_jobs_.fetch_add(1, std::memory_order_relaxed);
+      jobs_.emplace(
+          [p = std::move(promise), fn = std::forward<Func>(func)] mutable {
+            if constexpr (std::is_void_v<Ret>) {
+              try {
+                fn();
+              } catch (...) {
+                warn("exception in worker_pool::submit(); rethrowing");
+                p.set_exception(std::current_exception());
+                return;
+              }
+              p.set_value();
+            } else {
+              Ret ret;
+              try {
+                ret = fn();
+              } catch (...) {
+                warn("exception in worker_pool::submit(); rethrowing");
+                p.set_exception(std::current_exception());
+                return;
+              }
+              p.set_value(ret);
             }
-            p.set_value();
-          }
-          // otherwise handle the general return value case
-          else {
-            Ret ret;
-            try {
-              ret = fn();
-            } catch (...) {
-              warn("exception in worker_pool::submit(); rethrowing");
-              p.set_exception(std::current_exception());
-              return;
-            }
-            p.set_value(ret);
-          }
-        });
+          });
+      should_notify = active_workers_ < target_workers_;
+    }
 
-    // notify workers of the new job and return.
-    if (active_workers_ < target_workers_)
+    if (should_notify)
       cv_.notify_one();
     assert(future.valid());
     return future;
@@ -141,10 +141,14 @@ public:
   template<typename Func> requires std::is_invocable_r_v<void, Func>
   void submit_detached(Func &&func)
   {
-    std::scoped_lock g(lock_);
-    pending_jobs_.fetch_add(1, std::memory_order_relaxed);
-    jobs_.emplace(std::forward<Func>(func));
-    if (active_workers_ < target_workers_)
+    bool should_notify;
+    {
+      std::scoped_lock g(lock_);
+      pending_jobs_.fetch_add(1, std::memory_order_relaxed);
+      jobs_.emplace(std::forward<Func>(func));
+      should_notify = active_workers_ < target_workers_;
+    }
+    if (should_notify)
       cv_.notify_one();
   }
 
