@@ -137,7 +137,13 @@ template<> struct FFIHelperType<generated::AuthClaim> {
       };
       return ffi_auth_claim;
     case AuthClaimType::kPubkeySignature:
-      panic("Unimplemented auth claim type: {}", cpp_auth_claim.claim_type());
+      ffi_auth_claim.k_pubkey_signature = {
+          .tag = generated::AuthClaim::AuthClaim_kPubkeySignature,
+          .pubkey_preimage =
+              FFIHelperType<generated::PubkeyAccountPreimage>::to_ffi(
+                  cpp_auth_claim.pubkey_preimage()),
+      };
+      return ffi_auth_claim;
     }
     panic("Unknown auth claim type: {}", cpp_auth_claim.claim_type());
   }
