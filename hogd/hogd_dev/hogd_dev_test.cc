@@ -72,6 +72,7 @@ namespace hogd {
 namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
+constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
@@ -90,6 +91,24 @@ startup_timeout()
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
     throw std::runtime_error("invalid HOGD_DEV_STARTUP_TIMEOUT_SECS value");
+  }
+  return std::chrono::seconds(static_cast<int>(seconds));
+}
+
+std::chrono::seconds
+exit_timeout()
+{
+  const char *value = std::getenv("HOGD_DEV_EXIT_TIMEOUT_SECS");
+  if (value == nullptr || *value == '\0') {
+    return kDefaultExitTimeout;
+  }
+
+  errno = 0;
+  char *end = nullptr;
+  std::uint64_t seconds = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
+      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("invalid HOGD_DEV_EXIT_TIMEOUT_SECS value");
   }
   return std::chrono::seconds(static_cast<int>(seconds));
 }
@@ -805,8 +824,7 @@ TEST(HogdDev, HelpPrintsBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--help"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -829,8 +847,7 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   HogdDevProcess process =
       HogdDevProcess::start({"--scheduler-port", "not-a-port"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -851,8 +868,7 @@ TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--readiness", "stderr"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -878,8 +894,7 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
     HogdDevProcess process =
         HogdDevProcess::start({"--listen-host", std::string(host)});
 
-    std::optional<int> status =
-        process.wait_for_exit_for_test(std::chrono::seconds(10));
+    std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
     if (!status.has_value()) {
       FAIL() << "hogd-dev did not exit";
       return;
@@ -900,8 +915,11 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
 
 TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
+  // Disable LeakSanitizer so its print_suppressions output (which is
+  // non-JSON) does not pollute stderr when running under ASAN.
   HogdDevProcess process =
-      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"}});
+      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
+                                 {"LSAN_OPTIONS", "detect_leaks=0"}});
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
@@ -970,8 +988,7 @@ TEST(HogdDev, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
                                  {"HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START",
                                   "1"}});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit after injected constructor failure";
     return;
