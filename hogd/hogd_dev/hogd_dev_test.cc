@@ -1255,7 +1255,7 @@ TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
 TEST(HogdDev, BootstrapManifestRejectsOversizedFile)
 {
   std::filesystem::path manifest_path =
-      write_test_bootstrap_manifest(std::string(64 * 1024 + 1, ' '));
+      write_test_bootstrap_manifest(std::string((64 * 1024) + 1, ' '));
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
   HogdDevProcess process = HogdDevProcess::start({
