@@ -1969,9 +1969,60 @@ protected:
           return {};
         });
 
+    // Method 60: consume_delete_insert_direct(consume_val, insert_val)
+    // Uses direct syscalls only (no inner kInvoke), so it works on any address.
+    builder.add<SerializationFormat::kTxs>(
+        60,
+        [](NativeSyscallContext &ctx, uint32_t consume_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "consume failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (written_len != 4 || out != consume_val) {
+            ADD_FAILURE() << "consume: expected " << consume_val << " got "
+                          << out;
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "delete failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "insert failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
+  }
+
+  constexpr static ContractAddress kContractAddress2 =
+      make_contract_address(1);
+
+  static AddressAndKey get_queue_addrkey_for(ContractAddress const &addr)
+  {
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = kStorageKey;
+    return AddressAndKey{.address = addr, .key = key};
   }
 
   void SetUp() override
@@ -1981,6 +2032,8 @@ protected:
     write_contract(contract_0);
     write_deployment(kContractAddress, contract_0);
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
+    write_deployment(kContractAddress2, contract_0);
+    setup_grant_storage_token(kContractAddress2, 1'000'000'000);
     context_ = make_context();
 
     wait_flag_1_ = false;
@@ -3112,6 +3165,170 @@ TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
       << "New block 1 should exist (fresh RCQ after recreate)";
   EXPECT_FALSE(dao.read_retrocausal_queue_block(item_key, 2).has_value())
       << "No block 2 should exist (old ghost or new)";
+}
+
+TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
+{
+  auto make_tx = [](Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = kContractAddress,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  auto tx_insert = make_tx(0, uint32_t{42});
+  auto tx_delete_recreate = make_tx(28, uint32_t{42}, uint32_t{99});
+
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData delete_recreate_proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_insert, *context_);
+    handler.hack_dont_use_test_bypass_allow_reentrance();
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    insert_proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler(tx_delete_recreate, *context_);
+    handler.hack_dont_use_test_bypass_allow_reentrance();
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    delete_recreate_proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
+    ASSERT_EQ(
+        delete_recreate_proposal_data.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler = make_new_system_call_handler_validation(
+        tx_insert, *context_, insert_proposal_data);
+    handler.hack_dont_use_test_bypass_allow_reentrance();
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler = make_new_system_call_handler_validation(
+        tx_delete_recreate, *context_, delete_recreate_proposal_data);
+    handler.hack_dont_use_test_bypass_allow_reentrance();
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+}
+
+TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
+{
+  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = addr,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  auto tx_insert_a = make_tx(kContractAddress, 0, uint32_t{42});
+  auto tx_insert_b = make_tx(kContractAddress2, 0, uint32_t{42});
+  auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{99});
+  auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{99});
+
+  // Insert concurrent entries on both addresses.
+  for (auto const &tx : {tx_insert_a, tx_insert_b}) {
+    auto handler = make_new_system_call_handler(tx, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Proposal on address A.
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_a, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Validation on address B, reusing A's proposal data.
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  advance_block();
+
+  auto queue_a =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress));
+  auto queue_b =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2));
+  ASSERT_EQ(queue_a.has_value(), queue_b.has_value());
+  if (queue_a.has_value()) {
+    EXPECT_EQ(queue_a->type(), queue_b->type());
+    EXPECT_EQ(queue_a->metadata().live_entries,
+              queue_b->metadata().live_entries);
+  }
+}
+
+TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
+{
+  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = addr,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  // Insert two concurrent entries on each address.
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
+      auto tx = make_tx(addr, 0, v);
+      auto handler = make_new_system_call_handler(tx, *context_);
+      ASSERT_TRUE(handler.root_invoke().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    }
+  }
+
+  // Method 60: consume(42) -> delete -> insert(77).
+  // The second concurrent entry (99) is lost with the delete.
+  auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
+  auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
+
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_a, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  advance_block();
+
+  auto queue_a =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress));
+  auto queue_b =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2));
+  ASSERT_EQ(queue_a.has_value(), queue_b.has_value());
+  if (queue_a.has_value()) {
+    EXPECT_EQ(queue_a->type(), queue_b->type());
+    EXPECT_EQ(queue_a->metadata().live_entries,
+              queue_b->metadata().live_entries);
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

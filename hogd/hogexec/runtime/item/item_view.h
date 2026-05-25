@@ -89,7 +89,7 @@ public:
 
   static RetrocausalQueueItem
   make_fully_consumed_item(const SnapshotStorageItem &base_item,
-                           uint32_t retrocausally_consumed_count);
+                           x23::Vec<QueueEntry> consumed_entries);
 
   StorageDelta get_delta() const;
 

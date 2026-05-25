@@ -1570,6 +1570,66 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   EXPECT_TRUE(close_res.has_value());
 }
 
+TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = NativeContractTestFramework::make_storage_key("rcq");
+
+        QueueEntry entry = {0};
+        RuntimeMemoryLength written_len = 0;
+        auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::as_writable_bytes(std::span(entry)), written_len);
+        if (!r1.has_value() ||
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "consume failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+            key, std::to_underlying(StorageDeltaFlags::None));
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "delete failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        uint32_t new_val = 99;
+        auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            key, std::as_bytes(std::span(&new_val, 1)));
+        if (!r3.has_value() ||
+            r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "insert failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return {};
+      });
+
+  deploy_native(kNativeAddr);
+
+  NondeterministicProposalData ndet{};
+  ndet.nondeterministic_bits.push_back(0x01);
+  ndet.nondeterministic_bit_count = 1;
+  QueueEntry supplied_entry;
+  supplied_entry.push_back(0x42);
+  ndet.observed_queue_entry_sequence.push_back(supplied_entry);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result =
+      run_view(make_query(invocation), *setup.context, std::move(ndet));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)

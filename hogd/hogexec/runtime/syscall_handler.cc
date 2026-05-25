@@ -1205,10 +1205,25 @@ queue_entry_from_span(std::span<const std::byte> span)
   return new_entry;
 }
 
+x23::Vec<QueueEntry>
+get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
+                                  SnapshotStorageItem const &base_item,
+                                  AddressAndKey const &addrkey, uint32_t count)
+{
+  if (auto *vd = std::get_if<ValidationModeData>(&execution_mode_data)) {
+    return vd->get_observed_queue_entries(addrkey, count);
+  }
+  if (auto *vwd = std::get_if<ViewingModeData>(&execution_mode_data)) {
+    return vwd->get_observed_queue_entries(addrkey, count);
+  }
+  return base_item.get_retrocausally_consumed_entries(count);
+}
+
 SystemStatus<SyscallStatus<RetrocausalQueueItem *>>
 retrocausal_queue_item_from_view(ItemView *item_view,
                                  AddressAndKey const &addrkey,
-                                 StorageSnapshotCache &snapshot_cache)
+                                 StorageSnapshotCache &snapshot_cache,
+                                 ExecutionModeData &execution_mode_data)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     return queue_item;
@@ -1229,9 +1244,6 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     return item_view->get<RetrocausalQueueItem>();
   }
 
-  // Possible that the RCQ was deleted and then re-created in this transaction.
-  // In this case, we need to load the base item from the snapshot and create a
-  // new RCQItem.
   if (item_view->get<DeletedItem>()) {
 
     UnmodifiedItem unmodified_item;
@@ -1241,9 +1253,11 @@ retrocausal_queue_item_from_view(ItemView *item_view,
       return load_status.error();
     }
 
-    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(),
+    auto consumed = get_retrocausally_consumed_entries(
+        execution_mode_data, unmodified_item.base_item(), addrkey,
         item_view->get_retrocausally_consumed_count());
+    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(), std::move(consumed));
 
     auto set_status = item_view->set(new_item);
     if (!set_status.has_value()) {
@@ -1305,9 +1319,11 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
       return load_status.error();
     }
 
-    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(),
+    auto consumed = get_retrocausally_consumed_entries(
+        execution_mode_data, unmodified_item.base_item(), addrkey,
         item_view->get_retrocausally_consumed_count());
+    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(), std::move(consumed));
     return load_next_queue_entry(queue_item, execution_mode_data,
                                  /*advance_cursor=*/false);
   }
@@ -1327,8 +1343,8 @@ SystemCallHandler::retrocausal_queue_insert(
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  auto queue_item =
-      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
+  auto queue_item = retrocausal_queue_item_from_view(
+      item_view, addrkey, snapshot_cache_, execution_mode_data_);
   if (!queue_item.has_value()) {
     return queue_item.error();
   }
@@ -1355,8 +1371,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                             execution_mode_data_);
   }
 
-  auto queue_item =
-      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
+  auto queue_item = retrocausal_queue_item_from_view(
+      item_view, addrkey, snapshot_cache_, execution_mode_data_);
   if (!queue_item.has_value()) {
     return queue_item.error();
   }
