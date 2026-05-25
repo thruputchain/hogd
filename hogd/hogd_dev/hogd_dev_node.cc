@@ -82,10 +82,13 @@ validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
 
 HogdDevNode::HogdDevNode(std::string bind_host,
                          std::uint16_t requested_scheduler_port,
+                         std::string runtime_network_id,
                          BootstrapAccountConfig const &bootstrap_config)
-  : bind_host_(std::move(bind_host)), bootstrap_config_(bootstrap_config),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
-    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+  : bind_host_(std::move(bind_host)),
+    runtime_network_id_(std::move(runtime_network_id)),
+    bootstrap_config_(bootstrap_config), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   try {
     mempool_auth_server_->impl()->register_callback(

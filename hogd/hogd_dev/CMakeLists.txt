@@ -14,6 +14,7 @@ target_link_libraries(
   event
   exec_interface
   genesis
+  health
   hogd
   hogdb
   indexer

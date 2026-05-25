@@ -151,7 +151,7 @@ build_runtime_manifest_json(HogdDevNode const &node)
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hogd-dev-runtime");
-    w.field("networkId", "groundhog-local");
+    w.field("networkId", node.runtime_network_id());
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(genesis_hash));
     w.object_field("producer", [&](json::Writer &w) {
