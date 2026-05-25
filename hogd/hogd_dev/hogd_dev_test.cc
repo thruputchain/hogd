@@ -725,7 +725,8 @@ expect_clean_exit(HogdDevProcess &process)
 std::string
 bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
                         std::string_view initial_storage_tokens,
-                        std::string_view content_hash)
+                        std::string_view content_hash,
+                        bool include_protocol = false)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
@@ -735,7 +736,9 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
     w.field("kind", "groundhog-bootstrap");
     w.field("networkId", "groundhog-bench-local");
     w.field("profile", "local-dev");
-    w.field("protocol", version::kHogdProtocol());
+    if (include_protocol) {
+      w.field("protocol", version::kHogdProtocol());
+    }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hogd-dev-default");
       w.field("artifactHint", "./dev-wallet.wasm");
@@ -1168,7 +1171,7 @@ TEST(HogdDev, BootstrapManifestAdvertisesAccountMetadata)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, BootstrapManifestInputAdvertisesAccountMetadata)
+TEST(HogdDev, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = wallet_meta::load_wasm();
@@ -1239,6 +1242,26 @@ TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
       "/tmp/missing-hogd-dev-bootstrap-manifest.json",
       "--dev-accounts",
       "1",
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "--bootstrap-manifest conflicts with dev-account"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestConflictDetectedBeforeShorthandParsing)
+{
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      "/tmp/missing-hogd-dev-bootstrap-manifest.json",
+      "--dev-accounts",
+      "not-a-count",
   });
 
   std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
@@ -1345,10 +1368,9 @@ TEST(HogdDev, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
   EXPECT_FALSE(WIFEXITED(wait_status) &&
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(
-      process.read_remaining_stderr().find(
-          "Invalid bootstrap manifest initialStorageTokens"),
-      std::string::npos);
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "Invalid bootstrap manifest initialStorageTokens"),
+            std::string::npos);
 }
 
 TEST(HogdDev, RejectsDevAccountCountAboveLimit)

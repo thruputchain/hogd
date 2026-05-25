@@ -45,10 +45,10 @@ constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 std::string
 read_bootstrap_manifest_file(std::filesystem::path const &path)
 {
-  // Open with O_NOFOLLOW to close the TOCTOU window: if `path` resolves to a
-  // symlink, open() itself fails with ELOOP rather than transparently
-  // following. fstat() then operates on the same inode the fd pins, so a
-  // racing rename/replace cannot redirect us at a different file.
+  // Open with O_NOFOLLOW to close the final-component TOCTOU window: if the
+  // manifest path itself is a symlink, open() fails with ELOOP rather than
+  // transparently following it. fstat() then operates on the same inode the fd
+  // pins, so a racing rename/replace cannot redirect us at a different file.
   const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0) {
     const int err = errno;
@@ -67,7 +67,7 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   }
   UniqueFd fd_guard(fd);
 
-  struct stat st {};
+  struct stat st{};
   if (::fstat(fd, &st) < 0) {
     const int err = errno;
     throw std::runtime_error(
@@ -75,8 +75,9 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
                     std::strerror(err)));
   }
   if (!S_ISREG(st.st_mode)) {
-    throw std::runtime_error(std::format(
-        "bootstrap manifest must be a regular file: {}", path.string()));
+    throw std::runtime_error(
+        std::format("bootstrap manifest must be a regular file: {}",
+                    path.string()));
   }
 
   // Read up to kMaxBootstrapManifestBytes + 1 bytes; the +1 lets us detect
@@ -85,8 +86,7 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   std::string bytes(kMaxBootstrapManifestBytes + 1, '\0');
   std::size_t total = 0;
   while (total < bytes.size()) {
-    const ssize_t n =
-        ::read(fd, bytes.data() + total, bytes.size() - total);
+    const ssize_t n = ::read(fd, bytes.data() + total, bytes.size() - total);
     if (n < 0) {
       if (errno == EINTR) {
         continue;

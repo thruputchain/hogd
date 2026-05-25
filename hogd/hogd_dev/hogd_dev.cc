@@ -99,8 +99,7 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink,
 
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
-              ReadinessSink readiness_sink,
-              std::string_view runtime_network_id,
+              ReadinessSink readiness_sink, std::string_view runtime_network_id,
               BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
@@ -144,8 +143,7 @@ namespace {
 
 struct HogdDevOptions {
   std::string listen_host = "127.0.0.1";
-  std::string runtime_network_id =
-      std::string(hogd::kDefaultRuntimeNetworkId);
+  std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   hogd::BootstrapAccountConfig bootstrap_config;
@@ -202,14 +200,8 @@ usage(char *argv[])
 std::uint16_t
 parse_port(const std::string &value)
 {
-  std::size_t pos = 0;
-  std::uint64_t port = 0;
-  try {
-    port = std::stoul(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  if (pos != value.size() || port > 65535) {
+  const std::uint64_t port = hogd::parse_u64(value, "port");
+  if (port > 65535) {
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
   return static_cast<std::uint16_t>(port);
@@ -218,15 +210,8 @@ parse_port(const std::string &value)
 std::uint32_t
 parse_u32(const std::string &value, std::string_view name)
 {
-  std::size_t pos = 0;
-  std::uint64_t parsed = 0;
-  try {
-    parsed = std::stoull(value, &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  if (pos != value.size() ||
-      parsed > std::numeric_limits<std::uint32_t>::max()) {
+  const std::uint64_t parsed = hogd::parse_u64(value, name);
+  if (parsed > std::numeric_limits<std::uint32_t>::max()) {
     throw std::runtime_error(std::format("Invalid {}: {}", name, value));
   }
   return static_cast<std::uint32_t>(parsed);
@@ -263,6 +248,9 @@ parse_args(int argc, char *argv[])
   HogdDevOptions options;
   OptionSources sources;
   std::optional<std::filesystem::path> bootstrap_manifest_path;
+  std::optional<std::string> dev_accounts_value;
+  std::optional<std::string> dev_account_seed_value;
+  std::optional<std::string> dev_account_tokens_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -301,23 +289,37 @@ parse_args(int argc, char *argv[])
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
       sources.dev_accounts = true;
-      options.bootstrap_config.count = parse_bootstrap_account_count(argv[++i]);
+      dev_accounts_value = argv[++i];
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
       sources.dev_account_seed = true;
-      options.bootstrap_config.seed = argv[++i];
+      dev_account_seed_value = argv[++i];
       continue;
     }
     if (arg == "--dev-account-tokens" && i + 1 < argc) {
       sources.dev_account_tokens = true;
-      options.bootstrap_config.storage_tokens =
-          hogd::parse_u64(argv[++i], "dev account tokens");
+      dev_account_tokens_value = argv[++i];
       continue;
     }
     usage(argv);
   }
   reject_manifest_shorthand_conflicts(sources);
+  if (dev_accounts_value.has_value()) {
+    options.bootstrap_config.count =
+        parse_bootstrap_account_count(*dev_accounts_value);
+  }
+  if (dev_account_seed_value.has_value()) {
+    if (dev_account_seed_value->empty()) {
+      throw std::runtime_error(
+          "Invalid dev account seed: seed must not be empty");
+    }
+    options.bootstrap_config.seed = std::move(*dev_account_seed_value);
+  }
+  if (dev_account_tokens_value.has_value()) {
+    options.bootstrap_config.storage_tokens =
+        hogd::parse_u64(*dev_account_tokens_value, "dev account tokens");
+  }
   if (bootstrap_manifest_path.has_value()) {
     hogd::BootstrapManifestConfig manifest_config =
         hogd::load_bootstrap_manifest(*bootstrap_manifest_path);

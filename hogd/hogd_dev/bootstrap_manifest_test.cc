@@ -492,6 +492,19 @@ TEST(BootstrapManifest, RejectsOversizedManifest)
   expect_throws_with(path, "exceeds");
 }
 
+TEST(BootstrapManifest, AcceptsManifestAtExactSizeLimit)
+{
+  ManifestBuilder builder;
+  std::string manifest = builder.build();
+  ASSERT_LT(manifest.size(), 64UL * 1024UL);
+  manifest.resize(64UL * 1024UL, ' ');
+
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(manifest, cleanup);
+  EXPECT_NO_THROW((void)load_bootstrap_manifest(path));
+}
+
 // A dangling symlink (target does not exist) is a regression test for the
 // O_NOFOLLOW switch: under the previous stat-then-open implementation,
 // symlink_status() would succeed on the link itself and the failure mode

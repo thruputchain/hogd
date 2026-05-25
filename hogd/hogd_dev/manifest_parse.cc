@@ -1,7 +1,7 @@
 #include "hogd/hogd_dev/manifest_parse.h"
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <format>
 #include <limits>
@@ -14,6 +14,8 @@ namespace hogd {
 std::uint64_t
 parse_u64(std::string_view value, std::string_view name)
 {
+  // JSON integers are represented as int64_t in hogd::json, so decimal strings
+  // use the same upper bound for round-trip compatibility.
   if (value.empty() || value.front() == '+' || value.front() == '-' ||
       static_cast<unsigned char>(value.front()) <= ' ') {
     throw std::runtime_error(std::format("Invalid {}: {}", name, value));
