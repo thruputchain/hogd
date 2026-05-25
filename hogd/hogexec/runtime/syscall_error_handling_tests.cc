@@ -15,6 +15,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -437,6 +438,25 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   // The gas consumed must be 0
   ASSERT_EQ(gas.get(), 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+TEST_F(SyscallErrorHandlingTest,
+       WriteAddressRequiredWeightReadOnlyReturnsInvalidSyscallInput)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  handler.start_frame(kPlaceholderInvocation,
+                      std::to_underlying(InvokeFlag::ReadOnly),
+                      std::span<uint32_t>{});
+
+  NativeSyscallContext ctx(handler, 10000);
+  auto status =
+      ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
+  ASSERT_TRUE(status.has_value());
+  ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
