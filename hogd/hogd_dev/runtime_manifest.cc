@@ -35,6 +35,9 @@ namespace hogd {
 
 namespace {
 
+static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
+              "ordinary literal encoding must be ASCII-compatible");
+
 constexpr std::string_view kManifestFileName = "runtime-manifest.json";
 constexpr std::string_view kManifestTmpSuffix = ".tmp";
 constexpr std::string_view kStorageCostModelHashTag =
