@@ -99,7 +99,8 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink,
 
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
-              ReadinessSink readiness_sink, std::string runtime_network_id,
+              ReadinessSink readiness_sink,
+              std::string_view runtime_network_id,
               BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
@@ -348,7 +349,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   try {
     return hogd::hogd_dev_init(std::move(options.listen_host),
                                options.scheduler_port, options.readiness_sink,
-                               std::move(options.runtime_network_id),
+                               options.runtime_network_id,
                                options.bootstrap_config);
   } catch (const std::exception &error) {
     hogd::error("hogd-dev failed before readiness: {}", error.what());
