@@ -35,6 +35,7 @@
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -1583,26 +1584,20 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
 
-  // Method 0 (read-only child at kChildAddr): does nothing, token is dropped.
   fns.emplace(0,
               [](NativeSyscallContext & /*ctx*/) noexcept
                   -> InvokeStatus<void> { return {}; });
 
-  // Method 2 (consumer at kConsumerAddr): should never be reached.
   fns.emplace(
       2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         ADD_FAILURE() << "Consumer should never be invoked";
         return {};
       });
 
-  // Method 1 (outer at kOuterAddr): forwards the token to read-only child,
-  // then tries to reuse it.
   fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    // Token id 0 is the first (and only) forwarded token from the query.
     std::array<uint32_t, 1> forwarded{0};
     RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
 
-    // Forward token to read-only child.
     auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
         kChildAddr, 0, UINT64_MAX, Calldata{},
         std::to_underlying(InvokeFlag::ReadOnly),
@@ -1613,7 +1608,6 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
     }
     EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-    // Token is now gone. Attempting to forward it again must fail.
     auto reuse_res =
         ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr, 2, UINT64_MAX,
                                         Calldata{}, 0,
@@ -1654,6 +1648,66 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = NativeContractTestFramework::make_storage_key("rcq");
+
+        QueueEntry entry = {0};
+        RuntimeMemoryLength written_len = 0;
+        auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::as_writable_bytes(std::span(entry)), written_len);
+        if (!r1.has_value() ||
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "consume failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+            key, std::to_underlying(StorageDeltaFlags::None));
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "delete failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        uint32_t new_val = 99;
+        auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            key, std::as_bytes(std::span(&new_val, 1)));
+        if (!r3.has_value() ||
+            r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "insert failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return {};
+      });
+
+  deploy_native(kNativeAddr);
+
+  NondeterministicProposalData ndet{};
+  ndet.nondeterministic_bits.push_back(0x01);
+  ndet.nondeterministic_bit_count = 1;
+  QueueEntry supplied_entry;
+  supplied_entry.push_back(0x42);
+  ndet.observed_queue_entry_sequence.push_back(supplied_entry);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result =
+      run_view(make_query(invocation), *setup.context, std::move(ndet));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

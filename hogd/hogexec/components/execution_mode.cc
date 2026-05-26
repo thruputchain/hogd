@@ -4,10 +4,12 @@
 #include <optional>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "retrocausal_queue.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -94,6 +96,19 @@ ValidationModeData::consume_queue_entry_observation(
   next_queue_entry_index_++;
   entries.push_back(out);
   return out;
+}
+
+x23::Vec<QueueEntry>
+ValidationModeData::get_observed_queue_entries(AddressAndKey const &addrkey,
+                                               uint32_t count) const
+{
+  if (count == 0) {
+    return {};
+  }
+  auto it = queue_entry_observations_.find(addrkey);
+  CHECK(it != queue_entry_observations_.end());
+  CHECK_LE(count, static_cast<uint32_t>(it->second.size()));
+  return x23::Vec<QueueEntry>(it->second.begin(), it->second.begin() + count);
 }
 
 bool

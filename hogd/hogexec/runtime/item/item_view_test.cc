@@ -616,7 +616,8 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
   check_eq(res.value().value(), 99);
 
   auto fully_consumed = RetrocausalQueueItem::make_fully_consumed_item(
-      *item, rcq_item.get_retrocausally_consumed_count());
+      *item, item->get_retrocausally_consumed_entries(
+                 rcq_item.get_retrocausally_consumed_count()));
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);
