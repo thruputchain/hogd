@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -11,12 +12,13 @@
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "built_contracts/view_gateway_test.h"
-#include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "invoke_flag.hh"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
