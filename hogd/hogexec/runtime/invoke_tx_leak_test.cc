@@ -40,8 +40,7 @@ namespace {
 
 class NoopWasmiContext : public RuntimeContext {
 public:
-  InvokeErrorCode
-  verify_contract(Contract const & /*contract*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*contract*/) const override
   {
     return InvokeErrorCode::None;
   }
@@ -66,8 +65,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
       TestDB::kHogDB);
 
   Contract contract_to_deploy(ContractType::kWasmi);
-  contract_to_deploy.wasmi_contract().wasm.append_range(
-      std::string(8192, 'x'));
+  contract_to_deploy.wasmi_contract().wasm.append_range(std::string(8192, 'x'));
   const auto contract_hash = sha256(contract_to_deploy);
 
   constexpr static SHA256Hash kDeployNonce = []() {
@@ -79,21 +77,22 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   constexpr auto kDeployerAddr =
       NativeContractTestFramework::make_contract_address(1);
 
-  auto deployed_addr = SystemCallHandler::static_get_deploy_address(
-      kDeployerAddr, kDeployNonce, contract_hash);
+  auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(kDeployerAddr, kDeployNonce,
+                                                   contract_hash);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [contract_hash](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = ctx.handler().deploy_contract(kDeployNonce, contract_hash);
-        if (!r.has_value())
-          return r.error().to_invoke_error();
-        if (!r.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
-      });
+  fns.emplace(0,
+              [contract_hash](
+                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                auto r =
+                    ctx.handler().deploy_contract(kDeployNonce, contract_hash);
+                if (!r.has_value())
+                  return r.error().to_invoke_error();
+                if (!r.value().has_value())
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                return {};
+              });
 
   auto native = std::make_unique<NativeContract>(std::move(fns));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -105,8 +104,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kWasmi, {&wasmi_context, false}}});
 
-  auto deployer_contract =
-      NativeContractTestFramework::make_native_contract(0);
+  auto deployer_contract = NativeContractTestFramework::make_native_contract(0);
   fw.write_contract(deployer_contract);
   fw.write_deployment(kDeployerAddr, deployer_contract);
   fw.setup_grant_storage_token(kDeployerAddr, 1'000'000'000);
@@ -117,11 +115,10 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   {
     auto handler = fw.make_new_system_call_handler(
         Transaction{
-            .invocation =
-                Invocation{.invoked_address = kDeployerAddr,
-                           .entrypoint = entrypoint_from_method_id(0),
-                           .gas_limit = UINT64_MAX,
-                           .calldata = {}},
+            .invocation = Invocation{.invoked_address = kDeployerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
             .contracts_to_deploy = {contract_to_deploy},
         },
         context);
