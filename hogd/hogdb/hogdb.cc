@@ -146,6 +146,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the mempool server.
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
+  mempool_server.max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   const uint16_t actual_mempool_port =
       mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
