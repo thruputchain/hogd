@@ -3,14 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <mutex>
 #include <span>
-#include <unordered_set>
+#include <utility>
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/container/concurrent_map.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
@@ -125,28 +127,34 @@ reconcile_address_hog_age(HogDBDAO &db, const Address &address)
 HogDBStatus<void>
 reconcile_startup_hog_ages(HogDBDAO &db)
 {
-  std::unordered_set<Address> addresses;
-  // Careful: We are calling [get_each_parallel()] with a max width of 1, so
-  // this code is serial. If you change this to have multiple threads, then the
-  // body of the loop needs to be synchronized.
+  // [ConcurrentSet<T>] requires [T] to be an unsigned integral type, which
+  // [Address] is not. [ConcurrentMap<K, V>] places no constraints on [K], and
+  // its inserts are lock-free, so the scan below can run fully parallel: the
+  // dedup is handled by the map rather than relying on a serial callback.
+  // ([char] is an arbitrary placeholder value; we only use the keys.)
+  ConcurrentMap<Address, char> addresses;
   db.get_ramdb().get_each_parallel(
       [&addresses](std::span<const std::byte> key, uint8_t /*type*/,
                    std::span<const std::byte> /*value*/) {
         if (is_prefixed_address_key(key, Prefix::kBalance) ||
             is_prefixed_address_key(key, Prefix::kHogAge)) {
-          addresses.insert(address_from_prefixed_key(key));
+          addresses.insert_or_get(address_from_prefixed_key(key));
         }
-      },
-      1);
+      });
 
-  for (const Address &address : addresses) {
-    HogDBStatus<void> status = reconcile_address_hog_age(db, address);
-    if (!status.has_value()) {
-      return status.error();
-    }
-  }
+  // Now reconcile.
+  HogDBStatus<void> ret;
+  std::mutex lock;
+  addresses.for_each_parallel(
+      [&ret, &lock, &db](std::pair<const Address &, char &> entry) {
+        HogDBStatus<void> status = reconcile_address_hog_age(db, entry.first);
+        if (!status.has_value()) {
+          std::lock_guard<std::mutex> guard(lock);
+          ret = status.error();
+        }
+      });
 
-  return {};
+  return ret;
 }
 
 } // namespace hogd
