@@ -11,7 +11,6 @@
 
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -73,7 +72,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::uint16_t event_exec_port,
                                std::size_t nthreads)
   : db_proxy_(make_view_database_identifier(db_executor_address)),
-    event_server_proxy_(make_bind_host_port(event_host, event_exec_port)),
+    event_server_proxy_(x23::HostPort{event_host, event_exec_port}),
     worker_pool_(static_cast<int>(nthreads))
 {}
 
@@ -137,6 +136,35 @@ PerThreadARC<ViewGatewayRpc::ViewState> *
 ViewGatewayRpc::get_current_view_state()
 {
   std::scoped_lock g(view_state_mutex_);
+
+  if (current_view_block_id_ != 0 &&
+      refresh_flag_.exchange(false, std::memory_order_acquire)) {
+    auto res = db_proxy_.open_viewing_snapshot();
+    if (res.has_value()) {
+      CHECK(res.value().block_id != current_view_block_id_);
+
+      BlockID old_block_id = current_view_block_id_;
+      bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
+
+      auto &snapshot = res.value();
+      view_states_.try_emplace(snapshot.block_id, snapshot.block_id,
+                               snapshot.tip, db_proxy_);
+      current_view_block_id_ = snapshot.block_id;
+
+      if (can_gc) {
+        auto close_res = db_proxy_.close_viewing_snapshot(old_block_id);
+        if (!close_res.has_value()) {
+          warn("viewgateway: failed to close refreshed-out viewing snapshot {}",
+               old_block_id);
+        }
+        view_states_.erase(old_block_id);
+      }
+    }
+    else {
+      warn("viewgateway: failed to open refreshed viewing snapshot");
+    }
+  }
+
   if (current_view_block_id_ == 0) {
     if (shutdown_flag_.load(std::memory_order_relaxed)) {
       return nullptr;

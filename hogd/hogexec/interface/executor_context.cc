@@ -125,6 +125,24 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   co_return co_await awaitable;
 }
 
+// Stale-block execution during propose/validate is benign.
+//
+// The StorageSnapshotCache can mask HogDB stale-block detection: if
+// deployment metadata, contract code, or storage items are already cached,
+// later reads return the cached value without hitting HogDB and the
+// Abandon error code is never surfaced.  This is fine here because:
+//
+//  - A proposal that executes against a stale block produces a candidate
+//    that will never be committed (the coordinator commits at most one
+//    sibling, and the stale block's sibling already won).
+//  - Validation replays the same proposal data on the same block, so
+//    staleness is symmetric.
+//  - Stale proposal blocks are cleaned up lazily when the block is closed
+//    or the next block opens.
+//
+// The view gateway, by contrast, does care about staleness — it serves
+// public RPCs and must not return arbitrarily old data.  See
+// ViewGatewayRpc::request_refresh() for the view-side mitigation.
 ExecProposeResult
 ExecutorContext::run_propose_transaction(Transaction const &tx,
                                          TransactionID tx_id)

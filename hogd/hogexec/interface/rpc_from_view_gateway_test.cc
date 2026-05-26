@@ -2,16 +2,29 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <format>
+#include <limits>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
+#include "built_contracts/view_gateway_test.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "invoke_flag.hh"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 namespace {
@@ -140,6 +153,125 @@ TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
   EXPECT_EQ(normalized.forwarded_tokens.size(), 2U)
       << "forwarded_tokens must survive normalization (WAI: read-only "
          "simulation context)";
+}
+
+class ViewGatewayRefreshTest : public ::testing::Test {
+public:
+  using vgt_meta = ContractTraitMeta<view_gateway_test::ViewGatewayTest>;
+
+  static constexpr ContractAddress kAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  void SetUp() override
+  {
+    auto contract = vgt_meta::load_wasm();
+    framework_.write_contract(contract);
+    framework_.write_deployment(kAddr, contract);
+    framework_.setup_grant_storage_token(kAddr, 1'000'000'000);
+  }
+
+  static constexpr StorageKeyContractData kKey =
+      NativeContractTestFramework::make_storage_key("test_key");
+
+  void commit_bytestring(std::string_view value)
+  {
+    auto addrkey =
+        NativeContractTestFramework::make_contract_data_addrkey(kAddr,
+                                                                "test_key");
+    auto tx = framework_.make_new_per_tx_db_proxy(
+        std::numeric_limits<TransactionID>::max());
+    tx.add_delta(addrkey,
+                 NativeContractTestFramework::make_bytestring_delta(value),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto push = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(push.has_value());
+    ASSERT_TRUE(push.value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
+  }
+
+  static TransactionViewQuery make_read_query()
+  {
+    ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+    return TransactionViewQuery{
+        .invocation = client.make_invocation<"read_value">(UINT64_MAX, kKey),
+        .parent_address = {},
+        .auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData),
+        .forwarded_tokens = {},
+        .invoke_flags = {},
+    };
+  }
+
+  NativeContractTestFramework framework_{
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB};
+
+  x23::Defer<> force_commit_ = SystemCallHandler::force_commit_or_abort();
+};
+
+TEST_F(ViewGatewayRefreshTest, RequestRefreshReplacesStaleViewState)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  // First view warms the gateway's ViewState cache.
+  ViewGatewayResult r1 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r1.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r1.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  auto h1 = r1.payload().height;
+
+  // Update the storage value and advance.
+  commit_bytestring("new-value");
+  framework_.advance_block();
+
+  // Without refresh: the stale ViewState serves at the old height.
+  ViewGatewayResult r2 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r2.payload().height, h1);
+
+  // After request_refresh(): the ViewState is replaced — height advances.
+  gateway.request_refresh();
+  ViewGatewayResult r3 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r3.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r3.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_GT(r3.payload().height, h1);
+
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  ViewGatewayResult r1 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r1.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  auto h1 = r1.payload().height;
+
+  // Refresh without advancing the block — the tip hasn't changed.
+  gateway.request_refresh();
+  ViewGatewayResult r2 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r2.payload().height, h1);
+
+  // Do it again to confirm repeated no-op refreshes are safe.
+  gateway.request_refresh();
+  gateway.request_refresh();
+  ViewGatewayResult r3 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r3.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r3.payload().height, h1);
+
+  gateway.shut_down();
 }
 
 } // namespace
