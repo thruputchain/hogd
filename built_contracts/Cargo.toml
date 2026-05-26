@@ -34,6 +34,7 @@ members = [
     "integration_test_contracts/syscall_parse_hardening_test",
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
+    "integration_test_contracts/view_gateway_test",
 ]
 
 [workspace.package]

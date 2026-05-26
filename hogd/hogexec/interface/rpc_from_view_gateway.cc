@@ -11,7 +11,6 @@
 
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -73,7 +72,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::uint16_t event_exec_port,
                                std::size_t nthreads)
   : db_proxy_(make_view_database_identifier(db_executor_address)),
-    event_server_proxy_(make_bind_host_port(event_host, event_exec_port)),
+    event_server_proxy_(x23::HostPort{event_host, event_exec_port}),
     worker_pool_(static_cast<int>(nthreads))
 {}
 
