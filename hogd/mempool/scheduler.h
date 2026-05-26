@@ -121,7 +121,7 @@ public:
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
-  void write_all_average_hog_ages_to_db();
+  x23::Async<void> write_all_average_hog_ages_to_db();
 
   struct ReadAverageHogAgesResult {
     std::unordered_set<ContractAddress, ByteArrayHasher> found;
@@ -255,8 +255,6 @@ private:
                                          HogAge &hog_age,
                                          uint128_t &hogs_spent_by_this_account,
                                          BlockHeight block_height);
-
-  x23::Detached write_all_average_hog_ages_helper();
 
   std::pair<AccountState *, std::unique_lock<std::mutex>>
   get_account_state(const ContractAddress &address);

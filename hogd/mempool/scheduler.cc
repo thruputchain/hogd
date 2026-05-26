@@ -102,15 +102,8 @@ try_move_hogs_to_already_scheduled_group(HogAge &hog_ages, uint128_t num_hogs,
 
 } // namespace
 
-void
+x23::Async<void>
 Scheduler::write_all_average_hog_ages_to_db()
-{
-  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-  write_all_average_hog_ages_helper();
-}
-
-x23::Detached
-Scheduler::write_all_average_hog_ages_helper()
 {
   co_await default_coropoll().pool_.bg();
 
@@ -132,7 +125,6 @@ Scheduler::write_all_average_hog_ages_helper()
   }
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
-  pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
   co_return;
 }
 
