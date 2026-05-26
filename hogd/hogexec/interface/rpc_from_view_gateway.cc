@@ -140,7 +140,9 @@ ViewGatewayRpc::get_current_view_state()
   if (current_view_block_id_ != 0 &&
       refresh_flag_.exchange(false, std::memory_order_acquire)) {
     auto res = db_proxy_.open_viewing_snapshot();
-    if (res.has_value() && res.value().block_id != current_view_block_id_) {
+    if (res.has_value()) {
+      CHECK(res.value().block_id != current_view_block_id_);
+
       BlockID old_block_id = current_view_block_id_;
       bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
 
@@ -156,13 +158,6 @@ ViewGatewayRpc::get_current_view_state()
                old_block_id);
         }
         view_states_.erase(old_block_id);
-      }
-    }
-    else if (res.has_value()) {
-      auto close_res = db_proxy_.close_viewing_snapshot(res.value().block_id);
-      if (!close_res.has_value()) {
-        warn("viewgateway: failed to close same-block viewing snapshot {}",
-             res.value().block_id);
       }
     }
     else {
