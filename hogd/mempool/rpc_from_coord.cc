@@ -98,9 +98,15 @@ validation_outcome_str(SchedulerValidationOutcome outcome) -> const char *
 bool
 tx_succeeded(const ExecResult &r)
 {
-  return r != ExecResult::ExecResultTxDeterministicError &&
-         r != ExecResult::ExecResultOK &&
-         r != ExecResult::ExecResultTxRootFrameReverted;
+  return r == ExecResult::ExecResultTxDeterministicError ||
+         r == ExecResult::ExecResultOK ||
+         r == ExecResult::ExecResultTxRootFrameReverted;
+}
+
+bool
+tx_failed(const ExecResult &r)
+{
+  return !tx_succeeded(r);
 }
 
 } // namespace
@@ -1089,7 +1095,7 @@ MempoolCoordinatorRpc::validate_batch_chunk(
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
   // Validation succeeds only if every entry in the executor response is OK.
-  co_return !(std::ranges::any_of(res, tx_succeeded));
+  co_return !(std::ranges::any_of(res, tx_failed));
 }
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
