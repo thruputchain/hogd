@@ -758,6 +758,15 @@ public:
       const size_t child_threads = allocation.end - allocation.start;
       frontiers[i] =
           MerkleTrie::collect_hash_frontier(&trie->root_, child_threads);
+    }
+
+    size_t total_jobs = 0;
+    for (size_t i = 0; i < tries_.size(); i++) {
+      total_jobs += frontiers[i].size();
+    }
+    futures.reserve(total_jobs);
+
+    for (size_t i = 0; i < tries_.size(); i++) {
       for (Node *subtree_root : frontiers[i]) {
         futures.push_back(WorkerPool::get_default_pool().submit([subtree_root] {
           MerkleTrie::generate_all_hashes_serial(subtree_root);
