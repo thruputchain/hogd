@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <span>
 #include <utility>
 #include <variant>
 
@@ -56,14 +57,20 @@ make_nnint128_add(int128_xdr add)
 } // namespace
 
 std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
-ItemView::get_delta() const
+ItemView::get_delta(std::span<QueueEntry const> observed_entries) const
 {
-  return {std::visit(
-              [](auto const &v) -> std::optional<StorageDelta> {
-                return v.get_delta();
-              },
-              delta_args_),
-          flags_};
+  auto delta = std::visit(
+      [observed_entries](auto const &v) -> std::optional<StorageDelta> {
+        if constexpr (requires { v.get_delta(observed_entries); }) {
+          return v.get_delta(observed_entries);
+        }
+        else {
+          return v.get_delta();
+        }
+      },
+      delta_args_);
+
+  return {std::move(delta), flags_};
 }
 
 StorageDelta
@@ -325,7 +332,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 }
 
 StorageDelta
-RetrocausalQueueItem::get_delta() const
+RetrocausalQueueItem::get_delta(
+    std::span<QueueEntry const> observed_entries) const
 {
   StorageDelta delta =
       StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
@@ -341,6 +349,11 @@ RetrocausalQueueItem::get_delta() const
   delta.retrocausal_queue().insert.added_entries.append(
       queue_delta_.insert.added_entries.begin() + self_consumed_index_,
       queue_delta_.insert.added_entries.end());
+
+  if (!observed_entries.empty()) {
+    delta.retrocausal_queue().observed_concurrent_entries = {
+        observed_entries.begin(), observed_entries.end()};
+  }
 
   // In debug builds, we shuffle the order of entries in the concurrent
   // consumes, as these are not supposed to affect the result of the db

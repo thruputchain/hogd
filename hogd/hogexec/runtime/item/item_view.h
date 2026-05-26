@@ -4,6 +4,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -91,7 +92,8 @@ public:
   make_fully_consumed_item(const SnapshotStorageItem &base_item,
                            x23::Vec<QueueEntry> consumed_entries);
 
-  StorageDelta get_delta() const;
+  StorageDelta
+  get_delta(std::span<QueueEntry const> observed_entries = {}) const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
 
@@ -207,8 +209,15 @@ public:
   UnmodifiedItem(UnmodifiedItem const &other) = default;
   UnmodifiedItem &operator=(UnmodifiedItem const &other) = default;
 
-  constexpr static std::optional<StorageDelta> get_delta()
+  static std::optional<StorageDelta>
+  get_delta(std::span<QueueEntry const> observed_entries = {})
   {
+    if (!observed_entries.empty()) {
+      StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+      delta.retrocausal_queue().observed_concurrent_entries = {
+          observed_entries.begin(), observed_entries.end()};
+      return delta;
+    }
     return std::nullopt;
   }
 
@@ -303,7 +312,8 @@ public:
     return {};
   }
 
-  std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet> get_delta() const;
+  std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
+  get_delta(std::span<QueueEntry const> observed_entries = {}) const;
 
   void sync_retrocausally_consumed(RetrocausalQueueItem const &item)
   {

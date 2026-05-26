@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -137,8 +138,9 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
-  SystemStatus<bool>
-  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+  SystemStatus<bool> try_acquire_frame_locks(
+      PerTransactionDatabaseProxy &db_proxy,
+      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
   // Validation-mode counterpart for a successful TryInvoke. Bumps the
   // intra-transaction depth counter without pushing a HogDB subtransaction

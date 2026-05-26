@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -22,6 +23,7 @@
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -160,7 +162,9 @@ InvocationFrame::note_validation_try_invoke_success()
 }
 
 SystemStatus<bool>
-InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
+InvocationFrame::try_acquire_frame_locks(
+    PerTransactionDatabaseProxy &db_proxy,
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
 {
   // Pushes the accumulated delta batch as a HogDB subtransaction. Returns
   // true on a successful lock acquisition, false on contention failure.
@@ -173,12 +177,35 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   // depth-cap arm before this is called for a child TryInvoke frame. The child
   // cap reserves one slot for the root commit's subtransaction push.
 
-  db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
+  db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
+                   observations.size());
 
   for (auto const &[addrkey, item_view] : modified_items_) {
-    auto [delta, flags] = item_view.get_delta();
+    bool has_observations = false;
+    std::span<QueueEntry const> uncovered_obs;
+    if (auto it = observations.find(addrkey); it != observations.end()) {
+      has_observations = !it->second.empty();
+      auto consumed = item_view.get_retrocausally_consumed_count();
+      CHECK_LE(consumed, it->second.size());
+      uncovered_obs = std::span<QueueEntry const>(it->second).subspan(consumed);
+    }
+    auto [delta, flags] = item_view.get_delta(uncovered_obs);
+    if (has_observations && delta &&
+        delta->type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
+      return {false};
+    }
     if (delta) {
       db_proxy.add_delta(addrkey, std::move(*delta), flags);
+    }
+  }
+
+  for (auto const &[addrkey, entries] : observations) {
+    if (!entries.empty() && !modified_items_.contains(addrkey)) {
+      StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+      delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
+                                                               entries.end()};
+      db_proxy.add_delta(addrkey, std::move(delta),
+                         std::to_underlying(StorageDeltaFlags::None));
     }
   }
 
@@ -281,7 +308,9 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         acq_success = false;
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-        auto acq_res = frame_stack_.back().try_acquire_frame_locks(db_proxy_);
+        static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
+        auto acq_res =
+            frame_stack_.back().try_acquire_frame_locks(db_proxy_, no_obs);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           return acq_res.error();
@@ -305,6 +334,23 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         }
         acq_success = res.value().get();
         if (acq_success) {
+          auto const &obs = std::visit(
+              [](auto const &mode)
+                  -> std::map<AddressAndKey, std::vector<QueueEntry>> const & {
+                return mode.observations_to_validate();
+              },
+              execution_mode_data);
+          for (auto const &[addrkey, entries] : obs) {
+            if (entries.empty()) {
+              continue;
+            }
+            auto *view = frame_stack_.back().get_item_view(addrkey);
+            if (view && !view->get<RetrocausalQueueItem>() &&
+                !view->get<UnmodifiedItem>()) {
+              frame_stack_.pop_back();
+              return SystemError{SystemErrorCode::ValidationFailure};
+            }
+          }
           frame_stack_.back().note_validation_try_invoke_success();
         }
       }

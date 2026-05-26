@@ -72,6 +72,16 @@ public:
     return proposal_data_;
   }
 
+  // In proposal mode, observations don't need validation — the proposer
+  // built the block from genuine concurrent data. Return empty so
+  // try_acquire_frame_locks() emits no observation deltas.
+  static std::map<AddressAndKey, std::vector<QueueEntry>> const &
+  observations_to_validate()
+  {
+    static const std::map<AddressAndKey, std::vector<QueueEntry>> empty;
+    return empty;
+  }
+
 private:
   // Proposal data containing nondeterministic choices made during execution
   NondeterministicProposalData proposal_data_{};
@@ -118,6 +128,12 @@ public:
   NondeterministicProposalData const &proposal_data() const
   {
     return proposal_data_;
+  }
+
+  std::map<AddressAndKey, std::vector<QueueEntry>> const &
+  observations_to_validate() const
+  {
+    return queue_entry_observations_;
   }
 
 private:
@@ -183,6 +199,12 @@ public:
         partial_validation_data_.get_observed_queue_entries(addrkey, count);
     CHECK_EQ(entries.size(), count);
     return entries;
+  }
+
+  std::map<AddressAndKey, std::vector<QueueEntry>> const &
+  observations_to_validate() const
+  {
+    return partial_validation_data_.observations_to_validate();
   }
 
 private:
