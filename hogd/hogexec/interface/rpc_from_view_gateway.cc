@@ -137,6 +137,35 @@ PerThreadARC<ViewGatewayRpc::ViewState> *
 ViewGatewayRpc::get_current_view_state()
 {
   std::scoped_lock g(view_state_mutex_);
+
+  if (current_view_block_id_ != 0 &&
+      refresh_flag_.exchange(false, std::memory_order_acquire)) {
+    BlockID old_block_id = current_view_block_id_;
+    bool can_gc =
+        view_states_.at(old_block_id).initiate_shutdown();
+
+    auto res = db_proxy_.open_viewing_snapshot();
+    if (res.has_value()) {
+      auto &snapshot = res.value();
+      view_states_.try_emplace(snapshot.block_id, snapshot.block_id,
+                               snapshot.tip, db_proxy_);
+      current_view_block_id_ = snapshot.block_id;
+    }
+    else {
+      warn("viewgateway: failed to open refreshed viewing snapshot");
+      current_view_block_id_ = 0;
+    }
+
+    if (can_gc) {
+      auto close_res = db_proxy_.close_viewing_snapshot(old_block_id);
+      if (!close_res.has_value()) {
+        warn("viewgateway: failed to close refreshed-out viewing snapshot {}",
+             old_block_id);
+      }
+      view_states_.erase(old_block_id);
+    }
+  }
+
   if (current_view_block_id_ == 0) {
     if (shutdown_flag_.load(std::memory_order_relaxed)) {
       return nullptr;
