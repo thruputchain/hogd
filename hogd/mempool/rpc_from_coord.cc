@@ -1094,7 +1094,8 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  // Validation succeeds only if every entry in the executor response is OK.
+  // Validation succeeds only if every entry in the executor response is a
+  // success.
   co_return !(std::ranges::any_of(res, tx_failed));
 }
 
