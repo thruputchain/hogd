@@ -244,5 +244,35 @@ TEST_F(ViewGatewayRefreshTest, RequestRefreshReplacesStaleViewState)
   gateway.shut_down();
 }
 
+TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  ViewGatewayResult r1 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r1.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  auto h1 = r1.payload().height;
+
+  // Refresh without advancing the block — the tip hasn't changed.
+  gateway.request_refresh();
+  ViewGatewayResult r2 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r2.payload().height, h1);
+
+  // Do it again to confirm repeated no-op refreshes are safe.
+  gateway.request_refresh();
+  gateway.request_refresh();
+  ViewGatewayResult r3 = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(r3.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r3.payload().height, h1);
+
+  gateway.shut_down();
+}
+
 } // namespace
 } // namespace hogd
