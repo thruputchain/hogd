@@ -2125,6 +2125,64 @@ protected:
           return {};
         });
 
+    // Method 63: peek_delete_insert_consume_direct(peek_val, insert_val)
+    // Peeks a concurrent entry, deletes queue, inserts new entry, then
+    // consumes twice: first the self-inserted entry, then the original
+    // concurrent entry (which survives because peek didn't advance the
+    // cursor, so retrocausally_consumed_count stays 0).
+    builder.add<SerializationFormat::kTxs>(
+        63,
+        [](NativeSyscallContext &ctx, uint32_t peek_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          auto consume = [&](bool peek, uint32_t expected) -> bool {
+            uint32_t out = 0;
+            RuntimeMemoryLength written_len = 0;
+            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                kStorageKey, peek, std::as_writable_bytes(std::span(&out, 1)),
+                written_len);
+            if (!r.has_value() ||
+                r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              ADD_FAILURE() << (peek ? "peek" : "consume") << " failed";
+              return false;
+            }
+            if (written_len != 4 || out != expected) {
+              ADD_FAILURE() << (peek ? "peek" : "consume") << ": expected "
+                            << expected << " got " << out;
+              return false;
+            }
+            return true;
+          };
+
+          if (!consume(true, peek_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "delete failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "insert failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          if (!consume(false, insert_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (!consume(false, peek_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -3594,6 +3652,57 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   // concurrent entries). So consume(42) -> delete -> insert(77).
   auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
   auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
+
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_a, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  advance_block();
+
+  auto queue_a =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress));
+  auto queue_b =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2));
+  ASSERT_EQ(queue_a.has_value(), queue_b.has_value());
+  if (queue_a.has_value()) {
+    EXPECT_EQ(queue_a->type(), queue_b->type());
+    EXPECT_EQ(queue_a->metadata().live_entries,
+              queue_b->metadata().live_entries);
+  }
+}
+
+TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
+{
+  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = addr,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    auto tx = make_tx(addr, 0, uint32_t{42});
+    auto handler = make_new_system_call_handler(tx, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Method 63: peek(42) -> delete -> insert(99) -> consume(99) -> consume(42)
+  auto tx_a = make_tx(kContractAddress, 63, uint32_t{42}, uint32_t{99});
+  auto tx_b = make_tx(kContractAddress2, 63, uint32_t{42}, uint32_t{99});
 
   NondeterministicProposalData proposal_data;
   {
