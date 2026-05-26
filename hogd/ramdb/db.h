@@ -81,6 +81,8 @@ public:
   Database &operator=(const Database &db) = delete;
 
   // get finds an item for a given key.
+  //
+  // Read-only: safe to call concurrently with put()/remove() and with sync().
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
   // get_if_type finds an item of a specific type for a given key. If the type
@@ -101,11 +103,18 @@ public:
   DBStatus<uint8_t> get_type(std::span<const std::byte> key);
 
   // put inserts an item.
+  //
+  // Concurrent put()/remove() calls are safe, but a put() must never overlap a
+  // sync(): doing so is a data race / undefined behavior. See sync().
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
                      std::span<const std::byte> val);
 
   // remove deletes an item. It is not considered an error if the item does not
   // exist.
+  //
+  // Same concurrency rules as put(): concurrent put()/remove() are safe, but a
+  // remove() must never overlap a sync() (data race / undefined behavior). See
+  // sync().
   DBStatus<void> remove(std::span<const std::byte> key);
 
   // get_each reads every item and provides its key, type, and value to a
@@ -122,6 +131,12 @@ public:
   // before this call are guaranteed to be recoverable after a failure.
   // returns an lsn that can be passed to snapshot() to indicate which
   // items should be included in a snapshot.
+  //
+  // PRECONDITION: no put() or remove() may overlap a sync(). The caller must
+  // ensure every put()/remove() has returned and happens-before this call. An
+  // overlapping write is a data race / undefined behavior: sync() moves the
+  // per-head write buffers that put()/remove() mutate. Read-only access (get(),
+  // get_if_type(), get_each(), ...) is safe to run concurrently with sync().
   DBStatus<uint64_t> sync();
 
   // write all of the state changes that happened after begin_lsn.
