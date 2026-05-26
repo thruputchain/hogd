@@ -5,6 +5,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -390,9 +391,16 @@ SystemCallHandler::try_commit_transaction()
                  .value()
                  .get_try_invoke_frame_count() == 0);
 
+  auto const &observations = std::visit(
+      [](auto const &mode)
+          -> std::map<AddressAndKey, std::vector<QueueEntry>> const & {
+        return mode.observations_to_validate();
+      },
+      execution_mode_data_);
+
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
                .value()
-               .try_acquire_frame_locks(db_proxy_);
+               .try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
     two_phase_commit_failed_ = true;
     auto abort_res = abort_transaction();

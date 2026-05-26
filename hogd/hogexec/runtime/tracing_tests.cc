@@ -1,3 +1,5 @@
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
 
@@ -24,6 +26,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "invoke_flag.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -577,6 +580,48 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   // Deterministic
   ASSERT_EQ(child_trace.status.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
+{
+  auto contract_addr = make_contract_address(0);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    StorageKeyContractData key{};
+    std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
+    auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+        key, std::span<const std::byte>(oversized));
+    if (!r.has_value() ||
+        r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+      ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput for "
+                       "oversized RCQ entry";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(contract_addr, contract_xdr);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *runtime_context);
+  handler.enable_tracing();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
 }
 
 // NOLINTEND(bugprone-exception-escape)

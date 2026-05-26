@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1443,6 +1444,1288 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 
   run_case(InvokeErrorCode::Abandon, ExecResult::ExecResultSystemError);
   run_case(InvokeErrorCode::Unrecoverable, ExecResult::ExecResultUnrecoverable);
+}
+
+// ===================================================================
+// RCQ observation validation at commit time
+//
+// When a TX observes concurrent RCQ entries (peek or consume) but the
+// final delta for that key is not an RCQ delta (e.g. overwritten with
+// a bytestring or deleted), try_acquire_frame_locks() returns false
+// and try_commit_transaction() yields ExecResultTxNonDeterministicError.
+//
+// Observations only arise from *concurrent* entries (inserted by
+// another TX in the same block), so these tests insert in TX_A and
+// then operate in TX_B within the same block.
+// ===================================================================
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
+// concurrent entry then overwrites the key with a bytestring.
+// Observation key has a bytestring delta, not RCQ → conflict.
+TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10} into rcq0, commit (same block).
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: consume concurrent entry, then overwrite with bytestring.
+  auto consume_overwrite_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        // Overwrite with a bytestring
+        uint8_t data[] = {0xAB};
+        auto ws =
+            ctx.handler().set_bytestring(key, std::as_bytes(std::span(data)),
+                                         std::to_underlying(
+                                             StorageDeltaFlags::None));
+        if (!ws.has_value())
+          return ws.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(consume_overwrite_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+
+  // Propose TX_B (abort — we only need proposal data).
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validate: replay TX_A (insert), then TX_B.
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError)
+      << "Observation on key overwritten with bytestring should conflict";
+}
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
+// concurrent entry then deletes the key.
+// Observation key has a delete delta, not RCQ → conflict.
+TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: consume concurrent entry, then delete.
+  auto consume_delete_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        auto del =
+            ctx.handler().delete_object(key, std::to_underlying(
+                                                 StorageDeltaFlags::None));
+        if (!del.has_value())
+          return del.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(consume_delete_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError)
+      << "Observation on key that was deleted should conflict";
+}
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
+// concurrent entry then consumes it.  The observation is covered by
+// current_block_consumed → success.
+TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: peek then consume.
+  auto peek_then_consume_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!peek_res.has_value())
+          return peek_res.error().to_invoke_error();
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!consume_res.has_value())
+          return consume_res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(peek_then_consume_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, true);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Peek followed by consume should succeed — observation is covered";
+}
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B only peeks at the
+// concurrent entry, does nothing else.  An observation-only RCQ delta is
+// emitted for the key (not in modified_items_) and validated by HogDB.
+TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: peek only, no write.
+  auto peek_only_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(peek_only_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Peek-only observation with no write to the key should succeed — "
+         "unmatched observations are harmless if no delta is emitted";
+}
+
+// Two-contract test: TX_A inserts {10} (same block).  In TX_B,
+// contract B consumes from "rcq0" then faults (frame reverts).
+// Contract A catches the fault via try_invoke, then re-consumes from
+// "rcq0" itself.  The re-consume in A succeeds → commit should succeed.
+TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: A try_invokes B (which consumes + faults), then A re-consumes.
+  auto contract_b = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        // Fault — frame will be reverted
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // try_invoke B method 0 — it will fault
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Deterministic};
+        // B faulted, frame reverted. Now A re-consumes from rcq0.
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+
+  auto native_ctx =
+      make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, true);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Re-consume after reverted frame should succeed";
+}
+
+// Two-contract test: TX_A inserts {10} (same block).  In TX_B,
+// contract B consumes from "rcq0" then faults (frame reverts).
+// Contract A catches the fault via try_invoke but does NOT re-consume.
+// The child frame's consume probe sees no concurrent entry (bit=false),
+// so no observation is generated, and the transaction commits cleanly.
+// Contrast with ConsumeInRevertedFrameReconsumeSucceeds where A's
+// subsequent root-frame re-consume DOES observe the concurrent entry.
+TEST_P(ProposeValidateRoundtripTest,
+       ConsumeInRevertedFrameNoReconsumeCommitsCleanly)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: A try_invokes B (which consumes + faults), A does nothing else.
+  auto contract_b = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        // Fault — frame will be reverted
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // try_invoke B method 0 — it will fault
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Deterministic};
+        // Do NOT re-consume — no observation generated in reverted child
+        return {};
+      });
+
+  auto native_ctx =
+      make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  // The child frame's concurrent consume probe sees no concurrent entry
+  // (the child try_invoke runs in an environment where the concurrent
+  // entry is not yet visible to the probe). This produces bit=false with
+  // no observation.
+  EXPECT_EQ(proposal_b.nondeterministic_bit_count, 1U);
+  EXPECT_EQ(proposal_b.observed_queue_entry_sequence.size(), 0U);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "No observation generated — reverted child saw no concurrent entry";
+}
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
+// concurrent entry then overwrites the key with a bytestring.
+// Peek without consume means retrocausally_consumed_count=0, so
+// subspan keeps the full observation.  Type conflict fires.
+TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: peek at concurrent entry, then overwrite with bytestring.
+  auto peek_overwrite_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!peek_res.has_value())
+          return peek_res.error().to_invoke_error();
+        // Overwrite with a bytestring
+        uint8_t data[] = {0xAB};
+        auto ws =
+            ctx.handler().set_bytestring(key, std::as_bytes(std::span(data)),
+                                         std::to_underlying(
+                                             StorageDeltaFlags::None));
+        if (!ws.has_value())
+          return ws.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(peek_overwrite_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError)
+      << "Peek observation on key overwritten with bytestring should conflict";
+}
+
+// TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
+// concurrent entry then overwrites the key with set_nnint.
+// Same conflict as PeekThenBytestringOverwriteConflicts but via NNInt.
+TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: peek at concurrent entry, then overwrite with nnint.
+  auto peek_nnint_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!peek_res.has_value())
+          return peek_res.error().to_invoke_error();
+        // Overwrite with set_nnint(set_value=0, add_value=42)
+        auto ws = ctx.handler().set_nnint(key, std::optional<int128_t>{0},
+                                          int128_t{42},
+                                          std::to_underlying(
+                                              StorageDeltaFlags::None));
+        if (!ws.has_value())
+          return ws.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(peek_nnint_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError)
+      << "Peek observation on key overwritten with nnint should conflict";
+}
+
+// TX_A inserts {10} and {20} into "rcq0" (same block).
+// TX_B consumes one entry then peeks the next.
+// The consumed entry goes into current_block_consumed; the peeked entry
+// goes into observed_concurrent_entries.  Both should succeed.
+TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entries {10} and {20}, commit.
+  auto tx_insert = make_rcq_insert_tx({10, 20});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: consume one, then peek the next.
+  auto consume_then_peek_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!consume_res.has_value())
+          return consume_res.error().to_invoke_error();
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!peek_res.has_value())
+          return peek_res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(consume_then_peek_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, true);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Consume then peek on same key should succeed — consumed entry in "
+         "current_block_consumed, peeked entry in observed_concurrent_entries";
+}
+
+// TX_B inserts {42} into "rcq0" then immediately consumes from "rcq0".
+// The consume gets the self-inserted entry (step 2 in get_next_item),
+// never reaching concurrent entries (step 3).  No nondeterministic bits
+// or observations should be generated.
+TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // Single TX: insert then consume from the same key.
+  auto self_insert_consume_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 42;
+        auto ins_res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!ins_res.has_value())
+          return ins_res.error().to_invoke_error();
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!consume_res.has_value())
+          return consume_res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(self_insert_consume_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, true);
+
+  // No nondeterministic bits — self-insert consumed locally.
+  EXPECT_EQ(proposal_b.nondeterministic_bit_count, 0U);
+  EXPECT_EQ(proposal_b.observed_queue_entry_sequence.size(), 0U);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Self-insert then self-consume should succeed with no observations";
+}
+
+// TX_A inserts {10}.  TX_B peeks at "rcq0" (gets {10} in proposal).
+// We tamper the proposal: replace observed_queue_entry_sequence[0] with
+// {0xFF}.  In validation, TX_B's peek returns the forged {0xFF}.  The
+// observation-only delta records observed_concurrent_entries={0xFF}.
+// Block close: HogDB checks that every observed entry was actually
+// inserted by some TX.  {0xFF} was never inserted → reject_block.
+TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // TX_A: insert entry {10}, commit.
+  auto tx_insert = make_rcq_insert_tx({10});
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: peek only (no consume, no write).
+  auto peek_only_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(peek_only_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  // Tamper: replace observed entry {10} with {0xFF}.
+  ASSERT_GE(proposal_b.observed_queue_entry_sequence.size(), 1U);
+  proposal_b.observed_queue_entry_sequence[0] = {0xFF};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validate: replay TX_A (insert {10}), then TX_B with tampered proposal.
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  // try_commit succeeds — the executor does not validate observation content.
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // Block close: HogDB detects that {0xFF} was never inserted → reject.
+  reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
+}
+
+// Two-contract test: TX_A inserts {10} into "rcq0" under kAddrB.
+// TX_B: contract A try_invokes B (which peeks at kAddrB's "rcq0"),
+// B returns success.  The peek observation at kAddrB is logged in the
+// child frame and promoted to the parent on success.  Commit succeeds.
+TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // First, insert {10} into kAddrB's "rcq0" via a simple insert contract.
+  auto insert_contract_b = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  auto insert_contract_a = make_contract(
+      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        return {};
+      });
+  auto insert_ctx = make_ab_context(std::move(insert_contract_a),
+                                    std::move(insert_contract_b));
+
+  // TX_insert targets B to insert {10} at kAddrB.
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+
+  NondeterministicProposalData insert_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *insert_ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: A try_invokes B (which peeks at kAddrB's "rcq0"), B succeeds.
+  auto peek_contract_b = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  auto invoke_contract_a = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Deterministic};
+        return {};
+      });
+
+  auto native_ctx =
+      make_ab_context(std::move(invoke_contract_a), std::move(peek_contract_b));
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, false);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validate: replay insert at kAddrB, then TX_B.
+  {
+    auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
+                                                      insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Peek observation from successful child frame should be promoted "
+         "to parent and commit cleanly";
+}
+
+// Block 1: insert {10} into "rcq0", advance_block.
+// Block 2: TX_A inserts {20} (concurrent).  TX_B consumes from "rcq0"
+// (gets {10} from past block), then peeks (gets {20} from concurrent).
+// Past-block consume does not generate an observation; the peek does.
+// Both should succeed.
+TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto ctx = make_rcq_context();
+
+  // Block 1: insert {10}, commit, advance.
+  {
+    auto tx_insert = make_rcq_insert_tx({10});
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Block 2: TX_A inserts {20} (concurrent in this block).
+  auto tx_insert_20 = make_rcq_insert_tx({20});
+  NondeterministicProposalData insert_20_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert_20, *ctx);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    insert_20_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // TX_B: consume one (gets past-block {10}), peek next (gets concurrent {20}).
+  auto consume_peek_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!consume_res.has_value())
+          return consume_res.error().to_invoke_error();
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!peek_res.has_value())
+          return peek_res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(consume_peek_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  auto tx_b = make_invoke_a_tx(0);
+  auto proposal_b = propose(tx_b, *native_ctx, true);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validate: replay TX_A (insert {20}), then TX_B.
+  {
+    auto ha = make_new_system_call_handler_validation(tx_insert_20, *ctx,
+                                                      insert_20_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                                         std::move(proposal_b));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Past-block consume then concurrent peek should both succeed";
+}
+
+// Frame revert with concurrent observation: A try_invokes B. B consumes a
+// concurrent RCQ entry at kAddrB and faults. The observation persists in
+// queue_entry_observations_. Root A does nothing with that key. The
+// observation must be emitted as an observation-only delta for kAddrB.
+TEST_P(ProposeValidateRoundtripTest,
+       ConsumeInRevertedFrameWithConcurrentEntryEmitsObservation)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // B: method 0 = consume from "rcq0" then fault.
+  auto b_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+
+  // A: method 0 = try_invoke B.0 (faults), return success.
+  auto a_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        return {};
+      });
+
+  auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
+
+  // Insert at kAddrB (same block → concurrent entry visible to B).
+  auto b_insert_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
+  insert_cmap.emplace(1, std::move(b_insert_contract));
+  auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
+
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+  auto insert_p = propose(tx_insert, *insert_ctx);
+
+  auto tx = make_invoke_a_tx(0);
+  auto proposal = propose(tx, *ctx, /*commit=*/false);
+
+  // B consumed a concurrent entry → 1 bit (true), 1 observation.
+  // B faulted deterministically → no lock-acquisition bit.
+  ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
+  ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 1U);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validate: replay insert first, then the reverted-frame TX.
+  {
+    auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
+                                                      insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(proposal));
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+      << "Reverted child frame observation should be emitted as an "
+         "observation-only delta and validated by HogDB";
+  advance_block();
+}
+
+// Malicious proposer scenario: contract A try_invokes B twice.
+// Frame 1: B consumes a concurrent RCQ entry, then faults (observation
+// logged, frame reverts).  Frame 2: B writes a bytestring to the same key.
+// In proposal mode, Frame 2's lock acquisition fails (RCQ/bytestring type
+// conflict), so the nondeterministic bit is false.  A malicious proposer
+// doctors the bit to true.  In validation mode, finish_frame must detect
+// the observation/type mismatch and return ValidationFailure.
+TEST_P(ProposeValidateRoundtripTest,
+       DoctoredTryInvokeBitOnObservedKeyReturnsValidationFailure)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // B: method 0 = consume from "rcq0" then fault.
+  //    method 1 = write bytestring to "rcq0".
+  auto b_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return InvokeError{InvokeErrorCode::Deterministic};
+      },
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto overwrite = std::string_view("overwritten");
+        auto [ws, _wg] = syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span(overwrite)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!ws.has_value() ||
+            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+          return InvokeError{InvokeErrorCode::Deterministic};
+        return {};
+      });
+
+  // A: method 0 = try_invoke B.0 (faults), then try_invoke B.1.
+  auto a_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // Frame 1: B.0 consumes + faults
+        auto r1 = try_invoke_b(ctx, 0);
+        if (!r1.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        // Frame 2: B.1 writes bytestring
+        auto r2 = try_invoke_b(ctx, 1);
+        if (!r2.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        return {};
+      });
+
+  auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
+
+  // Insert at kAddrB so B's consume can find the concurrent entry.
+  auto b_insert_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
+  insert_cmap.emplace(1, std::move(b_insert_contract));
+  auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
+
+  // TX_insert: insert {10} at kAddrB — same block, so it's a concurrent entry.
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+  propose(tx_insert, *insert_ctx);
+
+  // Same block: propose the A→B.0(fault)→B.1(bytestring) TX.
+  auto tx = make_invoke_a_tx(0);
+  auto proposal = propose(tx, *ctx, /*commit=*/false);
+
+  // Bit 0 = true (concurrent entry found in B.0's consume probe).
+  // Frame 1 faults deterministically → no lock-acquisition bit.
+  // Bit 1 = false (Frame 2 lock acquisition: RCQ/bytestring type conflict).
+  ASSERT_EQ(proposal.nondeterministic_bit_count, 2U);
+  ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 1U);
+  ASSERT_EQ(proposal.nondeterministic_bits[0] & (1 << 1), 0)
+      << "Bit 1 should be false (Frame 2 lock acquisition failed)";
+
+  // Doctor: flip bit 1 to true, claiming Frame 2's lock succeeded.
+  auto doctored = proposal;
+  doctored.nondeterministic_bits[0] |= (1 << 1);
+
+  auto insert_p = propose(tx_insert, *insert_ctx);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Replay doctored TX first — should fail at root_invoke.
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
+  auto res = handler.root_invoke();
+  EXPECT_FALSE(res.is_root_success())
+      << "finish_frame should detect observation/type mismatch when the "
+         "doctored bit claims Frame 2 succeeded";
+
+  // Replay the insert TX after (in the same validation block).
+  auto insert_handler =
+      make_new_system_call_handler_validation(tx_insert, *insert_ctx, insert_p);
+  EXPECT_TRUE(insert_handler.root_invoke().is_root_success());
+  EXPECT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Malicious proposer scenario: contract A try_invokes B.  B peeks at a
+// concurrent RCQ entry and returns success.  In proposal mode, the lock
+// acquisition bit is true.  A malicious proposer doctors it to false,
+// causing the child frame to be treated as failed.  The observation was
+// consumed from the proposal stream (nondeterministic bit + observation)
+// but the frame's writes are discarded — no observation delta is emitted.
+// The block close should still catch this: the observation entry has
+// observe_count > 0 in HogDB but was never matched by an insert visible
+// to the observer's delta... actually, the observation-only delta is NOT
+// emitted because the frame reverted.  However, check_all_consumed()
+// should still pass (bits and observations were consumed from the stream).
+// The real question is whether the block finalizes without catching the
+// suppressed observation.
+TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // B: method 0 = peek at "rcq0", return success.
+  auto b_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+
+  // A: method 0 = try_invoke B.0.
+  auto a_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        return {};
+      });
+
+  auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
+
+  // Insert at kAddrB (same block, concurrent entry for B's peek).
+  auto b_insert_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
+  insert_cmap.emplace(1, std::move(b_insert_contract));
+  auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
+
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+  auto insert_p = propose(tx_insert, *insert_ctx);
+
+  // Same block: A try_invokes B (peek succeeds).
+  auto tx = make_invoke_a_tx(0);
+  auto proposal = propose(tx, *ctx);
+
+  // Bit 0 = true (concurrent entry found in B's peek probe).
+  // Bit 1 = true (B's frame lock acquisition succeeded — peek only, no
+  //          conflict).
+  ASSERT_EQ(proposal.nondeterministic_bit_count, 2U);
+  ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 1U);
+
+  // Doctor: flip bit 1 from true to false (claim frame failed).
+  auto doctored = proposal;
+  doctored.nondeterministic_bits[0] &= ~(1 << 1);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Replay insert.
+  {
+    auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
+                                                      insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Replay with doctored proposal.
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
+  auto res = handler.root_invoke();
+  // Root invoke succeeds — the doctored bit just makes the frame "fail",
+  // which is handled normally (frame reverted, A continues).
+  ASSERT_TRUE(res.is_root_success());
+  // try_commit succeeds — the observation persists in queue_entry_observations_
+  // even though the frame reverted. try_acquire_frame_locks emits an
+  // observation-only RCQ delta for kAddrB (key not in modified_items_).
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  // Block close succeeds because HogDB validates the observation against
+  // the concurrent insert from tx_insert. If the insert were missing,
+  // stage_committed_changes would reject (observe_count > insert_count).
+  advance_block();
+}
+
+// Same as DoctoredTryInvokeBitFalseDropsObservation, but the concurrent
+// insert is NOT replayed in validation mode.  The observation-only delta
+// reaches HogDB with no matching insert → block rejected.
+TEST_P(ProposeValidateRoundtripTest,
+       DoctoredTryInvokeBitFalseNoInsertRejectsBlock)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  auto b_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+
+  auto a_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r = try_invoke_b(ctx, 0);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        return {};
+      });
+
+  auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
+
+  auto b_insert_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
+  insert_cmap.emplace(1, std::move(b_insert_contract));
+  auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
+
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+  propose(tx_insert, *insert_ctx);
+
+  auto tx = make_invoke_a_tx(0);
+  auto proposal = propose(tx, *ctx);
+
+  ASSERT_EQ(proposal.nondeterministic_bit_count, 2U);
+  ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 1U);
+
+  auto doctored = proposal;
+  doctored.nondeterministic_bits[0] &= ~(1 << 1);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Do NOT replay the insert TX. Only replay the doctored TX.
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // Block close rejects: observation-only delta has observe_count=1 for
+  // entry {10} but insert_count=0 (no insert TX in this validation block).
+  reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  advance_block();
+}
+
+// Three reverted child frames each observe the same concurrent entry.
+// Because each child frame starts with retrocausally_consumed_count_=0
+// (parent's value is restored on revert), all three observe at index 0
+// and hit the same cached entry in queue_entry_observations_.  The
+// observation count should be 1 (not 3), so a single insert suffices.
+TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  // B: method 0 = consume from "rcq0" then fault.
+  auto b_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+
+  // A: method 0 = try_invoke B.0 three times, all fault.
+  auto a_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto r1 = try_invoke_b(ctx, 0);
+        if (!r1.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        auto r2 = try_invoke_b(ctx, 0);
+        if (!r2.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        auto r3 = try_invoke_b(ctx, 0);
+        if (!r3.has_value())
+          return InvokeError{InvokeErrorCode::Unrecoverable};
+        return {};
+      });
+
+  auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
+
+  // Insert one entry at kAddrB (same block → concurrent).
+  auto b_insert_contract = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          return res.error().to_invoke_error();
+        return {};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
+  insert_cmap.emplace(1, std::move(b_insert_contract));
+  auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
+
+  auto tx_insert = Transaction{
+      .invocation = Invocation{.invoked_address = kAddrB,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}}};
+  auto insert_p = propose(tx_insert, *insert_ctx);
+
+  auto tx = make_invoke_a_tx(0);
+  auto proposal = propose(tx, *ctx, /*commit=*/false);
+
+  // Each child frame's consume probe produces 1 bit (true = entry found).
+  // All three re-observe the same cached entry at index 0.
+  // Only 1 unique observation in the sequence.
+  ASSERT_EQ(proposal.nondeterministic_bit_count, 3U);
+  ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 1U);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
+                                                      insert_p);
+    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(proposal));
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // Block closes: one insert, one observation. observe_count=1 <=
+  // insert_count=1.
+  advance_block();
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
