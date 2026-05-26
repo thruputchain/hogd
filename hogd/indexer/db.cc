@@ -75,6 +75,8 @@ create_tx_index_sst_chunk(
   entries.reserve(events_chunk.size());
   std::string key_buffer; // Reusable buffer for key construction
 
+  static_assert(std::endian::native == std::endian::little);
+
   for (const auto &event_log : events_chunk) {
     // Serialize the TxEventLog for storage
     auto serialized = x23::serialize(event_log);
@@ -841,6 +843,7 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
   }
 
   // TODO(jhumphri): Support different endianness.
+  static_assert(std::endian::native == std::endian::little);
   CHECK_GE(value.size(), sizeof(BlockHeight));
   BlockHeight block_height;
   // value.data() is not guaranteed to be 8-byte aligned
