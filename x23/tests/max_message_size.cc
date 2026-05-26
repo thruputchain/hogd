@@ -40,8 +40,7 @@ TEST(MaxMessageSize, SrpcClientRejectsOversizedMessage)
 
   srpc_stream(server_fd.release())->server(&server);
 
-  RefPtr<SRpcStream<>> client_stream{
-      *new SRpcStream<>(std::move(client_fd))};
+  RefPtr<SRpcStream<>> client_stream{*new SRpcStream<>(std::move(client_fd))};
   client_stream->max_message_size_ = 100;
   client_stream->go();
   auto client = client_stream->client(blank_rpc_v1{});
