@@ -95,6 +95,20 @@ validation_outcome_str(SchedulerValidationOutcome outcome) -> const char *
   return "unknown";
 }
 
+bool
+tx_succeeded(const ExecResult &r)
+{
+  return r == ExecResult::ExecResultTxDeterministicError ||
+         r == ExecResult::ExecResultOK ||
+         r == ExecResult::ExecResultTxRootFrameReverted;
+}
+
+bool
+tx_failed(const ExecResult &r)
+{
+  return !tx_succeeded(r);
+}
+
 } // namespace
 
 void
@@ -426,17 +440,9 @@ MempoolCoordinatorRpc::propose_batch(
   // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
-
-    switch (result.result()) {
-    case ExecResult::ExecResultTxDeterministicError:
-    case ExecResult::ExecResultOK:
-    case ExecResult::ExecResultTxRootFrameReverted:
+    ret_chunk[i] = tx_succeeded(result.result());
+    if (ret_chunk[i]) {
       transaction_nominations.push_back(result.proposal_data());
-      ret_chunk[i] = true;
-      break;
-    default:
-      ret_chunk[i] = false;
-      break;
     }
   }
 }
@@ -1088,10 +1094,10 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  // Validation succeeds only if every entry in the executor response is OK.
-  co_return !(std::ranges::any_of(res, [](const ExecResult &r) {
-    return r != ExecResult::ExecResultOK;
-  }));
+  // Validation succeeds if every entry in the executor response is a
+  // deterministic outcome (OK, deterministic error, or root frame revert).
+  // System errors are nondeterministic and cause validation to fail.
+  co_return !(std::ranges::any_of(res, tx_failed));
 }
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
