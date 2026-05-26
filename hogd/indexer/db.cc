@@ -75,6 +75,8 @@ create_tx_index_sst_chunk(
   entries.reserve(events_chunk.size());
   std::string key_buffer; // Reusable buffer for key construction
 
+  static_assert(std::endian::native == std::endian::little);
+
   for (const auto &event_log : events_chunk) {
     // Serialize the TxEventLog for storage
     auto serialized = x23::serialize(event_log);
@@ -727,6 +729,7 @@ IndexDB::consume_events(BlockHeight block_height,
       }
     }
     if (advanced) {
+      static_assert(std::endian::native == std::endian::little);
       uint64_t encoded = std::byteswap(static_cast<uint64_t>(new_h));
       rocksdb::Status s =
           db_->Put(rocksdb::WriteOptions(), db_->DefaultColumnFamily(),
@@ -841,6 +844,7 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
   }
 
   // TODO(jhumphri): Support different endianness.
+  static_assert(std::endian::native == std::endian::little);
   CHECK_GE(value.size(), sizeof(BlockHeight));
   BlockHeight block_height;
   // value.data() is not guaranteed to be 8-byte aligned
@@ -891,6 +895,7 @@ IndexDB::initialize_highest_block_from_db()
           value.size(), sizeof(uint64_t));
     return;
   }
+  static_assert(std::endian::native == std::endian::little);
   uint64_t encoded = 0;
   std::memcpy(&encoded, value.data(), sizeof(encoded));
   const auto h = static_cast<int64_t>(std::byteswap(encoded));

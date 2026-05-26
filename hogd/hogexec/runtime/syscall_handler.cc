@@ -1372,21 +1372,62 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                             execution_mode_data_);
   }
 
-  auto queue_item =
-      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_,
-                                       execution_mode_data_);
-  if (!queue_item.has_value()) {
-    return queue_item.error();
+  // For unmodified keys, probe with a local item first. Only persist
+  // into the view if an entry is found, so that a no-op consume on an
+  // absent key does not pin the storage type.
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    RetrocausalQueueItem queue_item(unmodified_item->base_item());
+    auto entry = load_next_queue_entry(queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
+    if (entry.has_value() && entry.value().has_value()) {
+      auto set_status = item_view->set(queue_item);
+      if (!set_status.has_value()) {
+        return set_status.error();
+      }
+      item_view->sync_retrocausally_consumed(queue_item);
+    }
+    return entry;
   }
-  if (!queue_item.value().has_value()) {
-    return queue_item.value().error();
-  }
-  auto *queue_item_ptr = queue_item.value().value();
 
-  auto entry = load_next_queue_entry(*queue_item_ptr, execution_mode_data_,
-                                     /*advance_cursor=*/true);
-  item_view->sync_retrocausally_consumed(*queue_item_ptr);
-  return entry;
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    auto entry = load_next_queue_entry(*queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
+    item_view->sync_retrocausally_consumed(*queue_item);
+    return entry;
+  }
+
+  // Same treatment for deleted keys: a no-op consume should leave the
+  // key deleted rather than converting it to an empty RCQ.
+  if (item_view->get<DeletedItem>()) {
+    UnmodifiedItem unmodified_item;
+    auto load_status = unmodified_item.load(snapshot_cache_, addrkey);
+    if (!load_status.has_value()) {
+      return load_status.error();
+    }
+    auto consumed = get_retrocausally_consumed_entries(
+        execution_mode_data_, unmodified_item.base_item(), addrkey,
+        item_view->get_retrocausally_consumed_count());
+    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(), std::move(consumed));
+    auto entry = load_next_queue_entry(queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
+    if (entry.has_value() && entry.value().has_value()) {
+      auto set_status = item_view->set(queue_item);
+      if (!set_status.has_value()) {
+        return set_status.error();
+      }
+      item_view->sync_retrocausally_consumed(queue_item);
+    }
+    return entry;
+  }
+
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 // == Native token syscalls ==

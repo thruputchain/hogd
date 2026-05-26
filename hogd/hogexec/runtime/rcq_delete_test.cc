@@ -1,6 +1,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -2183,6 +2184,117 @@ protected:
           return {};
         });
 
+    // Method 64: peek_only_delete_insert_direct(peek_val, insert_val)
+    // Peeks (no consume) then deletes and inserts. Peek doesn't advance the
+    // cursor so retrocausally_consumed_count stays 0 and the concurrent entry
+    // survives the delete/recreate.
+    builder.add<SerializationFormat::kTxs>(
+        64,
+        [](NativeSyscallContext &ctx, uint32_t peek_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, true, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "peek failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (written_len != 4 || out != peek_val) {
+            ADD_FAILURE() << "peek: expected " << peek_val << " got " << out;
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "delete failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "insert failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+
+    // Method 65: insert_consume_self_delete_insert_consume_concurrent(
+    //     self_val, insert_val, concurrent_val)
+    // Inserts self entry, consumes it, deletes, inserts new, then consumes
+    // a concurrent entry. Verifies self_consumed_index doesn't interfere
+    // with retrocausally_consumed_count through a delete/recreate.
+    builder.add<SerializationFormat::kTxs>(
+        65,
+        [](NativeSyscallContext &ctx, uint32_t self_val, uint32_t insert_val,
+           uint32_t concurrent_val) -> InvokeStatus<void> {
+          auto do_insert = [&](uint32_t val) -> bool {
+            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                kStorageKey, std::as_bytes(std::span(&val, 1)));
+            if (!r.has_value() ||
+                r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              ADD_FAILURE() << "insert failed";
+              return false;
+            }
+            return true;
+          };
+          auto do_consume = [&](uint32_t expected) -> bool {
+            uint32_t out = 0;
+            RuntimeMemoryLength written_len = 0;
+            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+                written_len);
+            if (!r.has_value() ||
+                r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              ADD_FAILURE() << "consume failed";
+              return false;
+            }
+            if (written_len != 4 || out != expected) {
+              ADD_FAILURE()
+                  << "consume: expected " << expected << " got " << out;
+              return false;
+            }
+            return true;
+          };
+
+          // insert(self_val) -> consume(self_val) -> delete ->
+          // insert(insert_val) -> consume(insert_val) ->
+          // consume(concurrent_val)
+          if (!do_insert(self_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (!do_consume(self_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "delete failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          if (!do_insert(insert_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (!do_consume(insert_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (!do_consume(concurrent_val)) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2264,6 +2376,29 @@ protected:
   void set_bytestring(Bytestring const &bytestring)
   {
     invoke_method(3, bytestring);
+  }
+
+  testing::AssertionResult check_rcq_empty_for(ContractAddress const &addr)
+  {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
+    if (GetParam() == TestDB::kHogDB) {
+      if (queue.has_value()) {
+        return testing::AssertionFailure() << "Queue has live entries";
+      }
+      return testing::AssertionSuccess();
+    }
+
+    if (!queue.has_value()) {
+      return testing::AssertionFailure() << "No queue found";
+    }
+    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+      return testing::AssertionFailure() << "Queue has wrong type";
+    }
+    auto const &qe = queue->metadata();
+    if (qe.live_entries != 0) {
+      return testing::AssertionFailure() << "Queue has live entries";
+    }
+    return testing::AssertionSuccess();
   }
 
   testing::AssertionResult check_rcq_empty()
@@ -2489,6 +2624,7 @@ TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 
 // Delete queue, then try to consume. Should get no entry.
 // Insert is in previous block so no concurrent entries are available.
+// The empty consume should leave the key deleted, not convert to empty RCQ.
 TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 {
   insert(42);
@@ -2499,30 +2635,33 @@ TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Consume (nothing available) -> delete -> consume (nothing available).
 // Both should return no entry. retrocausally_consumed_count_ should remain 0.
+// The key should end up deleted, not converted to empty RCQ.
 TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 {
   invoke_method(18);
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Delete -> peek(empty) -> consume(empty). The peek must not decide the final
-// write shape; the later non-peek consume should still use delete-recreate RCQ
-// behavior.
+// write shape; the empty consume should leave the key deleted.
 TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 {
   invoke_method(51);
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
@@ -3729,6 +3868,129 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
     EXPECT_EQ(queue_a->type(), queue_b->type());
     EXPECT_EQ(queue_a->metadata().live_entries,
               queue_b->metadata().live_entries);
+  }
+}
+
+TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = addr,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    auto tx = make_tx(addr, 0, uint32_t{42});
+    auto handler = make_new_system_call_handler(tx, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Method 64: peek(42) -> delete -> insert(99). No consume, so
+  // retrocausally_consumed_count stays 0 through the delete/recreate.
+  auto tx_a = make_tx(kContractAddress, 64, uint32_t{42}, uint32_t{99});
+  auto tx_b = make_tx(kContractAddress2, 64, uint32_t{42}, uint32_t{99});
+
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_a, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  advance_block();
+
+  // peek(42) -> delete -> insert(99): the concurrent entry 42 was not consumed
+  // (peek doesn't advance the cursor), plus self-insert 99. Both survive in
+  // the recreated queue as block 1 entries.
+  auto read_u32 = [](QueueEntry const &e) -> uint32_t {
+    uint32_t v = 0;
+    std::memcpy(&v, e.data(), sizeof(v));
+    return v;
+  };
+
+  auto &dao = get_hogdb_dao();
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
+    ASSERT_TRUE(queue.has_value());
+    EXPECT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+    EXPECT_EQ(queue->metadata().live_entries, 2U);
+
+    auto item_key = make_item_key(get_queue_addrkey_for(addr));
+    auto block = dao.read_retrocausal_queue_block(item_key, 1);
+    ASSERT_TRUE(block.has_value()) << "Block 1 should exist";
+    ASSERT_EQ(block->entries.size(), 2U);
+    EXPECT_EQ(read_u32(block->entries[0]), 42U);
+    EXPECT_EQ(read_u32(block->entries[1]), 99U);
+  }
+}
+
+TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
+                    auto const &...args) -> Transaction {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = addr,
+                       .entrypoint = entrypoint_from_method_id(method),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = x23::serialize(args...)}};
+  };
+
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    auto tx = make_tx(addr, 0, uint32_t{77});
+    auto handler = make_new_system_call_handler(tx, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Method 65: insert(10) -> consume(10) -> delete -> insert(20) ->
+  //            consume(20) -> consume(77)
+  auto tx_a =
+      make_tx(kContractAddress, 65, uint32_t{10}, uint32_t{20}, uint32_t{77});
+  auto tx_b =
+      make_tx(kContractAddress2, 65, uint32_t{10}, uint32_t{20}, uint32_t{77});
+
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_a, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  advance_block();
+
+  // All entries consumed: self(10) before delete, self(20) and concurrent(77)
+  // after recreate. Queue should not exist (HogDB removes empty queues).
+  for (auto const &addr : {kContractAddress, kContractAddress2}) {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
+    EXPECT_FALSE(queue.has_value()) << "Queue should be empty (all consumed)";
   }
 }
 
