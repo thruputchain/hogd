@@ -1094,8 +1094,9 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  // Validation succeeds only if every entry in the executor response is a
-  // success.
+  // Validation succeeds if every entry in the executor response is a
+  // deterministic outcome (OK, deterministic error, or root frame revert).
+  // System errors are nondeterministic and cause validation to fail.
   co_return !(std::ranges::any_of(res, tx_failed));
 }
 
