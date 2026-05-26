@@ -441,6 +441,12 @@ struct RpcStream : public detail::RpcStreamImpl {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
+    if (record.size() - 4 > max_message_size) [[unlikely]]
+      throw XdrBadInput("{}::{}: message size {} exceeds maximum {}",
+                        ProcMeta::version_meta::version_name,
+                        ProcMeta::proc_name, record.size() - 4,
+                        max_message_size);
+
     // Note we geneate the xid after calling make_record just in case
     // make_record throws because of illegal XDR values (such as an
     // invalid union discriminant).
