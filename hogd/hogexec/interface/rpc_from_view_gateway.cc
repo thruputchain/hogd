@@ -141,8 +141,7 @@ ViewGatewayRpc::get_current_view_state()
   if (current_view_block_id_ != 0 &&
       refresh_flag_.exchange(false, std::memory_order_acquire)) {
     BlockID old_block_id = current_view_block_id_;
-    bool can_gc =
-        view_states_.at(old_block_id).initiate_shutdown();
+    bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
 
     auto res = db_proxy_.open_viewing_snapshot();
     if (res.has_value()) {

@@ -42,7 +42,10 @@ public:
   // snapshot before the next view attempt.  This is a no-op if there is
   // no current ViewState.  Thread-safe; intended to be called from a
   // timer thread in production and explicitly from tests.
-  void request_refresh() { refresh_flag_.store(true, std::memory_order_release); }
+  void request_refresh()
+  {
+    refresh_flag_.store(true, std::memory_order_release);
+  }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 

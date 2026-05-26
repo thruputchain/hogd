@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -267,8 +268,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
 TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
 {
   auto contract_addr = make_contract_address(11);
-  auto missing_hash =
-      sha256(std::string("contract-not-yet-deployed"));
+  auto missing_hash = sha256(std::string("contract-not-yet-deployed"));
 
   advance_block();
 
