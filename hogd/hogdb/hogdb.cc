@@ -37,6 +37,7 @@
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
