@@ -22,6 +22,7 @@
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
