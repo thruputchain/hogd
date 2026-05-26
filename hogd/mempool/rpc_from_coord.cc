@@ -1839,7 +1839,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // We write the hog ages to the database down here because we need to commit
   // the hog ages above first ([scheduler_->commit_pending_nomination()] and
   // [scheduler_->apply_committed_block_hog_ages]).
-  scheduler_->write_all_average_hog_ages_to_db();
+  x23::Async<void> write_hog_ages_handle =
+      scheduler_->write_all_average_hog_ages_to_db();
   record_stage(stage_write_average_hog_ages);
 
   for (x23::Async<void> &handle : commit_handles) {
@@ -1848,6 +1849,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   for (x23::Async<DbSchedResult> &handle : snapshot_handles) {
     CHECK_EQ(co_await handle, DbSchedResult::DbSchedResultOK);
   }
+  co_await write_hog_ages_handle;
   record_stage(stage_await_handles);
 
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
