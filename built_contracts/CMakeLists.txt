@@ -227,6 +227,7 @@ add_wasm_builds(
     calldata_wrapper
     delegate_call_test
     ed25519_verify_wrapper
+    view_gateway_test
   RAW_CONTRACTS
     hash_bug
     calldata_raw
@@ -286,6 +287,7 @@ add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
+add_contract_header(view_gateway_test)
 
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)

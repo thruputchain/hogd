@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -10,6 +11,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
+#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -197,6 +199,161 @@ TEST_F(DirectStalenessTest, CommitInvalidatedBlockReturnsError)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
   EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
+}
+
+// Viewing-snapshot refresh tests.
+//
+// These verify that opening a fresh viewing snapshot after a commit
+// returns current data, even when a previous snapshot's
+// StorageSnapshotCache was warm with stale entries.  This is the
+// mechanism that ViewGatewayRpc::request_refresh() relies on.
+
+TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
+{
+  auto contract_addr = make_contract_address(10);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_contract_data_addrkey(contract_addr, "view_key");
+
+  {
+    auto tx = make_new_per_tx_db_proxy(0);
+    tx.add_delta(addrkey, make_bytestring_delta("old-value"),
+                 std::to_underlying(StorageDeltaFlags::None));
+    ASSERT_TRUE(tx.try_push_current_subtransaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
+  }
+
+  advance_block();
+
+  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap1.has_value());
+  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+
+  auto warm = cache1.try_get_snapshot_item(addrkey);
+  ASSERT_TRUE(warm.has_value());
+  ASSERT_NE(warm.value(), nullptr);
+  EXPECT_EQ(warm.value()->bytestring(), make_bytestring("old-value"));
+
+  {
+    auto tx = make_new_per_tx_db_proxy(1);
+    tx.add_delta(addrkey, make_bytestring_delta("new-value"),
+                 std::to_underlying(StorageDeltaFlags::None));
+    ASSERT_TRUE(tx.try_push_current_subtransaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
+  }
+
+  advance_block();
+
+  // The stale cache still returns old-value.
+  auto stale = cache1.try_get_snapshot_item(addrkey);
+  ASSERT_TRUE(stale.has_value());
+  ASSERT_NE(stale.value(), nullptr);
+  EXPECT_EQ(stale.value()->bytestring(), make_bytestring("old-value"));
+
+  // A fresh viewing snapshot sees new-value.
+  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap2.has_value());
+  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+
+  auto fresh = cache2.try_get_snapshot_item(addrkey);
+  ASSERT_TRUE(fresh.has_value());
+  ASSERT_NE(fresh.value(), nullptr);
+  EXPECT_EQ(fresh.value()->bytestring(), make_bytestring("new-value"));
+
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+}
+
+TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
+{
+  auto contract_addr = make_contract_address(11);
+  auto missing_hash = sha256(std::string("contract-not-yet-deployed"));
+
+  advance_block();
+
+  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap1.has_value());
+  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+
+  // Warm negative contract lookup.
+  auto warm = cache1.try_get_contract_by_hash(missing_hash);
+  ASSERT_TRUE(warm.has_value());
+  EXPECT_EQ(warm.value(), nullptr);
+
+  // Warm negative deployment lookup.
+  auto warm_deploy = cache1.try_get_deployed_contract_hash(contract_addr);
+  ASSERT_TRUE(warm_deploy.has_value());
+  EXPECT_FALSE(warm_deploy.value().has_value());
+
+  // Now deploy the contract and advance.
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  advance_block();
+
+  // Stale cache still returns nulls.
+  auto stale_contract = cache1.try_get_contract_by_hash(missing_hash);
+  ASSERT_TRUE(stale_contract.has_value());
+  EXPECT_EQ(stale_contract.value(), nullptr);
+
+  auto stale_deploy = cache1.try_get_deployed_contract_hash(contract_addr);
+  ASSERT_TRUE(stale_deploy.has_value());
+  EXPECT_FALSE(stale_deploy.value().has_value());
+
+  // Fresh viewing snapshot sees the deployment.
+  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap2.has_value());
+  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+
+  auto fresh_deploy = cache2.try_get_deployed_contract_hash(contract_addr);
+  ASSERT_TRUE(fresh_deploy.has_value());
+  EXPECT_TRUE(fresh_deploy.value().has_value());
+
+  auto deployed_hash = sha256(*contract);
+  auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash);
+  ASSERT_TRUE(fresh_contract.has_value());
+  EXPECT_NE(fresh_contract.value(), nullptr);
+
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+}
+
+TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
+{
+  advance_block();
+
+  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap1.has_value());
+  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+
+  auto warm_tip = cache1.try_get_db_tip();
+  ASSERT_TRUE(warm_tip.has_value());
+  BlockHeight old_height = warm_tip.value()->height;
+
+  advance_block();
+
+  // Stale cache still returns old height.
+  auto stale_tip = cache1.try_get_db_tip();
+  ASSERT_TRUE(stale_tip.has_value());
+  EXPECT_EQ(stale_tip.value()->height, old_height);
+
+  // Fresh viewing snapshot sees incremented height.
+  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snap2.has_value());
+  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+
+  auto fresh_tip = cache2.try_get_db_tip();
+  ASSERT_TRUE(fresh_tip.has_value());
+  EXPECT_GT(fresh_tip.value()->height, old_height);
+
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
+  EXPECT_TRUE(
+      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
 }
 
 } // namespace hogd

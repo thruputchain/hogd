@@ -38,6 +38,15 @@ public:
 
   void shut_down();
 
+  // Signal that the current ViewState should be replaced with a fresh
+  // snapshot before the next view attempt.  This is a no-op if there is
+  // no current ViewState.  Thread-safe; intended to be called from a
+  // timer thread in production and explicitly from tests.
+  void request_refresh()
+  {
+    refresh_flag_.store(true, std::memory_order_release);
+  }
+
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
@@ -70,6 +79,7 @@ private:
   void gc_view_state(BlockID block_id);
 
   std::atomic<bool> shutdown_flag_ = false;
+  std::atomic<bool> refresh_flag_ = false;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
 
