@@ -585,22 +585,19 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
   auto contract_addr = make_contract_address(0);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        StorageKeyContractData key{};
-        std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
-        auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
-            key, std::span<const std::byte>(oversized));
-        if (!r.has_value() ||
-            r.value() !=
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          ADD_FAILURE()
-              << "Expected kSyscallErrorCodeInvalidSyscallInput for "
-                 "oversized RCQ entry";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    StorageKeyContractData key{};
+    std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
+    auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+        key, std::span<const std::byte>(oversized));
+    if (!r.has_value() ||
+        r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+      ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput for "
+                       "oversized RCQ entry";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
