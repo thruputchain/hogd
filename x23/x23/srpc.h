@@ -327,6 +327,12 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     msg.xid = xid;
     Buf record = make_record(msg, args...);
 
+    if (record.size() - 4 > max_message_size_) [[unlikely]]
+      throw XdrBadInput("{}::{}: message size {} exceeds maximum {}",
+                        ProcMeta::version_meta::version_name,
+                        ProcMeta::proc_name, record.size() - 4,
+                        max_message_size_);
+
     using ErrType = std::variant<XdrBadInput, XdrCallFailed>;
     std::expected<typename ProcMeta::return_type, ErrType> ret;
     std::binary_semaphore done{0};

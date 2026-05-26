@@ -171,9 +171,16 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
         src_item->get_key(),
         [this, alloc_loglet, src_item, &bytes_moved,
          &stats](ItemHeader **hptr, size_t /* hash */) mutable {
-          // no need to recheck storage field for tombstone status.
-          // if this item was already removed, modify_locked would not have
-          // triggered this callback.
+          // modify_locked matched by key, not by pointer. A concurrent
+          // different-sized put or remove+put may have already unlinked
+          // src_item and inserted a new same-key header; unlink()
+          // tombstones src_item under this same bucket lock. *hptr is
+          // then the new live header, and cloning src_item over it would
+          // clobber the live value with stale bytes. src_item is already
+          // dead, so skip it; its memory is reclaimed when this source
+          // loglet is freed at the end of the pass.
+          if (*hptr != src_item)
+            return;
 
           // initialize the first use of the per-thread loglet.
           static thread_local UniqueLoglet dst;
@@ -195,7 +202,6 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
                             dst_item->get_key_and_value().begin());
 
           // point the map to the new location (bucket lock is held).
-          assert(*hptr == src_item);
           dst_item->next = src_item->next;
           *hptr = dst_item;
           stats.live_items++;
