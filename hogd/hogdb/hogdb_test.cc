@@ -117,7 +117,7 @@ protected:
     fn(invoke_tx);
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -151,7 +151,11 @@ protected:
     if (!synced_balances) {
       return {};
     }
-    invoke_tx.commit();
+    auto commit_result = invoke_tx.commit();
+    EXPECT_TRUE(commit_result.has_value());
+    if (!commit_result.has_value()) {
+      return {};
+    }
     invoke_tx.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -480,7 +484,7 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
-  invoke_tx.commit();
+  ASSERT_TRUE(invoke_tx.commit());
   invoke_tx.release_blocktx_reference();
 
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
@@ -560,7 +564,8 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, r2.value());
 
     auto commit_cost = lock2.commit_change(c3, ctx);
-    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
+    ASSERT_TRUE(commit_cost.has_value());
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *commit_cost);
     auto changes = db_.create_changeset();
     ASSERT_TRUE(lock2.stage_committed_changes(ctx, changes));
     ASSERT_TRUE(db_.apply(changes));
@@ -606,7 +611,7 @@ TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
 
   LockContext ctx(&db_, current_height, rckey, &cost_model_);
   ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &c, ctx));
-  (void)lock.commit_change(c, ctx);
+  ASSERT_TRUE(lock.commit_change(c, ctx).has_value());
 
   auto changes = db_.create_changeset();
   ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
@@ -655,7 +660,7 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
-  invoke_tx.commit();
+  ASSERT_TRUE(invoke_tx.commit());
   invoke_tx.release_blocktx_reference();
 
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
@@ -823,7 +828,7 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
         std::to_underlying(StorageDeltaFlags::None)));
 
     ASSERT_TRUE(invoke_tx1.sync_balance_locks());
-    invoke_tx1.commit();
+    ASSERT_TRUE(invoke_tx1.commit());
     invoke_tx1.release_blocktx_reference();
   }
 
@@ -840,7 +845,7 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
         std::to_underlying(StorageDeltaFlags::None)));
 
     ASSERT_TRUE(invoke_tx2.sync_balance_locks());
-    invoke_tx2.commit();
+    ASSERT_TRUE(invoke_tx2.commit());
     invoke_tx2.release_blocktx_reference();
   }
 
@@ -961,7 +966,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
       invoke_tx.request_nnint128(key, 321,
                                  std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
-  invoke_tx.commit();
+  ASSERT_TRUE(invoke_tx.commit());
   invoke_tx.release_blocktx_reference();
 
   auto hash_result = block_tx.get().close(base_hash);
@@ -1015,7 +1020,7 @@ TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
       invoke_tx.request_nnint128(key, 321,
                                  std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
-  invoke_tx.commit();
+  ASSERT_TRUE(invoke_tx.commit());
   invoke_tx.release_blocktx_reference();
 
   auto hash_result = block_tx.get().close(base_hash);
@@ -1162,7 +1167,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
 
     // sync_balance_locks() handles storage cost deduction
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
 
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
@@ -1256,7 +1261,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1282,7 +1287,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_consume);
@@ -1343,7 +1348,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1371,7 +1376,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_delete);
@@ -1437,7 +1442,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1459,7 +1464,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_deletion(
         rcq_key, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_delete);
@@ -1532,7 +1537,7 @@ TEST_F(HogDBTest,
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1555,7 +1560,7 @@ TEST_F(HogDBTest,
         rcq_key, std::span<const std::byte>(std::as_bytes(std::span("test"))),
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_type_change);
@@ -1627,7 +1632,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1649,7 +1654,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.request_nnint128(
         rcq_key, 100, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_type_change);
@@ -1732,7 +1737,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1756,7 +1761,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -2130,7 +2135,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -2149,7 +2154,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
         std::to_underlying(StorageDeltaFlags::None)));
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
-    invoke_tx.commit();
+    ASSERT_TRUE(invoke_tx.commit());
     invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -2270,7 +2275,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
       ASSERT_TRUE(invoke_tx.request_nnint128(
           data_key, 0, 100, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2281,7 +2286,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
       ASSERT_TRUE(invoke_tx.request_nnint128(
           data_key, 200, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2413,7 +2418,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2426,7 +2431,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2505,7 +2510,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
           addr, Uniquifier(3, 100),
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2517,7 +2522,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
           addr, Uniquifier(3, 200),
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2569,7 +2574,7 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2586,7 +2591,7 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      ASSERT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2629,7 +2634,7 @@ TEST_F(HogDBTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
           addr, Uniquifier(3, 200),
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
-      invoke_tx_b.commit();
+      ASSERT_TRUE(invoke_tx_b.commit());
       invoke_tx_b.release_blocktx_reference();
     }
 
@@ -2684,7 +2689,7 @@ TEST_F(HogDBTest, AbortedFreshHeightStaysAbsentInNextBlock)
           addr, Uniquifier(3, 200),
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
-      invoke_tx_b.commit();
+      ASSERT_TRUE(invoke_tx_b.commit());
       invoke_tx_b.release_blocktx_reference();
     }
 
@@ -2745,7 +2750,7 @@ TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
           addr, Uniquifier(99999, 200),
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
-      invoke_tx_b.commit();
+      ASSERT_TRUE(invoke_tx_b.commit());
       invoke_tx_b.release_blocktx_reference();
     }
 
@@ -2809,7 +2814,7 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
             addr, Uniquifier(3, 200),
             std::to_underlying(StorageDeltaFlags::None)));
         EXPECT_TRUE(invoke_tx_b.sync_balance_locks());
-        invoke_tx_b.commit();
+        EXPECT_TRUE(invoke_tx_b.commit());
         invoke_tx_b.release_blocktx_reference();
       }
 
@@ -2823,7 +2828,7 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
           addr, Uniquifier(3, 200),
           std::to_underlying(StorageDeltaFlags::None)));
       EXPECT_TRUE(invoke_tx.sync_balance_locks());
-      invoke_tx.commit();
+      EXPECT_TRUE(invoke_tx.commit());
       invoke_tx.release_blocktx_reference();
     }
 
@@ -2864,7 +2869,7 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
         rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
 
     ASSERT_TRUE(itx.sync_balance_locks());
-    itx.commit();
+    ASSERT_TRUE(itx.commit());
     itx.release_blocktx_reference();
   }
 
@@ -2882,7 +2887,7 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
     ASSERT_TRUE(itx.sync_balance_locks());
 
     // Before the fix, this throws std::runtime_error("failed to lock balance")
-    ASSERT_NO_THROW(itx.commit());
+    ASSERT_TRUE(itx.commit());
     itx.release_blocktx_reference();
   }
 }
@@ -2935,8 +2940,7 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
                                                   StorageDeltaFlags::None)));
     ASSERT_TRUE(itx.sync_balance_locks());
 
-    ASSERT_NO_THROW(itx.commit())
-        << "commit should not throw when crediting a fresh-balance refund";
+    ASSERT_TRUE(itx.commit());
     itx.release_blocktx_reference();
   }
 }
@@ -3000,7 +3004,7 @@ TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
         itx.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
                              std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx.sync_balance_locks());
-    itx.commit();
+    ASSERT_TRUE(itx.commit());
     itx.release_blocktx_reference();
   }
 
@@ -3087,7 +3091,7 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
 
     if (ordering == 0) {
       // T1 commits before T2 tries to lock balance
-      itx1.commit();
+      ASSERT_TRUE(itx1.commit());
       itx1.release_blocktx_reference();
 
       int depth = itx2.get_savepoint_head();
@@ -3112,7 +3116,7 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
       itx2.rollback_to_savepoint(depth);
       itx2.release_blocktx_reference();
 
-      itx1.commit();
+      ASSERT_TRUE(itx1.commit());
       itx1.release_blocktx_reference();
     }
   }
@@ -3154,7 +3158,7 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
         itx_b.request_auth_data(addr, sibling_args,
                                 std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
-    itx_b.commit();
+    ASSERT_TRUE(itx_b.commit());
     itx_b.release_blocktx_reference();
     ASSERT_TRUE(block_tx_b.get().close(DbHash{}));
     ASSERT_TRUE(block_tx_b.get().commit());
@@ -3308,7 +3312,7 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
         itx_a.request_nnint128(j_key, 1,
                                std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_a.sync_balance_locks());
-    itx_a.commit();
+    ASSERT_TRUE(itx_a.commit());
     itx_a.release_blocktx_reference();
   }
 
@@ -3321,7 +3325,7 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
         itx_b.request_bytes(k_key, std::span(large_value),
                             std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
-    itx_b.commit();
+    ASSERT_TRUE(itx_b.commit());
     itx_b.release_blocktx_reference();
   }
   ASSERT_TRUE(block_b.get().close_skip_hash_for_testing());
@@ -3347,6 +3351,146 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
     itx_a.abort();
     itx_a.release_blocktx_reference();
   }
+}
+
+TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr auto kExclusiveFlags =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  Address trigger_addr = make_address(kAddress + 18);
+  Address control_addr = make_address(kAddress + 19);
+  ItemKey trigger_key = make_key(kAddress + 18, 1);
+  ItemKey control_key = make_key(kAddress + 19, 1);
+  setup_contract_address(trigger_addr);
+  setup_contract_address(control_addr);
+
+  auto make_insert_delta = [](uint8_t byte) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{byte});
+    return delta;
+  };
+
+  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+    auto trigger_seed = make_insert_delta(0x11);
+    ASSERT_TRUE(
+        itx.request_retrocausal_queue(trigger_key, trigger_seed, kNoFlags));
+    auto control_seed = make_insert_delta(0x22);
+    ASSERT_TRUE(
+        itx.request_retrocausal_queue(control_key, control_seed, kNoFlags));
+  });
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(trigger_key));
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(control_key));
+
+  PerThreadARC<BlockTX> stale_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX insert_only_tx(stale_block_tx);
+  ASSERT_TRUE(insert_only_tx.request_deletion(control_key, kExclusiveFlags));
+  auto control_delta = make_insert_delta(0x33);
+  ASSERT_TRUE(insert_only_tx.request_retrocausal_queue(control_key,
+                                                       control_delta,
+                                                       kNoFlags));
+  ASSERT_TRUE(insert_only_tx.sync_balance_locks());
+
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX consuming_tx(stale_block_tx);
+  ASSERT_TRUE(consuming_tx.request_deletion(trigger_key, kExclusiveFlags));
+  auto consuming_delta = make_insert_delta(0x44);
+  consuming_delta.consume.emplace();
+  consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
+      1;
+  consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  ASSERT_TRUE(consuming_tx.request_retrocausal_queue(trigger_key,
+                                                     consuming_delta,
+                                                     kNoFlags));
+  ASSERT_TRUE(consuming_tx.sync_balance_locks());
+
+  PerThreadARC<BlockTX> sibling_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
+  {
+    InvokeTX sibling_tx(sibling_block_tx);
+    ASSERT_TRUE(sibling_tx.request_deletion(trigger_key, kNoFlags));
+    ASSERT_TRUE(sibling_tx.request_deletion(control_key, kNoFlags));
+    ASSERT_TRUE(sibling_tx.sync_balance_locks());
+    ASSERT_TRUE(sibling_tx.commit());
+    sibling_tx.release_blocktx_reference();
+  }
+
+  ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
+  stale_block_tx.get().invalidate();
+  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
+  ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
+
+  // Insert-only exclusive RCQ commit succeeds even on a stale block because
+  // the re-validation has no past-block consume to check against the DAO.
+  ASSERT_TRUE(insert_only_tx.commit());
+  insert_only_tx.release_blocktx_reference();
+
+  // Consuming exclusive RCQ commit fails: the re-validation reads deleted
+  // RCQ blocks from the live DAO.
+  auto r = consuming_tx.commit();
+  ASSERT_FALSE(r.has_value());
+  consuming_tx.release_blocktx_reference();
+
+  // The failed commit poisons the BlockTX.
+  ASSERT_TRUE(stale_block_tx.get().is_poisoned());
+
+  // A poisoned BlockTX refuses to close or commit.
+  ASSERT_FALSE(stale_block_tx.get().close(parent_hash).has_value());
+}
+
+TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr auto kExclusiveFlags =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  Address addr = make_address(kAddress + 20);
+  ItemKey key = make_key(kAddress + 20, 1);
+  setup_contract_address(addr);
+
+  auto make_insert_delta = [](uint8_t byte) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{byte});
+    return delta;
+  };
+
+  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+    auto seed = make_insert_delta(0x11);
+    ASSERT_TRUE(itx.request_retrocausal_queue(key, seed, kNoFlags));
+  });
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
+
+  // Exclusive RCQ delete + recreate with consume on a non-stale block.
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx(block_tx);
+  ASSERT_TRUE(itx.request_deletion(key, kExclusiveFlags));
+  auto consuming_delta = make_insert_delta(0x22);
+  consuming_delta.consume.emplace();
+  consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
+      1;
+  consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  ASSERT_TRUE(itx.request_retrocausal_queue(key, consuming_delta, kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+
+  // Commit succeeds on a non-stale block.
+  ASSERT_TRUE(itx.commit());
+  itx.release_blocktx_reference();
+
+  // Block is not poisoned, close and commit succeed.
+  ASSERT_FALSE(block_tx.get().is_poisoned());
+  ASSERT_TRUE(block_tx.get().close(parent_hash));
+  ASSERT_TRUE(block_tx.get().commit());
 }
 
 } // namespace hogd

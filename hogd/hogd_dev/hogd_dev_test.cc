@@ -28,6 +28,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -47,6 +48,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/hogd_dev/manifest_hex.h"
 #include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -72,6 +74,7 @@ namespace hogd {
 namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
+constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
@@ -94,6 +97,24 @@ startup_timeout()
   return std::chrono::seconds(static_cast<int>(seconds));
 }
 
+std::chrono::seconds
+exit_timeout()
+{
+  const char *value = std::getenv("HOGD_DEV_EXIT_TIMEOUT_SECS");
+  if (value == nullptr || *value == '\0') {
+    return kDefaultExitTimeout;
+  }
+
+  errno = 0;
+  char *end = nullptr;
+  std::uint64_t seconds = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
+      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("invalid HOGD_DEV_EXIT_TIMEOUT_SECS value");
+  }
+  return std::chrono::seconds(static_cast<int>(seconds));
+}
+
 struct Readiness {
   struct Endpoint {
     std::string host;
@@ -104,6 +125,7 @@ struct Readiness {
   Endpoint indexer;
   Endpoint db_gateway;
   Endpoint view_gateway;
+  std::string network_id;
   std::filesystem::path manifest_path;
   std::string manifest_hash;
   json::Value manifest;
@@ -391,9 +413,8 @@ parse_readiness(std::string line)
   }
   std::string_view network_id =
       require_string_field(*manifest, "networkId", manifest_bytes);
-  if (network_id != "groundhog-local") {
-    throw std::runtime_error(
-        std::format("unexpected manifest networkId '{}'", network_id));
+  if (network_id.empty()) {
+    throw std::runtime_error("manifest networkId is empty");
   }
 
   const json::Value *endpoints = manifest->find("endpoints");
@@ -418,6 +439,7 @@ parse_readiness(std::string line)
           parse_endpoint(require_string_field(*endpoints, "viewGateway",
                                               manifest_bytes),
                          "viewGateway", manifest_bytes),
+      .network_id = std::string(network_id),
       .manifest_path = std::move(manifest_path),
       .manifest_hash = std::move(manifest_hash),
       .manifest = std::move(*manifest),
@@ -721,11 +743,77 @@ expect_clean_exit(HogdDevProcess &process)
   EXPECT_TRUE(process.read_remaining_stdout().empty());
 }
 
+std::string
+bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
+                        std::string_view initial_storage_tokens,
+                        std::string_view content_hash,
+                        bool include_protocol = false)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+
+  std::string buffer;
+  json::Writer(buffer).object([&](json::Writer &w) {
+    w.field("schemaVersion", std::int64_t{1});
+    w.field("kind", "groundhog-bootstrap");
+    w.field("networkId", "groundhog-bench-local");
+    w.field("profile", "local-dev");
+    if (include_protocol) {
+      w.field("protocol", version::kHogdProtocol());
+    }
+    w.object_field("devWallet", [&](json::Writer &w) {
+      w.field("profile", "hogd-dev-default");
+      w.field("artifactHint", "./dev-wallet.wasm");
+      w.field("contentHash", content_hash);
+      w.field("deployEntrypoint",
+              entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
+      w.field("doActionEntrypoint",
+              entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+    });
+    w.object_field("bootstrapAccounts", [&](json::Writer &w) {
+      w.field("count", static_cast<std::int64_t>(count));
+      w.field("seed", seed);
+      w.field("initialStorageTokens", initial_storage_tokens);
+    });
+    w.object_field("storageCostModel", [&](json::Writer &w) {
+      w.field("profile", "hogd-default");
+    });
+  });
+  return buffer;
+}
+
+std::filesystem::path
+write_test_bootstrap_manifest(std::string_view contents)
+{
+  std::filesystem::path path =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-bootstrap-manifest-{}-{}.json", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::ofstream output(path, std::ios::binary);
+  if (!output) {
+    throw std::runtime_error(std::format("failed to write {}", path.string()));
+  }
+  output << contents;
+  return path;
+}
+
+std::filesystem::path
+missing_test_bootstrap_manifest_path()
+{
+  std::filesystem::path path =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-bootstrap-manifest-missing-{}-{}.json", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+  return path;
+}
+
 TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
 {
   HogdDevProcess process = HogdDevProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
+  EXPECT_EQ(readiness.network_id, "groundhog-local");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
   EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
@@ -777,9 +865,9 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "built_contracts/dev_wallet.wasm");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            hex_string(wallet_meta::entrypoint<"initialize">()));
+            entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            hex_string(wallet_meta::entrypoint<"do_action">()));
+            entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -805,8 +893,7 @@ TEST(HogdDev, HelpPrintsBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--help"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -829,8 +916,7 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   HogdDevProcess process =
       HogdDevProcess::start({"--scheduler-port", "not-a-port"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -851,8 +937,7 @@ TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
 {
   HogdDevProcess process = HogdDevProcess::start({"--readiness", "stderr"});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit";
     return;
@@ -878,8 +963,7 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
     HogdDevProcess process =
         HogdDevProcess::start({"--listen-host", std::string(host)});
 
-    std::optional<int> status =
-        process.wait_for_exit_for_test(std::chrono::seconds(10));
+    std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
     if (!status.has_value()) {
       FAIL() << "hogd-dev did not exit";
       return;
@@ -900,8 +984,11 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
 
 TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
+  // Disable LeakSanitizer so its print_suppressions output (which is
+  // non-JSON) does not pollute stderr when running under ASAN.
   HogdDevProcess process =
-      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"}});
+      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
+                                 {"LSAN_OPTIONS", "detect_leaks=0"}});
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
@@ -970,8 +1057,7 @@ TEST(HogdDev, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
                                  {"HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START",
                                   "1"}});
 
-  std::optional<int> status =
-      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
     FAIL() << "hogd-dev did not exit after injected constructor failure";
     return;
@@ -1114,6 +1200,210 @@ TEST(HogdDev, BootstrapManifestAdvertisesAccountMetadata)
   }
 
   expect_clean_exit(process);
+}
+
+TEST(HogdDev, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  const std::string manifest =
+      bootstrap_manifest_json(2, "manifest-seed", "1000000000",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+  Readiness readiness = process.wait_for_readiness();
+
+  EXPECT_EQ(readiness.network_id, "groundhog-bench-local");
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+  const json::Value *derivation =
+      readiness.manifest.find("bootstrapAccountDerivation");
+  ASSERT_NE(derivation, nullptr);
+  EXPECT_EQ(require_string_field(*derivation, "seed", ""), "manifest-seed");
+  for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
+    auto keypair = derive_bootstrap_account_keypair("manifest-seed", i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
+              hex_string(keypair.first));
+    EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
+              "1000000000");
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  const std::string manifest =
+      bootstrap_manifest_json(1, "manifest-seed", "42",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+      "--dev-accounts",
+      "1",
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "--bootstrap-manifest conflicts with dev-account"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
+{
+  std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      missing_path.string(),
+      "--dev-accounts",
+      "1",
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "--bootstrap-manifest conflicts with dev-account"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestConflictDetectedBeforeShorthandParsing)
+{
+  std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      missing_path.string(),
+      "--dev-accounts",
+      "not-a-count",
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "--bootstrap-manifest conflicts with dev-account"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestRejectsOversizedFile)
+{
+  std::filesystem::path manifest_path =
+      write_test_bootstrap_manifest(std::string((64 * 1024) + 1, ' '));
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find("bootstrap manifest exceeds"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestRejectsMismatchedDevWalletHash)
+{
+  const std::string manifest = bootstrap_manifest_json(
+      1, "manifest-seed", "42",
+      "0x9999999999999999999999999999999999999999999999999999999999999999");
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find("devWallet.contentHash"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  const std::string manifest =
+      bootstrap_manifest_json(1, "", "42",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "bootstrapAccounts.seed must not be empty"),
+            std::string::npos);
+}
+
+TEST(HogdDev, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
+{
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  const std::string manifest =
+      bootstrap_manifest_json(1, "manifest-seed", " 1000",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  HogdDevProcess process = HogdDevProcess::start({
+      "--bootstrap-manifest",
+      manifest_path.string(),
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  ASSERT_TRUE(status.has_value());
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "Invalid bootstrap manifest initialStorageTokens"),
+            std::string::npos);
 }
 
 TEST(HogdDev, RejectsDevAccountCountAboveLimit)

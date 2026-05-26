@@ -46,6 +46,9 @@ public:
     return invalidated_.load(std::memory_order_acquire);
   }
 
+  void poison() { poisoned_.store(true, std::memory_order_release); }
+  bool is_poisoned() const { return poisoned_.load(std::memory_order_acquire); }
+
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
@@ -65,7 +68,9 @@ public:
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.
   // returns the increase in committed storage cost.
-  int128_t commit_change(const ItemKey &key, ItemChange const &change);
+  // Returns an error if the exclusive commit path reads a live DAO that was
+  // mutated by a sibling block commit (stale block).
+  HogDBStatus<int128_t> commit_change(const ItemKey &key, ItemChange change);
 
   void release_balance(const Address &addr, int128_t delta);
 
@@ -117,6 +122,7 @@ private:
   BlockHeight block_height_;
   std::optional<ChangeSet> changeset_;
   std::atomic<bool> invalidated_{false};
+  std::atomic<bool> poisoned_{false};
   const BlockExecutionMode mode_;
 
   HogDBStatus<void> stage_locks(ChangeSet &changes);

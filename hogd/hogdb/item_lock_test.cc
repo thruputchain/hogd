@@ -746,7 +746,7 @@ TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
       auto res = lock.try_atomic_change_lock(nullptr, &change_a, ctx);
       if (res.has_value()) {
         committed.store(true, std::memory_order_relaxed);
-        (void)lock.commit_change(change_a, ctx);
+        ASSERT_TRUE(lock.commit_change(change_a, ctx).has_value());
       }
       finalized_ready.store(true, std::memory_order_relaxed);
     });
@@ -868,7 +868,9 @@ TEST(ItemLockTest, ConcurrentNonexclusiveCommitSingleFinalizer)
     for (size_t i = 0; i < kThreads; ++i) {
       threads.emplace_back([&, i]() {
         sync.arrive_and_wait();
-        costs[i] = lock.commit_change(deletion, ctx);
+        auto r = lock.commit_change(deletion, ctx);
+        ASSERT_TRUE(r.has_value());
+        costs[i] = *r;
       });
     }
 

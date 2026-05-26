@@ -81,7 +81,8 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     auto r = do_lock(*lock, change, ctx);
     CHECK(r.has_value());
-    lock->commit_change(change, ctx);
+    auto cr = lock->commit_change(std::move(change), ctx);
+    CHECK(cr.has_value());
   }
 }
 
@@ -170,8 +171,8 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   do_unlock_item(*lock, change, ctx);
 }
 
-int128_t
-BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
+HogDBStatus<int128_t>
+BlockTX::commit_change(const ItemKey &key, ItemChange change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
@@ -180,14 +181,17 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
-    lock->commit_change(change, ctx);
+    auto r = lock->commit_change(std::move(change), ctx);
+    if (!r.has_value()) {
+      return r.error();
+    }
     return 0;
   }
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  return lock->commit_change(change, ctx);
+  return lock->commit_change(std::move(change), ctx);
 }
 
 HogDBStatus<std::optional<QueueEntry>>
@@ -252,6 +256,9 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   if (!changeset_.has_value() ||
       mode_ == BlockExecutionMode::kBlockExecutionModeViewing) {
     return HogDBError(mode_ == BlockExecutionMode::kBlockExecutionModeViewing
@@ -320,6 +327,9 @@ BlockTX::commit(WorkerPool &pool)
 HogDBStatus<void>
 BlockTX::close_skip_hash_for_testing()
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
   if (auto r = stage_locks(changes); !r) {
     return r;
@@ -331,6 +341,9 @@ BlockTX::close_skip_hash_for_testing()
 HogDBStatus<DbHash>
 BlockTX::close(const DbHash &base_hash)
 {
+  if (is_poisoned()) {
+    return HogDBError(HogDBCode::kInternal);
+  }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
   if (auto r = stage_locks(changes); !r) {
     return r.error();

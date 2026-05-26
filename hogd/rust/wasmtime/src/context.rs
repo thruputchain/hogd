@@ -45,14 +45,12 @@ fn check_memory_limit(module: &Module) -> bool {
 /// against a stale SDK fails with a diagnosable signal in release.
 /// Without this, the only release-visible symptom is an opaque
 /// "deterministicError" outcome on the calling transaction.
-fn validate_imports(
-    module: &Module,
-    imports: &std::collections::HashMap<(String, String), u8>,
-) -> bool {
+fn validate_imports(module: &Module, imports: &[common::LinkEntry]) -> bool {
     for import in module.imports() {
-        let key = (import.module().to_string(), import.name().to_string());
-        let expected_nargs = match imports.get(&key) {
-            Some(n) => *n as usize,
+        let expected_nargs = match imports.iter().find(|e| {
+            e.module() == import.module() && e.function() == import.name()
+        }) {
+            Some(e) => e.nargs() as usize,
             None => {
                 eprintln!(
                     "wasmtime: rejecting contract — unknown host import {}::{} (likely SDK/runtime ABI mismatch)",
@@ -225,63 +223,16 @@ impl WasmtimeContext {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
-        let config = groundhog_wasm_meter::Config {
-            max_imported_functions: 1,
-            reject_floats: true,
-            ..groundhog_wasm_meter::Config::default()
-        };
-        let module_info =
-            match groundhog_wasm_meter::verify(contract_data, &config) {
-                Ok(info) => info,
-                Err(e) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("Contract verification failed: wasm-meter: {e}");
-                    return match e {
-                    groundhog_wasm_meter::Error::InternalResourceExhausted(
-                        _,
-                    ) => InvokeErrorCode::Unrecoverable,
-                    _ => InvokeErrorCode::Deterministic,
-                };
-                }
-            };
-        if module_info.memories.len() != 1 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: expected 1 memory, found {}",
-                module_info.memories.len()
-            );
-            return InvokeErrorCode::Deterministic;
-        }
-        if module_info.memories[0].initial_pages > 1 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: initial memory {} pages exceeds limit of 1",
-                module_info.memories[0].initial_pages
-            );
-            return InvokeErrorCode::Deterministic;
-        }
         let engine = self.engine();
-        let module = match Module::new(engine, contract_data) {
-            Ok(m) => m,
-            Err(_e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Contract verification failed: {}", _e);
-                return InvokeErrorCode::Deterministic;
-            }
-        };
-        if !check_memory_limit(&module) {
+        if let Err(_e) = Module::validate(engine, contract_data) {
             #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: memory limit check failed"
-            );
+            eprintln!("Contract verification failed: {}", _e);
             return InvokeErrorCode::Deterministic;
         }
-        if !validate_imports(&module, self.global_context.imports()) {
-            #[cfg(debug_assertions)]
-            eprintln!("Contract verification failed: import validation failed");
-            return InvokeErrorCode::Deterministic;
-        }
-        InvokeErrorCode::None
+        common::verify_contract_meter(
+            contract_data,
+            self.global_context.imports(),
+        )
     }
 }
 

@@ -112,6 +112,15 @@ is_allowed_error_code(SyscallErrorCode code)
     return true;
   }
 
+  // Mutable syscalls always allow kSyscallErrorCodeInvalidSyscallInput:
+  // the read-only wrapper returns it when a mutable syscall is called in a
+  // read-only frame, regardless of what the inner syscall documents.
+  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if (code == SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+      return true;
+    }
+  }
+
   return std::ranges::any_of(SyscallMeta::kAllowedErrors,
                              [code](auto allowed) { return code == allowed; });
 }

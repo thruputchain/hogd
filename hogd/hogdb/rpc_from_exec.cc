@@ -149,7 +149,20 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
       return to_rpc_error(r.error());
     }
   }
-  itx->commit();
+
+  if (ctx_.is_snapshot_read_stale(block)) {
+    itx->abort();
+    ctx_.close_invoke_tx(block, tx, itx);
+    return RPCError::kRPCBadBlockID;
+  }
+
+  if (auto r = itx->commit(); !r.has_value()) {
+    ctx_.close_invoke_tx(block, tx, itx);
+    if (ctx_.is_snapshot_read_stale(block)) {
+      return RPCError::kRPCBadBlockID;
+    }
+    return to_rpc_error(r.error());
+  }
   ctx_.close_invoke_tx(block, tx, itx);
 
   return RPCError::kRPCNone;

@@ -34,7 +34,7 @@ public:
   }
 
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                         const Bytes & /*unused*/, const LockContext &ctx) const
+                         Bytes & /*unused*/, const LockContext &ctx) const
   {
     if (did_finalize) {
       return ctx.cost_model->get_bytestring_cost(bytestring_.size()) -

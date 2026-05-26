@@ -579,6 +579,7 @@ public:
   {
     return std::get_if<T>(&type_);
   }
+  template<typename T> auto *get_inner() { return std::get_if<T>(&type_); }
 
   // narrow combines the reservation of a change into this one.
   HogDBStatus<void> narrow(const ItemChange &change);

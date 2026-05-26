@@ -22,6 +22,7 @@
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -137,8 +138,11 @@ NNIntItem::validate() const
 
 RetrocausalQueueItem
 RetrocausalQueueItem::make_fully_consumed_item(
-    const SnapshotStorageItem &base_item, uint32_t retrocausally_consumed_count)
+    const SnapshotStorageItem &base_item, x23::Vec<QueueEntry> consumed_entries)
 {
+  auto retrocausally_consumed_count =
+      static_cast<uint32_t>(consumed_entries.size());
+
   RetrocausalQueueItem item(base_item);
   item.locally_consumed_index_ = retrocausally_consumed_count;
 
@@ -158,10 +162,8 @@ RetrocausalQueueItem::make_fully_consumed_item(
     }
     item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
         .past_block_consume = past_consume,
+        .current_block_consumed = std::move(consumed_entries),
     });
-    item.queue_delta_.consume->current_block_consumed =
-        base_item.get_retrocausally_consumed_entries(
-            retrocausally_consumed_count);
   }
 
   return item;

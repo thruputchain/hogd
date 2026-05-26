@@ -1,8 +1,10 @@
 add_library(
   hogd_dev
   bootstrap_accounts.cc
+  bootstrap_manifest.cc
   hogd_dev_node.cc
   hogd_dev_tmp_dir.cc
+  manifest_parse.cc
   runtime_manifest.cc
 )
 target_link_libraries(
@@ -79,6 +81,29 @@ gtest_discover_tests(
   PROPERTIES
     RESOURCE_LOCK hogd_dev
 )
+
+add_executable(
+  bootstrap_manifest_test
+  bootstrap_manifest_test.cc
+)
+target_include_directories(
+  bootstrap_manifest_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  bootstrap_manifest_test
+  contract_loader
+  crypto
+  hogd_dev
+  GTest::gtest
+)
+add_dependencies(
+  bootstrap_manifest_test
+  all_wasm_contracts
+  all_wasm_headers
+)
+gtest_discover_tests(bootstrap_manifest_test)
 
 add_executable(
   hogd_dev_fresh_launch_test

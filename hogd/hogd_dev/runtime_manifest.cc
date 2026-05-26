@@ -1,7 +1,6 @@
 #include "hogd/hogd_dev/runtime_manifest.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
@@ -14,18 +13,17 @@
 #include <utility>
 
 #include "built_contracts/dev_wallet.h"
-#include "contract.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/status.h"
-#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/hogd_dev/manifest_hex.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
@@ -35,25 +33,15 @@ namespace hogd {
 
 namespace {
 
+static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
+              "ordinary literal encoding must be ASCII-compatible");
+
 constexpr std::string_view kManifestFileName = "runtime-manifest.json";
 constexpr std::string_view kManifestTmpSuffix = ".tmp";
 constexpr std::string_view kStorageCostModelHashTag =
     "groundhog-storage-cost-model-v1";
 constexpr int kManifestTempOpenFlags =
     O_WRONLY | O_CREAT | O_TRUNC; // NOLINT(misc-include-cleaner)
-
-std::string
-hex_string(std::span<const std::byte> bytes)
-{
-  return std::format("0x{}", encode_hex(bytes));
-}
-
-template<std::size_t N>
-std::string
-hex_string(std::array<std::uint8_t, N> const &bytes)
-{
-  return hex_string(std::as_bytes(std::span(bytes)));
-}
 
 std::string
 int128_to_decimal(int128_t value)
@@ -111,12 +99,6 @@ storage_cost_model_hash(StorageCostModel const &model)
   return hasher.finalize();
 }
 
-std::string
-entrypoint_hex(ContractEntrypointID const &entrypoint)
-{
-  return hex_string(std::as_bytes(std::span(entrypoint)));
-}
-
 void
 write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 {
@@ -136,7 +118,8 @@ write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 }
 
 std::string
-build_runtime_manifest_json(HogdDevNode const &node)
+build_runtime_manifest_json(HogdDevNode const &node,
+                            std::string_view network_id)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
@@ -151,7 +134,7 @@ build_runtime_manifest_json(HogdDevNode const &node)
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hogd-dev-runtime");
-    w.field("networkId", "groundhog-local");
+    w.field("networkId", network_id);
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(genesis_hash));
     w.object_field("producer", [&](json::Writer &w) {
@@ -299,11 +282,12 @@ format_hex_hash(SHA256Hash const &hash)
 }
 
 RuntimeManifestPointer
-write_hogd_dev_runtime_manifest(HogdDevNode const &node)
+write_hogd_dev_runtime_manifest(HogdDevNode const &node,
+                                std::string_view network_id)
 {
   std::filesystem::path manifest_path =
       std::filesystem::path(node.runtime_dir()) / kManifestFileName;
-  std::string manifest = build_runtime_manifest_json(node);
+  std::string manifest = build_runtime_manifest_json(node, network_id);
   write_manifest_atomically(manifest_path, manifest);
 
   SHA256Hash manifest_hash = hash_bytes(manifest);

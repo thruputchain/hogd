@@ -188,6 +188,11 @@ syscall_Invoke_inner(
     RuntimeMemoryLength &output_return_buffer_len,
     RuntimeMemoryLength &output_returned_auth_token_len) noexcept
 {
+  if (!SystemCallHandler::validate_invoke_flags(input_flags)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
   Calldata calldata;
   try {
     calldata.resize_uninitialized(input_calldata.size());

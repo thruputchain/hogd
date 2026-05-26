@@ -32,7 +32,7 @@ public:
                          const PointerItem<ReplayCacheIt> *after,
                          const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                         const PointerItem<ReplayCacheIt> &after,
+                         PointerItem<ReplayCacheIt> &after,
                          const LockContext &ctx);
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
@@ -66,6 +66,13 @@ private:
   mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};
+
+  // Cached result of count_pruned_replay_cache_entries, computed once per block
+  // on the first commit_change call. The value depends only on the snapshot
+  // metadata and ctx.block_height, both of which are constant within a block.
+  mutable std::atomic<uint64_t> cached_pruned_count_{0};
+  mutable std::once_flag pruned_count_once_flag_;
+  mutable std::atomic<BlockHeight> pruned_count_block_height_{0};
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;

@@ -216,6 +216,18 @@ public:
 
   // Syscalls: operations within an invocation
 
+  template<auto... Flags, typename FlagSet>
+  static constexpr bool validate_flags(FlagSet flags)
+  {
+    constexpr FlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
+    return (flags & kAllowedFlags) == flags;
+  }
+
+  static constexpr bool validate_invoke_flags(InvokeFlagSet flags)
+  {
+    return validate_flags<InvokeFlag::TryInvoke, InvokeFlag::ReadOnly>(flags);
+  }
+
   // Create and run a child call frame.
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<SystemStatus<SyscallErrorCode>, GasAmount>

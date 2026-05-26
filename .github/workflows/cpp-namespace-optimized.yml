@@ -175,7 +175,7 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           # Limit parallelism for Debug builds - they use more memory per compile
-          echo 'NPROC=22' >> ./scripts/conf.sh
+          echo 'NPROC=20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
           # Configure ccache with namespace to avoid contention between parallel jobs

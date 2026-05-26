@@ -1007,6 +1007,95 @@ fn test_h001_verify_contract_rejects_float_module() {
 }
 
 #[test]
+fn test_validation_invalid_control_flow_rejected_deterministically() {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+
+    // Type section: one no-arg, no-result function type.
+    wasm.extend([0x01, 0x04, 0x01, 0x60, 0x00, 0x00]);
+    // Function section: one function using type 0.
+    wasm.extend([0x03, 0x02, 0x01, 0x00]);
+    // Memory section: one memory, min 1 page, max 1 page.
+    wasm.extend([0x05, 0x04, 0x01, 0x01, 0x01, 0x01]);
+    // Global section: mutable i64 __groundhog_stack_limit, initialized to 0.
+    wasm.extend([0x06, 0x06, 0x01, 0x7e, 0x01, 0x42, 0x00, 0x0b]);
+
+    let stack_limit_export = b"__groundhog_stack_limit";
+    let entrypoint_export = b"0000000000000001";
+
+    let mut exports = Vec::new();
+    exports.push(0x03); // 3 exports
+    exports.push(0x06);
+    exports.extend(b"memory");
+    exports.extend([0x02, 0x00]); // memory export, index 0
+    exports.push(stack_limit_export.len() as u8);
+    exports.extend(stack_limit_export.as_slice());
+    exports.extend([0x03, 0x00]); // global export, index 0
+    exports.push(entrypoint_export.len() as u8);
+    exports.extend(entrypoint_export.as_slice());
+    exports.extend([0x00, 0x00]); // function export, index 0
+    wasm.extend([0x07, exports.len() as u8]);
+    wasm.extend(exports);
+
+    let mut body = Vec::new();
+    body.push(0x00); // local declaration count
+    body.extend([
+        0x23, 0x00, // global.get 0
+        0x42, 0x3f, // i64.const 63
+        0x54, // i64.lt_u
+        0x04, 0x40, // if
+        0x00, // unreachable
+        0x0b, // end
+        0x23, 0x00, // global.get 0
+        0x42, 0x3f, // i64.const 63
+        0x7d, // i64.sub
+        0x24, 0x00, // global.set 0
+        // Validation-invalid: block declares i32 result but body leaves i64
+        0x41, 0x01, // i32.const 1
+        0x04, 0x7f, // if (result i32)
+        0x42, 0x00, // i64.const 0
+        0x0b, // end
+        0x23, 0x00, // global.get 0
+        0x42, 0x3f, // i64.const 63
+        0x7c, // i64.add
+        0x24, 0x00, // global.set 0
+        0x0b, // function end
+    ]);
+
+    let mut code = Vec::new();
+    code.push(0x01); // 1 function body
+    code.push(body.len() as u8);
+    code.extend(body);
+    wasm.extend([0x0a, code.len() as u8]);
+    wasm.extend(code);
+
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+    wasmtime::Module::new(&engine, &wasm)
+        .err()
+        .expect("wasmtime must reject the validation-invalid control flow");
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let result =
+            wasmtime_verify_contract(context, wasm.as_ptr(), wasm.len());
+
+        assert_ne!(
+            result, 0,
+            "validation-invalid Wasm must be rejected deterministically, \
+             not via debug abort"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+#[test]
 fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
     unsafe {
         let global_context = new_wasmtime_global_context(8);

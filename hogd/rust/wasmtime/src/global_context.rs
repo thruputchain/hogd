@@ -1,5 +1,4 @@
 use core::ffi::c_void;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -106,12 +105,7 @@ pub struct WasmtimeGlobalContext {
     /// modulo engine_count. This replaces the old static global allocator
     /// which was shared across all WasmtimeGlobalContext instances.
     next_engine_index: AtomicUsize,
-    /// Shadow of host imports registered into every per-engine linker.
-    /// Keyed by (module_name, field_name), value is the arity used to
-    /// pick the `link_function_Nargs` wrapper. All host imports share
-    /// the shape `[i64; nargs] -> [i32]`, so arity alone is sufficient
-    /// to structurally validate a contract's declared import type.
-    imports: HashMap<(String, String), u8>,
+    imports: Vec<LinkEntry>,
 }
 
 impl WasmtimeGlobalContext {
@@ -253,7 +247,7 @@ impl WasmtimeGlobalContext {
             engine_count,
             linkers,
             next_engine_index: AtomicUsize::new(0),
-            imports: HashMap::new(),
+            imports: Vec::new(),
         }
     }
 
@@ -275,7 +269,7 @@ impl WasmtimeGlobalContext {
         &self.instance_pre_cache
     }
 
-    pub fn imports(&self) -> &HashMap<(String, String), u8> {
+    pub fn imports(&self) -> &[LinkEntry] {
         &self.imports
     }
 
@@ -284,10 +278,7 @@ impl WasmtimeGlobalContext {
         for linker in &mut self.linkers {
             Self::apply_link_entry(linker, &entry);
         }
-        self.imports.insert(
-            (entry.module().to_string(), entry.function().to_string()),
-            entry.nargs(),
-        );
+        self.imports.push(entry.clone());
     }
 
     fn apply_link_entry(linker: &mut Linker<*mut c_void>, entry: &LinkEntry) {

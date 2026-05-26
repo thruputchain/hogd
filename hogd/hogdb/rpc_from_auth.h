@@ -1,11 +1,13 @@
 #pragma once
 
+#include <string_view>
 #include <utility>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -26,6 +28,10 @@ public:
 
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
+    if (std::string_view(card.protocol) !=
+        std::string_view(version::kHogdProtocol())) {
+      co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
+    }
     if (!co_await ctx_.get_auth_change_subscription_manager()
              .add_full_auth_change_subscriber(std::move(card))) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);

@@ -62,7 +62,7 @@ public:
   // not currently do.
   static int128_t commit_change(bool /* finalize */,
                                 int128_t /* snapshot_cost */,
-                                const Balance & /* after */,
+                                Balance & /* after */,
                                 const LockContext & /*ctx*/)
   {
     return 0;

@@ -87,6 +87,41 @@ public:
     return delta;
   }
 
+  constexpr static auto
+  make_rcq_observed_delta(std::vector<QueueEntry> const &observed_entries)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    delta.retrocausal_queue().observed_concurrent_entries = {
+        observed_entries.begin(), observed_entries.end()};
+    return delta;
+  }
+
+  constexpr static auto make_rcq_insert_observed_delta(
+      std::vector<QueueEntry> const &inserted_entries,
+      std::vector<QueueEntry> const &observed_entries)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{
+        .added_entries = {inserted_entries.begin(), inserted_entries.end()}};
+    delta.retrocausal_queue().observed_concurrent_entries = {
+        observed_entries.begin(), observed_entries.end()};
+    return delta;
+  }
+
+  constexpr static auto make_rcq_consume_observed_delta(
+      uint32_t max_fully_consumed_block_number,
+      uint32_t partial_consumed_number,
+      x23::Vec<QueueEntry, 0xffffffff> const &current_block_consumed,
+      std::vector<QueueEntry> const &observed_entries)
+  {
+    auto delta =
+        make_rcq_consume_delta(max_fully_consumed_block_number,
+                               partial_consumed_number, current_block_consumed);
+    delta.retrocausal_queue().observed_concurrent_entries = {
+        observed_entries.begin(), observed_entries.end()};
+    return delta;
+  }
+
   std::optional<QueueEntry> load_concurrent_entry(AddressAndKey const &addrkey,
                                                   uint32_t index)
   {
@@ -4211,6 +4246,418 @@ TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
   ASSERT_TRUE(r.has_value() && r.value())
       << "after tx1 commits 0 actual entries, the 500-slot reservation must "
          "be released so tx2 can insert 501";
+}
+
+TEST_F(DirectRCQTests, ObservedEntryMatchesInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0x0A})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservedEntryNoMatchingInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xFF})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservedAndConsumedSameEntry)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_observed_delta(0, 0, {entryA}, {entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservationCommitsBeforeInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, MultipleObservedPartialMatch)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key,
+                make_rcq_observed_delta(
+                    {make_rcq_entry({0x0A}), make_rcq_entry({0xFF})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, TupleTrackingUnmatchedConsume)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0x0A})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, TupleTrackingMultipleInsertsOneConsume)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_consume_delta(0, 0, {entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservedEntryZeroInserts)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  // Single TX observes an entry on a key with no inserts from any TX.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xBB})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservedEntryInserterAborted)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A, reserve it
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe A, reserve it
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX1 aborted — insert never reaches commit_change
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  // TX2 commits — observation is committed
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  // Block close rejects: observed entry was never inserted (inserter aborted).
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservedEntryObserverAborted)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe forged entry — would fail validation
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xFF})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  // TX2 aborted — forged observation never reaches commit_change
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // Block close succeeds: only the insert committed, no unmatched observations.
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, InsertAndObserveInSameDelta)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+  auto entryB = make_rcq_entry({0x0B});
+
+  // TX1: insert B (so the observation of B in TX2 is valid)
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryB}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: insert A and observe B in a single delta
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_observed_delta({entryA}, {entryB}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObservationAcrossDifferentKeys)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key1 = make_contract_data_addrkey(kContractAddress, "rcq0");
+  auto key2 = make_contract_data_addrkey(kContractAddress, "rcq1");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A on key1
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key1, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe A on key2 (different key — insert on key1 doesn't help)
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key2, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  // Block rejects: per-key isolation — insert on key1 doesn't validate
+  // an observation on key2.
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, RepeatedObservationExceedsInserts)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A once
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe A three times in one delta (e.g. three consumes in a
+  // reverted frame). One insert cannot satisfy three observations.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA, entryA, entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, TwoTxsObserveSameEntryOneInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A once
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2 and TX3 each observe A once. Observation is an existence check —
+  // different TXs see the same pool, so one insert satisfies both
+  // (observe_count = max(1,1) = 1, not sum).
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObserveCountUsesMaxNotSum)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A twice
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA, entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe A once
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX3: observe A twice — this is the max, so observe_count = 2
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryA, entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  // observe_count = max(1, 2) = 2, insert_count = 2. 2 <= 2 → passes.
+  // With sum semantics (1+2=3 > 2) this would incorrectly reject.
+  advance_block();
+}
+
+TEST_F(DirectRCQTests, ObserveCountMaxExceedsSingleInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert A once
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe A once — fine on its own
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX3: observe A twice — max(1, 2) = 2 > insert_count(1)
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryA, entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  // observe_count = max(1, 2) = 2 > insert_count = 1 → rejected.
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  advance_block();
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

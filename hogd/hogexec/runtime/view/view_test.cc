@@ -35,6 +35,7 @@
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -1568,6 +1569,145 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   auto close_res =
       framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
   EXPECT_TRUE(close_res.has_value());
+}
+
+TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
+{
+  static constexpr ContractAddress kOuterAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kChildAddr =
+      NativeContractTestFramework::make_contract_address(11);
+  static constexpr ContractAddress kConsumerAddr =
+      NativeContractTestFramework::make_contract_address(12);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+
+  fns.emplace(0,
+              [](NativeSyscallContext & /*ctx*/) noexcept
+                  -> InvokeStatus<void> { return {}; });
+
+  fns.emplace(
+      2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "Consumer should never be invoked";
+        return {};
+      });
+
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    std::array<uint32_t, 1> forwarded{0};
+    RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
+
+    auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+        kChildAddr, 0, UINT64_MAX, Calldata{},
+        std::to_underlying(InvokeFlag::ReadOnly),
+        std::span<uint32_t const>{forwarded}, out_ret_len, out_auth_len);
+    if (!invoke_res.has_value()) {
+      ADD_FAILURE() << "read-only invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+    auto reuse_res =
+        ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr, 2, UINT64_MAX,
+                                        Calldata{}, 0,
+                                        std::span<uint32_t const>{forwarded},
+                                        out_ret_len, out_auth_len);
+    if (!reuse_res.has_value()) {
+      ADD_FAILURE() << "reuse invoke syscall failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    EXPECT_EQ(reuse_res.value(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+    return {};
+  });
+
+  NativeViewSetup setup(std::move(fns));
+
+  deploy_native(kOuterAddr);
+  deploy_native(kChildAddr);
+  deploy_native(kConsumerAddr);
+
+  Invocation invocation{
+      .invoked_address = kOuterAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kParentAddr,
+                .expiry_height = 1'000'000,
+                .root_node = {.consumer_address = kChildAddr,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query, *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+}
+
+TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = NativeContractTestFramework::make_storage_key("rcq");
+
+        QueueEntry entry = {0};
+        RuntimeMemoryLength written_len = 0;
+        auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::as_writable_bytes(std::span(entry)), written_len);
+        if (!r1.has_value() ||
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "consume failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+            key, std::to_underlying(StorageDeltaFlags::None));
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "delete failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        uint32_t new_val = 99;
+        auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            key, std::as_bytes(std::span(&new_val, 1)));
+        if (!r3.has_value() ||
+            r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "insert failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return {};
+      });
+
+  deploy_native(kNativeAddr);
+
+  NondeterministicProposalData ndet{};
+  ndet.nondeterministic_bits.push_back(0x01);
+  ndet.nondeterministic_bit_count = 1;
+  QueueEntry supplied_entry;
+  supplied_entry.push_back(0x42);
+  ndet.observed_queue_entry_sequence.push_back(supplied_entry);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result =
+      run_view(make_query(invocation), *setup.context, std::move(ndet));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

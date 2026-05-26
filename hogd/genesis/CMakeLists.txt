@@ -5,6 +5,8 @@ add_library(genesis
 add_dependencies(
   genesis
   all_wasm_headers
+  generate_syscall_inner_h
+  generate_syscall_meta_h
 )
 
 target_link_libraries(genesis
@@ -40,6 +42,8 @@ target_include_directories(genesis_test_objects PRIVATE
 add_dependencies(
   genesis_test_objects
   all_wasm_headers
+  generate_syscall_inner_h
+  generate_syscall_meta_h
 )
 
 # Create test executable

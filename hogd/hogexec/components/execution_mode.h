@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "retrocausal_queue.hh"
 #include "transaction.hh"
@@ -108,6 +109,9 @@ public:
   std::optional<Nondeterministic<QueueEntry>>
   consume_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index);
 
+  x23::Vec<QueueEntry> get_observed_queue_entries(AddressAndKey const &addrkey,
+                                                  uint32_t count) const;
+
   // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;
 
@@ -170,6 +174,15 @@ public:
   {
     return partial_validation_data_.consume_queue_entry_observation(addrkey,
                                                                     index);
+  }
+
+  x23::Vec<QueueEntry> get_observed_queue_entries(AddressAndKey const &addrkey,
+                                                  uint32_t count) const
+  {
+    auto entries =
+        partial_validation_data_.get_observed_queue_entries(addrkey, count);
+    CHECK_EQ(entries.size(), count);
+    return entries;
   }
 
 private:

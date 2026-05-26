@@ -76,8 +76,7 @@ make_caller_contract()
   builder.add<CallerContract, "call_return_ok_void">(
       [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] =
-            client.template invoke_opt<"return_ok_void">(ctx.handler());
+        auto result = client.template invoke_opt<"return_ok_void">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -88,8 +87,7 @@ make_caller_contract()
   builder.add<CallerContract, "call_return_ok_int">(
       [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] =
-            client.template invoke_opt<"return_ok_int">(ctx.handler());
+        auto result = client.template invoke_opt<"return_ok_int">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
