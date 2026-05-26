@@ -137,13 +137,8 @@ jobs:
           cp build/release/hogd/indexer/indexer_exec artifacts/
           cp build/release/chuckd.dev artifacts/
           cp build/release/scpd.dev artifacts/
-          mkdir -p package/hogd-dev-linux-x86_64
-          cp build/release/hogd/hogd_dev/hogd-dev package/hogd-dev-linux-x86_64/
-          chmod +x package/hogd-dev-linux-x86_64/hogd-dev
-          tar -czf artifacts/hogd-dev-linux-x86_64.tar.gz -C package/hogd-dev-linux-x86_64 hogd-dev
+          cp build/release/hogd/hogd_dev/hogd-dev artifacts/
           chmod +x artifacts/*
-          cd artifacts
-          sha256sum hogd-dev-linux-x86_64.tar.gz > hogd-dev-linux-x86_64.tar.gz.sha256
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
