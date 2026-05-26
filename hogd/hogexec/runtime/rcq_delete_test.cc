@@ -2264,6 +2264,7 @@ TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 
 // Delete queue, then try to consume. Should get no entry.
 // Insert is in previous block so no concurrent entries are available.
+// The empty consume should leave the key deleted, not convert to empty RCQ.
 TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 {
   insert(42);
@@ -2274,30 +2275,33 @@ TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Consume (nothing available) -> delete -> consume (nothing available).
 // Both should return no entry. retrocausally_consumed_count_ should remain 0.
+// The key should end up deleted, not converted to empty RCQ.
 TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 {
   invoke_method(18);
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Delete -> peek(empty) -> consume(empty). The peek must not decide the final
-// write shape; the later non-peek consume should still use delete-recreate RCQ
-// behavior.
+// write shape; the empty consume should leave the key deleted.
 TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 {
   invoke_method(51);
 
   advance_block();
 
-  ASSERT_TRUE(check_rcq_empty());
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(queue.has_value());
 }
 
 // Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
