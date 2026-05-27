@@ -4665,8 +4665,7 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCost)
   // Grant exactly enough storage for one insert (kBaseItemCost + 1 *
   // kRCQCostPerEntry).  If the observe-only delta charges any storage at all,
   // the balance check will fail.
-  int128_t exact_cost =
-      cost_model_->get_retrocausal_queue_cost(1);
+  int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
   setup_grant_storage_token(kContractAddress, exact_cost);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_cost");
 
@@ -4705,8 +4704,7 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostExistingRCQ)
   // kBaseItemCost so that the reservation succeeds and kBaseItemCost remains
   // after both blocks.
   int128_t base_cost = cost_model_->kBaseItemCost;
-  int128_t total_cost =
-      cost_model_->get_retrocausal_queue_cost(4) + base_cost;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(4) + base_cost;
   setup_grant_storage_token(kContractAddress, total_cost);
 
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_exist");
@@ -4714,11 +4712,11 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostExistingRCQ)
 
   // Block 1: Insert 3 entries.
   auto tx_setup = make_new_per_tx_db_proxy();
-  tx_setup.add_delta(
-      key,
-      make_rcq_insert_delta(
-          {make_rcq_entry({1}), make_rcq_entry({2}), make_rcq_entry({3})}),
-      std::to_underlying(StorageDeltaFlags::None));
+  tx_setup.add_delta(key,
+                     make_rcq_insert_delta({make_rcq_entry({1}),
+                                            make_rcq_entry({2}),
+                                            make_rcq_entry({3})}),
+                     std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
   ASSERT_TRUE(tx_setup.commit_transaction().has_value());
   advance_block();
@@ -4757,8 +4755,8 @@ TEST_F(DirectRCQTests,
   // The insert in block 2 reserves standalone cost(1) = kBaseItemCost +
   // per_entry.  Grant cost(2) + kBaseItemCost so the reservation succeeds.
   int128_t base_cost = cost_model_->kBaseItemCost;
-  int128_t total_cost =
-      cost_model_->get_retrocausal_queue_cost(2) + base_cost + cost_model_->kRCQCostPerEntry;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(2) + base_cost +
+                        cost_model_->kRCQCostPerEntry;
   setup_grant_storage_token(kContractAddress, total_cost);
 
   auto key =
@@ -4767,10 +4765,10 @@ TEST_F(DirectRCQTests,
 
   // Block 1: Insert 2 entries.
   auto tx_setup = make_new_per_tx_db_proxy();
-  tx_setup.add_delta(
-      key,
-      make_rcq_insert_delta({make_rcq_entry({1}), make_rcq_entry({2})}),
-      std::to_underlying(StorageDeltaFlags::None));
+  tx_setup.add_delta(key,
+                     make_rcq_insert_delta(
+                         {make_rcq_entry({1}), make_rcq_entry({2})}),
+                     std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
   ASSERT_TRUE(tx_setup.commit_transaction().has_value());
   advance_block();
@@ -4778,13 +4776,13 @@ TEST_F(DirectRCQTests,
   auto bal_before = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(kContractAddress));
   ASSERT_TRUE(bal_before.has_value());
-  EXPECT_EQ(from_xdr(bal_before->nnint()), base_cost + cost_model_->kRCQCostPerEntry);
+  EXPECT_EQ(from_xdr(bal_before->nnint()),
+            base_cost + cost_model_->kRCQCostPerEntry);
 
   // Block 2: TX1 consumes 1 past-block entry and inserts 1 new entry (net
   // zero).  TX2 only observes the new entry.
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key,
-                make_rcq_consume_insert_delta(0, 1, {}, {entryA}),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 1, {}, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
 
@@ -4813,12 +4811,11 @@ TEST_F(DirectRCQTests,
   // All three TXs (insert, consume+insert, observe) land in the same block on
   // a brand-new key.  The observe-only TX should cost nothing.
   int128_t base_cost = cost_model_->kBaseItemCost;
-  int128_t total_cost =
-      cost_model_->get_retrocausal_queue_cost(2) + base_cost;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(2) + base_cost;
   setup_grant_storage_token(kContractAddress, total_cost);
 
-  auto key = make_contract_data_addrkey(kContractAddress,
-                                        "rcq_observe_ci_cancel_new");
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_observe_ci_cancel_new");
   auto entryA = make_rcq_entry({0x0A});
   auto entryB = make_rcq_entry({0x0B});
 
@@ -4831,8 +4828,7 @@ TEST_F(DirectRCQTests,
   // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
   auto entryC = make_rcq_entry({0x0C});
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {entryA}, {entryC}),
+  tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryC}),
                 std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
 
@@ -4863,8 +4859,7 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostEmptyQueue)
   int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
   setup_grant_storage_token(kContractAddress, exact_cost);
 
-  auto key =
-      make_contract_data_addrkey(kContractAddress, "rcq_observe_empty");
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_empty");
   auto entryA = make_rcq_entry({0x0A});
   auto entryB = make_rcq_entry({0x0B});
 
@@ -4876,8 +4871,7 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostEmptyQueue)
 
   // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {entryA}, {entryB}),
+  tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
 
@@ -4909,8 +4903,7 @@ TEST_F(DirectRCQTests,
   int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
   setup_grant_storage_token(kContractAddress, exact_cost);
 
-  auto key = make_contract_data_addrkey(kContractAddress,
-                                        "rcq_observe_sep_ci");
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_sep_ci");
   auto entryA = make_rcq_entry({0x0A});
 
   // TX1: insert 1 entry.
