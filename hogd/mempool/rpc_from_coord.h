@@ -173,7 +173,7 @@ public:
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> schedulercoord_shutdown()
+  x23::Async<void> schedulercoord_shutdown() const
   {
     CHECK(ready());
 
