@@ -12,7 +12,6 @@ experimental in-tree VM. Raw Google Benchmark JSON is saved beside this file as
 
 ```sh
 build-release/hogd/hogexec/runtime/rv32/rv32_vm_bench \
-  --benchmark_filter='fibonacci_recursive_20' \
   --benchmark_min_time=0.5s \
   --benchmark_out=docs/superpowers/benchmarks/2026-05-27-rv32-vm-baseline.json \
   --benchmark_out_format=json
@@ -22,15 +21,22 @@ build-release/hogd/hogexec/runtime/rv32/rv32_vm_bench \
 
 | Benchmark | Real time | CPU time | Throughput counter |
 | --- | ---: | ---: | ---: |
-| `bm_rv32_fibonacci_recursive_20` | 1.030 ms | 1.030 ms | 255.1M RV32 instructions/sec |
-| `bm_wasmi_wat_fibonacci_recursive_20` | 0.283 ms | 0.283 ms | 657.7M wasmi fuel/sec |
-| `bm_wasmi_built_contract_fibonacci_recursive_20` | 0.360 ms | 0.360 ms | 566.2M wasmi fuel/sec |
+| `bm_dispatch_arithmetic` | 0.00175 ms | 0.00175 ms | 230.8M RV32 instructions/sec |
+| `bm_load_store_loop` | 0.00174 ms | 0.00174 ms | 231.4M RV32 instructions/sec |
+| `bm_rv32_fibonacci_recursive_20` | 1.043 ms | 1.043 ms | 251.9M RV32 instructions/sec |
+| `bm_wasmi_wat_fibonacci_recursive_20` | 0.284 ms | 0.284 ms | 654.5M wasmi fuel/sec |
+| `bm_wasmi_built_contract_fibonacci_recursive_20` | 0.360 ms | 0.360 ms | 566.8M wasmi fuel/sec |
 
 ## Interpretation
 
 For the repo-built `fibonacci_raw.wasm` artifact, the current RV32 interpreter is
-about 2.86x slower by wall time on this compute-heavy recursive Fibonacci
+about 2.90x slower by wall time on this compute-heavy recursive Fibonacci
 microbenchmark.
+
+The dispatch and load/store loop microbenches show similar RV32 throughput
+around 230M executed guest instructions/sec, close to the 251.9M/sec Fibonacci
+row, so the current baseline does not isolate the Fibonacci gap to
+call/stack-frame handling alone.
 
 The WAT benchmark is a minimal wasm text fixture compiled to `.wasm` during the
 CMake build. It is useful as a pure engine-shape datapoint, but the
