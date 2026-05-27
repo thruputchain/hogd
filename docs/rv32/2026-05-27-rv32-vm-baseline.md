@@ -5,8 +5,8 @@ Commit: `d61b564ed7090195cdc8594c62a407868139d92e`
 Build: `build-release`, `CMAKE_BUILD_TYPE=Release`
 
 This records the first RV32 VM versus wasmi head-to-head baseline for the
-experimental in-tree VM. Raw Google Benchmark JSON is saved beside this file as
-`2026-05-27-rv32-vm-baseline.json`.
+experimental in-tree VM. The raw Google Benchmark JSON is not committed; it can
+be regenerated with the command below.
 
 ## Command
 

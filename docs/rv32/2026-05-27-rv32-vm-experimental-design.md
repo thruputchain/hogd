@@ -241,13 +241,14 @@ uses mock hosts only. A production bridge, if built later, must route through th
 same parsing, alias-guard, tracing, and gas machinery used by the WASM syscall
 path.
 
-The seven-register test convention is not sufficient for production
-`SystemCallHandler` parity. The current WASM boundary passes a syscall number
-and ten `uint64_t` argument words through `syscall_entry`. Milestone 2 must
-therefore add a production-shaped memory marshalling convention, such as an
-`ecall` frame pointer in guest memory containing the syscall number and ten
-64-bit argument slots, rather than trying to squeeze the full syscall ABI into
-RV32 argument registers.
+The seven-register convention above is the Milestone 1 starting point and is not
+sufficient for production `SystemCallHandler` parity: the WASM boundary passes a
+syscall number and ten `uint64_t` argument words through `syscall_entry`.
+Milestone 2 therefore replaced it with the production-shaped marshalling
+convention now in use — an `ecall` frame pointer in guest memory holding the
+syscall number and ten 64-bit argument slots followed by a result footer —
+rather than squeezing the full syscall ABI into RV32 argument registers. See the
+Milestone 2 status below for the implemented bridge.
 
 ## C++ API Shape
 
@@ -255,8 +256,10 @@ The implementation should live under `hogd/hogexec/runtime/rv32/` and expose a
 small public surface:
 
 - `Program`: immutable validated instruction image.
-- `Program::validate(std::span<const uint8_t>)`: validates length, alignment,
-  instruction encodings, and profile restrictions.
+- `Program::create(std::span<const uint8_t>)`: the validated factory (returns
+  `std::expected`) that decodes once and rejects bad length, alignment,
+  instruction encodings, and profile restrictions; `Program::validate` remains
+  for callers that only need the pass/fail check.
 - `Machine`: registers, PC, memory, gas, and run/step methods.
 - `EcallArgs` and `HostResult`: explicit test-only `ecall` boundary types.
 - `Host`: abstract `ecall` callback for tests and future runtime integration.
@@ -446,26 +449,22 @@ SDK/toolchain viability question:
   alternative, but is not the current M4 dispatch direction.
 - A C++ ownership review concluded that the VM core is small, explicit, and
   maintainable enough to keep owning, while the host/runtime/artifact edges need
-  the M5 hardening listed below. See
-  [RV32 C++ Ownership Review](2026-05-27-rv32-cpp-ownership-review.md).
+  pre-protocol hardening. See
+  [RV32 C++ Ownership Review](2026-05-27-rv32-cpp-ownership-review.md) and its
+  M5 Readiness Checklist.
 
 ### Deferred Hardening Before Milestone 5
 
-These are not blockers for Milestone 4, but they should be closed before any
-protocol exposure:
-
-- Split overloaded `HostResult.value` into typed payloads or add an explicit
-  trap-code field so return values, halt codes, and host trap codes cannot be
-  confused by status discipline alone.
-- Classify bridge ABI faults caused by guest input, such as invalid bridge
-  version, misaligned frame pointer, unreadable frame, or code-zero host traps,
-  as deterministic guest failures rather than fatal host failures.
-- Fold syscall gas costs into the versioned gas-schedule digest so total RV32
-  contract cost cannot change silently when syscall costs change.
-- Add differential WASM-vs-RV32 error contracts for validation failure,
-  abandon, deterministic guest failures, and relevant host trap classes.
-- Continue planned bridge cleanup: replace scratch-copy memory writeback with a
-  live mutable memory span if the performance/determinism tradeoff holds up.
+Milestone 4 is complete, but several host/runtime/artifact edges must be hardened
+before any protocol exposure. The canonical, full list is the **M5 Readiness
+Checklist** in the
+[RV32 C++ Ownership Review](2026-05-27-rv32-cpp-ownership-review.md); in summary
+it covers typed host-result payloads and atomic host-trap handling, deterministic
+classification of guest-caused bridge ABI faults, a cryptographic artifact
+content commitment, folding syscall gas costs into the versioned gas-schedule
+digest, differential WASM-vs-RV32 error contracts, cross-platform determinism
+runs, the production SDK lowerer design, and an imported RV32I/RV32M conformance
+corpus.
 
 ## Review Gates
 

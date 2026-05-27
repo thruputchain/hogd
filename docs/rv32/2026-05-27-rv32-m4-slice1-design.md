@@ -246,6 +246,12 @@ This slice does **not**:
 
 ## Followups
 
+> **Status (as of the M4 close):** F1, F2, and F5 have since landed — the
+> versioned artifact format, the method dispatch table, and storage/event
+> parity, respectively. F0, F3, and F4 remain open. This section is preserved as
+> the point-in-time slice plan; the current state lives in the design doc's
+> Milestone 4 status.
+
 - **F0** — Migrate the crude author-side (contract, linker script, syscall-frame
   writes) out of hogd fixtures into sdk_rs as the real contract-authoring
   surface, once viability is proven. Tracked as an M4 followup here; not folded

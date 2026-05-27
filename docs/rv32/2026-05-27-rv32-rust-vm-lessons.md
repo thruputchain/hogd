@@ -256,6 +256,15 @@ A good shape:
 This keeps the VM unaware of high-level method names while giving the SDK a
 clean dispatch target.
 
+> **Decision note (post-implementation):** M4 ultimately chose artifact-visible
+> *runtime-side* dispatch — a versioned dispatch table mapping method IDs to
+> validated entry PCs, resolved before VM construction — over this guest-side
+> stub/frame shape. The runtime-side choice keeps the method set auditable and
+> parser-validated before execution and makes an unknown-method miss a zero-gas
+> deterministic reject, while the `Machine` still only ever receives an entry PC.
+> See the Milestone 4 status in the design doc and the C++ Ownership Review for
+> the rationale.
+
 ### R3. Keep The Existing Syscall Frame Direction
 
 The current M2/M3 bridge frame already points the right way: `a0` points at a
