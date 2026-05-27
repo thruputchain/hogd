@@ -10,6 +10,7 @@ namespace hogd::rv32 {
 namespace {
 
 inline constexpr int32_t kHostFnNoneOrRecoverable = 0;
+inline constexpr int32_t kHostFnOutOfGas = 1;
 inline constexpr int32_t kHostFnReturn = 3;
 inline constexpr int32_t kHostFnExit = 4;
 
@@ -103,20 +104,29 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   }
   last_result_ = result;
   store_result_footer(memory, args.a0, result);
-  if (!view.write_memory(0, memory)) {
-    return HostResult::trap();
-  }
 
-  // OutOfGas and fatal host statuses still collapse to HostTrap until Machine
-  // grows host-gas debit and richer host-result plumbing.
   switch (result.panic) {
   case kHostFnNoneOrRecoverable:
+    if (!view.write_memory(0, memory)) {
+      return HostResult::trap();
+    }
     return HostResult::continue_with(static_cast<uint32_t>(result.result_code));
   case kHostFnReturn:
+    if (!view.write_memory(0, memory)) {
+      return HostResult::trap();
+    }
     return HostResult::halt();
   case kHostFnExit:
+    if (!view.write_memory(0, memory)) {
+      return HostResult::trap();
+    }
     return HostResult::halt(static_cast<uint32_t>(result.result_code));
+  case kHostFnOutOfGas:
+    return HostResult::out_of_gas();
   default:
+    if (!view.write_memory(0, memory)) {
+      return HostResult::trap();
+    }
     return HostResult::trap();
   }
 }

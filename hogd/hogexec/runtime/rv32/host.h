@@ -38,6 +38,7 @@ enum class StepResult {
 enum class HostStatus {
   kContinue,
   kHalt,
+  kOutOfGas,
   kTrap,
 };
 
@@ -105,6 +106,12 @@ struct HostResult {
   static HostResult halt(uint32_t code = 0)
   {
     return HostResult{.status = HostStatus::kHalt, .value = code};
+  }
+  // Host OutOfGas rolls back host memory effects but does not rewind the
+  // already-executed ECALL instruction.
+  static HostResult out_of_gas()
+  {
+    return HostResult{.status = HostStatus::kOutOfGas, .value = 0};
   }
   static HostResult trap()
   {

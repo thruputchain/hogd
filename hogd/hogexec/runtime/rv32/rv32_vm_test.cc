@@ -157,6 +157,29 @@ struct TrapHost : Host {
   int calls = 0;
 };
 
+struct OutOfGasHost : Host {
+  HostResult ecall(MachineView, const EcallArgs &) noexcept override
+  {
+    ++calls;
+    return HostResult::out_of_gas();
+  }
+
+  int calls = 0;
+};
+
+struct MutatingOutOfGasHost : Host {
+  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  {
+    ++calls;
+    const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
+    wrote = view.write_memory(4, data);
+    return HostResult::out_of_gas();
+  }
+
+  int calls = 0;
+  bool wrote = false;
+};
+
 struct MutatingTrapHost : Host {
   HostResult ecall(MachineView view, const EcallArgs &) noexcept override
   {
@@ -1018,6 +1041,50 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     EXPECT_EQ(machine.run(host), StepResult::kTrap);
     EXPECT_EQ(host.calls, 1);
     EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 1024, 100);
+    MachineTestPeer::set_reg(machine, 10, 7);
+    OutOfGasHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(host.calls, 1);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.reg(10), 7U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_FALSE(machine.pending_ecall().has_value());
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 100);
+    MutatingOutOfGasHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(host.calls, 1);
+    EXPECT_TRUE(host.wrote);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.memory()[4], 0U);
+    EXPECT_EQ(machine.memory()[7], 0U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_FALSE(machine.pending_ecall().has_value());
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 100);
+    MutatingOutOfGasHost host;
+    EXPECT_EQ(machine.step(), StepResult::kEcall);
+    ASSERT_TRUE(machine.pending_ecall().has_value());
+    const HostResult result =
+        host.ecall(machine.view(), *machine.pending_ecall());
+    EXPECT_EQ(machine.memory()[4], 0xaaU);
+    EXPECT_EQ(machine.complete_ecall(result), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.memory()[4], 0U);
+    EXPECT_EQ(machine.memory()[7], 0U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_FALSE(machine.pending_ecall().has_value());
   }
   {
     const auto program = make_program({0x00000073U});

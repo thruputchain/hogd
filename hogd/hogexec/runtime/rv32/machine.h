@@ -66,6 +66,7 @@ private:
   bool halted_ = false;
   uint32_t halt_code_ = 0;
   std::optional<EcallArgs> pending_ecall_;
+  std::vector<uint8_t> ecall_memory_snapshot_;
 };
 
 } // namespace hogd::rv32

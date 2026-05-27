@@ -152,6 +152,7 @@ Machine::reset(uint64_t gas)
   halted_ = false;
   halt_code_ = 0;
   pending_ecall_.reset();
+  ecall_memory_snapshot_.clear();
   if (construction_trap_ != Trap::kNone) {
     // A machine that failed construction must remain trapped after reset; do
     // not allow benchmark/test reset paths to re-enter execution with no valid
@@ -302,17 +303,28 @@ Machine::complete_ecall(const HostResult &result)
   case HostStatus::kContinue:
     // Host memory writes happen during Host::ecall through MachineView. The
     // only VM register mutation on a continuing ecall is the returned a0 value.
+    ecall_memory_snapshot_.clear();
     write_reg(10, result.value);
     return StepResult::kContinue;
   case HostStatus::kHalt:
+    ecall_memory_snapshot_.clear();
     halt_code_ = result.value;
     halted_ = true;
     return StepResult::kHalted;
+  case HostStatus::kOutOfGas:
+    // Host OOG rolls back host memory effects. The already-executed ECALL
+    // instruction stays charged and pc remains advanced past the ECALL.
+    memory_ = ecall_memory_snapshot_;
+    ecall_memory_snapshot_.clear();
+    set_trap(Trap::kOutOfGas);
+    return StepResult::kTrap;
   case HostStatus::kTrap:
+    ecall_memory_snapshot_.clear();
     set_trap(Trap::kHostTrap);
     return StepResult::kTrap;
   default:
     assert(false && "invalid host status");
+    ecall_memory_snapshot_.clear();
     set_trap(Trap::kHostTrap);
     return StepResult::kTrap;
   }
@@ -627,9 +639,11 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kEcall:
-    // Advance PC and snapshot argument registers before yielding to the host.
-    // complete_ecall owns the post-host mutation/trap ordering.
+    // Advance PC and snapshot guest-visible state before yielding to the host.
+    // complete_ecall owns post-host mutation, trap, and host-OOG rollback
+    // ordering for both Machine::run and manual step/complete callers.
     pc_ = pc_next;
+    ecall_memory_snapshot_ = memory_;
     pending_ecall_ = EcallArgs{
         .a0 = registers_[10],
         .a1 = registers_[11],

@@ -458,12 +458,32 @@ TEST(Rv32SyscallBridgeTest, trapsOnUnsupportedBridgeVersion)
   EXPECT_EQ(captured.calls, 0);
 }
 
-TEST(Rv32SyscallBridgeTest, hostPanicBecomesHostTrap)
+TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
+{
+  std::array<uint32_t, kRegisterCount> registers = {};
+  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  memory[7] = 0x11;
+  CapturedCall captured;
+  captured.result = {.result_code = 3, .panic = 1, .gas_consumed = 4};
+  SyscallBridgeHost bridge(&captured, capture_entry);
+  MachineView view(0, 10, registers, memory);
+
+  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+
+  EXPECT_EQ(result.status, HostStatus::kOutOfGas);
+  EXPECT_EQ(captured.calls, 1);
+  ASSERT_TRUE(bridge.last_result().has_value());
+  EXPECT_EQ(bridge.last_result()->panic, 1);
+  EXPECT_EQ(memory[7], 0x11U);
+  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
+}
+
+TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(kSyscallFrameBytes);
   CapturedCall captured;
-  captured.result = {.result_code = 3, .panic = 1, .gas_consumed = 4};
+  captured.result = {.result_code = 3, .panic = 2, .gas_consumed = 4};
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
@@ -472,8 +492,8 @@ TEST(Rv32SyscallBridgeTest, hostPanicBecomesHostTrap)
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(captured.calls, 1);
   ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->panic, 1);
-  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 1U);
+  EXPECT_EQ(bridge.last_result()->panic, 2);
+  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 2U);
 }
 
 TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
