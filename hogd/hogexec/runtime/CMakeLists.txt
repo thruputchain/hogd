@@ -12,6 +12,7 @@ add_subdirectory(wasm)
 add_subdirectory(item)
 add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
+add_subdirectory(rv32)
 
 add_library(runtime_objects OBJECT
   event_server_proxy.cc
