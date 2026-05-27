@@ -103,9 +103,10 @@ private:
 
   // Tracks per-entry insert, consume, and observe counts across all committed
   // TXs in the current block. insert_count and consume_count are summed across
-  // TXs; observe_count is the max across any single TX (different TXs observe
-  // the same concurrent pool). At block close, every entry must have
-  // insert_count >= consume_count and insert_count >= observe_count.
+  // TXs; observe_count is the max per-TX demand (consumes + observations),
+  // since a consumed entry cannot also cover an observation within the same TX.
+  // At block close, every entry must have insert_count >= consume_count and
+  // insert_count >= observe_count.
   std::unordered_map<QueueEntry, EntryTracking, QueueEntryHasher>
       entry_tracking_;
 

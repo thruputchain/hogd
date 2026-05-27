@@ -4298,17 +4298,25 @@ TEST_F(DirectRCQTests, ObservedAndConsumedSameEntry)
 
   auto entryA = make_rcq_entry({0x0A});
 
-  auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
-                std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  // Two inserts needed: one to cover the consume, one to cover the
+  // uncovered observation (per-TX demand = consume + observe = 2).
+  auto tx1a = make_new_per_tx_db_proxy();
+  tx1a.add_delta(key, make_rcq_insert_delta({entryA}),
+                 std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1a.try_push_current_subtransaction().value());
+
+  auto tx1b = make_new_per_tx_db_proxy();
+  tx1b.add_delta(key, make_rcq_insert_delta({entryA}),
+                 std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1b.try_push_current_subtransaction().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_observed_delta(0, 0, {entryA}, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
   ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1a.commit_transaction().has_value());
+  ASSERT_TRUE(tx1b.commit_transaction().has_value());
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();

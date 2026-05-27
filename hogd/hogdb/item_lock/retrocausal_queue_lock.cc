@@ -359,10 +359,20 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                     int128_t snapshot_cost, change_type &change,
                                     const LockContext &ctx)
 {
-  // Dedup observation counts outside the lock (allocation + O(n log n) insert).
-  std::map<QueueEntry, uint32_t> obs_counts;
+  // Per-TX demand: observations plus current-block consumes.  A destructive
+  // consume uses up one inserted entry, so the same insert cannot also cover
+  // an observation within the same TX.  Adding both into one map and taking
+  // the max across TXs lets has_unmatched_entries() reject doctored proposals
+  // where a single insert is reused for both a consume and a later peek.
+  // TODO(geoff): reduce copies by using non-owning span keys.
+  std::map<QueueEntry, uint32_t> per_tx_demand;
   for (auto const &entry : change.delta_.observed_concurrent_entries) {
-    ++obs_counts[entry];
+    ++per_tx_demand[entry];
+  }
+  if (change.delta_.consume) {
+    for (auto const &entry : change.delta_.consume->current_block_consumed) {
+      ++per_tx_demand[entry];
+    }
   }
 
   std::unique_lock<std::mutex> lock(mtx_);
@@ -419,7 +429,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
       ++entry_tracking_[entry].consume_count;
     }
   }
-  for (auto const &[entry, count] : obs_counts) {
+  for (auto const &[entry, count] : per_tx_demand) {
     auto &t = entry_tracking_[entry];
     t.observe_count = std::max(t.observe_count, count);
   }
