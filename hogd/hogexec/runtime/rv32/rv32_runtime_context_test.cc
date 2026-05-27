@@ -26,6 +26,7 @@
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
@@ -37,6 +38,8 @@
 
 namespace hogd {
 namespace {
+
+namespace compiled_sha256_return = rv32::fixtures::compiled_sha256_return;
 
 constexpr int32_t kRv32ContractId = 7;
 constexpr ContractAddress kWasmContractAddress =
@@ -84,6 +87,17 @@ make_program(std::initializer_list<uint32_t> words)
       rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
   if (!result.has_value()) {
     ADD_FAILURE() << "failed to create RV32 test program";
+    return {};
+  }
+  return std::make_shared<rv32::Program>(std::move(*result));
+}
+
+std::shared_ptr<const rv32::Program>
+make_program_from_bytes(std::span<const uint8_t> code)
+{
+  auto result = rv32::Program::create(code);
+  if (!result.has_value()) {
+    ADD_FAILURE() << "failed to create RV32 byte fixture program";
     return {};
   }
   return std::make_shared<rv32::Program>(std::move(*result));
@@ -301,6 +315,20 @@ make_sha256_then_return_image(std::span<const uint8_t> input)
       }),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kShaMemoryBytes,
+  };
+}
+
+rv32::RuntimeContractImage
+make_compiled_sha256_then_return_image()
+{
+  std::vector<uint8_t> initial_memory(compiled_sha256_return::kInitialMemory
+                                          .begin(),
+                                      compiled_sha256_return::kInitialMemory
+                                          .end());
+  return rv32::RuntimeContractImage{
+      .program = make_program_from_bytes(compiled_sha256_return::kCode),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = compiled_sha256_return::kMemoryBytes,
   };
 }
 
@@ -734,6 +762,78 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
   EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
 }
 
+TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnMatchesWasmTraceAndOutput)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input(
+      compiled_sha256_return::kInput.begin(),
+      compiled_sha256_return::kInput.end());
+  const SHA256Hash expected_hash = sha256(input);
+
+  auto wasm_context = make_hogexec_context();
+  auto wasm_contract =
+      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
+  write_contract(wasm_contract);
+  write_deployment(kWasmContractAddress, wasm_contract);
+  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
+  auto rv32_contract = make_rv32_contract_xdr();
+  install_contract(rv32_contract);
+
+  ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
+      kWasmContractAddress);
+  auto wasm_handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      wasm_client.make_invocation<"sha256">(kParityGas, input),
+                  .uniquifier =
+                      Uniquifier{
+                          .block_expiry_height =
+                              std::numeric_limits<BlockHeight>::max(),
+                          .nonce = 4,
+                      }},
+      *wasm_context);
+  wasm_handler.enable_tracing();
+  wasm_handler.enable_transaction_stats();
+
+  auto rv32_handler =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  rv32_handler.enable_tracing();
+  rv32_handler.enable_transaction_stats();
+
+  const auto wasm_result = wasm_handler.root_invoke();
+  const auto rv32_result = rv32_handler.root_invoke();
+
+  ASSERT_TRUE(wasm_result.is_root_success());
+  ASSERT_TRUE(rv32_result.is_root_success());
+
+  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
+  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
+  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
+  EXPECT_TRUE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
+
+  ASSERT_NE(wasm_handler.get_trace(), nullptr);
+  ASSERT_NE(rv32_handler.get_trace(), nullptr);
+  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
+            rv32_handler.get_trace()->status.status_code());
+  EXPECT_TRUE(
+      std::ranges::equal(wasm_handler.get_trace()->status.return_buffer(),
+                         expected_hash));
+  EXPECT_TRUE(
+      std::ranges::equal(rv32_handler.get_trace()->status.return_buffer(),
+                         expected_hash));
+  expect_sha256_return_trace_matches(*wasm_handler.get_trace(),
+                                     *rv32_handler.get_trace(), input,
+                                     expected_hash);
+  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
+  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
+}
+
 TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
 {
   auto wasm_context = make_hogexec_context();
@@ -833,6 +933,55 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
   const SHA256Hash expected_hash = sha256(input);
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_sha256_then_return_image(input)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler1 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  auto handler2 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  handler1.enable_tracing();
+  handler2.enable_tracing();
+  const auto result1 = handler1.root_invoke();
+  const auto result2 = handler2.root_invoke();
+
+  ASSERT_TRUE(result1.is_root_success());
+  ASSERT_TRUE(result2.is_root_success());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+
+  const auto output1 = handler1.get_most_recent_frame_output();
+  const auto output2 = handler2.get_most_recent_frame_output();
+  EXPECT_EQ(output1.status_code(), output2.status_code());
+  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected_hash));
+  EXPECT_TRUE(
+      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+
+  ASSERT_NE(handler1.get_trace(), nullptr);
+  ASSERT_NE(handler2.get_trace(), nullptr);
+  EXPECT_EQ(handler1.get_trace()->system_calls.size(),
+            handler2.get_trace()->system_calls.size());
+  expect_sha256_return_trace_matches(*handler1.get_trace(),
+                                     *handler2.get_trace(), input,
+                                     expected_hash);
+  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
+  }
+}
+
+TEST_F(Rv32RuntimeContextTest,
+       CompiledSha256ReturnIsDeterministicForSameInputs)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input(
+      compiled_sha256_return::kInput.begin(),
+      compiled_sha256_return::kInput.end());
+  const SHA256Hash expected_hash = sha256(input);
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
