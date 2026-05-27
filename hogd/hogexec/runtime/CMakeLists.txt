@@ -10,6 +10,7 @@ add_subdirectory(test_util)
 add_subdirectory(view)
 add_subdirectory(wasm)
 add_subdirectory(item)
+add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
 
 add_library(runtime_objects OBJECT

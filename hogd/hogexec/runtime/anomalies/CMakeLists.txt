@@ -1,0 +1,30 @@
+add_library(anomalies_test_objects OBJECT
+  replay_cache_height_budget_leak_test.cc
+)
+
+target_link_libraries(
+  anomalies_test_objects
+  GTest::gtest
+  hogd_interface
+)
+
+target_include_directories(
+  anomalies_test_objects
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
+  anomalies_test
+  anomalies_test_main.cc
+  $<TARGET_OBJECTS:anomalies_test_objects>
+)
+
+target_link_libraries(
+  anomalies_test
+  runtime_test_lib
+  storage_cost
+  model_checker
+  GTest::gtest
+)
+gtest_discover_tests(anomalies_test)
