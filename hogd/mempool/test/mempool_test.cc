@@ -513,9 +513,13 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   Nomination nomination{
-      .block_height = 1,
-      .prev_block_hash = {},
+      .block_height = db_tip.height + 1,
+      .prev_block_hash = db_tip.block_hash,
       .transactions_hash = t_to_parallel_batch(tx_hashes)(),
       .transactions_nondeterministic_data =
           t_to_parallel_batch(tx_nondeterministic_data)(),
@@ -528,7 +532,7 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(DbTip{}, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
@@ -542,16 +546,20 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   Nomination nomination{
-      .block_height = 1,
-      .prev_block_hash = {},
+      .block_height = db_tip.height + 1,
+      .prev_block_hash = db_tip.block_hash,
       .transactions_hash = t_to_parallel_batch(tx_hashes)(),
       .transactions_nondeterministic_data =
           t_to_parallel_batch(tx_nondeterministic_data)(),
   };
 
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(DbTip{}, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
