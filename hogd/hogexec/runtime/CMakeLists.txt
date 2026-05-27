@@ -205,6 +205,37 @@ target_link_libraries(
 gtest_discover_tests(rv32_syscall_entry_bridge_test
                      TEST_PREFIX rv32.entry.)
 
+add_executable(
+  rv32_runtime_context_test
+  rv32/runtime_context.cc
+  rv32/rv32_runtime_context_test.cc
+  rv32/rv32_syscall_entry_bridge_test_main.cc
+)
+
+target_link_libraries(
+  rv32_runtime_context_test
+  precompiles
+  rv32_syscall_bridge
+  runtime
+  runtime_test_lib
+  runtime_test_util
+  db_interface
+  hogdb
+  storage_cost
+  model_checker
+  contract_loader
+  genesis
+  GTest::gtest
+)
+gtest_discover_tests(rv32_runtime_context_test
+                     TEST_PREFIX rv32.runtime.)
+
+add_dependencies(
+  rv32_runtime_context_test
+  all_wasm_contracts
+  all_wasm_headers
+)
+
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
