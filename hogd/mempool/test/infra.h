@@ -365,9 +365,9 @@ private:
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
+  RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_;
-  RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 

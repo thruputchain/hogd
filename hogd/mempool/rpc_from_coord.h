@@ -67,9 +67,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id,
-                        size_t mempool_tx_size_limit)
-    : db_rpc_(db_rpc), network_id_(network_id),
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
+                        uint64_t network_id, size_t mempool_tx_size_limit)
+    : db_rpc_(db_rpc), auth_rpc_(auth_rpc), network_id_(network_id),
       mempool_tx_size_limit_(mempool_tx_size_limit)
   {}
 
@@ -112,8 +112,20 @@ public:
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
+
+    // Only one coordinator is allowed to register with the mempool.
+    size_t expected_coordinators_registered = 0;
+    if (!num_coordinators_registered_.compare_exchange_strong(
+            /*expected=*/expected_coordinators_registered, /*desired=*/1,
+            /*order=*/std::memory_order_relaxed)) {
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationAlreadyRegistered;
+    }
+    CHECK(!ready());
+
     Registration::registration().register_coordinator(card);
     co_await finish_init();
+    CHECK(ready());
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
   }
@@ -143,6 +155,8 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
+    CHECK(ready());
+
     // [last_committed_block_] is updated by [schedulercoord_commit_block()]
     // under the [commit_lock_] lock.
     x23::CoroGuard cg;
@@ -160,8 +174,10 @@ public:
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  static x23::Async<void> schedulercoord_shutdown()
+  x23::Async<void> schedulercoord_shutdown() const
   {
+    CHECK(ready());
+
     // TODO(jhumphri): Implement.
     co_return;
   }
@@ -169,6 +185,8 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
+    CHECK(ready());
+
     x23::CoroGuard commit_cg;
     co_await commit_cg(commit_lock_);
 
@@ -208,6 +226,8 @@ public:
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
+    CHECK(ready());
+
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
@@ -416,6 +436,10 @@ private:
         last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
+    auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        });
 
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
@@ -558,6 +582,7 @@ private:
   }
 
   MempoolDbRpc *db_rpc_;
+  MempoolAuthRpc *auth_rpc_;
   const uint64_t network_id_;
   const size_t mempool_tx_size_limit_;
 
@@ -568,8 +593,6 @@ private:
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
-  std::optional<AuthCard> auth_card_;
-  std::string auth_mempool_address_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
@@ -594,6 +617,7 @@ private:
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 
+  std::atomic<size_t> num_coordinators_registered_ = 0;
   std::atomic<bool> ready_ = false;
 
   std::chrono::steady_clock::time_point last_ =

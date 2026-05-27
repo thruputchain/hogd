@@ -38,7 +38,6 @@
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
-#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -88,11 +87,6 @@ HogdDevNode::HogdDevNode(std::string bind_host,
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
-    mempool_auth_server_->impl()->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
-          return mempool_coord_server_->impl()->auth_data_changed(
-              height, std::move(key_changes));
-        });
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
