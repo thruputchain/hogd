@@ -610,6 +610,51 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
   EXPECT_EQ(machine.gas_remaining(), 12U);
 }
 
+TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
+{
+  std::array<uint32_t, kRegisterCount> registers = {};
+  constexpr uint32_t kFrameAddress = 16;
+  std::vector<uint8_t> first_memory(128, 0x33);
+  std::vector<uint8_t> second_memory = first_memory;
+  for (size_t i = 0; i < kSyscallFrameArgWords; ++i) {
+    store_le64(first_memory,
+               kFrameAddress + static_cast<uint32_t>(i * sizeof(uint64_t)),
+               0x1000U + i);
+    store_le64(second_memory,
+               kFrameAddress + static_cast<uint32_t>(i * sizeof(uint64_t)),
+               0x1000U + i);
+  }
+
+  CapturedCall first_captured;
+  first_captured.result = {.result_code = 17,
+                           .panic = std::to_underlying(
+                               HostFnErrorCode::NoneOrRecoverable),
+                           .gas_consumed = 6};
+  CapturedCall second_captured = first_captured;
+  SyscallBridgeHost first_bridge(&first_captured, capture_entry);
+  SyscallBridgeHost second_bridge(&second_captured, capture_entry);
+  MachineView first_view(0, 44, registers, first_memory);
+  MachineView second_view(0, 44, registers, second_memory);
+
+  const HostResult first_result =
+      first_bridge.ecall(first_view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
+  const HostResult second_result =
+      second_bridge.ecall(second_view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
+
+  EXPECT_EQ(first_result.status, second_result.status);
+  EXPECT_EQ(first_result.value, second_result.value);
+  EXPECT_EQ(first_result.gas_consumed, second_result.gas_consumed);
+  EXPECT_EQ(first_memory, second_memory);
+  ASSERT_TRUE(first_bridge.last_result().has_value());
+  ASSERT_TRUE(second_bridge.last_result().has_value());
+  EXPECT_EQ(first_bridge.last_result()->result_code,
+            second_bridge.last_result()->result_code);
+  EXPECT_EQ(first_bridge.last_result()->panic,
+            second_bridge.last_result()->panic);
+  EXPECT_EQ(first_bridge.last_result()->gas_consumed,
+            second_bridge.last_result()->gas_consumed);
+}
+
 TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
 {
   const auto program = make_program({

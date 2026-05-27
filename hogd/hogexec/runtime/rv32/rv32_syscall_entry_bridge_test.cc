@@ -286,6 +286,48 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
   EXPECT_EQ(memory, before);
 }
 
+TEST_F(Rv32SyscallEntryBridgeTest, InvokeArgTenFaultLeavesGuestMemoryUnchanged)
+{
+  std::vector<uint8_t> memory(512, 0xBB);
+  constexpr uint32_t kAddress = 128;
+  constexpr uint32_t kEntrypoint = 192;
+  constexpr uint32_t kReturnBufferLen = 256;
+  std::ranges::fill(std::span<uint8_t>(memory).subspan(kAddress,
+                                                       sizeof(ContractAddress)),
+                    0);
+  std::ranges::fill(std::span<uint8_t>(memory).subspan(
+                        kEntrypoint, sizeof(ContractEntrypointID)),
+                    0);
+  std::ranges::fill(std::span<uint8_t>(memory).subspan(kReturnBufferLen,
+                                                       sizeof(uint32_t)),
+                    0);
+  const std::array<uint64_t, 11> frame_words = {
+      static_cast<uint64_t>(SyscallNo::kInvoke),
+      kAddress,
+      kEntrypoint,
+      1,
+      memory.size(),
+      0,
+      std::to_underlying(InvokeFlag::None),
+      memory.size(),
+      0,
+      kReturnBufferLen,
+      memory.size() - 1,
+  };
+  write_frame(memory, frame_words);
+  const std::vector<uint8_t> before = memory;
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  rv32::HostResult result = call_bridge(memory, handler, kPlentyOfGas);
+  finish_frame(handler, std::move(stashed_trace));
+
+  ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(result.value,
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
+  EXPECT_EQ(memory, before);
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
 {
   std::vector<uint8_t> memory(256);
