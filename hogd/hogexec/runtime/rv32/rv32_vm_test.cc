@@ -2,9 +2,11 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 #include "hogd/hogexec/runtime/rv32/machine.h"
@@ -37,12 +39,10 @@ std::shared_ptr<const Program>
 make_program(std::initializer_list<uint32_t> words)
 {
   const auto code = code_from_words(words);
-  Program program;
-  const auto result =
-      Program::create(std::span<const uint8_t>(code.data(), code.size()),
-                      program);
-  EXPECT_TRUE(result.ok);
-  return std::make_shared<Program>(std::move(program));
+  auto result =
+      Program::create(std::span<const uint8_t>(code.data(), code.size()));
+  EXPECT_TRUE(result.has_value());
+  return std::make_shared<Program>(std::move(*result));
 }
 
 uint32_t
@@ -191,6 +191,49 @@ TEST(Rv32ProgramTest, validates_code_shape_and_profile)
     EXPECT_EQ(Program::validate(code).error,
               ProgramError::kUnsupportedInstruction);
   }
+}
+
+TEST(Rv32ProgramTest, create_returns_validated_immutable_program)
+{
+  static_assert(!std::is_default_constructible_v<Program>);
+
+  const auto valid = code_from_words({addi(1, 0, 7)});
+  auto program = Program::create(valid);
+  ASSERT_TRUE(program.has_value());
+  EXPECT_EQ(program->instruction_count(), 1U);
+  EXPECT_EQ(program->byte_size(), kInstructionBytes);
+
+  const std::array<uint8_t, 1> invalid = {0};
+  auto error = Program::create(invalid);
+  ASSERT_FALSE(error.has_value());
+  EXPECT_EQ(error.error(), ProgramError::kCodeSizeNotAligned);
+}
+
+TEST(Rv32HostViewTest, checks_memory_ranges_with_machine_invariants)
+{
+  const auto program = make_program({addi(0, 0, 0)});
+  Machine machine(program, 16, 10);
+  MachineView view = machine.view();
+
+  std::array<uint8_t, 4> data = {1, 2, 3, 4};
+  EXPECT_TRUE(view.write_memory(12, data));
+  EXPECT_EQ(machine.memory()[12], 1U);
+  EXPECT_EQ(machine.memory()[15], 4U);
+
+  std::array<uint8_t, 4> out = {};
+  EXPECT_TRUE(view.read_memory(12, out));
+  EXPECT_EQ(out, data);
+
+  std::array<uint8_t, 1> one_byte = {9};
+  EXPECT_TRUE(
+      view.write_memory(16, std::span<const uint8_t>(one_byte.data(), 0)));
+  EXPECT_TRUE(view.read_memory(16, std::span<uint8_t>(one_byte.data(), 0)));
+  EXPECT_FALSE(view.write_memory(16, one_byte));
+  EXPECT_FALSE(view.write_memory(13, data));
+  EXPECT_FALSE(view.read_memory(13, out));
+  EXPECT_FALSE(
+      view.write_memory(std::numeric_limits<uint32_t>::max(), one_byte));
+  EXPECT_FALSE(view.read_memory(std::numeric_limits<uint32_t>::max(), out));
 }
 
 TEST(Rv32DecodeTest, decodes_representative_instruction_families)

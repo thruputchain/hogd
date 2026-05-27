@@ -303,12 +303,12 @@ Program::validate(std::span<const uint8_t> code)
   return ProgramResult{.ok = true, .error = ProgramError::kNone};
 }
 
-ProgramResult
-Program::create(std::span<const uint8_t> code, Program &out)
+std::expected<Program, ProgramError>
+Program::create(std::span<const uint8_t> code)
 {
   const auto result = validate(code);
   if (!result.ok) {
-    return result;
+    return std::unexpected(result.error);
   }
 
   Program program;
@@ -317,8 +317,7 @@ Program::create(std::span<const uint8_t> code, Program &out)
     program.instructions_.push_back(
         decode_instruction(load_u32_le(code, offset)).instruction);
   }
-  out = std::move(program);
-  return result;
+  return program;
 }
 
 bool

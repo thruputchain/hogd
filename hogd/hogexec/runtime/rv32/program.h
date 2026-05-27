@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <span>
 #include <vector>
 
@@ -160,9 +161,8 @@ struct ProgramResult {
 class Program {
 public:
   static ProgramResult validate(std::span<const uint8_t> code);
-  static ProgramResult create(std::span<const uint8_t> code, Program &out);
-
-  Program() = default;
+  static std::expected<Program, ProgramError>
+  create(std::span<const uint8_t> code);
 
   [[nodiscard]] size_t instruction_count() const
   {
@@ -177,6 +177,8 @@ public:
   instruction_at_aligned_pc(uint32_t pc) const;
 
 private:
+  Program() = default;
+
   std::vector<DecodedInstruction> instructions_;
 };
 

@@ -63,9 +63,9 @@ make_program(std::initializer_list<uint32_t> words)
   for (const uint32_t word : words) {
     append_u32(code, word);
   }
-  Program program;
-  benchmark::DoNotOptimize(Program::create(code, program));
-  return std::make_shared<Program>(std::move(program));
+  auto program = Program::create(code);
+  benchmark::DoNotOptimize(program.has_value());
+  return std::make_shared<Program>(std::move(*program));
 }
 
 void
