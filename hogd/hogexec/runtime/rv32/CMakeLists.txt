@@ -48,6 +48,7 @@ add_executable(
 target_link_libraries(
   rv32_syscall_bridge_test
   rv32_syscall_bridge
+  x23
   GTest::gtest
 )
 gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)

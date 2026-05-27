@@ -1,14 +1,20 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
+#include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
+#include "hogd/hogexec/runtime/syscall_arg_params.h"
 
 namespace hogd::rv32 {
 namespace {
@@ -28,6 +34,16 @@ store_le64(std::vector<uint8_t> &memory, uint32_t address, uint64_t value)
   for (uint32_t i = 0; i < sizeof(uint64_t); ++i) {
     memory[address + i] = static_cast<uint8_t>(value >> (i * 8));
   }
+}
+
+int32_t
+load_le32(const std::vector<uint8_t> &memory, uint32_t address)
+{
+  uint32_t value = 0;
+  for (uint32_t i = 0; i < sizeof(uint32_t); ++i) {
+    value |= uint32_t{memory[address + i]} << (i * 8);
+  }
+  return static_cast<int32_t>(value);
 }
 
 std::shared_ptr<const Program>
@@ -100,6 +116,96 @@ throwing_entry(ExternHostCallContext, WasmContext, uint64_t, uint64_t, uint64_t,
   throw 1;
 }
 
+enum class ParserProbeMode : uint64_t {
+  kSpans = 1,
+  kBool = 2,
+  kSignedI32 = 3,
+  kOptionalU32 = 4,
+};
+
+TrampolineResult
+parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
+                   uint64_t mode, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+                   uint64_t arg4, uint64_t, uint64_t, uint64_t, uint64_t,
+                   uint64_t, uint64_t)
+{
+  AliasGuard guard;
+  std::span<std::byte> memory(reinterpret_cast<std::byte *>(
+                                  wasm_context.memory.mem),
+                              wasm_context.memory.sz);
+
+  switch (static_cast<ParserProbeMode>(mode)) {
+  case ParserProbeMode::kSpans:
+  {
+    auto input =
+        SyscallArgParams<std::span<const std::byte>>::parse(guard, memory, arg1,
+                                                            arg2);
+    auto output = SyscallArgParams<std::span<std::byte>>::parse(guard, memory,
+                                                                arg3, arg4);
+    if (!SyscallArgParams<std::span<const std::byte>>::validate(input) ||
+        !SyscallArgParams<std::span<std::byte>>::validate(output) ||
+        !guard.check()) {
+      return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+    }
+    auto in = SyscallArgParams<std::span<const std::byte>>::deref(input);
+    auto out = SyscallArgParams<std::span<std::byte>>::deref(output);
+    if (!in.empty() && !out.empty()) {
+      out[0] = in[0];
+    }
+    return {.result_code = 0, .panic = 0, .gas_consumed = 0};
+  }
+  case ParserProbeMode::kBool:
+  {
+    auto parsed = SyscallArgParams<bool>::parse(guard, memory, arg1);
+    return {.result_code = SyscallArgParams<bool>::validate(parsed) ? 0 : -1,
+            .panic = 0,
+            .gas_consumed = 0};
+  }
+  case ParserProbeMode::kSignedI32:
+  {
+    auto parsed = SyscallArgParams<int32_t>::parse(guard, memory, arg1);
+    return {.result_code = SyscallArgParams<int32_t>::validate(parsed) ? 0 : -1,
+            .panic = 0,
+            .gas_consumed = 0};
+  }
+  case ParserProbeMode::kOptionalU32:
+  {
+    auto parsed =
+        SyscallArgParams<const uint32_t *>::parse(guard, memory, arg1);
+    if (!SyscallArgParams<const uint32_t *>::validate(parsed)) {
+      return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+    }
+    const uint32_t *value = SyscallArgParams<const uint32_t *>::deref(parsed);
+    return {.result_code = value == nullptr ? 1 : static_cast<int32_t>(*value),
+            .panic = 0,
+            .gas_consumed = 0};
+  }
+  }
+  return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+}
+
+void
+write_bridge_frame(std::vector<uint8_t> &memory, uint32_t frame_address,
+                   std::initializer_list<uint64_t> words)
+{
+  size_t index = 0;
+  for (const uint64_t word : words) {
+    store_le64(memory, frame_address + static_cast<uint32_t>(index * 8), word);
+    ++index;
+  }
+}
+
+HostResult
+call_parser_probe(std::vector<uint8_t> &memory, uint32_t frame_address,
+                  std::initializer_list<uint64_t> words)
+{
+  std::array<uint32_t, kRegisterCount> registers = {};
+  write_bridge_frame(memory, frame_address, words);
+  SyscallBridgeHost bridge(nullptr, parser_probe_entry);
+  MachineView view(0, 10, registers, memory);
+  return bridge.ecall(view, EcallArgs{.a0 = frame_address, .a7 = 0});
+}
+
 TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
@@ -134,6 +240,153 @@ TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset], 0xf9U);
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 4], 0U);
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 8], 12U);
+}
+
+TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
+{
+  std::vector<uint8_t> memory(160);
+  constexpr uint32_t kFrameAddress = 0;
+  constexpr uint32_t kInput = 120;
+  constexpr uint32_t kOutput = 128;
+  memory[kInput] = 0x44;
+
+  HostResult result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSpans), kInput,
+                         1, kOutput, 1});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(memory[kOutput], 0x44U);
+  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), 0);
+
+  result = call_parser_probe(memory, kFrameAddress,
+                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
+                              memory.size(), 0, memory.size(), 0});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+}
+
+TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
+{
+  std::vector<uint8_t> memory(160);
+  constexpr uint32_t kFrameAddress = 0;
+
+  HostResult result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSpans), 159, 2,
+                         128, 1});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
+
+  result = call_parser_probe(memory, kFrameAddress,
+                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
+                              120, 1, 159, 2});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
+
+  result = call_parser_probe(memory, kFrameAddress,
+                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
+                              120, 8, 124, 4});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
+}
+
+TEST(Rv32SyscallBridgeTest, parserProbeEnforcesCanonicalScalars)
+{
+  std::vector<uint8_t> memory(160);
+  constexpr uint32_t kFrameAddress = 0;
+
+  HostResult result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kBool), 1});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kBool), 0});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kBool), 2});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
+                         0});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
+                         std::numeric_limits<int32_t>::max()});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
+                         std::numeric_limits<uint64_t>::max()});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
+                         0xffffFFFFU});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
+                         0x0000000080000000ULL});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+}
+
+TEST(Rv32SyscallBridgeTest, parserProbeUsesUint64MaxOptionalPointerSentinel)
+{
+  std::vector<uint8_t> memory(180);
+  constexpr uint32_t kFrameAddress = 0;
+  constexpr uint32_t kValueAddress = 120;
+  store_le64(memory, kValueAddress, 37);
+
+  HostResult result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
+                         std::numeric_limits<uint64_t>::max()});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 1U);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
+                         0});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, static_cast<uint32_t>(ParserProbeMode::kOptionalU32));
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
+                         179});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 0xffffFFFFU);
+
+  result =
+      call_parser_probe(memory, kFrameAddress,
+                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
+                         kValueAddress});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value, 37U);
 }
 
 TEST(Rv32SyscallBridgeTest, trapsWithoutCallingNullEntry)
