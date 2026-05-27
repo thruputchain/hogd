@@ -379,8 +379,9 @@ host boundary.
 
 ## Milestone Status
 
-Current status as of 2026-05-27: Milestones 1 through 3 are complete for the
-experimental, test-only scope. Milestone 4 is the next active slice.
+Current status as of 2026-05-27: Milestones 1 through 4 are complete for the
+experimental, test-only scope. The next decision point is M5 readiness and
+whether to harden RV32 toward protocol exposure.
 
 ### Milestone 1 Status: Complete
 
@@ -421,10 +422,10 @@ experimental, test-only scope. Milestone 4 is the next active slice.
   success, nonzero halt as deterministic failure, and same-input determinism.
 - Debug and ASan RV32 CTest filters pass for the milestone test surface.
 
-### Milestone 4 Status: In Progress
+### Milestone 4 Status: Complete
 
-Milestone 4 has started from the current test-only runtime proof and is focused
-on the SDK/toolchain question:
+Milestone 4 started from the test-only runtime proof and answered the
+SDK/toolchain viability question:
 
 - A committed Rust `riscv32im-unknown-none-elf` SHA256 fixture now lowers to an
   RV32 artifact and runs through the unchanged VM with WASM parity checks.
@@ -443,6 +444,10 @@ on the SDK/toolchain question:
 - Dispatch remains experimental and `ContractType::kMockTest`-only. The
   guest-side fixed entry stub plus invocation frame remains a documented
   alternative, but is not the current M4 dispatch direction.
+- A C++ ownership review concluded that the VM core is small, explicit, and
+  maintainable enough to keep owning, while the host/runtime/artifact edges need
+  the M5 hardening listed below. See
+  `2026-05-27-rv32-cpp-ownership-review.md`.
 
 ### Deferred Hardening Before Milestone 5
 
