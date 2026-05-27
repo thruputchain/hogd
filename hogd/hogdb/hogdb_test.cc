@@ -683,6 +683,49 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
             *recipient_balance);
 }
 
+TEST_F(HogDBTest, NewBalanceHogAgeUsesBlockHeight)
+{
+  Address sender_addr = make_address(kAddress);
+  Address recipient_addr = make_address(kAddress + 1);
+
+  constexpr int128_t kInitialBalance = 100000;
+  ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
+
+  constexpr BlockHeight kBlockHeight = 42;
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, kBlockHeight,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  constexpr int128_t kTransferAmount = 50000;
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(make_address_balance_item_key(sender_addr),
+                                 -kTransferAmount,
+                                 std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(make_address_balance_item_key(recipient_addr),
+                                 kTransferAmount,
+                                 std::to_underlying(StorageDeltaFlags::None)));
+
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  ASSERT_TRUE(invoke_tx.commit());
+  invoke_tx.release_blocktx_reference();
+
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto age = db_.read_address_average_hog_age(recipient_addr);
+  ASSERT_TRUE(age);
+
+  uint128_t expected_hogs = kTransferAmount - cost_model_.get_balance_cost();
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), expected_hogs);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], kBlockHeight);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
+}
+
 TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
 {
   Address account = make_address(kAddress);
