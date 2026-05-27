@@ -37,6 +37,8 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -45,13 +47,15 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
+// NOLINTBEGIN(bugprone-exception-escape,bugprone-unchecked-optional-access)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class RCQObservationByValueTest : public ::testing::Test,
@@ -512,6 +516,6 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   EXPECT_EQ(saw->bytestring(), (Bytestring{42}));
 }
 
-// NOLINTEND(bugprone-unchecked-optional-access)
+// NOLINTEND(bugprone-exception-escape,bugprone-unchecked-optional-access)
 
 } // namespace hogd
