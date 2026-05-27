@@ -41,7 +41,10 @@ make_program(std::initializer_list<uint32_t> words)
   const auto code = code_from_words(words);
   auto result =
       Program::create(std::span<const uint8_t>(code.data(), code.size()));
-  EXPECT_TRUE(result.has_value());
+  if (!result.has_value()) {
+    ADD_FAILURE() << "failed to create test program";
+    return {};
+  }
   return std::make_shared<Program>(std::move(*result));
 }
 
@@ -147,8 +150,24 @@ struct MemoryHost : Host {
 struct TrapHost : Host {
   HostResult ecall(MachineView, const EcallArgs &) noexcept override
   {
+    ++calls;
     return HostResult::trap();
   }
+
+  int calls = 0;
+};
+
+struct MutatingTrapHost : Host {
+  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  {
+    ++calls;
+    const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
+    wrote = view.write_memory(4, data);
+    return HostResult::trap();
+  }
+
+  int calls = 0;
+  bool wrote = false;
 };
 
 TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
@@ -165,31 +184,83 @@ TEST(Rv32ProgramTest, validates_code_shape_and_profile)
 {
   {
     const std::array<uint8_t, 1> code = {0};
-    EXPECT_EQ(Program::validate(code).error, ProgramError::kCodeSizeNotAligned);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kCodeSizeNotAligned);
   }
   {
     std::vector<uint8_t> code(kMaxCodeBytes + kInstructionBytes);
-    EXPECT_EQ(Program::validate(code).error, ProgramError::kCodeTooLarge);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kCodeTooLarge);
   }
   {
     const auto code = code_from_words({0x00000001U});
-    EXPECT_EQ(Program::validate(code).error,
-              ProgramError::kUnsupportedCompressedInstruction);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedCompressedInstruction);
   }
   {
     const auto code = code_from_words({0x00100073U});
-    EXPECT_EQ(Program::validate(code).error,
-              ProgramError::kUnsupportedSystemInstruction);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedSystemInstruction);
   }
   {
     const auto code = code_from_words({0x0000100fU});
-    EXPECT_EQ(Program::validate(code).error,
-              ProgramError::kUnsupportedInstruction);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedInstruction);
   }
   {
     const auto code = code_from_words({0x0000007fU});
-    EXPECT_EQ(Program::validate(code).error,
-              ProgramError::kUnsupportedInstruction);
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedInstruction);
+  }
+}
+
+TEST(Rv32ProgramTest, validates_profile_boundaries)
+{
+  {
+    std::vector<uint8_t> code;
+    code.reserve(kMaxCodeBytes);
+    for (uint32_t i = 0; i < kMaxCodeBytes / kInstructionBytes; ++i) {
+      append_u32(code, addi(0, 0, 0));
+    }
+    const auto result = Program::validate(code);
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kNone);
+  }
+  {
+    const auto code = code_from_words({0x00001073U}); // CSR/system.
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedSystemInstruction);
+  }
+  {
+    const auto code = code_from_words({0x30200073U}); // MRET/privileged.
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedSystemInstruction);
+  }
+  {
+    const auto code = code_from_words({0x0000202fU}); // Atomic opcode.
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedInstruction);
+  }
+  {
+    const auto code = code_from_words({0x00000053U}); // Floating-point op.
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedInstruction);
+  }
+  {
+    const auto code = code_from_words({0x00000007U}); // Floating-point load.
+    const auto result = Program::validate(code);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.error, ProgramError::kUnsupportedInstruction);
   }
 }
 
@@ -211,6 +282,14 @@ TEST(Rv32ProgramTest, create_returns_validated_immutable_program)
 
 TEST(Rv32HostViewTest, checks_memory_ranges_with_machine_invariants)
 {
+  EXPECT_TRUE(memory_range_in_bounds(16, 12, 4));
+  EXPECT_TRUE(memory_range_in_bounds(16, 16, 0));
+  EXPECT_FALSE(memory_range_in_bounds(16, 17, 0));
+  EXPECT_FALSE(
+      memory_range_in_bounds(16, 1, std::numeric_limits<size_t>::max()));
+  EXPECT_FALSE(memory_range_in_bounds(16, std::numeric_limits<uint32_t>::max(),
+                                      std::numeric_limits<size_t>::max()));
+
   const auto program = make_program({addi(0, 0, 0)});
   Machine machine(program, 16, 10);
   MachineView view = machine.view();
@@ -225,15 +304,28 @@ TEST(Rv32HostViewTest, checks_memory_ranges_with_machine_invariants)
   EXPECT_EQ(out, data);
 
   std::array<uint8_t, 1> one_byte = {9};
+  const std::vector<uint8_t> memory_before_failure(machine.memory().begin(),
+                                                   machine.memory().end());
   EXPECT_TRUE(
       view.write_memory(16, std::span<const uint8_t>(one_byte.data(), 0)));
   EXPECT_TRUE(view.read_memory(16, std::span<uint8_t>(one_byte.data(), 0)));
   EXPECT_FALSE(view.write_memory(16, one_byte));
   EXPECT_FALSE(view.write_memory(13, data));
+  const std::vector<uint8_t> memory_after_write_failure(
+      machine.memory().begin(), machine.memory().end());
+  EXPECT_EQ(memory_after_write_failure, memory_before_failure);
+
+  out = {0xaa, 0xbb, 0xcc, 0xdd};
+  const std::array<uint8_t, 4> out_before_failure = out;
   EXPECT_FALSE(view.read_memory(13, out));
+  EXPECT_EQ(out, out_before_failure);
   EXPECT_FALSE(
       view.write_memory(std::numeric_limits<uint32_t>::max(), one_byte));
   EXPECT_FALSE(view.read_memory(std::numeric_limits<uint32_t>::max(), out));
+  const std::vector<uint8_t> memory_after_overflow_failure(
+      machine.memory().begin(), machine.memory().end());
+  EXPECT_EQ(memory_after_overflow_failure, memory_before_failure);
+  EXPECT_EQ(out, out_before_failure);
 }
 
 TEST(Rv32DecodeTest, decodes_representative_instruction_families)
@@ -297,19 +389,49 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
 
 TEST(Rv32GasTest, version_pins_full_cost_table)
 {
-  std::array<uint64_t, kOpCount> expected = {};
-  expected.fill(1);
-  expected[static_cast<size_t>(Op::kMul)] = 3;
-  expected[static_cast<size_t>(Op::kMulh)] = 3;
-  expected[static_cast<size_t>(Op::kMulhsu)] = 3;
-  expected[static_cast<size_t>(Op::kMulhu)] = 3;
-  expected[static_cast<size_t>(Op::kDiv)] = 8;
-  expected[static_cast<size_t>(Op::kDivu)] = 8;
-  expected[static_cast<size_t>(Op::kRem)] = 8;
-  expected[static_cast<size_t>(Op::kRemu)] = 8;
+  struct ExpectedGasEntry {
+    Op op;
+    const char *name;
+    uint64_t cost;
+  };
 
+  const std::array<ExpectedGasEntry, kOpCount> expected = {{
+      {Op::kLui, "LUI", 1},     {Op::kAuipc, "AUIPC", 1},
+      {Op::kJal, "JAL", 1},     {Op::kJalr, "JALR", 1},
+      {Op::kBeq, "BEQ", 1},     {Op::kBne, "BNE", 1},
+      {Op::kBlt, "BLT", 1},     {Op::kBge, "BGE", 1},
+      {Op::kBltu, "BLTU", 1},   {Op::kBgeu, "BGEU", 1},
+      {Op::kLb, "LB", 1},       {Op::kLh, "LH", 1},
+      {Op::kLw, "LW", 1},       {Op::kLbu, "LBU", 1},
+      {Op::kLhu, "LHU", 1},     {Op::kSb, "SB", 1},
+      {Op::kSh, "SH", 1},       {Op::kSw, "SW", 1},
+      {Op::kAddi, "ADDI", 1},   {Op::kSlti, "SLTI", 1},
+      {Op::kSltiu, "SLTIU", 1}, {Op::kXori, "XORI", 1},
+      {Op::kOri, "ORI", 1},     {Op::kAndi, "ANDI", 1},
+      {Op::kSlli, "SLLI", 1},   {Op::kSrli, "SRLI", 1},
+      {Op::kSrai, "SRAI", 1},   {Op::kAdd, "ADD", 1},
+      {Op::kSub, "SUB", 1},     {Op::kSll, "SLL", 1},
+      {Op::kSlt, "SLT", 1},     {Op::kSltu, "SLTU", 1},
+      {Op::kXor, "XOR", 1},     {Op::kSrl, "SRL", 1},
+      {Op::kSra, "SRA", 1},     {Op::kOr, "OR", 1},
+      {Op::kAnd, "AND", 1},     {Op::kMul, "MUL", 3},
+      {Op::kMulh, "MULH", 3},   {Op::kMulhsu, "MULHSU", 3},
+      {Op::kMulhu, "MULHU", 3}, {Op::kDiv, "DIV", 8},
+      {Op::kDivu, "DIVU", 8},   {Op::kRem, "REM", 8},
+      {Op::kRemu, "REMU", 8},   {Op::kFence, "FENCE", 1},
+      {Op::kEcall, "ECALL", 1},
+  }};
+
+  EXPECT_EQ(kOpCount, 47U);
   EXPECT_EQ(kGasTableVersion, 1U);
-  EXPECT_EQ(kInstructionGasCosts, expected);
+  EXPECT_EQ(kGasScheduleDigest, 0xd2f3483dc373fadaULL);
+  ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
+    EXPECT_STREQ(kInstructionGasSchedule[i].name, expected[i].name);
+    EXPECT_EQ(kInstructionGasSchedule[i].cost, expected[i].cost);
+    EXPECT_EQ(kInstructionGasCosts[i], expected[i].cost);
+  }
 }
 
 TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_uses_aligned_stack)
@@ -390,6 +512,69 @@ TEST(Rv32ExecutionTest, executes_lui_and_auipc_values)
   EXPECT_EQ(machine.reg(2), 0x00001004U);
 }
 
+TEST(Rv32ExecutionTest, executes_immediate_operations)
+{
+  const auto program = make_program({
+      i_type(0x13, 3, 2, 1, 0),      // slti
+      i_type(0x13, 4, 3, 1, 1),      // sltiu
+      i_type(0x13, 5, 4, 1, 0xff),   // xori
+      i_type(0x13, 6, 6, 1, 0xf0),   // ori
+      i_type(0x13, 7, 7, 1, 0xf0),   // andi
+      i_type(0x13, 8, 5, 2, 1),      // srli
+      i_type(0x13, 9, 5, 2, 0x401U), // srai
+  });
+  Machine machine(program, 1024, 100);
+  MachineTestPeer::set_reg(machine, 1, 0xffffffffU);
+  MachineTestPeer::set_reg(machine, 2, 0x80000000U);
+
+  for (int i = 0; i < 7; ++i) {
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+  }
+
+  EXPECT_EQ(machine.reg(3), 1U);
+  EXPECT_EQ(machine.reg(4), 0U);
+  EXPECT_EQ(machine.reg(5), 0xffffff00U);
+  EXPECT_EQ(machine.reg(6), 0xffffffffU);
+  EXPECT_EQ(machine.reg(7), 0xf0U);
+  EXPECT_EQ(machine.reg(8), 0x40000000U);
+  EXPECT_EQ(machine.reg(9), 0xc0000000U);
+  EXPECT_EQ(machine.gas_remaining(), 93U);
+}
+
+TEST(Rv32ExecutionTest, executes_byte_halfword_stores_and_fence)
+{
+  {
+    const auto program = make_program({s_type(0, 1, 2, 0)});
+    Machine machine(program, 16, 10);
+    MachineTestPeer::set_reg(machine, 1, 4);
+    MachineTestPeer::set_reg(machine, 2, 0xaabbccddU);
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+    EXPECT_EQ(machine.memory()[4], 0xddU);
+    EXPECT_EQ(machine.memory()[5], 0U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 9U);
+  }
+  {
+    const auto program = make_program({s_type(1, 1, 2, 0)});
+    Machine machine(program, 16, 10);
+    MachineTestPeer::set_reg(machine, 1, 6);
+    MachineTestPeer::set_reg(machine, 2, 0xaabbccddU);
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+    EXPECT_EQ(machine.memory()[6], 0xddU);
+    EXPECT_EQ(machine.memory()[7], 0xccU);
+    EXPECT_EQ(machine.memory()[8], 0U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 9U);
+  }
+  {
+    const auto program = make_program({0x0000000fU});
+    Machine machine(program, 16, 10);
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 9U);
+  }
+}
+
 TEST(Rv32ExecutionTest, sign_and_zero_extends_loads)
 {
   const auto program = make_program({
@@ -431,6 +616,52 @@ TEST(Rv32ExecutionTest, branches_and_jumps)
   EXPECT_EQ(machine.reg(2), 2U);
   EXPECT_EQ(machine.reg(3), 20U);
   EXPECT_EQ(machine.reg(4), 4U);
+}
+
+TEST(Rv32ExecutionTest, executes_all_branch_conditions_signed_and_unsigned)
+{
+  struct Case {
+    const char *name;
+    uint8_t funct3;
+    uint32_t lhs;
+    uint32_t rhs;
+    uint32_t expected;
+  };
+
+  const std::array<Case, 16> cases = {{
+      {"beq_taken", 0, 5, 5, 2},
+      {"beq_not_taken", 0, 5, 6, 1},
+      {"bne_taken", 1, 5, 6, 2},
+      {"bne_not_taken", 1, 5, 5, 1},
+      {"blt_taken", 4, 0xffffffffU, 1, 2},
+      {"blt_not_taken", 4, 1, 0xffffffffU, 1},
+      {"blt_equal_not_taken", 4, 5, 5, 1},
+      {"bge_taken", 5, 1, 0xffffffffU, 2},
+      {"bge_not_taken", 5, 0xffffffffU, 1, 1},
+      {"bge_equal_taken", 5, 5, 5, 2},
+      {"bltu_taken", 6, 1, 0xffffffffU, 2},
+      {"bltu_not_taken", 6, 0xffffffffU, 1, 1},
+      {"bltu_equal_not_taken", 6, 5, 5, 1},
+      {"bgeu_taken", 7, 0xffffffffU, 1, 2},
+      {"bgeu_not_taken", 7, 1, 0xffffffffU, 1},
+      {"bgeu_equal_taken", 7, 5, 5, 2},
+  }};
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto program = make_program({
+        b_type(test_case.funct3, 1, 2, 8),
+        addi(3, 0, 1),
+        addi(3, 0, 2),
+    });
+    Machine machine(program, 1024, 10);
+    MachineTestPeer::set_reg(machine, 1, test_case.lhs);
+    MachineTestPeer::set_reg(machine, 2, test_case.rhs);
+
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+    ASSERT_EQ(machine.step(), StepResult::kContinue);
+    EXPECT_EQ(machine.reg(3), test_case.expected);
+  }
 }
 
 TEST(Rv32ExecutionTest, bad_jump_targets_trap_before_state_mutation)
@@ -529,6 +760,69 @@ TEST(Rv32ExecutionTest, traps_on_bad_fetch_memory_and_alignment)
   }
 }
 
+TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
+{
+  struct LoadTrapCase {
+    const char *name;
+    uint8_t funct3;
+    uint32_t address;
+    Trap trap;
+  };
+
+  const std::array<LoadTrapCase, 5> load_cases = {{
+      {"lb_bad_memory", 0, 16, Trap::kBadMemory},
+      {"lh_misaligned", 1, 1, Trap::kMisalignedAccess},
+      {"lh_bad_memory", 1, 16, Trap::kBadMemory},
+      {"lw_misaligned", 2, 1, Trap::kMisalignedAccess},
+      {"lw_bad_memory", 2, 16, Trap::kBadMemory},
+  }};
+
+  for (const auto &test_case : load_cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto program = make_program({load(1, test_case.funct3, 2, 0)});
+    Machine machine(program, 16, kBaseInstructionGas);
+    MachineTestPeer::set_reg(machine, 1, 99);
+    MachineTestPeer::set_reg(machine, 2, test_case.address);
+    EXPECT_EQ(machine.step(), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), test_case.trap);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
+    EXPECT_EQ(machine.pc(), 0U);
+    EXPECT_EQ(machine.reg(1), 99U);
+  }
+
+  struct StoreTrapCase {
+    const char *name;
+    uint8_t funct3;
+    uint32_t address;
+    Trap trap;
+  };
+
+  const std::array<StoreTrapCase, 5> store_cases = {{
+      {"sb_bad_memory", 0, 16, Trap::kBadMemory},
+      {"sh_misaligned", 1, 1, Trap::kMisalignedAccess},
+      {"sh_bad_memory", 1, 16, Trap::kBadMemory},
+      {"sw_misaligned", 2, 2, Trap::kMisalignedAccess},
+      {"sw_bad_memory", 2, 16, Trap::kBadMemory},
+  }};
+
+  for (const auto &test_case : store_cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto program = make_program({s_type(test_case.funct3, 1, 2, 0)});
+    Machine machine(program, 16, kBaseInstructionGas);
+    MachineTestPeer::set_reg(machine, 1, test_case.address);
+    MachineTestPeer::set_reg(machine, 2, 0xaabbccddU);
+    const std::vector<uint8_t> memory_before(machine.memory().begin(),
+                                             machine.memory().end());
+    EXPECT_EQ(machine.step(), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), test_case.trap);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
+    EXPECT_EQ(machine.pc(), 0U);
+    const std::vector<uint8_t> memory_after(machine.memory().begin(),
+                                            machine.memory().end());
+    EXPECT_EQ(memory_after, memory_before);
+  }
+}
+
 TEST(Rv32ExecutionTest, running_off_end_traps_as_bad_pc)
 {
   const auto program = make_program({addi(1, 0, 1)});
@@ -609,43 +903,44 @@ TEST(Rv32ExecutionTest, debits_gas_before_later_traps_and_mutation)
 
 TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
 {
-  {
-    const auto program = make_program({r_type(1, 2, 1, 0, 3)});
-    Machine machine(program, 1024, kMulInstructionGas - 1);
-    MachineTestPeer::set_reg(machine, 1, 6);
-    MachineTestPeer::set_reg(machine, 2, 7);
-    EXPECT_EQ(machine.step(), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
-    EXPECT_EQ(machine.reg(3), 0U);
-    EXPECT_EQ(machine.gas_remaining(), kMulInstructionGas - 1);
-  }
-  {
-    const auto program = make_program({r_type(1, 2, 1, 0, 3)});
-    Machine machine(program, 1024, kMulInstructionGas);
-    MachineTestPeer::set_reg(machine, 1, 6);
-    MachineTestPeer::set_reg(machine, 2, 7);
-    EXPECT_EQ(machine.step(), StepResult::kContinue);
-    EXPECT_EQ(machine.reg(3), 42U);
-    EXPECT_EQ(machine.gas_remaining(), 0U);
-  }
-  {
-    const auto program = make_program({r_type(1, 2, 1, 4, 3)});
-    Machine machine(program, 1024, kDivInstructionGas - 1);
-    MachineTestPeer::set_reg(machine, 1, 42);
-    MachineTestPeer::set_reg(machine, 2, 6);
-    EXPECT_EQ(machine.step(), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
-    EXPECT_EQ(machine.reg(3), 0U);
-    EXPECT_EQ(machine.gas_remaining(), kDivInstructionGas - 1);
-  }
-  {
-    const auto program = make_program({r_type(1, 2, 1, 4, 3)});
-    Machine machine(program, 1024, kDivInstructionGas);
-    MachineTestPeer::set_reg(machine, 1, 42);
-    MachineTestPeer::set_reg(machine, 2, 6);
-    EXPECT_EQ(machine.step(), StepResult::kContinue);
-    EXPECT_EQ(machine.reg(3), 7U);
-    EXPECT_EQ(machine.gas_remaining(), 0U);
+  struct Case {
+    const char *name;
+    uint8_t funct3;
+    uint64_t cost;
+    uint32_t expected;
+  };
+
+  const std::array<Case, 8> cases = {{
+      {"mul", 0, kMulInstructionGas, 252},
+      {"mulh", 1, kMulInstructionGas, 0},
+      {"mulhsu", 2, kMulInstructionGas, 0},
+      {"mulhu", 3, kMulInstructionGas, 0},
+      {"div", 4, kDivInstructionGas, 7},
+      {"divu", 5, kDivInstructionGas, 7},
+      {"rem", 6, kDivInstructionGas, 0},
+      {"remu", 7, kDivInstructionGas, 0},
+  }};
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto program = make_program({r_type(1, 2, 1, test_case.funct3, 3)});
+    {
+      Machine machine(program, 1024, test_case.cost - 1);
+      MachineTestPeer::set_reg(machine, 1, 42);
+      MachineTestPeer::set_reg(machine, 2, 6);
+      EXPECT_EQ(machine.step(), StepResult::kTrap);
+      EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+      EXPECT_EQ(machine.reg(3), 0U);
+      EXPECT_EQ(machine.gas_remaining(), test_case.cost - 1);
+    }
+    {
+      Machine machine(program, 1024, test_case.cost);
+      MachineTestPeer::set_reg(machine, 1, 42);
+      MachineTestPeer::set_reg(machine, 2, 6);
+      EXPECT_EQ(machine.step(), StepResult::kContinue);
+      EXPECT_EQ(machine.reg(3), test_case.expected);
+      EXPECT_EQ(machine.gas_remaining(), 0U);
+    }
   }
 }
 
@@ -694,7 +989,31 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     Machine machine(program, 1024, 100);
     TrapHost host;
     EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(host.calls, 1);
     EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 0);
+    MachineTestPeer::set_reg(machine, 10, 7);
+    TrapHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(host.calls, 0);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.pc(), 0U);
+    EXPECT_EQ(machine.reg(10), 7U);
+    EXPECT_FALSE(machine.pending_ecall().has_value());
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 100);
+    MutatingTrapHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(host.calls, 1);
+    EXPECT_TRUE(host.wrote);
+    EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+    EXPECT_EQ(machine.memory()[4], 0xaaU);
+    EXPECT_EQ(machine.memory()[7], 0xddU);
   }
   {
     const auto program = make_program({0x00000073U});

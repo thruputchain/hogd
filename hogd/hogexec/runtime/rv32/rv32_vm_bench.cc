@@ -1,6 +1,7 @@
 #include <benchmark/benchmark.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -64,7 +65,9 @@ make_program(std::initializer_list<uint32_t> words)
     append_u32(code, word);
   }
   auto program = Program::create(code);
-  benchmark::DoNotOptimize(program.has_value());
+  if (!program.has_value()) {
+    std::abort();
+  }
   return std::make_shared<Program>(std::move(*program));
 }
 
@@ -80,14 +83,16 @@ bm_dispatch_arithmetic(benchmark::State &state)
       branch(1, 1, 0, -12),
   });
 
+  int64_t executed_instructions = 0;
   for (auto _ : state) {
     Machine machine(program, 4096, 100000);
     while (machine.step() == StepResult::kContinue) {
+      ++executed_instructions;
       benchmark::DoNotOptimize(machine.pc());
     }
     benchmark::DoNotOptimize(machine.reg(3));
   }
-  state.SetItemsProcessed(state.iterations() * 303);
+  state.SetItemsProcessed(executed_instructions);
 }
 
 void
@@ -102,14 +107,16 @@ bm_load_store_loop(benchmark::State &state)
       branch(1, 2, 0, -12),
   });
 
+  int64_t executed_instructions = 0;
   for (auto _ : state) {
     Machine machine(program, 4096, 100000);
     while (machine.step() == StepResult::kContinue) {
+      ++executed_instructions;
       benchmark::DoNotOptimize(machine.pc());
     }
     benchmark::DoNotOptimize(machine.reg(3));
   }
-  state.SetItemsProcessed(state.iterations() * 303);
+  state.SetItemsProcessed(executed_instructions);
 }
 
 BENCHMARK(bm_dispatch_arithmetic);

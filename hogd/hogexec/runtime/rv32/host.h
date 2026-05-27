@@ -12,8 +12,8 @@ namespace hogd::rv32 {
 [[nodiscard]] constexpr bool
 memory_range_in_bounds(size_t memory_size, uint32_t address, size_t width)
 {
-  return uint64_t{address} + static_cast<uint64_t>(width) <=
-         static_cast<uint64_t>(memory_size);
+  const size_t addr = address;
+  return addr <= memory_size && width <= memory_size - addr;
 }
 
 enum class Trap {

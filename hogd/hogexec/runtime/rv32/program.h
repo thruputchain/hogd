@@ -94,37 +94,125 @@ enum class Op {
 
 constexpr size_t kOpCount = static_cast<size_t>(Op::kCount);
 
-constexpr std::array<uint64_t, kOpCount>
-make_instruction_gas_costs()
-{
-  std::array<uint64_t, kOpCount> costs = {};
-  costs.fill(kBaseInstructionGas);
-  costs[static_cast<size_t>(Op::kMul)] = kMulInstructionGas;
-  costs[static_cast<size_t>(Op::kMulh)] = kMulInstructionGas;
-  costs[static_cast<size_t>(Op::kMulhsu)] = kMulInstructionGas;
-  costs[static_cast<size_t>(Op::kMulhu)] = kMulInstructionGas;
-  costs[static_cast<size_t>(Op::kDiv)] = kDivInstructionGas;
-  costs[static_cast<size_t>(Op::kDivu)] = kDivInstructionGas;
-  costs[static_cast<size_t>(Op::kRem)] = kDivInstructionGas;
-  costs[static_cast<size_t>(Op::kRemu)] = kDivInstructionGas;
-  return costs;
-}
+struct InstructionGasEntry {
+  Op op;
+  const char *name;
+  uint64_t cost;
+};
 
-constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
-    make_instruction_gas_costs();
+constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
+    {Op::kLui, "LUI", kBaseInstructionGas},
+    {Op::kAuipc, "AUIPC", kBaseInstructionGas},
+    {Op::kJal, "JAL", kBaseInstructionGas},
+    {Op::kJalr, "JALR", kBaseInstructionGas},
+    {Op::kBeq, "BEQ", kBaseInstructionGas},
+    {Op::kBne, "BNE", kBaseInstructionGas},
+    {Op::kBlt, "BLT", kBaseInstructionGas},
+    {Op::kBge, "BGE", kBaseInstructionGas},
+    {Op::kBltu, "BLTU", kBaseInstructionGas},
+    {Op::kBgeu, "BGEU", kBaseInstructionGas},
+    {Op::kLb, "LB", kBaseInstructionGas},
+    {Op::kLh, "LH", kBaseInstructionGas},
+    {Op::kLw, "LW", kBaseInstructionGas},
+    {Op::kLbu, "LBU", kBaseInstructionGas},
+    {Op::kLhu, "LHU", kBaseInstructionGas},
+    {Op::kSb, "SB", kBaseInstructionGas},
+    {Op::kSh, "SH", kBaseInstructionGas},
+    {Op::kSw, "SW", kBaseInstructionGas},
+    {Op::kAddi, "ADDI", kBaseInstructionGas},
+    {Op::kSlti, "SLTI", kBaseInstructionGas},
+    {Op::kSltiu, "SLTIU", kBaseInstructionGas},
+    {Op::kXori, "XORI", kBaseInstructionGas},
+    {Op::kOri, "ORI", kBaseInstructionGas},
+    {Op::kAndi, "ANDI", kBaseInstructionGas},
+    {Op::kSlli, "SLLI", kBaseInstructionGas},
+    {Op::kSrli, "SRLI", kBaseInstructionGas},
+    {Op::kSrai, "SRAI", kBaseInstructionGas},
+    {Op::kAdd, "ADD", kBaseInstructionGas},
+    {Op::kSub, "SUB", kBaseInstructionGas},
+    {Op::kSll, "SLL", kBaseInstructionGas},
+    {Op::kSlt, "SLT", kBaseInstructionGas},
+    {Op::kSltu, "SLTU", kBaseInstructionGas},
+    {Op::kXor, "XOR", kBaseInstructionGas},
+    {Op::kSrl, "SRL", kBaseInstructionGas},
+    {Op::kSra, "SRA", kBaseInstructionGas},
+    {Op::kOr, "OR", kBaseInstructionGas},
+    {Op::kAnd, "AND", kBaseInstructionGas},
+    {Op::kMul, "MUL", kMulInstructionGas},
+    {Op::kMulh, "MULH", kMulInstructionGas},
+    {Op::kMulhsu, "MULHSU", kMulInstructionGas},
+    {Op::kMulhu, "MULHU", kMulInstructionGas},
+    {Op::kDiv, "DIV", kDivInstructionGas},
+    {Op::kDivu, "DIVU", kDivInstructionGas},
+    {Op::kRem, "REM", kDivInstructionGas},
+    {Op::kRemu, "REMU", kDivInstructionGas},
+    {Op::kFence, "FENCE", kBaseInstructionGas},
+    {Op::kEcall, "ECALL", kBaseInstructionGas},
+}};
 
 constexpr bool
-gas_costs_are_positive()
+gas_schedule_shape_is_valid()
 {
-  for (const uint64_t cost : kInstructionGasCosts) {
-    if (cost == 0) {
+  for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
+    if (static_cast<size_t>(kInstructionGasSchedule[i].op) != i ||
+        kInstructionGasSchedule[i].cost == 0) {
       return false;
     }
   }
   return true;
 }
 
-static_assert(gas_costs_are_positive());
+static_assert(gas_schedule_shape_is_valid());
+
+constexpr std::array<uint64_t, kOpCount>
+make_instruction_gas_costs()
+{
+  std::array<uint64_t, kOpCount> costs = {};
+  for (const auto &entry : kInstructionGasSchedule) {
+    costs[static_cast<size_t>(entry.op)] = entry.cost;
+  }
+  return costs;
+}
+
+constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
+    make_instruction_gas_costs();
+
+constexpr uint64_t
+gas_schedule_digest_byte(uint64_t digest, uint8_t value)
+{
+  return (digest ^ value) * 1099511628211ULL;
+}
+
+constexpr uint64_t
+gas_schedule_digest_u64(uint64_t digest, uint64_t value)
+{
+  for (int i = 0; i < 8; ++i) {
+    digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(value));
+    value >>= 8;
+  }
+  return digest;
+}
+
+constexpr uint64_t
+gas_schedule_digest()
+{
+  uint64_t digest = 1469598103934665603ULL;
+  digest = gas_schedule_digest_u64(digest, kGasTableVersion);
+  digest = gas_schedule_digest_u64(digest, kOpCount);
+  for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
+    const auto &entry = kInstructionGasSchedule[i];
+    digest = gas_schedule_digest_u64(digest, i);
+    digest = gas_schedule_digest_u64(digest, static_cast<size_t>(entry.op));
+    digest = gas_schedule_digest_u64(digest, entry.cost);
+    for (const char *cursor = entry.name; *cursor != '\0'; ++cursor) {
+      digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(*cursor));
+    }
+    digest = gas_schedule_digest_byte(digest, 0);
+  }
+  return digest;
+}
+
+constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 constexpr uint64_t
 gas_cost_for_op(Op op)
