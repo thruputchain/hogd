@@ -1,0 +1,64 @@
+{
+  "context": {
+    "date": "2026-05-27T03:06:36-07:00",
+    "host_name": "markmayo-K3VKL6QTPY-mbp",
+    "executable": "build-release/hogd/hogexec/runtime/rv32/rv32_vm_bench",
+    "num_cpus": 12,
+    "mhz_per_cpu": 24,
+    "cpu_scaling_enabled": false,
+    "caches": [
+    ],
+    "load_avg": [1.51416,2.0249,2.12451],
+    "library_version": "v1.9.0",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "bm_rv32_fibonacci_recursive_20",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "bm_rv32_fibonacci_recursive_20",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 579,
+      "real_time": 1.0300085774103310e+06,
+      "cpu_time": 1.0298566493955095e+06,
+      "time_unit": "ns",
+      "gas": 2.6269100000000000e+05,
+      "items_per_second": 2.5507530601874599e+08
+    },
+    {
+      "name": "bm_wasmi_wat_fibonacci_recursive_20",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "bm_wasmi_wat_fibonacci_recursive_20",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 2468,
+      "real_time": 2.8299745097733743e+05,
+      "cpu_time": 2.8290761750405189e+05,
+      "time_unit": "ns",
+      "items_per_second": 6.5772000641635263e+08
+    },
+    {
+      "name": "bm_wasmi_built_contract_fibonacci_recursive_20",
+      "family_index": 2,
+      "per_family_instance_index": 0,
+      "run_name": "bm_wasmi_built_contract_fibonacci_recursive_20",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 1945,
+      "real_time": 3.5999860718683520e+05,
+      "cpu_time": 3.5992236503856035e+05,
+      "time_unit": "ns",
+      "items_per_second": 5.6622766406351566e+08
+    }
+  ]
+}
