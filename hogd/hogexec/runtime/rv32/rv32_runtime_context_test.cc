@@ -8,13 +8,16 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/no_syscall_test.h"
+#include "built_contracts/read_only_test.h"
 #include "built_contracts/sha256_wrapper.h"
 #include "contract.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -45,8 +48,20 @@ constexpr uint32_t kReturnBufferAddress = 192;
 constexpr uint32_t kShaInputAddress = 224;
 constexpr uint32_t kShaOutputAddress = 320;
 constexpr uint32_t kShaMemoryBytes = 512;
+constexpr uint32_t kEffectBytestringFrameAddress = 64;
+constexpr uint32_t kEffectLogEventFrameAddress = 192;
+constexpr uint32_t kEffectReturnFrameAddress = 320;
+constexpr uint32_t kEffectStorageKeyAddress = 448;
+constexpr uint32_t kEffectStorageValueAddress = 480;
+constexpr uint32_t kEffectTopicAddress = 512;
+constexpr uint32_t kEffectEventDataAddress = 544;
+constexpr uint32_t kEffectMemoryBytes = 768;
 constexpr GasAmount kEnoughGas = 1000;
 constexpr GasAmount kParityGas = 10'000;
+
+constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
+constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
+constexpr std::string_view kEffectEventData = "rv32 parity event";
 
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
@@ -165,6 +180,14 @@ exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
   return make_host_panic_result(HostFnErrorCode::Exit);
 }
 
+extern "C" TrampolineResult
+return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
+             uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+             uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::Return);
+}
+
 void
 store_le64(std::span<uint8_t> bytes, uint32_t offset, uint64_t value)
 {
@@ -188,6 +211,18 @@ write_return_frame(std::span<uint8_t> memory, std::span<const uint8_t> payload)
     store_le64(memory, kFrameAddress + i * sizeof(uint64_t), frame_words[i]);
   }
   std::ranges::copy(payload, memory.begin() + kReturnBufferAddress);
+}
+
+void
+write_syscall_frame(std::span<uint8_t> memory, uint32_t frame_address,
+                    std::initializer_list<uint64_t> words)
+{
+  ASSERT_LE(words.size(), rv32::kSyscallFrameArgWords);
+  size_t i = 0;
+  for (const uint64_t word : words) {
+    store_le64(memory, frame_address + i * sizeof(uint64_t), word);
+    ++i;
+  }
 }
 
 std::vector<uint8_t>
@@ -266,6 +301,50 @@ make_sha256_then_return_image(std::span<const uint8_t> input)
       }),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kShaMemoryBytes,
+  };
+}
+
+rv32::RuntimeContractImage
+make_storage_event_return_image()
+{
+  std::vector<uint8_t> initial_memory(kEffectMemoryBytes);
+  const StorageKeyContractData key = NativeContractTestFramework::
+      make_storage_key_matching_static_key_sdk_macro(kEffectStorageKey);
+  std::ranges::copy(key, initial_memory.begin() + kEffectStorageKeyAddress);
+  std::ranges::copy(kEffectStorageValue,
+                    initial_memory.begin() + kEffectStorageValueAddress);
+  std::fill_n(initial_memory.begin() + kEffectTopicAddress, SHA256Hash{}.size(),
+              0x5aU);
+  std::ranges::copy(kEffectEventData,
+                    initial_memory.begin() + kEffectEventDataAddress);
+
+  write_syscall_frame(initial_memory, kEffectBytestringFrameAddress,
+                      {static_cast<uint64_t>(SyscallNo::kBytestringSet),
+                       kEffectStorageKeyAddress, kEffectStorageValueAddress,
+                       kEffectStorageValue.size(),
+                       std::to_underlying(StorageDeltaFlags::None)});
+  write_syscall_frame(initial_memory, kEffectLogEventFrameAddress,
+                      {static_cast<uint64_t>(SyscallNo::kLogEvent),
+                       kEffectTopicAddress,
+                       std::numeric_limits<uint64_t>::max(),
+                       std::numeric_limits<uint64_t>::max(),
+                       kEffectEventDataAddress, kEffectEventData.size()});
+  write_syscall_frame(initial_memory, kEffectReturnFrameAddress,
+                      {static_cast<uint64_t>(SyscallNo::kReturn), 0, 0, 0, 0,
+                       0});
+
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          addi(10, 0, kEffectBytestringFrameAddress),
+          ecall(),
+          addi(10, 0, kEffectLogEventFrameAddress),
+          ecall(),
+          addi(10, 0, kEffectReturnFrameAddress),
+          ecall(),
+      }),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = kEffectMemoryBytes,
   };
 }
 
@@ -457,6 +536,65 @@ expect_sha256_return_trace_matches(InvocationFrameTrace const &wasm_trace,
   EXPECT_FALSE(rv32_return.body.return_trace().inputs.revert_frame);
 }
 
+void
+expect_storage_event_return_trace_matches(
+    InvocationFrameTrace const &wasm_trace,
+    InvocationFrameTrace const &rv32_trace)
+{
+  ASSERT_GE(wasm_trace.system_calls.size(), 3U);
+  ASSERT_EQ(rv32_trace.system_calls.size(), 3U);
+  const size_t wasm_offset = wasm_trace.system_calls.size() - 3;
+
+  auto const &wasm_set = wasm_trace.system_calls[wasm_offset];
+  auto const &rv32_set = rv32_trace.system_calls[0];
+  ASSERT_EQ(wasm_set.body.syscall_number(), SyscallNo::kBytestringSet);
+  ASSERT_EQ(rv32_set.body.syscall_number(), SyscallNo::kBytestringSet);
+  EXPECT_EQ(wasm_set.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(rv32_set.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(wasm_set.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_EQ(rv32_set.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.key,
+            rv32_set.body.bytestring_set().inputs.key);
+  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.bytestring,
+            rv32_set.body.bytestring_set().inputs.bytestring);
+  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.flags,
+            rv32_set.body.bytestring_set().inputs.flags);
+
+  auto const &wasm_event = wasm_trace.system_calls[wasm_offset + 1];
+  auto const &rv32_event = rv32_trace.system_calls[1];
+  ASSERT_EQ(wasm_event.body.syscall_number(), SyscallNo::kLogEvent);
+  ASSERT_EQ(rv32_event.body.syscall_number(), SyscallNo::kLogEvent);
+  EXPECT_EQ(wasm_event.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(rv32_event.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(wasm_event.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_EQ(rv32_event.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  ASSERT_NE(wasm_event.body.log_event().inputs.topic0, nullptr);
+  ASSERT_NE(rv32_event.body.log_event().inputs.topic0, nullptr);
+  EXPECT_EQ(*wasm_event.body.log_event().inputs.topic0,
+            *rv32_event.body.log_event().inputs.topic0);
+  EXPECT_EQ(wasm_event.body.log_event().inputs.topic1, nullptr);
+  EXPECT_EQ(rv32_event.body.log_event().inputs.topic1, nullptr);
+  EXPECT_EQ(wasm_event.body.log_event().inputs.topic2, nullptr);
+  EXPECT_EQ(rv32_event.body.log_event().inputs.topic2, nullptr);
+  EXPECT_EQ(wasm_event.body.log_event().inputs.data,
+            rv32_event.body.log_event().inputs.data);
+
+  auto const &wasm_return = wasm_trace.system_calls[wasm_offset + 2];
+  auto const &rv32_return = rv32_trace.system_calls[2];
+  ASSERT_EQ(wasm_return.body.syscall_number(), SyscallNo::kReturn);
+  ASSERT_EQ(rv32_return.body.syscall_number(), SyscallNo::kReturn);
+  EXPECT_EQ(wasm_return.status.error(), HostFnErrorCode::Return);
+  EXPECT_EQ(rv32_return.status.error(), HostFnErrorCode::Return);
+  EXPECT_TRUE(wasm_return.body.return_trace().inputs.buffer.empty());
+  EXPECT_TRUE(rv32_return.body.return_trace().inputs.buffer.empty());
+  EXPECT_FALSE(wasm_return.body.return_trace().inputs.revert_frame);
+  EXPECT_FALSE(rv32_return.body.return_trace().inputs.revert_frame);
+}
+
 TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
 {
   auto wasm_context = make_hogexec_context();
@@ -596,6 +734,99 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
   EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
 }
 
+TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
+{
+  auto wasm_context = make_hogexec_context();
+  auto wasm_contract =
+      ContractTraitMeta<read_only_test::ReadOnlyTest>::load_wasm();
+  write_contract(wasm_contract);
+  write_deployment(kWasmContractAddress, wasm_contract);
+  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_storage_event_return_image()}});
+  auto rv32_contract = make_rv32_contract_xdr();
+  install_contract(rv32_contract);
+
+  ContractTraitClient<read_only_test::ReadOnlyTest> wasm_client(
+      kWasmContractAddress);
+  auto wasm_handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              wasm_client.make_invocation<"write_storage_and_log_event">(
+                  kParityGas),
+          .uniquifier =
+              Uniquifier{
+                  .block_expiry_height =
+                      std::numeric_limits<BlockHeight>::max(),
+                  .nonce = 3,
+              }},
+      *wasm_context);
+  wasm_handler.enable_tracing();
+  wasm_handler.enable_transaction_stats();
+
+  auto rv32_handler =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  rv32_handler.enable_tracing();
+  rv32_handler.enable_transaction_stats();
+
+  const auto wasm_result = wasm_handler.root_invoke();
+  const auto rv32_result = rv32_handler.root_invoke();
+
+  ASSERT_TRUE(wasm_result.is_root_success());
+  ASSERT_TRUE(rv32_result.is_root_success());
+
+  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
+  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
+  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(wasm_output.return_buffer().empty());
+  EXPECT_TRUE(rv32_output.return_buffer().empty());
+
+  ASSERT_NE(wasm_handler.get_trace(), nullptr);
+  ASSERT_NE(rv32_handler.get_trace(), nullptr);
+  auto const *wasm_trace = wasm_handler.get_trace();
+  auto const *rv32_trace = rv32_handler.get_trace();
+  const auto wasm_events = wasm_handler.get_most_recent_frame_events();
+  const auto rv32_events = rv32_handler.get_most_recent_frame_events();
+
+  ASSERT_EQ(wasm_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_EQ(rv32_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK)());
+
+  EXPECT_EQ(wasm_trace->status.status_code(), rv32_trace->status.status_code());
+  EXPECT_TRUE(wasm_trace->status.return_buffer().empty());
+  EXPECT_TRUE(rv32_trace->status.return_buffer().empty());
+  expect_storage_event_return_trace_matches(*wasm_trace, *rv32_trace);
+
+  ASSERT_EQ(wasm_trace->storage_writes.size(), 1U);
+  ASSERT_EQ(rv32_trace->storage_writes.size(), 1U);
+  auto const &wasm_write = wasm_trace->storage_writes[0];
+  auto const &rv32_write = rv32_trace->storage_writes[0];
+  EXPECT_EQ(wasm_write.addrkey.address, kWasmContractAddress);
+  EXPECT_EQ(rv32_write.addrkey.address, kRv32ContractAddress);
+  EXPECT_EQ(wasm_write.addrkey.key, rv32_write.addrkey.key);
+  EXPECT_EQ(wasm_write.flags, rv32_write.flags);
+  ASSERT_EQ(wasm_write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
+  ASSERT_EQ(rv32_write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
+  EXPECT_EQ(wasm_write.delta.bytestring(), rv32_write.delta.bytestring());
+
+  ASSERT_EQ(wasm_events.size(), 1U);
+  ASSERT_EQ(rv32_events.size(), 1U);
+  EXPECT_EQ(wasm_events[0].contract_address, kWasmContractAddress);
+  EXPECT_EQ(rv32_events[0].contract_address, kRv32ContractAddress);
+  EXPECT_EQ(wasm_events[0].num_topics, 1U);
+  EXPECT_EQ(rv32_events[0].num_topics, 1U);
+  EXPECT_EQ(wasm_events[0].serialized_event, rv32_events[0].serialized_event);
+
+  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
+  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
+}
+
 TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
 {
   const x23::Vec<uint8_t, 0xffffffff> input = {3, 1, 4, 1, 5, 9};
@@ -703,7 +934,23 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   expect_mapping(&unknown_panic_entry, InvokeErrorCode::Unrecoverable);
 }
 
-TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltMapsToDeterministic)
+TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_single_ecall_image(&return_entry)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                              rv32_context);
+
+  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+  ASSERT_TRUE(result.is_root_success());
+  EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas + 4U);
+}
+
+TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltCodeMapsToDeterministic)
 {
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_single_ecall_image(&exit_entry)}});
