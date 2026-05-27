@@ -12,6 +12,8 @@ namespace hogd::rv32 {
 [[nodiscard]] constexpr bool
 memory_range_in_bounds(size_t memory_size, uint32_t address, size_t width)
 {
+  // Single bounds predicate for guest and host views. The subtraction form
+  // avoids address+width overflow while allowing zero-length end pointers.
   const size_t addr = address;
   return addr <= memory_size && width <= memory_size - addr;
 }
@@ -79,6 +81,8 @@ public:
   [[nodiscard]] bool write_memory(uint32_t address,
                                   std::span<const uint8_t> in) const
   {
+    // Host calls may mutate only guest data memory through this view. Code is
+    // held in Program, not in the writable memory span.
     if (!memory_range_in_bounds(memory_.size(), address, in.size())) {
       return false;
     }

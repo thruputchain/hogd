@@ -88,6 +88,8 @@ unsupported(ProgramError error)
 DecodeResult
 decoded(DecodedInstruction instruction)
 {
+  // Gas is a property of the validated decoded stream. Execution never
+  // re-decodes or recomputes costs from raw bytes.
   instruction.gas_cost = gas_cost_for_op(instruction.op);
   return DecodeResult{.ok = true,
                       .error = ProgramError::kNone,
@@ -100,6 +102,8 @@ DecodeResult
 decode_instruction(uint32_t word)
 {
   if ((word & 0x3U) != 0x3U) {
+    // The v1 profile excludes compressed instructions so every PC is a
+    // four-byte index into the immutable decoded instruction array.
     return unsupported(ProgramError::kUnsupportedCompressedInstruction);
   }
 
@@ -272,6 +276,8 @@ decode_instruction(uint32_t word)
     return decoded(instruction);
   case 0x73:
     if (word != 0x00000073U) {
+      // ECALL is the only accepted SYSTEM instruction. CSR, privileged, and
+      // environment-return forms are rejected before a Program can be created.
       return unsupported(ProgramError::kUnsupportedSystemInstruction);
     }
     instruction.kind = InstructionKind::kEcall;
@@ -285,6 +291,8 @@ decode_instruction(uint32_t word)
 ProgramResult
 Program::validate(std::span<const uint8_t> code)
 {
+  // Validation is the consensus boundary for the RV32 profile. A Machine only
+  // receives already-decoded instructions from Program::create.
   if ((code.size() % kInstructionBytes) != 0) {
     return ProgramResult{.ok = false,
                          .error = ProgramError::kCodeSizeNotAligned};
@@ -313,6 +321,8 @@ Program::create(std::span<const uint8_t> code)
 
   Program program;
   program.instructions_.reserve(code.size() / kInstructionBytes);
+  // Store only decoded instructions. The raw guest code bytes are intentionally
+  // not guest-addressable and cannot be modified after validation.
   for (size_t offset = 0; offset < code.size(); offset += kInstructionBytes) {
     program.instructions_.push_back(
         decode_instruction(load_u32_le(code, offset)).instruction);

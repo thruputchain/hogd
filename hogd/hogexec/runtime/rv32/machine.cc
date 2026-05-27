@@ -8,6 +8,8 @@
 namespace hogd::rv32 {
 namespace {
 
+// Keep architectural values as raw 32-bit patterns. Converting through signed
+// C++ arithmetic is only done in helpers that pin the RISC-V edge cases.
 uint32_t
 bits_from_i32(int32_t value)
 {
@@ -30,6 +32,9 @@ sign_extend(uint32_t value, uint32_t bits_count)
 uint32_t
 arithmetic_shift_right(uint32_t value, uint32_t amount)
 {
+  // C++ signed right shift is implementation-defined, and shifting by 32 is
+  // undefined. Decode/execution masks amounts before this helper; amount==0
+  // still needs a separate path to avoid the 32-bit fill expression below.
   if (amount == 0) {
     return value;
   }
@@ -43,6 +48,8 @@ arithmetic_shift_right(uint32_t value, uint32_t amount)
 uint32_t
 mulh(uint32_t lhs, uint32_t rhs)
 {
+  // MULH variants differ only in signedness of the high half. Keep the casts
+  // explicit so future refactors do not accidentally collapse the variants.
   const int64_t product =
       int64_t{i32_from_bits(lhs)} * int64_t{i32_from_bits(rhs)};
   return static_cast<uint32_t>(static_cast<uint64_t>(product) >> 32);
@@ -146,6 +153,9 @@ Machine::reset(uint64_t gas)
   halt_code_ = 0;
   pending_ecall_.reset();
   if (construction_trap_ != Trap::kNone) {
+    // A machine that failed construction must remain trapped after reset; do
+    // not allow benchmark/test reset paths to re-enter execution with no valid
+    // program or memory image.
     trap_ = construction_trap_;
     halted_ = true;
     return;
@@ -183,6 +193,8 @@ Machine::set_trap(Trap trap)
 void
 Machine::write_reg(uint8_t index, uint32_t value)
 {
+  // RISC-V x0 is hardwired to zero. Centralize the rule so instruction bodies
+  // can freely write rd without per-op special cases.
   if (index != 0) {
     registers_[index] = value;
   }
@@ -191,6 +203,9 @@ Machine::write_reg(uint8_t index, uint32_t value)
 bool
 Machine::validate_control_target(uint32_t target)
 {
+  // Code memory is immutable and separate from guest data memory. Every dynamic
+  // target is rechecked so computed control flow cannot escape the decoded
+  // Program image.
   if (!program_->contains_pc(target)) {
     set_trap(Trap::kBadPc);
     return false;
@@ -201,6 +216,8 @@ Machine::validate_control_target(uint32_t target)
 bool
 Machine::check_load(uint32_t address, uint32_t width)
 {
+  // Trap class is observable. Alignment wins over bounds, and both checks run
+  // after gas debit but before register or memory mutation.
   if ((address % width) != 0) {
     set_trap(Trap::kMisalignedAccess);
     return false;
@@ -215,6 +232,8 @@ Machine::check_load(uint32_t address, uint32_t width)
 bool
 Machine::check_store(uint32_t address, uint32_t width)
 {
+  // Stores share the load ordering: debit first in step(), then validate all
+  // store preconditions, then mutate memory only on success.
   if ((address % width) != 0) {
     set_trap(Trap::kMisalignedAccess);
     return false;
@@ -260,7 +279,9 @@ Machine::step()
 
   const DecodedInstruction &instruction =
       program_->instruction_at_aligned_pc(pc_);
-  // Gas is charged after a valid fetch but before semantic traps or mutation.
+  // Consensus ordering: invalid fetch traps without gas; a valid fetched
+  // instruction pays gas before any semantic trap or state mutation. This makes
+  // OutOfGas win cleanly with no partial instruction effects.
   if (!consume_gas(instruction.gas_cost)) {
     return StepResult::kTrap;
   }
@@ -279,6 +300,8 @@ Machine::complete_ecall(const HostResult &result)
 
   switch (result.status) {
   case HostStatus::kContinue:
+    // Host memory writes happen during Host::ecall through MachineView. The
+    // only VM register mutation on a continuing ecall is the returned a0 value.
     write_reg(10, result.value);
     return StepResult::kContinue;
   case HostStatus::kHalt:
@@ -350,6 +373,8 @@ Machine::execute(const DecodedInstruction &instruction)
   }
   case Op::kJalr:
   {
+    // JALR clears bit 0 after adding the immediate; validate the masked target
+    // before writing rd so bad targets do not expose partial link writes.
     const uint32_t target = (registers_[instruction.rs1] + imm) & ~uint32_t{1};
     if (!validate_control_target(target)) {
       return StepResult::kTrap;
@@ -602,6 +627,8 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kEcall:
+    // Advance PC and snapshot argument registers before yielding to the host.
+    // complete_ecall owns the post-host mutation/trap ordering.
     pc_ = pc_next;
     pending_ecall_ = EcallArgs{
         .a0 = registers_[10],
