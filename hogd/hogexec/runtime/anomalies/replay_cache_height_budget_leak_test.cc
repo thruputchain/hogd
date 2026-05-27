@@ -9,7 +9,8 @@
 // Why this is tolerated:
 //   - kConflict propagates as RPCError::kRPCStorageWriteFailed, which is a
 //     soft rejection: the transaction is excluded from the current block
-//     proposal and retried in the next block (ExecResultTxNonDeterministicError).
+//     proposal and retried in the next block
+//     (ExecResultTxNonDeterministicError).
 //   - It never becomes a ValidationFailure (consensus-critical divergence).
 //     The proposer's leaked counter is strictly more restrictive than the
 //     validator's (which replays only successful txs and has no leak), so any
@@ -107,11 +108,10 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
   // TX1: reserve a fresh height and commit.
   {
     auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(
-        make_replay_cache_addrkey(contract_addr),
-        make_nonce_delta(
-            Uniquifier{.block_expiry_height = kept_height, .nonce = 1}),
-        std::to_underlying(StorageDeltaFlags::None));
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(Uniquifier{.block_expiry_height = kept_height,
+                                             .nonce = 1}),
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -121,11 +121,11 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
   // TX2: reserve a different fresh height, then abort.
   {
     auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(
-        make_replay_cache_addrkey(contract_addr),
-        make_nonce_delta(
-            Uniquifier{.block_expiry_height = dropped_height, .nonce = 2}),
-        std::to_underlying(StorageDeltaFlags::None));
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = dropped_height,
+                                .nonce = 2}),
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -137,11 +137,11 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
   // aborted TX2 makes the lock think 2 fresh heights are active.
   {
     auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(
-        make_replay_cache_addrkey(contract_addr),
-        make_nonce_delta(
-            Uniquifier{.block_expiry_height = final_height, .nonce = 3}),
-        std::to_underlying(StorageDeltaFlags::None));
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = final_height,
+                                .nonce = 3}),
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
@@ -157,11 +157,11 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
 
   {
     auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(
-        make_replay_cache_addrkey(contract_addr),
-        make_nonce_delta(
-            Uniquifier{.block_expiry_height = final_height, .nonce = 3}),
-        std::to_underlying(StorageDeltaFlags::None));
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = final_height,
+                                .nonce = 3}),
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     EXPECT_TRUE(r.value())
