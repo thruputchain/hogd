@@ -33,7 +33,7 @@ export SOURCE_DATE_EPOCH=0
 cargo build --release --locked --offline
 
 rustc_version="$(rustc --version --verbose | tr '\n' '; ')"
-build_flags="$(printf '%s' 'cargo build --release --locked --offline; panic=abort; opt-level=s; codegen-units=1; relocation-model=static; target-feature=+m,-a,-c; linker.ld; gc-sections')"
+build_flags="$(printf '%s' 'cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no')"
 
 write_fixture() {
   local out_header="$1"

@@ -8,6 +8,8 @@ const SYSCALL_RETURN: u64 = 6;
 const SYSCALL_BRIDGE_VERSION: usize = 0;
 const HASH_BYTES: usize = 32;
 
+type EntryPoint = unsafe extern "C" fn() -> !;
+
 #[no_mangle]
 #[link_section = ".rodata.fixture_input"]
 static RV32_COMPILED_SHA256_RETURN_INPUT: [u8; 7] = [1, 2, 3, 4, 5, 8, 13];
@@ -60,6 +62,11 @@ pub unsafe extern "C" fn _start() -> ! {
 pub unsafe extern "C" fn RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED() -> ! {
     sha256_return_empty()
 }
+
+#[used]
+#[link_section = ".rodata.entry_points"]
+static RV32_COMPILED_SHA256_RETURN_ENTRY_POINTS: [EntryPoint; 2] =
+    [_start, RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED];
 
 #[inline(always)]
 unsafe fn sha256_return_hash() -> ! {
@@ -124,8 +131,11 @@ unsafe fn issue_syscall(frame: *mut SyscallFrame) -> usize {
         options(nostack),
     );
 
-    let _footer_result_code = core::ptr::read_volatile(core::ptr::addr_of!((*frame).result_code));
-    let _footer_panic = core::ptr::read_volatile(core::ptr::addr_of!((*frame).panic));
-    let _footer_gas = core::ptr::read_volatile(core::ptr::addr_of!((*frame).gas_consumed));
+    let _footer_result_code =
+        core::ptr::read_volatile(core::ptr::addr_of!((*frame).result_code));
+    let _footer_panic =
+        core::ptr::read_volatile(core::ptr::addr_of!((*frame).panic));
+    let _footer_gas =
+        core::ptr::read_volatile(core::ptr::addr_of!((*frame).gas_consumed));
     result
 }

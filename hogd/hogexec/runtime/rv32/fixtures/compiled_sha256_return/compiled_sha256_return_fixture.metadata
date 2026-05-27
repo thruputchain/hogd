@@ -1,9 +1,9 @@
 {
   "artifact_bytes": 65984,
-  "artifact_sha256": "2f52a7d576497525ac94bff1d190ba3eca0447700af4c357d9c16f6706285129",
-  "build_flags": "cargo build --release --locked --offline; panic=abort; opt-level=s; codegen-units=1; relocation-model=static; target-feature=+m,-a,-c; linker.ld; gc-sections",
+  "artifact_sha256": "ef95319f4afa147d8e26916116c903806b3102eaf3c1fbc39e6edac18639006b",
+  "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
   "code_bytes": 316,
-  "code_sha256": "d956adeeb1e10613441201e561462ec084bb82afe7821f8b8aa150334ae7f875",
+  "code_sha256": "84b7e42c5fa5dc8f1d6b8d493093ee13e295eedd6ba99f74bce403f36a453de0",
   "dispatch_entries": [
     {
       "method_id": "0x5749e8fa5d1f3cfe",
@@ -14,12 +14,12 @@
       "pc": 0
     }
   ],
-  "elf_sha256": "8e087f917e24ec3f0f3c35ed97117766f8ac19af4a52317e234af397780c7943",
+  "elf_sha256": "8aea2d48321f2382d170ab2e881e165dd0171ccdcd7b90093eebdb73b6883b44",
   "fixture_input": "0102030405080d",
   "fixture_input_offset": 320,
   "fixture_input_sha256": "976ad63be07aa8f9f1d50ec110693c0edcf5172b6245de4aa0e6482b875a9740",
-  "fixture_sha256": "21ed48005d8cd99bc483920e1ead6e15f170431d2df845a4a57748484949eca7",
-  "initial_memory_sha256": "6fac47687bacc5d3158cae9a28fdf55fb39ce5212deae285b133dd80f31f305b",
+  "fixture_sha256": "147af09e99ff264ce8c1c9a5545d28c919c69015784f14b8cb750f34962a2a51",
+  "initial_memory_sha256": "cce1bfbce39026995e5c924db1c642dbe6ab6e16cf0ffc59efea08ff9a0183c5",
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
   "lowering_tool_sha256": "5fbc81f0822903bce3730d360a2bf1a4067784c0829cac81c248758dade57591",
   "memory_bytes": 65536,
@@ -32,6 +32,6 @@
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
   "sha256_pc": 0,
   "sha256_repeated_pc": 160,
-  "source_sha256": "0cc2a4744e4182d6b1cb07a351096627b43683216135105f8a474ad397c1a27f",
+  "source_sha256": "22ecb5e747dd3a5f13a0409d5b1ba279dd8b3d3b8bf7df4dbd5b2a13ea11314b",
   "target_triple": "riscv32im-unknown-none-elf"
 }
