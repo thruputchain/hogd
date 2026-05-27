@@ -10,6 +10,22 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
+add_library(
+  rv32_syscall_bridge
+  syscall_bridge.cc
+)
+
+target_link_libraries(
+  rv32_syscall_bridge
+  rv32_vm
+)
+
+target_include_directories(
+  rv32_syscall_bridge
+  PUBLIC
+  ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(
   rv32_vm_test
   rv32_vm_test.cc
@@ -22,6 +38,19 @@ target_link_libraries(
   GTest::gtest
 )
 gtest_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
+
+add_executable(
+  rv32_syscall_bridge_test
+  rv32_syscall_bridge_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_syscall_bridge_test
+  rv32_syscall_bridge
+  GTest::gtest
+)
+gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 
 if(BUILD_BENCHMARKS)
   wat2wasm_target(
