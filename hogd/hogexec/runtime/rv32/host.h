@@ -99,27 +99,36 @@ private:
 };
 
 struct HostResult {
-  static HostResult continue_with(uint32_t value = 0)
+  static HostResult continue_with(uint32_t value = 0, uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kContinue, .value = value};
+    return HostResult{.status = HostStatus::kContinue,
+                      .value = value,
+                      .gas_consumed = gas_consumed};
   }
-  static HostResult halt(uint32_t code = 0)
+  static HostResult halt(uint32_t code = 0, uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kHalt, .value = code};
+    return HostResult{.status = HostStatus::kHalt,
+                      .value = code,
+                      .gas_consumed = gas_consumed};
   }
   // Host OutOfGas rolls back host memory effects but does not rewind the
   // already-executed ECALL instruction.
-  static HostResult out_of_gas()
+  static HostResult out_of_gas(uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kOutOfGas, .value = 0};
+    return HostResult{.status = HostStatus::kOutOfGas,
+                      .value = 0,
+                      .gas_consumed = gas_consumed};
   }
-  static HostResult trap()
+  static HostResult trap(uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kTrap, .value = 0};
+    return HostResult{.status = HostStatus::kTrap,
+                      .value = 0,
+                      .gas_consumed = gas_consumed};
   }
 
   HostStatus status = HostStatus::kContinue;
   uint32_t value = 0;
+  uint64_t gas_consumed = 0;
 };
 
 class Host {

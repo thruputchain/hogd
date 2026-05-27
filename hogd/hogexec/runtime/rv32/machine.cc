@@ -299,6 +299,16 @@ Machine::complete_ecall(const HostResult &result)
   }
   pending_ecall_.reset();
 
+  // ECALL instruction gas has already been charged by step(). Debit host gas
+  // before committing the host result so an over-budget syscall cannot mutate
+  // a0, halt state, or final trap state.
+  if (!consume_gas(result.gas_consumed)) {
+    memory_ = ecall_memory_snapshot_;
+    ecall_memory_snapshot_.clear();
+    set_trap(Trap::kOutOfGas);
+    return StepResult::kTrap;
+  }
+
   switch (result.status) {
   case HostStatus::kContinue:
     // Host memory writes happen during Host::ecall through MachineView. The
@@ -312,8 +322,8 @@ Machine::complete_ecall(const HostResult &result)
     halted_ = true;
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
-    // Host OOG rolls back host memory effects. The already-executed ECALL
-    // instruction stays charged and pc remains advanced past the ECALL.
+    // Host OOG rolls back host memory effects. ECALL and reported host gas stay
+    // charged, and pc remains advanced past the ECALL.
     memory_ = ecall_memory_snapshot_;
     ecall_memory_snapshot_.clear();
     set_trap(Trap::kOutOfGas);

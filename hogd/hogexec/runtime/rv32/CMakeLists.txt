@@ -15,6 +15,13 @@ add_library(
   syscall_bridge.cc
 )
 
+add_custom_target(
+  rv32_syscall_xdr_hh
+  DEPENDS
+  ${CMAKE_BINARY_DIR}/hogd/xdr/ffi_enums.hh
+  ${CMAKE_BINARY_DIR}/hogd/xdr/syscall_error.hh
+)
+
 target_link_libraries(
   rv32_syscall_bridge
   rv32_vm
@@ -24,6 +31,13 @@ target_include_directories(
   rv32_syscall_bridge
   PUBLIC
   ${CMAKE_SOURCE_DIR}
+  PRIVATE
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
+add_dependencies(
+  rv32_syscall_bridge
+  rv32_syscall_xdr_hh
 )
 
 add_executable(
@@ -50,6 +64,17 @@ target_link_libraries(
   rv32_syscall_bridge
   x23
   GTest::gtest
+)
+
+target_include_directories(
+  rv32_syscall_bridge_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
+add_dependencies(
+  rv32_syscall_bridge_test
+  rv32_syscall_xdr_hh
 )
 gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 

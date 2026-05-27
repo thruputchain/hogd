@@ -144,23 +144,23 @@ protected:
   static std::unique_ptr<InvocationFrameTrace>
   start_frame(SystemCallHandler &handler)
   {
-    return handler.start_frame(Invocation{
-                                   .invoked_address = make_contract_address(0),
-                                   .entrypoint = ContractEntrypointID{},
-                                   .gas_limit = kPlentyOfGas,
-                                   .calldata = Calldata{},
-                               },
-                               std::to_underlying(InvokeFlag::None),
-                               std::span<const uint32_t>{});
+    return handler.start_frame(
+        Invocation{
+            .invoked_address = make_contract_address(0),
+            .entrypoint = ContractEntrypointID{},
+            .gas_limit = kPlentyOfGas,
+            .calldata = Calldata{},
+        },
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
   }
 
-  static void finish_frame(
-      SystemCallHandler &handler,
-      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace,
-      InvokeStatus<void> result = {})
+  static void
+  finish_frame(SystemCallHandler &handler,
+               std::unique_ptr<InvocationFrameTrace> stashed_parent_trace,
+               InvokeStatus<void> result = {})
   {
-    auto status =
-        handler.finish_frame(std::move(result), std::move(stashed_parent_trace));
+    auto status = handler.finish_frame(std::move(result),
+                                       std::move(stashed_parent_trace));
     ASSERT_TRUE(status.has_value());
   }
 
@@ -202,18 +202,66 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
   EXPECT_EQ(result.value,
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_GT(result.gas_consumed, 0U);
   const SHA256Hash expected = sha256(input);
-  EXPECT_TRUE(std::ranges::equal(
-      expected, std::span<const uint8_t>(memory).subspan(kOutputAddress,
-                                                         expected.size())));
+  EXPECT_TRUE(
+      std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
+                                       kOutputAddress, expected.size())));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
             static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),
             static_cast<int32_t>(HostFnErrorCode::NoneOrRecoverable));
-  EXPECT_GT(load_le64(memory, rv32::kSyscallFrameResultOffset + 8), 0U);
+  EXPECT_EQ(load_le64(memory, rv32::kSyscallFrameResultOffset + 8),
+            result.gas_consumed);
 }
 
-TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultWritesRecoverableResult)
+TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
+{
+  constexpr uint32_t frame_address = 0;
+  const auto program = make_program({
+      addi(10, 0, frame_address),
+      addi(17, 0, rv32::kSyscallBridgeVersion),
+      ecall(),
+  });
+  ASSERT_NE(program, nullptr);
+
+  rv32::Machine machine(program, 256, kPlentyOfGas);
+  std::vector<uint8_t> memory(256);
+  constexpr std::string_view input = "rv32 syscall bridge gas";
+  std::ranges::copy(input, memory.begin() + kInputAddress);
+  constexpr std::array<uint64_t, 4> frame_words = {
+      static_cast<uint64_t>(SyscallNo::kSHA256),
+      kInputAddress,
+      input.size(),
+      kOutputAddress,
+  };
+  write_frame(memory, frame_words);
+  ASSERT_TRUE(machine.view().write_memory(0, memory));
+
+  auto handler = make_handler();
+  auto host_context = make_new_host_call_context(&handler);
+  rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
+  auto stashed_trace = start_frame(handler);
+
+  EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
+  EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
+  EXPECT_EQ(machine.step(), rv32::StepResult::kEcall);
+  ASSERT_TRUE(machine.pending_ecall().has_value());
+  const uint64_t before_host = machine.gas_remaining();
+  const rv32::HostResult host_result =
+      bridge.ecall(machine.view(), *machine.pending_ecall());
+  ASSERT_EQ(host_result.status, rv32::HostStatus::kContinue);
+  ASSERT_GT(host_result.gas_consumed, 0U);
+  EXPECT_EQ(machine.complete_ecall(host_result), rv32::StepResult::kContinue);
+  finish_frame(handler, std::move(stashed_trace));
+
+  EXPECT_EQ(machine.gas_remaining(), before_host - host_result.gas_consumed);
+  EXPECT_EQ(machine.gas_remaining(), kPlentyOfGas -
+                                         3 * rv32::kBaseInstructionGas -
+                                         host_result.gas_consumed);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(256, 0xAA);
   constexpr std::string_view input = "fault";
@@ -225,6 +273,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultWritesRecoverableResult)
       memory.size() - 1,
   };
   write_frame(memory, frame_words);
+  const std::vector<uint8_t> before = memory;
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
@@ -234,10 +283,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultWritesRecoverableResult)
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
   EXPECT_EQ(result.value,
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
-            static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),
-            static_cast<int32_t>(HostFnErrorCode::NoneOrRecoverable));
+  EXPECT_EQ(memory, before);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
@@ -255,12 +301,10 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
-  EXPECT_EQ(
-      result.value,
-      static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
+  EXPECT_EQ(result.value, static_cast<uint32_t>(
+                              SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
-            static_cast<int32_t>(
-                SyscallErrorCode::kSyscallErrorCodeNoSyscall));
+            static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),
             static_cast<int32_t>(HostFnErrorCode::NoneOrRecoverable));
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
@@ -304,12 +348,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
   rv32::Machine machine(program, 256, kPlentyOfGas);
   std::vector<uint8_t> frame(rv32::kSyscallFrameBytes);
   constexpr std::array<uint64_t, 6> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kReturn),
-      0,
-      0,
-      0,
-      0,
-      0,
+      static_cast<uint64_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0,
   };
   write_frame(frame, frame_words);
   ASSERT_TRUE(machine.view().write_memory(frame_address, frame));

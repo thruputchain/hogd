@@ -4,15 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
+
+#include "ffi_enums.hh"
+#include "syscall_error.hh"
 
 namespace hogd::rv32 {
 namespace {
-
-inline constexpr int32_t kHostFnNoneOrRecoverable = 0;
-inline constexpr int32_t kHostFnOutOfGas = 1;
-inline constexpr int32_t kHostFnReturn = 3;
-inline constexpr int32_t kHostFnExit = 4;
 
 uint64_t
 load_le64(std::span<const uint8_t> bytes, size_t offset)
@@ -103,31 +102,45 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::trap();
   }
   last_result_ = result;
-  store_result_footer(memory, args.a0, result);
 
   switch (result.panic) {
-  case kHostFnNoneOrRecoverable:
-    if (!view.write_memory(0, memory)) {
-      return HostResult::trap();
+  case std::to_underlying(HostFnErrorCode::NoneOrRecoverable):
+    // Fault means the parser/output layer rejected guest memory. Preserve the
+    // return code through a0, but do not commit scratch memory or the footer.
+    if (result.result_code ==
+        std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault)) {
+      return HostResult::continue_with(static_cast<uint32_t>(
+                                           result.result_code),
+                                       result.gas_consumed);
     }
-    return HostResult::continue_with(static_cast<uint32_t>(result.result_code));
-  case kHostFnReturn:
+    store_result_footer(memory, args.a0, result);
     if (!view.write_memory(0, memory)) {
-      return HostResult::trap();
+      return HostResult::trap(result.gas_consumed);
     }
-    return HostResult::halt();
-  case kHostFnExit:
+    return HostResult::continue_with(static_cast<uint32_t>(result.result_code),
+                                     result.gas_consumed);
+  case std::to_underlying(HostFnErrorCode::Return):
+    // Return and Exit terminate the VM invocation cleanly after committing the
+    // same scratch/footer writes the WASM path would expose.
+    store_result_footer(memory, args.a0, result);
     if (!view.write_memory(0, memory)) {
-      return HostResult::trap();
+      return HostResult::trap(result.gas_consumed);
     }
-    return HostResult::halt(static_cast<uint32_t>(result.result_code));
-  case kHostFnOutOfGas:
-    return HostResult::out_of_gas();
+    return HostResult::halt(0, result.gas_consumed);
+  case std::to_underlying(HostFnErrorCode::Exit):
+    store_result_footer(memory, args.a0, result);
+    if (!view.write_memory(0, memory)) {
+      return HostResult::trap(result.gas_consumed);
+    }
+    return HostResult::halt(static_cast<uint32_t>(result.result_code),
+                            result.gas_consumed);
+  case std::to_underlying(HostFnErrorCode::OutOfGas):
+    // OOG is atomic with respect to guest memory: Machine::complete_ecall
+    // charges reported host gas, then rolls back the pre-host snapshot.
+    return HostResult::out_of_gas(result.gas_consumed);
   default:
-    if (!view.write_memory(0, memory)) {
-      return HostResult::trap();
-    }
-    return HostResult::trap();
+    // Unknown or fatal host panics trap without committing scratch memory.
+    return HostResult::trap(result.gas_consumed);
   }
 }
 

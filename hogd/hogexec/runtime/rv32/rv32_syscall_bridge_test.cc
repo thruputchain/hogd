@@ -8,13 +8,16 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
+#include "syscall_error.hh"
 
 namespace hogd::rv32 {
 namespace {
@@ -106,6 +109,24 @@ capture_entry(ExternHostCallContext context, WasmContext wasm_context,
   captured->first_memory_byte = wasm_context.memory.mem[0];
   wasm_context.memory.mem[7] = 0xa5;
   return captured->result;
+}
+
+struct SequencedGasCall {
+  int calls = 0;
+  uint64_t gas_consumed = 0;
+};
+
+TrampolineResult
+sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  auto *captured = static_cast<SequencedGasCall *>(context);
+  ++captured->calls;
+  wasm_context.memory.mem[8] = static_cast<uint8_t>(0x40 + captured->calls);
+  return {.result_code = 222,
+          .panic = std::to_underlying(HostFnErrorCode::NoneOrRecoverable),
+          .gas_consumed = captured->gas_consumed};
 }
 
 TrampolineResult
@@ -228,6 +249,7 @@ TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
 
   ASSERT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.value, 0xfffffff9U);
+  EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
   EXPECT_EQ(captured.args[0], 0x0102030405060708ULL);
   EXPECT_EQ(captured.args[10], 0x0102030405060712ULL);
@@ -464,16 +486,20 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   std::vector<uint8_t> memory(kSyscallFrameBytes);
   memory[7] = 0x11;
   CapturedCall captured;
-  captured.result = {.result_code = 3, .panic = 1, .gas_consumed = 4};
+  captured.result = {.result_code = 3,
+                     .panic = std::to_underlying(HostFnErrorCode::OutOfGas),
+                     .gas_consumed = 4};
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kOutOfGas);
+  EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
   ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->panic, 1);
+  EXPECT_EQ(bridge.last_result()->panic,
+            std::to_underlying(HostFnErrorCode::OutOfGas));
   EXPECT_EQ(memory[7], 0x11U);
   EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
 }
@@ -482,18 +508,49 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(kSyscallFrameBytes);
+  memory[7] = 0x11;
   CapturedCall captured;
-  captured.result = {.result_code = 3, .panic = 2, .gas_consumed = 4};
+  captured.result = {.result_code = 3,
+                     .panic =
+                         std::to_underlying(HostFnErrorCode::Unrecoverable),
+                     .gas_consumed = 4};
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
   ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->panic, 2);
-  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 2U);
+  EXPECT_EQ(bridge.last_result()->panic,
+            std::to_underlying(HostFnErrorCode::Unrecoverable));
+  EXPECT_EQ(memory[7], 0x11U);
+  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
+}
+
+TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
+{
+  std::array<uint32_t, kRegisterCount> registers = {};
+  std::vector<uint8_t> memory(kSyscallFrameBytes, 0x55);
+  CapturedCall captured;
+  captured.result = {.result_code = std::to_underlying(
+                         SyscallErrorCode::kSyscallErrorCodeFault),
+                     .panic =
+                         std::to_underlying(HostFnErrorCode::NoneOrRecoverable),
+                     .gas_consumed = 4};
+  SyscallBridgeHost bridge(&captured, capture_entry);
+  MachineView view(0, 10, registers, memory);
+  const std::vector<uint8_t> before = memory;
+
+  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.value,
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
+  EXPECT_EQ(result.gas_consumed, 4U);
+  EXPECT_EQ(captured.calls, 1);
+  EXPECT_EQ(memory, before);
 }
 
 TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
@@ -504,15 +561,21 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
-  captured.result = {.result_code = 3, .panic = 3, .gas_consumed = 4};
+  captured.result = {.result_code = 3,
+                     .panic = std::to_underlying(HostFnErrorCode::Return),
+                     .gas_consumed = 4};
   HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.gas_consumed, 4U);
 
-  captured.result = {.result_code = 9, .panic = 4, .gas_consumed = 4};
+  captured.result = {.result_code = 9,
+                     .panic = std::to_underlying(HostFnErrorCode::Exit),
+                     .gas_consumed = 4};
   result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.value, 9U);
+  EXPECT_EQ(result.gas_consumed, 4U);
 }
 
 TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
@@ -544,6 +607,28 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
   EXPECT_EQ(captured.calls, 1);
   EXPECT_EQ(captured.args[0], 1U);
   EXPECT_EQ(machine.memory()[7], 0xa5U);
+  EXPECT_EQ(machine.gas_remaining(), 12U);
+}
+
+TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
+{
+  const auto program = make_program({
+      addi(10, 0, 0),
+      ecall(),
+      addi(10, 0, 0),
+      ecall(),
+  });
+  Machine machine(program, kSyscallFrameBytes, 9);
+  SequencedGasCall captured{.gas_consumed = 3};
+  SyscallBridgeHost bridge(&captured, sequenced_gas_entry);
+
+  EXPECT_EQ(machine.run(bridge), StepResult::kTrap);
+
+  EXPECT_EQ(captured.calls, 2);
+  EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.gas_remaining(), 2U);
+  EXPECT_EQ(machine.reg(10), 0U);
+  EXPECT_EQ(machine.memory()[8], 0x41U);
 }
 
 } // namespace
