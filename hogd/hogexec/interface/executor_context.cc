@@ -260,7 +260,7 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
 x23::Async<std::optional<SystemErrorCode>>
 ExecutorContext::await_event_return()
 {
-  int wait_count = 0;
+  uint32_t wait_count = 0;
   // Use acquire ordering to ensure we see all operations that happened
   // before the release-store in log_event_return, including all server-side
   // event operations.
