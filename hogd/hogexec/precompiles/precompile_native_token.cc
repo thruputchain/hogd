@@ -248,13 +248,14 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  // subtract amount from spender's allowance
-  auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
-  if (!allow_res.has_value()) {
-    return allow_res.error();
-  }
-  if (!allow_res.value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+  if (owner != *spender) {
+    auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
+    if (!allow_res.has_value()) {
+      return allow_res.error();
+    }
+    if (!allow_res.value()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
   }
 
   auto event_buf = make_event_from_xdr_struct(TransferEvent{
@@ -284,6 +285,10 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
   auto owner = get_msg_sender(ctx);
   if (!owner.has_value()) {
     return owner.error();
+  }
+
+  if (*owner == spender) {
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   int128_t amount_signed_int =
