@@ -13,9 +13,11 @@
 #include <vector>
 
 #include "built_contracts/no_syscall_test.h"
+#include "built_contracts/sha256_wrapper.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
@@ -40,7 +42,11 @@ constexpr ContractAddress kRv32ContractAddress =
     NativeContractTestFramework::make_contract_address(7);
 constexpr uint32_t kFrameAddress = 64;
 constexpr uint32_t kReturnBufferAddress = 192;
+constexpr uint32_t kShaInputAddress = 224;
+constexpr uint32_t kShaOutputAddress = 320;
+constexpr uint32_t kShaMemoryBytes = 512;
 constexpr GasAmount kEnoughGas = 1000;
+constexpr GasAmount kParityGas = 10'000;
 
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
@@ -227,6 +233,43 @@ make_return_image(std::span<const uint8_t> payload)
 }
 
 rv32::RuntimeContractImage
+make_sha256_then_return_image(std::span<const uint8_t> input)
+{
+  std::vector<uint8_t> initial_memory(kShaMemoryBytes);
+  const std::array<uint64_t, 4> frame_words = {
+      static_cast<uint64_t>(SyscallNo::kSHA256),
+      kShaInputAddress,
+      input.size(),
+      kShaOutputAddress,
+  };
+  for (size_t i = 0; i < frame_words.size(); ++i) {
+    store_le64(initial_memory, kFrameAddress + i * sizeof(uint64_t),
+               frame_words[i]);
+  }
+  std::ranges::copy(input, initial_memory.begin() + kShaInputAddress);
+
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(10, 0, kFrameAddress),
+          addi(8, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+          addi(5, 0, std::to_underlying(SyscallNo::kReturn)),
+          sw(5, 8, 0),
+          addi(5, 0, kShaOutputAddress),
+          sw(5, 8, 8),
+          addi(5, 0, SHA256Hash{}.size()),
+          sw(5, 8, 16),
+          sw(0, 8, 24),
+          addi(10, 8, 0),
+          ecall(),
+      }),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = kShaMemoryBytes,
+  };
+}
+
+rv32::RuntimeContractImage
 make_bad_pc_image()
 {
   return rv32::RuntimeContractImage{
@@ -373,6 +416,47 @@ expect_syscall_trace_suffix_matches(InvocationFrameTrace const &wasm_trace,
   }
 }
 
+void
+expect_sha256_return_trace_matches(InvocationFrameTrace const &wasm_trace,
+                                   InvocationFrameTrace const &rv32_trace,
+                                   std::span<const uint8_t> input,
+                                   SHA256Hash const &expected_hash)
+{
+  ASSERT_GE(wasm_trace.system_calls.size(), 2U);
+  ASSERT_EQ(rv32_trace.system_calls.size(), 2U);
+  const size_t wasm_offset = wasm_trace.system_calls.size() - 2;
+
+  auto const &wasm_sha = wasm_trace.system_calls[wasm_offset];
+  auto const &rv32_sha = rv32_trace.system_calls[0];
+  ASSERT_EQ(wasm_sha.body.syscall_number(), SyscallNo::kSHA256);
+  ASSERT_EQ(rv32_sha.body.syscall_number(), SyscallNo::kSHA256);
+  EXPECT_EQ(wasm_sha.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(rv32_sha.status.error(), HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(wasm_sha.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_EQ(rv32_sha.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_TRUE(std::ranges::equal(wasm_sha.body.sha256().inputs.input, input));
+  EXPECT_TRUE(std::ranges::equal(rv32_sha.body.sha256().inputs.input, input));
+  ASSERT_NE(wasm_sha.body.sha256().outputs, nullptr);
+  ASSERT_NE(rv32_sha.body.sha256().outputs, nullptr);
+  EXPECT_EQ(wasm_sha.body.sha256().outputs->hash, expected_hash);
+  EXPECT_EQ(rv32_sha.body.sha256().outputs->hash, expected_hash);
+
+  auto const &wasm_return = wasm_trace.system_calls[wasm_offset + 1];
+  auto const &rv32_return = rv32_trace.system_calls[1];
+  ASSERT_EQ(wasm_return.body.syscall_number(), SyscallNo::kReturn);
+  ASSERT_EQ(rv32_return.body.syscall_number(), SyscallNo::kReturn);
+  EXPECT_EQ(wasm_return.status.error(), HostFnErrorCode::Return);
+  EXPECT_EQ(rv32_return.status.error(), HostFnErrorCode::Return);
+  EXPECT_TRUE(std::ranges::equal(wasm_return.body.return_trace().inputs.buffer,
+                                 expected_hash));
+  EXPECT_TRUE(std::ranges::equal(rv32_return.body.return_trace().inputs.buffer,
+                                 expected_hash));
+  EXPECT_FALSE(wasm_return.body.return_trace().inputs.revert_frame);
+  EXPECT_FALSE(rv32_return.body.return_trace().inputs.revert_frame);
+}
+
 TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
 {
   auto wasm_context = make_hogexec_context();
@@ -436,6 +520,126 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
   ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 1);
   EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 1);
+}
+
+TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input = {1, 2, 3, 4, 5, 8, 13};
+  const SHA256Hash expected_hash = sha256(input);
+
+  auto wasm_context = make_hogexec_context();
+  auto wasm_contract =
+      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
+  write_contract(wasm_contract);
+  write_deployment(kWasmContractAddress, wasm_contract);
+  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_sha256_then_return_image(input)}});
+  auto rv32_contract = make_rv32_contract_xdr();
+  install_contract(rv32_contract);
+
+  ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
+      kWasmContractAddress);
+  auto wasm_handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      wasm_client.make_invocation<"sha256">(kParityGas, input),
+                  .uniquifier =
+                      Uniquifier{
+                          .block_expiry_height =
+                              std::numeric_limits<BlockHeight>::max(),
+                          .nonce = 2,
+                      }},
+      *wasm_context);
+  wasm_handler.enable_tracing();
+  wasm_handler.enable_transaction_stats();
+
+  auto rv32_handler =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  rv32_handler.enable_tracing();
+  rv32_handler.enable_transaction_stats();
+
+  const auto wasm_result = wasm_handler.root_invoke();
+  const auto rv32_result = rv32_handler.root_invoke();
+
+  ASSERT_TRUE(wasm_result.is_root_success());
+  ASSERT_TRUE(rv32_result.is_root_success());
+
+  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
+  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
+  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
+  EXPECT_TRUE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
+
+  ASSERT_NE(wasm_handler.get_trace(), nullptr);
+  ASSERT_NE(rv32_handler.get_trace(), nullptr);
+  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
+            rv32_handler.get_trace()->status.status_code());
+  EXPECT_TRUE(
+      std::ranges::equal(wasm_handler.get_trace()->status.return_buffer(),
+                         expected_hash));
+  EXPECT_TRUE(
+      std::ranges::equal(rv32_handler.get_trace()->status.return_buffer(),
+                         expected_hash));
+  EXPECT_EQ(wasm_handler.get_trace()->storage_writes.size(),
+            rv32_handler.get_trace()->storage_writes.size());
+  EXPECT_EQ(wasm_handler.get_most_recent_frame_events().size(),
+            rv32_handler.get_most_recent_frame_events().size());
+  expect_sha256_return_trace_matches(*wasm_handler.get_trace(),
+                                     *rv32_handler.get_trace(), input,
+                                     expected_hash);
+  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
+  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
+}
+
+TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input = {3, 1, 4, 1, 5, 9};
+  const SHA256Hash expected_hash = sha256(input);
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_sha256_then_return_image(input)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler1 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  auto handler2 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  handler1.enable_tracing();
+  handler2.enable_tracing();
+  const auto result1 = handler1.root_invoke();
+  const auto result2 = handler2.root_invoke();
+
+  ASSERT_TRUE(result1.is_root_success());
+  ASSERT_TRUE(result2.is_root_success());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+
+  const auto output1 = handler1.get_most_recent_frame_output();
+  const auto output2 = handler2.get_most_recent_frame_output();
+  EXPECT_EQ(output1.status_code(), output2.status_code());
+  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected_hash));
+  EXPECT_TRUE(
+      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+
+  ASSERT_NE(handler1.get_trace(), nullptr);
+  ASSERT_NE(handler2.get_trace(), nullptr);
+  EXPECT_EQ(handler1.get_trace()->system_calls.size(),
+            handler2.get_trace()->system_calls.size());
+  expect_sha256_return_trace_matches(*handler1.get_trace(),
+                                     *handler2.get_trace(), input,
+                                     expected_hash);
+  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
+  }
 }
 
 TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
