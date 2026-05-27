@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/rpc_common.h"
 
 namespace hogd {
@@ -59,6 +60,8 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
 {
   const std::size_t saved_max = x23::default_max_message_size;
   x23::default_max_message_size = 4096;
+  x23::Defer restore_max{
+      [saved_max] { x23::default_max_message_size = saved_max; }};
 
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
@@ -129,8 +132,6 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
     auto commit_res = handler.try_commit_transaction();
     EXPECT_EQ(commit_res, ExecResult::ExecResultUnrecoverable);
   }
-
-  x23::default_max_message_size = saved_max;
 
   // Discard the block. If the InvokeTX was properly aborted, the BlockTX
   // refcount is zero and the block can be cleaned up. If it leaked, the
