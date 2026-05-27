@@ -28,8 +28,8 @@
 #include <cstdint>
 #include <utility>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
