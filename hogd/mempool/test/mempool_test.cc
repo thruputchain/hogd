@@ -507,6 +507,8 @@ TEST(Mempool, Validate)
 
 TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
 {
+  MempoolTestInfra server;
+
   SignedTransactionHashBatch tx_hashes{SignedTransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
@@ -525,16 +527,16 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   nomination.transactions_hash.segment_tokens[0]++;
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
-  MempoolCoordinatorRpc coord(
-      /*db_rpc=*/nullptr, /*auth_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
-      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
-  auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
 
 TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
 {
+  MempoolTestInfra server;
+
   SignedTransactionHashBatch tx_hashes{SignedTransactionHash{},
                                        SignedTransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
@@ -548,10 +550,8 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
           t_to_parallel_batch(tx_nondeterministic_data)(),
   };
 
-  MempoolCoordinatorRpc coord(
-      /*db_rpc=*/nullptr, /*auth_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
-      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
-  auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
