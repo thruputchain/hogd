@@ -25,6 +25,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -319,7 +320,11 @@ TEST(MockSyscallTest, NoReturnTest)
 
 TEST(MockSyscallTest, NoSyscallTest)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto db_result = create_db(nullptr, 0);
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer free_db_defer([&] { free_db(db_result.db); });
+  auto &db_context = *static_cast<DBContext *>(db_result.db);
+
   auto runtime_context =
       std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
   SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
