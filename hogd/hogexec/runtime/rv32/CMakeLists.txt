@@ -1,5 +1,6 @@
 add_library(
   rv32_vm
+  artifact.cc
   machine.cc
   program.cc
 )

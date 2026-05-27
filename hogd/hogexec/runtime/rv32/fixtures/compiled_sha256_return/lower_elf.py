@@ -7,6 +7,14 @@ from pathlib import Path
 
 K_MAX_CODE_BYTES = 64 * 1024
 K_MAX_MEMORY_BYTES = 64 * 1024
+ARTIFACT_MAGIC = b"GHRV32A1"
+ARTIFACT_FORMAT_VERSION = 1
+ARTIFACT_HEADER_BYTES = 92
+ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
+ARTIFACT_ENTRY_ABI_VERSION = 0
+ARTIFACT_SYSCALL_ABI_VERSION = 0
+GAS_TABLE_VERSION = 1
+GAS_SCHEDULE_DIGEST = 0xD2F3483DC373FADA
 SHT_SYMTAB = 2
 SHT_STRTAB = 3
 SHT_RELA = 4
@@ -42,6 +50,25 @@ def sha256_file(path):
 
 def sha256_bytes(blob):
     return hashlib.sha256(blob).hexdigest()
+
+
+def artifact_digest_byte(digest, value):
+    return ((digest ^ value) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+
+
+def artifact_digest_u64(digest, value):
+    for _ in range(8):
+        digest = artifact_digest_byte(digest, value & 0xFF)
+        value >>= 8
+    return digest
+
+
+def artifact_digest(blob):
+    digest = 1469598103934665603
+    digest = artifact_digest_u64(digest, len(blob))
+    for byte in blob:
+        digest = artifact_digest_byte(digest, byte)
+    return digest
 
 
 class ElfError(RuntimeError):
@@ -270,6 +297,35 @@ def extract_fixture_input(memory, sections, symbols):
     return memory[symbol.value : symbol.value + symbol.size]
 
 
+def build_artifact(code, memory):
+    code_offset = ARTIFACT_HEADER_BYTES
+    memory_offset = code_offset + len(code)
+    header = struct.pack(
+        "<8sIIQIIIIQIIIIIIIQQ",
+        ARTIFACT_MAGIC,
+        ARTIFACT_FORMAT_VERSION,
+        ARTIFACT_HEADER_BYTES,
+        ARTIFACT_VM_PROFILE_DIGEST,
+        0,
+        ARTIFACT_ENTRY_ABI_VERSION,
+        ARTIFACT_SYSCALL_ABI_VERSION,
+        GAS_TABLE_VERSION,
+        GAS_SCHEDULE_DIGEST,
+        K_MAX_MEMORY_BYTES,
+        len(code),
+        len(memory),
+        code_offset,
+        memory_offset,
+        0,
+        0,
+        artifact_digest(code),
+        artifact_digest(memory),
+    )
+    if len(header) != ARTIFACT_HEADER_BYTES:
+        raise ElfError("internal artifact header size mismatch")
+    return header + code + memory
+
+
 def format_array(name, blob):
     out = [f"inline constexpr std::array<uint8_t, {len(blob)}> {name} = {{"]
     for i in range(0, len(blob), 12):
@@ -279,7 +335,7 @@ def format_array(name, blob):
     return "\n".join(out)
 
 
-def write_header(path, code, memory, metadata):
+def write_header(path, artifact, metadata):
     body = f"""#pragma once
 
 #include <array>
@@ -288,15 +344,13 @@ def write_header(path, code, memory, metadata):
 namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {K_MAX_MEMORY_BYTES};
-inline constexpr uint32_t kCodeBytes = {len(code)};
+inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr char kFixtureSha256[] = "{metadata['fixture_sha256']}";
 inline constexpr char kElfSha256[] = "{metadata['elf_sha256']}";
 
 {format_array("kInput", metadata["fixture_input"])}
 
-{format_array("kCode", code)}
-
-{format_array("kInitialMemory", memory)}
+{format_array("kArtifact", artifact)}
 
 }} // namespace hogd::rv32::fixtures::compiled_sha256_return
 """
@@ -321,6 +375,7 @@ def main():
     symbols = parse_symbols(data, sections)
     code, memory = validate_sections(data, sections, symbols)
     fixture_input = extract_fixture_input(memory, sections, symbols)
+    artifact = build_artifact(code, memory)
     fixture_blob = code + memory
     metadata = {
         "source_sha256": sha256_file(args.source),
@@ -331,6 +386,8 @@ def main():
         },
         "elf_sha256": sha256_file(args.elf),
         "fixture_sha256": sha256_bytes(fixture_blob),
+        "artifact_sha256": sha256_bytes(artifact),
+        "artifact_bytes": len(artifact),
         "fixture_input": fixture_input,
         "fixture_input_sha256": sha256_bytes(fixture_input),
         "code_sha256": sha256_bytes(code),
@@ -341,7 +398,7 @@ def main():
         "target_triple": args.target_triple,
         "build_flags": args.build_flags,
     }
-    write_header(args.header, code, memory, metadata)
+    write_header(args.header, artifact, metadata)
     serializable = dict(metadata)
     serializable["fixture_input"] = fixture_input.hex()
     Path(args.metadata).write_text(json.dumps(serializable, indent=2, sort_keys=True) + "\n")

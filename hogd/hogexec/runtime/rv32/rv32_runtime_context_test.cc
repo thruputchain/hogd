@@ -26,6 +26,7 @@
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
@@ -87,17 +88,6 @@ make_program(std::initializer_list<uint32_t> words)
       rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
   if (!result.has_value()) {
     ADD_FAILURE() << "failed to create RV32 test program";
-    return {};
-  }
-  return std::make_shared<rv32::Program>(std::move(*result));
-}
-
-std::shared_ptr<const rv32::Program>
-make_program_from_bytes(std::span<const uint8_t> code)
-{
-  auto result = rv32::Program::create(code);
-  if (!result.has_value()) {
-    ADD_FAILURE() << "failed to create RV32 byte fixture program";
     return {};
   }
   return std::make_shared<rv32::Program>(std::move(*result));
@@ -321,14 +311,15 @@ make_sha256_then_return_image(std::span<const uint8_t> input)
 rv32::RuntimeContractImage
 make_compiled_sha256_then_return_image()
 {
-  std::vector<uint8_t> initial_memory(compiled_sha256_return::kInitialMemory
-                                          .begin(),
-                                      compiled_sha256_return::kInitialMemory
-                                          .end());
+  auto artifact = rv32::parse_artifact(compiled_sha256_return::kArtifact);
+  if (!artifact.has_value()) {
+    ADD_FAILURE() << "failed to parse compiled RV32 artifact";
+    return {};
+  }
   return rv32::RuntimeContractImage{
-      .program = make_program_from_bytes(compiled_sha256_return::kCode),
-      .initial_memory = std::move(initial_memory),
-      .memory_bytes = compiled_sha256_return::kMemoryBytes,
+      .program = std::move(artifact->program),
+      .initial_memory = std::move(artifact->initial_memory),
+      .memory_bytes = artifact->memory_bytes,
   };
 }
 

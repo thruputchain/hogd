@@ -9,11 +9,33 @@
 #include <type_traits>
 #include <vector>
 
+#include "hogd/hogexec/runtime/rv32/artifact.h"
+#include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 
 namespace hogd::rv32 {
 namespace {
+
+namespace compiled_sha256_return = fixtures::compiled_sha256_return;
+
+constexpr size_t kArtifactFormatVersionOffset = 8;
+constexpr size_t kArtifactHeaderSizeOffset = 12;
+constexpr size_t kArtifactVmProfileOffset = 16;
+constexpr size_t kArtifactFlagsOffset = 24;
+constexpr size_t kArtifactEntryAbiOffset = 28;
+constexpr size_t kArtifactSyscallAbiOffset = 32;
+constexpr size_t kArtifactGasVersionOffset = 36;
+constexpr size_t kArtifactGasDigestOffset = 40;
+constexpr size_t kArtifactMemoryBytesOffset = 48;
+constexpr size_t kArtifactCodeSizeOffset = 52;
+constexpr size_t kArtifactInitialMemorySizeOffset = 56;
+constexpr size_t kArtifactCodeOffsetOffset = 60;
+constexpr size_t kArtifactInitialMemoryOffsetOffset = 64;
+constexpr size_t kArtifactDispatchOffsetOffset = 68;
+constexpr size_t kArtifactDispatchSizeOffset = 72;
+constexpr size_t kArtifactCodeDigestOffset = 76;
+constexpr size_t kArtifactInitialMemoryDigestOffset = 84;
 
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
@@ -33,6 +55,46 @@ code_from_words(std::initializer_list<uint32_t> words)
     append_u32(code, word);
   }
   return code;
+}
+
+std::vector<uint8_t>
+compiled_artifact_bytes()
+{
+  return std::vector<uint8_t>(compiled_sha256_return::kArtifact.begin(),
+                              compiled_sha256_return::kArtifact.end());
+}
+
+uint32_t
+load_u32_at(std::span<const uint8_t> bytes, size_t offset)
+{
+  return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8) |
+         (uint32_t{bytes[offset + 2]} << 16) |
+         (uint32_t{bytes[offset + 3]} << 24);
+}
+
+void
+store_u32_at(std::vector<uint8_t> &bytes, size_t offset, uint32_t value)
+{
+  bytes[offset] = static_cast<uint8_t>(value);
+  bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+  bytes[offset + 2] = static_cast<uint8_t>(value >> 16);
+  bytes[offset + 3] = static_cast<uint8_t>(value >> 24);
+}
+
+void
+store_u64_at(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
+{
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  }
+}
+
+void
+expect_artifact_error(std::vector<uint8_t> artifact, ArtifactError expected)
+{
+  const auto parsed = parse_artifact(artifact);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error(), expected);
 }
 
 std::shared_ptr<const Program>
@@ -192,6 +254,169 @@ struct MutatingTrapHost : Host {
   int calls = 0;
   bool wrote = false;
 };
+
+TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
+{
+  const auto parsed = parse_artifact(compiled_sha256_return::kArtifact);
+
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_NE(parsed->program, nullptr);
+  EXPECT_EQ(parsed->program->byte_size(), 160U);
+  EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
+  ASSERT_EQ(parsed->initial_memory.size(), kMaxMemoryBytes);
+  EXPECT_TRUE(std::ranges::equal(
+      std::span<const uint8_t>(compiled_sha256_return::kInput),
+      std::span<const uint8_t>(parsed->initial_memory).subspan(0xa0, 7)));
+}
+
+TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
+{
+  {
+    auto artifact = compiled_artifact_bytes();
+    artifact[0] ^= 0xffU;
+    expect_artifact_error(std::move(artifact), ArtifactError::kBadMagic);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactFormatVersionOffset,
+                 kArtifactFormatVersion + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kUnsupportedFormatVersion);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactHeaderSizeOffset,
+                 kArtifactHeaderBytes + 4);
+    expect_artifact_error(std::move(artifact), ArtifactError::kBadHeaderSize);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u64_at(artifact, kArtifactVmProfileOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kUnsupportedVmProfile);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactFlagsOffset, 1);
+    expect_artifact_error(std::move(artifact), ArtifactError::kUnsupportedFlags);
+  }
+}
+
+TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
+{
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactEntryAbiOffset,
+                 kArtifactEntryAbiVersion + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kUnsupportedEntryAbi);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactSyscallAbiOffset,
+                 kArtifactSyscallAbiVersion + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kUnsupportedSyscallAbi);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactGasVersionOffset, kGasTableVersion + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kGasScheduleVersionMismatch);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u64_at(artifact, kArtifactGasDigestOffset,
+                 kGasScheduleDigest ^ 1ULL);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kGasScheduleDigestMismatch);
+  }
+}
+
+TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
+{
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kMemorySizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactCodeSizeOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kCodeSizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
+                 kMaxMemoryBytes + 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInitialMemoryTooLarge);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
+                 kMaxMemoryBytes - 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInitialMemorySizeMismatch);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactCodeOffsetOffset, kArtifactHeaderBytes - 1);
+    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t code_offset = load_u32_at(artifact, kArtifactCodeOffsetOffset);
+    store_u32_at(artifact, kArtifactInitialMemoryOffsetOffset, code_offset);
+    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    artifact.push_back(0);
+    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactDispatchOffsetOffset,
+                 kArtifactHeaderBytes);
+    store_u32_at(artifact, kArtifactDispatchSizeOffset, 4);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchUnsupported);
+  }
+}
+
+TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
+{
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u64_at(artifact, kArtifactCodeDigestOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kCodeDigestMismatch);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u64_at(artifact, kArtifactInitialMemoryDigestOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInitialMemoryDigestMismatch);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t code_offset = load_u32_at(artifact, kArtifactCodeOffsetOffset);
+    const uint32_t code_size = load_u32_at(artifact, kArtifactCodeSizeOffset);
+    artifact[code_offset] = 0;
+    const auto code = std::span<const uint8_t>(artifact).subspan(code_offset,
+                                                                 code_size);
+    store_u64_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
+    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    artifact.resize(kArtifactHeaderBytes - 1);
+    expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
+  }
+}
 
 TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
 {

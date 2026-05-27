@@ -1,4 +1,6 @@
 {
+  "artifact_bytes": 65788,
+  "artifact_sha256": "06ed4462b8874759ed25e9046a1b4eea25925b2808402ea30266e14ccfd9d550",
   "build_flags": "cargo build --release --locked --offline; panic=abort; opt-level=s; codegen-units=1; relocation-model=static; target-feature=+m,-a,-c; linker.ld; gc-sections",
   "code_bytes": 160,
   "code_sha256": "eab913dd5848339d2240c19956317f43836ebb60bfe9fe2ba432587c6d39d2c6",
@@ -8,7 +10,7 @@
   "fixture_sha256": "79fa236527fe15b067a1beb3ebbc36f3a0bb3a5a3f3f97ef06d7bc9b0a7109c1",
   "initial_memory_sha256": "4520e6a4cf32b7257e4c02ac1d072dd82460c7fcaa34b2120aeb95f19935a3f4",
   "linker_script_sha256": "c52f349cb8681d320d154274baf5e32c30935c79ba4fa53ddf2246fa84816e5c",
-  "lowering_tool_sha256": "f287154cd9ddae104f01ef5606280828c5544a6d5c5adcd867db314abe8f1a5d",
+  "lowering_tool_sha256": "19a281dbe3fc14111b03b35cc7ceeba4c61e8820e893cf23c2595d4edd816323",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
