@@ -125,6 +125,7 @@ public:
 
     Registration::registration().register_coordinator(card);
     co_await finish_init();
+    CHECK(ready());
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
   }
