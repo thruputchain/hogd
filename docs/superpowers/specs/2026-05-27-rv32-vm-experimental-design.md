@@ -377,6 +377,79 @@ host boundary.
 - Version the artifact header, VM profile, memory limit, and gas schedule
   explicitly.
 
+## Milestone Status
+
+Current status as of 2026-05-27: Milestones 1 through 3 are complete for the
+experimental, test-only scope. Milestone 4 is the next active slice.
+
+### Milestone 1 Status: Complete
+
+- RV32IM validation, decode, execution, traps, gas, and mock `ecall` are
+  implemented under `hogd/hogexec/runtime/rv32/`.
+- The VM core remains isolated from production WASM runtime state and protocol
+  dispatch.
+- Unit tests cover instruction families, gas-before-mutation ordering,
+  deterministic trap behavior, host completion, and representative loop
+  execution.
+
+### Milestone 2 Status: Complete
+
+- The test-only syscall bridge reuses the production-shaped `syscall_entry`
+  boundary through an RV32 memory frame containing the syscall number and ten
+  `uint64_t` argument words.
+- Host syscall gas is reported through `HostResult` and debited after ECALL base
+  gas but before committing host-visible effects.
+- Out-of-gas, guest-memory parser faults, and fatal host traps are atomic with
+  respect to guest memory writeback.
+- Fatal host panic codes are named with `HostFnErrorCode` and propagated without
+  collapsing known consensus outcomes.
+
+### Milestone 3 Status: Complete
+
+- The experimental `rv32::RuntimeContext` is test-only and remains restricted to
+  `ContractType::kMockTest`; no production contract selection path was added.
+- RV32 invokes run through the shared `SystemCallHandler` and real
+  `syscall_entry`, preserving the production syscall parser, tracing, frame, and
+  gas-normalization machinery.
+- RV32/WASM differential tests now compare real host-visible success behavior:
+  invalid-syscall traces, SHA256 plus Return output, storage writes, events,
+  return buffers, transaction stats, and trace bodies.
+- Runtime outcome mapping mirrors WASM for host panics:
+  `OutOfGas`, `Return`, `Exit`, `Unrecoverable`, `ValidationFailure`, and
+  `Abandon`; unknown host panic codes map to `Unrecoverable`.
+- Runtime branch tests pin guest traps, out-of-gas normalization, zero halt as
+  success, nonzero halt as deterministic failure, and same-input determinism.
+- Debug and ASan RV32 CTest filters pass for the milestone test surface.
+
+### Milestone 4 Status: Ready
+
+Milestone 4 should start from the current test-only runtime proof and focus on
+the SDK/toolchain question:
+
+- Define the Rust `riscv32im-unknown-none-elf` build experiment.
+- Replace WASM export-name dispatch with an RV32-compatible dispatch table or
+  fixed entry stub.
+- Keep artifacts and dispatch experimental until SDK ergonomics and validation
+  are reviewed.
+
+### Deferred Hardening Before Milestone 5
+
+These are not blockers for Milestone 4, but they should be closed before any
+protocol exposure:
+
+- Split overloaded `HostResult.value` into typed payloads or add an explicit
+  trap-code field so return values, halt codes, and host trap codes cannot be
+  confused by status discipline alone.
+- Classify bridge ABI faults caused by guest input, such as invalid bridge
+  version, misaligned frame pointer, unreadable frame, or code-zero host traps,
+  as deterministic guest failures rather than fatal host failures.
+- Fold syscall gas costs into the versioned gas-schedule digest so total RV32
+  contract cost cannot change silently when syscall costs change.
+- Add differential WASM-vs-RV32 error contracts for validation failure,
+  abandon, deterministic guest failures, and relevant host trap classes.
+- Continue planned bridge cleanup: replace scratch-copy memory writeback with a
+  live mutable memory span if the performance/determinism tradeoff holds up.
+
 ## Review Gates
 
 Before moving beyond Milestone 1:
