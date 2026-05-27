@@ -2340,8 +2340,8 @@ TEST_F(SyscallAuthTokenTest, ReturnRevertWithMintedAuthTokenCausesExit)
         std::array<uint32_t, 1> returned_ids{token_id};
         auto auth_bytes =
             std::as_bytes(std::span<const uint32_t>{returned_ids});
-        auto ret = ctx.syscall<SyscallNo::kReturn>(
-            std::span<const std::byte>{}, true, auth_bytes);
+        auto ret = ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{},
+                                                   true, auth_bytes);
         EXPECT_FALSE(ret.has_value());
         EXPECT_EQ(ret.error().code(), HostFnErrorCode::Exit);
         return InvokeError{InvokeErrorCode::Deterministic};
@@ -2443,8 +2443,9 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
 
         child_minted_token_id = token_id;
 
-        auto ret = ctx.syscall<SyscallNo::kReturn>(
-            std::span<const std::byte>{}, true, std::span<const std::byte>{});
+        auto ret =
+            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{}, true,
+                                            std::span<const std::byte>{});
         EXPECT_FALSE(ret.has_value());
         return {};
       });
@@ -2461,9 +2462,11 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         RuntimeMemoryLength output_return_len = 0, output_auth_len = 0;
-        auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddress, 0, UINT64_MAX, Calldata{}, 0,
-            std::span<uint32_t const>{}, output_return_len, output_auth_len);
+        auto invoke_res =
+            ctx.syscall<SyscallNo::kInvoke>(kChildAddress, 0, UINT64_MAX,
+                                            Calldata{}, 0,
+                                            std::span<uint32_t const>{},
+                                            output_return_len, output_auth_len);
         EXPECT_TRUE(invoke_res.has_value());
         EXPECT_EQ(invoke_res.value(),
                   SyscallErrorCode::kSyscallErrorCodeFrameReverted);
