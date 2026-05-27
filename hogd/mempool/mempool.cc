@@ -91,17 +91,13 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   // TODO(jhumphri): Make [mempool_tx_size_limit] a command line arg.
   RpcServer<MempoolCoordinatorRpc> coord(
-      db->impl(), network_id,
+      db->impl(), auth->impl(), network_id,
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
       coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
-  auth->impl()->register_callback(
-      [&coord](BlockHeight height, KeyChangeBatch key_changes) {
-        return coord->impl()->auth_data_changed(height, std::move(key_changes));
-      });
 
   while (!coord->impl()->ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

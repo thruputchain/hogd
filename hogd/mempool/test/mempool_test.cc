@@ -526,7 +526,7 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
   MempoolCoordinatorRpc coord(
-      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      /*db_rpc=*/nullptr, /*auth_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -549,7 +549,7 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
   };
 
   MempoolCoordinatorRpc coord(
-      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      /*db_rpc=*/nullptr, /*auth_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),

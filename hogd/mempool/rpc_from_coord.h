@@ -67,9 +67,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id,
-                        size_t mempool_tx_size_limit)
-    : db_rpc_(db_rpc), network_id_(network_id),
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
+                        uint64_t network_id, size_t mempool_tx_size_limit)
+    : db_rpc_(db_rpc), auth_rpc_(auth_rpc), network_id_(network_id),
       mempool_tx_size_limit_(mempool_tx_size_limit)
   {}
 
@@ -416,6 +416,10 @@ private:
         last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
+    auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        });
 
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
@@ -558,6 +562,7 @@ private:
   }
 
   MempoolDbRpc *db_rpc_;
+  MempoolAuthRpc *auth_rpc_;
   const uint64_t network_id_;
   const size_t mempool_tx_size_limit_;
 
@@ -568,8 +573,6 @@ private:
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
-  std::optional<AuthCard> auth_card_;
-  std::string auth_mempool_address_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;

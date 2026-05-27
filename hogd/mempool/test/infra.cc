@@ -28,18 +28,15 @@ namespace hogd {
 MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
                                    size_t mempool_tx_size_limit)
   : mempool_coord_server_(
-        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId,
+        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(),
+                                         mempool_auth_server_->impl(),
+                                         kNetworkId,
                                          mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.
   Registration::registration().clear();
 
-  mempool_auth_server_->impl()->register_callback(
-      [this](BlockHeight height, KeyChangeBatch key_changes) {
-        return mempool_coord_server_->impl()->auth_data_changed(
-            height, std::move(key_changes));
-      });
   mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
 
   // Start the mempool RPC servers. All of the subsystems register with the
