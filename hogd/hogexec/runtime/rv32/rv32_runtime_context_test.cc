@@ -933,6 +933,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchMatchesWasm)
   ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(wasm_output.return_buffer().empty());
   EXPECT_TRUE(rv32_output.return_buffer().empty());
+  ASSERT_FALSE(std::span<const uint8_t>(expected_hash).empty());
+  EXPECT_FALSE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
+  EXPECT_FALSE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
 
   ASSERT_NE(wasm_handler.get_trace(), nullptr);
   ASSERT_NE(rv32_handler.get_trace(), nullptr);
@@ -1139,6 +1142,57 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnIsDeterministicForSameInputs)
   }
 }
 
+TEST_F(Rv32RuntimeContextTest,
+       CompiledMultiMethodDispatchIsDeterministicForSameInputs)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input(
+      compiled_sha256_return::kInput.begin(),
+      compiled_sha256_return::kInput.end());
+  const SHA256Hash expected_hash = sha256(input);
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler1 = make_new_system_call_handler(
+      make_root_transaction(kParityGas,
+                            compiled_sha256_return::kSha256RepeatedMethodId),
+      rv32_context);
+  auto handler2 = make_new_system_call_handler(
+      make_root_transaction(kParityGas,
+                            compiled_sha256_return::kSha256RepeatedMethodId),
+      rv32_context);
+  handler1.enable_tracing();
+  handler2.enable_tracing();
+  const auto result1 = handler1.root_invoke();
+  const auto result2 = handler2.root_invoke();
+
+  ASSERT_TRUE(result1.is_root_success());
+  ASSERT_TRUE(result2.is_root_success());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+
+  const auto output1 = handler1.get_most_recent_frame_output();
+  const auto output2 = handler2.get_most_recent_frame_output();
+  EXPECT_EQ(output1.status_code(), output2.status_code());
+  EXPECT_TRUE(output1.return_buffer().empty());
+  EXPECT_TRUE(output2.return_buffer().empty());
+
+  ASSERT_NE(handler1.get_trace(), nullptr);
+  ASSERT_NE(handler2.get_trace(), nullptr);
+  ASSERT_EQ(handler1.get_trace()->system_calls.size(),
+            handler2.get_trace()->system_calls.size());
+  expect_sha256_then_return_trace_matches(*handler1.get_trace(),
+                                          *handler2.get_trace(), input,
+                                          expected_hash,
+                                          std::span<const uint8_t>{});
+  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
+    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
+              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
+  }
+}
+
 TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodToSelectedPc)
 {
   const std::array<uint8_t, 4> zero_payload = {'z', 'e', 'r', 'o'};
@@ -1204,6 +1258,7 @@ TEST_F(Rv32RuntimeContextTest, UnknownDispatchMethodIsDeterministicMiss)
   EXPECT_EQ(wasm_result.result_.error().code(),
             rv32_result.result_.error().code());
   ASSERT_EQ(rv32_result.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(wasm_result.gas_consumed_, 0U);
   EXPECT_EQ(rv32_result.gas_consumed_, 0U);
   ASSERT_NE(rv32_handler.get_trace(), nullptr);
   EXPECT_TRUE(rv32_handler.get_trace()->system_calls.empty());

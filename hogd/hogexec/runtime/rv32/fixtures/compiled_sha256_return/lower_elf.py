@@ -31,6 +31,10 @@ STT_FUNC = 2
 EM_RISCV = 243
 SHN_ABS = 0xFFF1
 FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
+# Fixture dispatch is intentionally explicit while the real SDK lowerer is still
+# pending: _start backs Sha256Wrapper::sha256, and the named non-callgraph
+# function below backs Sha256Wrapper::sha256_repeated. The C++ parity test
+# static_asserts these MethodIDs against the generated WASM contract metadata.
 SHA256_METHOD_ID = 0xCA571C66A719DD56
 SHA256_REPEATED_METHOD_ID = 0x5749E8FA5D1F3CFE
 SHA256_REPEATED_SYMBOL = "RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED"
