@@ -20,6 +20,8 @@ public:
   Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
           uint64_t gas);
 
+  void reset(uint64_t gas);
+
   [[nodiscard]] StepResult step();
   [[nodiscard]] StepResult complete_ecall(const HostResult &result);
   [[nodiscard]] StepResult run(Host &host);
@@ -60,6 +62,7 @@ private:
   std::vector<uint8_t> memory_;
   uint64_t gas_remaining_ = 0;
   Trap trap_ = Trap::kNone;
+  Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   uint32_t halt_code_ = 0;
   std::optional<EcallArgs> pending_ecall_;

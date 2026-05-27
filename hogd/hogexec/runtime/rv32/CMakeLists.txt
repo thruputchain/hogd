@@ -24,6 +24,12 @@ target_link_libraries(
 gtest_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
 
 if(BUILD_BENCHMARKS)
+  wat2wasm_target(
+    rv32_fibonacci_bench_wasm
+    fibonacci_bench.wat
+    ${CMAKE_CURRENT_BINARY_DIR}/rv32_fibonacci_bench.wasm
+  )
+
   add_executable(
     rv32_vm_bench
     rv32_vm_bench.cc
@@ -33,6 +39,27 @@ if(BUILD_BENCHMARKS)
     rv32_vm_bench
     rv32_vm
     benchmark::benchmark
+    unified_lib
+  )
+
+  target_include_directories(
+    rv32_vm_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+
+  add_dependencies(
+    rv32_vm_bench
+    rv32_fibonacci_bench_wasm
+    all_wasms_built
+    generate_wasmi_ffi_h
+  )
+
+  target_compile_definitions(
+    rv32_vm_bench
+    PRIVATE
+    CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    RV32_VM_BENCH_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
   )
 
   if(CMAKE_BUILD_TYPE STREQUAL "Release")

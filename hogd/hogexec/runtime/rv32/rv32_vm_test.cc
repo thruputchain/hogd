@@ -180,6 +180,33 @@ TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
   EXPECT_EQ(machine.step(), StepResult::kContinue);
 }
 
+TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
+{
+  const auto program = make_program({addi(1, 0, 7)});
+  Machine machine(program, 31, 5);
+  ASSERT_EQ(machine.step(), StepResult::kContinue);
+  EXPECT_EQ(machine.reg(1), 7U);
+
+  machine.reset(9);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.reg(1), 0U);
+  EXPECT_EQ(machine.reg(2), 16U);
+  EXPECT_EQ(machine.gas_remaining(), 9U);
+  EXPECT_EQ(machine.trap(), Trap::kNone);
+
+  Machine bad_memory(program, kMaxMemoryBytes + 1, 5);
+  EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
+  bad_memory.reset(9);
+  EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
+  EXPECT_EQ(bad_memory.step(), StepResult::kTrap);
+
+  Machine bad_program(nullptr, 16, 5);
+  EXPECT_EQ(bad_program.trap(), Trap::kInvalidInstruction);
+  bad_program.reset(9);
+  EXPECT_EQ(bad_program.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(bad_program.step(), StepResult::kTrap);
+}
+
 TEST(Rv32ProgramTest, validates_code_shape_and_profile)
 {
   {

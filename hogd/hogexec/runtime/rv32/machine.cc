@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/rv32/machine.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <limits>
@@ -116,19 +117,40 @@ branch_taken(Op op, uint32_t lhs, uint32_t rhs)
 
 Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
                  uint64_t gas)
-  : program_(std::move(program)), gas_remaining_(gas)
+  : program_(std::move(program))
 {
   if (!program_) {
+    construction_trap_ = Trap::kInvalidInstruction;
     set_trap(Trap::kInvalidInstruction);
     return;
   }
   if (memory_bytes > kMaxMemoryBytes) {
+    construction_trap_ = Trap::kBadMemory;
     set_trap(Trap::kBadMemory);
     return;
   }
 
   memory_.resize(memory_bytes);
-  registers_[2] = memory_bytes & ~uint32_t{0x0f};
+  reset(gas);
+}
+
+void
+Machine::reset(uint64_t gas)
+{
+  registers_.fill(0);
+  std::fill(memory_.begin(), memory_.end(), 0);
+  pc_ = 0;
+  gas_remaining_ = gas;
+  trap_ = Trap::kNone;
+  halted_ = false;
+  halt_code_ = 0;
+  pending_ecall_.reset();
+  if (construction_trap_ != Trap::kNone) {
+    trap_ = construction_trap_;
+    halted_ = true;
+    return;
+  }
+  registers_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
 }
 
 MachineView
