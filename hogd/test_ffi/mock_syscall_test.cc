@@ -23,9 +23,9 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "syscall.hh"
-#include "x23/cleanup.h"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
