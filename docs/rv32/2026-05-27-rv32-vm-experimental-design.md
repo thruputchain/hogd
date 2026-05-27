@@ -447,7 +447,7 @@ SDK/toolchain viability question:
 - A C++ ownership review concluded that the VM core is small, explicit, and
   maintainable enough to keep owning, while the host/runtime/artifact edges need
   the M5 hardening listed below. See
-  `2026-05-27-rv32-cpp-ownership-review.md`.
+  [RV32 C++ Ownership Review](2026-05-27-rv32-cpp-ownership-review.md).
 
 ### Deferred Hardening Before Milestone 5
 

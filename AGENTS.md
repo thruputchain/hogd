@@ -7,9 +7,9 @@ Core C++ source lives under `hogd/` by subsystem (`auth`, `hogexec`, `mempool`,
 workspace in `hogx/Cargo.toml`; Rust libraries used by C++ are under
 `hogd/rust/`. Protocol XDR files are in `protocol/`, contract assets are in
 `built_contracts/`, and design notes are in `docs/superpowers/specs/`.
-Experimental RISC-V work follows the `2026-05-27-rv32-vm-experimental-design`
-spec and lives in `hogd/hogexec/runtime/rv32/`; keep it isolated from production
-WASM. Vendored code is under `external/`; avoid editing it unless intentional.
+Experimental RISC-V work follows the docs in `docs/rv32/` and lives in
+`hogd/hogexec/runtime/rv32/`; keep it isolated from production WASM. Vendored
+code is under `external/`; avoid editing it unless intentional.
 
 ## Build, Test, and Development Commands
 

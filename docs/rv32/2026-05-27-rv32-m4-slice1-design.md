@@ -3,7 +3,8 @@
 ## Context
 
 Milestones 1 through 3 of the experimental RV32 VM are complete (see
-`2026-05-27-rv32-vm-experimental-design.md`). The runtime is proven sound, but
+[Experimental RV32 VM Design](2026-05-27-rv32-vm-experimental-design.md)). The
+runtime is proven sound, but
 every test so far has fed it a **hand-assembled** instruction image. Milestone 4
 is the SDK/toolchain question: can the output of a real compiler survive contact
 with this VM?
@@ -11,7 +12,8 @@ with this VM?
 This document scopes the **first** M4 implementor slice. It is deliberately the
 thinnest end-to-end vertical that answers the toolchain unknowns, not the final
 M4 form. The prior-art recommendations in
-`2026-05-27-rv32-rust-vm-lessons.md` (artifact format, dispatch table, typed SDK
+[RV32 Rust VM Prior Art Lessons](2026-05-27-rv32-rust-vm-lessons.md) (artifact
+format, dispatch table, typed SDK
 wrappers) describe the *eventual* design; this slice proves viability before we
 take on that full-scope work, so we do not lock viability findings into a final
 design prematurely.

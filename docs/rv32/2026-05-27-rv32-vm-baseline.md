@@ -13,7 +13,7 @@ experimental in-tree VM. Raw Google Benchmark JSON is saved beside this file as
 ```sh
 build-release/hogd/hogexec/runtime/rv32/rv32_vm_bench \
   --benchmark_min_time=0.5s \
-  --benchmark_out=docs/superpowers/benchmarks/2026-05-27-rv32-vm-baseline.json \
+  --benchmark_out=docs/rv32/2026-05-27-rv32-vm-baseline.json \
   --benchmark_out_format=json
 ```
 
