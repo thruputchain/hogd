@@ -136,4 +136,8 @@ private:
                                     const LockContext &ctx);
 };
 
+// 192 on x86 (kCacheLineSize=64), 256 on aarch64 (kCacheLineSize=256).
+static_assert(sizeof(ConcurrentMap<Address, ItemLock>::value_bucket_t) <= 256);
+static_assert(sizeof(ConcurrentMap<ItemKey, ItemLock>::value_bucket_t) <= 256);
+
 } // namespace hogd
