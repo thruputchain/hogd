@@ -38,7 +38,7 @@ namespace detail {
 // end.
 template<typename KeyType, typename Value,
          typename KeyEqual = std::equal_to<KeyType>>
-class ValueBucket {
+class alignas(kCacheLineSize) ValueBucket {
 public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
   ValueBucket(KeyType key, Args &&...args)
@@ -57,7 +57,9 @@ public:
   // Does not own the next_ptr_.  Memory is freed when the bump allocator is
   // destroyed.
   std::atomic<value_bucket_t *> next_ptr_;
-  Value value_;
+  // Hardcoded to 64 (x86 cache line) rather than kCacheLineSize, which can
+  // be 256 on aarch64 and would waste too much padding.
+  alignas(64) Value value_;
 
   // You almost certainly do not want to do an insert concurrent with a
   // for_each. In such a situation, the insert() might or might not get picked
