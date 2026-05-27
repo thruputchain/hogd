@@ -8,16 +8,17 @@
 #include <span>
 #include <vector>
 
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
 
-inline constexpr std::array<uint8_t, 8> kArtifactMagic = {
-    'G', 'H', 'R', 'V', '3', '2', 'A', '1'};
-inline constexpr uint32_t kArtifactFormatVersion = 1;
-inline constexpr uint32_t kArtifactHeaderBytes = 92;
+inline constexpr std::array<uint8_t, 8> kArtifactMagic = {'G', 'H', 'R', 'V',
+                                                          '3', '2', 'A', '1'};
+inline constexpr uint32_t kArtifactFormatVersion = 2;
+inline constexpr uint32_t kArtifactHeaderBytes = 100;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
-inline constexpr uint32_t kArtifactEntryAbiVersion = 0;
+inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 0;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -36,13 +37,14 @@ inline constexpr size_t kArtifactDispatchOffsetOffset = 68;
 inline constexpr size_t kArtifactDispatchSizeOffset = 72;
 inline constexpr size_t kArtifactCodeDigestOffset = 76;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset = 84;
+inline constexpr size_t kArtifactDispatchDigestOffset = 92;
 
 // Experimental M4 artifact header, little-endian:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
 // code_offset, initial_memory_offset, dispatch_table_offset,
-// dispatch_table_size, code_digest, initial_memory_digest.
+// dispatch_table_size, code_digest, initial_memory_digest, dispatch_digest.
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,
@@ -59,7 +61,9 @@ enum class ArtifactError {
   kInitialMemorySizeMismatch,
   kInitialMemoryTooLarge,
   kInvalidOffsets,
-  kDispatchUnsupported,
+  kDispatchSizeInvalid,
+  kDispatchDigestMismatch,
+  kDispatchTableInvalid,
   kCodeDigestMismatch,
   kInitialMemoryDigestMismatch,
   kInvalidProgram,
@@ -68,6 +72,7 @@ enum class ArtifactError {
 struct ArtifactImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
+  std::vector<DispatchEntry> dispatch_table;
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 

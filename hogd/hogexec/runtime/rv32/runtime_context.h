@@ -10,6 +10,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
@@ -17,6 +18,10 @@ namespace hogd::rv32 {
 struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
+  // Test-built images default to the historical single method-0 entry. Parsed
+  // F2 artifacts always provide their explicit dispatch table.
+  std::vector<DispatchEntry> dispatch_table = {
+      DispatchEntry{.method_id = 0, .pc = 0}};
   uint32_t memory_bytes = kMaxMemoryBytes;
   HostFn11 entry = nullptr;
 };

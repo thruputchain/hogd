@@ -421,16 +421,23 @@ experimental, test-only scope. Milestone 4 is the next active slice.
   success, nonzero halt as deterministic failure, and same-input determinism.
 - Debug and ASan RV32 CTest filters pass for the milestone test surface.
 
-### Milestone 4 Status: Ready
+### Milestone 4 Status: In Progress
 
-Milestone 4 should start from the current test-only runtime proof and focus on
-the SDK/toolchain question:
+Milestone 4 has started from the current test-only runtime proof and is focused
+on the SDK/toolchain question:
 
-- Define the Rust `riscv32im-unknown-none-elf` build experiment.
-- Replace WASM export-name dispatch with an RV32-compatible dispatch table or
-  fixed entry stub.
-- Keep artifacts and dispatch experimental until SDK ergonomics and validation
-  are reviewed.
+- A committed Rust `riscv32im-unknown-none-elf` SHA256 fixture now lowers to an
+  RV32 artifact and runs through the unchanged VM with WASM parity checks.
+- The experimental artifact format is versioned and validated before runtime
+  construction, including VM profile, ABI pins, gas schedule metadata, code,
+  memory, and dispatch-table digests.
+- Runtime dispatch now resolves method IDs through the artifact dispatch table
+  to a validated initial PC. Unknown selectors fail deterministically with zero
+  gas before VM construction.
+- Dispatch remains experimental and `ContractType::kMockTest`-only. The
+  guest-side fixed entry stub plus invocation frame, and a compiled Rust
+  multi-entry fixture with distinct method PCs, are tracked follow-ups before
+  SDK ergonomics are considered complete.
 
 ### Deferred Hardening Before Milestone 5
 

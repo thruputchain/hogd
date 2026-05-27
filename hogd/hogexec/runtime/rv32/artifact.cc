@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace hogd::rv32 {
 namespace {
@@ -15,14 +16,41 @@ range_within(uint32_t offset, uint32_t size, size_t total)
 }
 
 bool
-ranges_overlap(uint32_t left_offset, uint32_t left_size,
-               uint32_t right_offset, uint32_t right_size)
+ranges_overlap(uint32_t left_offset, uint32_t left_size, uint32_t right_offset,
+               uint32_t right_size)
 {
   const size_t left_begin = left_offset;
   const size_t left_end = left_begin + left_size;
   const size_t right_begin = right_offset;
   const size_t right_end = right_begin + right_size;
   return left_begin < right_end && right_begin < left_end;
+}
+
+std::expected<std::vector<DispatchEntry>, ArtifactError>
+parse_dispatch_table(std::span<const uint8_t> dispatch_table,
+                     uint32_t code_size)
+{
+  std::vector<DispatchEntry> entries;
+  entries.reserve(dispatch_table.size() / kDispatchEntryBytes);
+  uint64_t previous_method_id = 0;
+  bool first = true;
+  for (size_t offset = 0; offset < dispatch_table.size();
+       offset += kDispatchEntryBytes) {
+    const uint64_t method_id =
+        load_u64_le(dispatch_table, offset + kDispatchEntryMethodOffset);
+    const uint32_t pc =
+        load_u32_le(dispatch_table, offset + kDispatchEntryPcOffset);
+    const uint32_t reserved =
+        load_u32_le(dispatch_table, offset + kDispatchEntryReservedOffset);
+    if (reserved != 0 || (pc % kInstructionBytes) != 0 || pc >= code_size ||
+        (!first && method_id <= previous_method_id)) {
+      return std::unexpected(ArtifactError::kDispatchTableInvalid);
+    }
+    entries.push_back(DispatchEntry{.method_id = method_id, .pc = pc});
+    previous_method_id = method_id;
+    first = false;
+  }
+  return entries;
 }
 
 } // namespace
@@ -75,6 +103,8 @@ parse_artifact(std::span<const uint8_t> bytes)
   const uint64_t code_digest = load_u64_le(bytes, kArtifactCodeDigestOffset);
   const uint64_t initial_memory_digest =
       load_u64_le(bytes, kArtifactInitialMemoryDigestOffset);
+  const uint64_t dispatch_digest =
+      load_u64_le(bytes, kArtifactDispatchDigestOffset);
 
   if (format_version != kArtifactFormatVersion) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
@@ -114,26 +144,39 @@ parse_artifact(std::span<const uint8_t> bytes)
   if (initial_memory_size != memory_bytes) {
     return std::unexpected(ArtifactError::kInitialMemorySizeMismatch);
   }
+  if (dispatch_table_size == 0 || dispatch_table_size > kMaxDispatchBytes ||
+      (dispatch_table_size % kDispatchEntryBytes) != 0) {
+    return std::unexpected(ArtifactError::kDispatchSizeInvalid);
+  }
   if (code_offset < header_size || initial_memory_offset < header_size ||
+      dispatch_table_offset < header_size ||
       !range_within(code_offset, code_size, bytes.size()) ||
       !range_within(initial_memory_offset, initial_memory_size, bytes.size()) ||
+      !range_within(dispatch_table_offset, dispatch_table_size, bytes.size()) ||
       ranges_overlap(code_offset, code_size, initial_memory_offset,
-                     initial_memory_size)) {
+                     initial_memory_size) ||
+      ranges_overlap(code_offset, code_size, dispatch_table_offset,
+                     dispatch_table_size) ||
+      ranges_overlap(dispatch_table_offset, dispatch_table_size,
+                     initial_memory_offset, initial_memory_size)) {
     return std::unexpected(ArtifactError::kInvalidOffsets);
   }
   const size_t code_end = size_t{code_offset} + code_size;
+  const size_t dispatch_table_end =
+      size_t{dispatch_table_offset} + dispatch_table_size;
   const size_t initial_memory_end =
       size_t{initial_memory_offset} + initial_memory_size;
-  // Keep the v1 layout canonical: header, code, memory, and no hidden bytes.
-  if (code_offset != header_size || initial_memory_offset != code_end ||
+  // Keep the v2 layout canonical: header, code, dispatch, memory, no hidden
+  // bytes. Sparse sections can be a later format.
+  if (code_offset != header_size || dispatch_table_offset != code_end ||
+      initial_memory_offset != dispatch_table_end ||
       initial_memory_end != bytes.size()) {
     return std::unexpected(ArtifactError::kInvalidOffsets);
   }
-  if (dispatch_table_offset != 0 || dispatch_table_size != 0) {
-    return std::unexpected(ArtifactError::kDispatchUnsupported);
-  }
 
   const auto code = bytes.subspan(code_offset, code_size);
+  const auto dispatch_table_bytes =
+      bytes.subspan(dispatch_table_offset, dispatch_table_size);
   const auto initial_memory =
       bytes.subspan(initial_memory_offset, initial_memory_size);
   if (artifact_digest(code) != code_digest) {
@@ -142,16 +185,24 @@ parse_artifact(std::span<const uint8_t> bytes)
   if (artifact_digest(initial_memory) != initial_memory_digest) {
     return std::unexpected(ArtifactError::kInitialMemoryDigestMismatch);
   }
+  if (artifact_digest(dispatch_table_bytes) != dispatch_digest) {
+    return std::unexpected(ArtifactError::kDispatchDigestMismatch);
+  }
 
   auto program = Program::create(code);
   if (!program.has_value()) {
     return std::unexpected(ArtifactError::kInvalidProgram);
+  }
+  auto dispatch_table = parse_dispatch_table(dispatch_table_bytes, code_size);
+  if (!dispatch_table.has_value()) {
+    return std::unexpected(dispatch_table.error());
   }
 
   return ArtifactImage{
       .program = std::make_shared<Program>(std::move(*program)),
       .initial_memory =
           std::vector<uint8_t>(initial_memory.begin(), initial_memory.end()),
+      .dispatch_table = std::move(*dispatch_table),
       .memory_bytes = memory_bytes,
   };
 }

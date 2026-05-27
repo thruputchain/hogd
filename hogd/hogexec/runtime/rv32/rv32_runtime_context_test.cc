@@ -272,6 +272,42 @@ make_return_image(std::span<const uint8_t> payload)
 }
 
 rv32::RuntimeContractImage
+make_two_method_return_image(std::span<const uint8_t> zero_payload,
+                             std::span<const uint8_t> one_payload)
+{
+  constexpr uint32_t kMemoryBytes = 256;
+  constexpr uint32_t kSecondFrameAddress = 128;
+  constexpr uint32_t kZeroReturnBufferAddress = 192;
+  constexpr uint32_t kOneReturnBufferAddress = 224;
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
+  write_syscall_frame(initial_memory, kFrameAddress,
+                      {static_cast<uint64_t>(SyscallNo::kReturn),
+                       kZeroReturnBufferAddress, zero_payload.size(), 0, 0, 0});
+  write_syscall_frame(initial_memory, kSecondFrameAddress,
+                      {static_cast<uint64_t>(SyscallNo::kReturn),
+                       kOneReturnBufferAddress, one_payload.size(), 0, 0, 0});
+  std::ranges::copy(zero_payload,
+                    initial_memory.begin() + kZeroReturnBufferAddress);
+  std::ranges::copy(one_payload,
+                    initial_memory.begin() + kOneReturnBufferAddress);
+
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(10, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+          addi(10, 0, kSecondFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+      }),
+      .initial_memory = std::move(initial_memory),
+      .dispatch_table = {{.method_id = 0, .pc = 0},
+                         {.method_id = 1, .pc = 3 * rv32::kInstructionBytes}},
+      .memory_bytes = kMemoryBytes,
+  };
+}
+
+rv32::RuntimeContractImage
 make_sha256_then_return_image(std::span<const uint8_t> input)
 {
   std::vector<uint8_t> initial_memory(kShaMemoryBytes);
@@ -319,6 +355,7 @@ make_compiled_sha256_then_return_image()
   return rv32::RuntimeContractImage{
       .program = std::move(artifact->program),
       .initial_memory = std::move(artifact->initial_memory),
+      .dispatch_table = std::move(artifact->dispatch_table),
       .memory_bytes = artifact->memory_bytes,
   };
 }
@@ -428,7 +465,7 @@ make_invalid_syscall_then_return_image()
 InvokeResult
 direct_invoke(std::shared_ptr<const Contract> const &contract,
               rv32::RuntimeContext &rv32_context, SystemCallHandler &handler,
-              GasAmount gas_limit)
+              GasAmount gas_limit, Runtime::MethodID method_id = 0)
 {
   const DeployedContractHash deployed =
       NativeContractTestFramework::make_deployed_contract_hash(contract);
@@ -439,7 +476,7 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
                         .gas_consumed_ = 0};
   }
-  return runtime.value()->invoke(0, gas_limit);
+  return runtime.value()->invoke(method_id, gas_limit);
 }
 
 std::shared_ptr<const Contract>
@@ -458,13 +495,13 @@ make_wasmi_contract_xdr()
 }
 
 Transaction
-make_root_transaction(GasAmount gas_limit)
+make_root_transaction(GasAmount gas_limit, Runtime::MethodID method_id = 0)
 {
   return Transaction{
       .invocation =
           Invocation{
               .invoked_address = kRv32ContractAddress,
-              .entrypoint = ContractEntrypointID{},
+              .entrypoint = entrypoint_from_method_id(method_id),
               .gas_limit = gas_limit,
               .calldata = Calldata{},
           },
@@ -964,8 +1001,7 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
   }
 }
 
-TEST_F(Rv32RuntimeContextTest,
-       CompiledSha256ReturnIsDeterministicForSameInputs)
+TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnIsDeterministicForSameInputs)
 {
   const x23::Vec<uint8_t, 0xffffffff> input(
       compiled_sha256_return::kInput.begin(),
@@ -1011,6 +1047,48 @@ TEST_F(Rv32RuntimeContextTest,
     EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
               handler2.get_trace()->system_calls[i].gas_remaining_at_end);
   }
+}
+
+TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodToSelectedPc)
+{
+  const std::array<uint8_t, 4> zero_payload = {'z', 'e', 'r', 'o'};
+  const std::array<uint8_t, 3> one_payload = {'o', 'n', 'e'};
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId,
+        make_two_method_return_image(zero_payload, one_payload)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+  auto handler =
+      make_new_system_call_handler(make_root_transaction(kEnoughGas, 1),
+                                   rv32_context);
+
+  auto result = handler.root_invoke();
+
+  ASSERT_TRUE(result.is_root_success());
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), one_payload));
+}
+
+TEST_F(Rv32RuntimeContextTest, UnknownDispatchMethodIsDeterministicMiss)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+  auto handler =
+      make_new_system_call_handler(make_root_transaction(kEnoughGas, 2),
+                                   rv32_context);
+  handler.enable_tracing();
+
+  auto result = handler.root_invoke();
+
+  ASSERT_FALSE(result.is_root_success());
+  ASSERT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(result.gas_consumed_, 0U);
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->system_calls.empty());
 }
 
 TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)

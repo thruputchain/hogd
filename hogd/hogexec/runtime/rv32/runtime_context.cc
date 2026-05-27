@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -51,6 +52,36 @@ host_trap_code_to_invoke_status(uint32_t code)
   return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 
+bool
+dispatch_table_is_valid(const RuntimeContractImage &image)
+{
+  if (image.dispatch_table.empty()) {
+    return false;
+  }
+  uint64_t previous_method_id = 0;
+  bool first = true;
+  for (const auto &entry : image.dispatch_table) {
+    if (image.program == nullptr || !image.program->contains_pc(entry.pc) ||
+        (!first && entry.method_id <= previous_method_id)) {
+      return false;
+    }
+    previous_method_id = entry.method_id;
+    first = false;
+  }
+  return true;
+}
+
+std::optional<uint32_t>
+entry_pc_for_method(const RuntimeContractImage &image, uint64_t method_id)
+{
+  auto it = std::ranges::lower_bound(image.dispatch_table, method_id, {},
+                                     &DispatchEntry::method_id);
+  if (it == image.dispatch_table.end() || it->method_id != method_id) {
+    return std::nullopt;
+  }
+  return it->pc;
+}
+
 class Runtime final : public hogd::Runtime {
 public:
   Runtime(RuntimeContractImage image,
@@ -68,17 +99,17 @@ private:
             method_name);
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
-    if (*method_id != 0) {
-      // M3 exposes one RV32 test entry point. Named methods become a stable
-      // deterministic miss until M4 adds contract-defined dispatch.
-      return {InvokeError{InvokeErrorCode::Deterministic}, 0};
-    }
     if (image_.program == nullptr ||
-        image_.initial_memory.size() > image_.memory_bytes) {
+        image_.initial_memory.size() > image_.memory_bytes ||
+        !dispatch_table_is_valid(image_)) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
+    auto entry_pc = entry_pc_for_method(image_, *method_id);
+    if (!entry_pc.has_value()) {
+      return {InvokeError{InvokeErrorCode::Deterministic}, 0};
+    }
 
-    Machine machine(image_.program, image_.memory_bytes, gas_limit);
+    Machine machine(image_.program, image_.memory_bytes, gas_limit, *entry_pc);
     if (!image_.initial_memory.empty() &&
         !machine.view().write_memory(0, image_.initial_memory)) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
@@ -141,7 +172,8 @@ RuntimeContext::verify_contract(Contract const &contract) const
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
   if (it == contracts_.end() || it->second.program == nullptr ||
-      it->second.initial_memory.size() > it->second.memory_bytes) {
+      it->second.initial_memory.size() > it->second.memory_bytes ||
+      !dispatch_table_is_valid(it->second)) {
     return InvokeErrorCode::Deterministic;
   }
   return InvokeErrorCode::None;

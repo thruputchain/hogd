@@ -18,7 +18,7 @@ class MachineTestPeer;
 class Machine {
 public:
   Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
-          uint64_t gas);
+          uint64_t gas, uint32_t initial_pc = 0);
 
   void reset(uint64_t gas);
 
@@ -59,6 +59,7 @@ private:
 
   std::shared_ptr<const Program> program_;
   std::array<uint32_t, kRegisterCount> registers_ = {};
+  uint32_t initial_pc_ = 0;
   uint32_t pc_ = 0;
   std::vector<uint8_t> memory_;
   uint64_t gas_remaining_ = 0;

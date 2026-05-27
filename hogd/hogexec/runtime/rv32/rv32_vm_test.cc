@@ -64,6 +64,20 @@ store_u64_at(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
 }
 
 void
+refresh_dispatch_digest(std::vector<uint8_t> &artifact)
+{
+  const uint32_t dispatch_offset =
+      load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+  const uint32_t dispatch_size =
+      load_u32_le(artifact, kArtifactDispatchSizeOffset);
+  const auto dispatch =
+      std::span<const uint8_t>(artifact).subspan(dispatch_offset,
+                                                 dispatch_size);
+  store_u64_at(artifact, kArtifactDispatchDigestOffset,
+               artifact_digest(dispatch));
+}
+
+void
 expect_artifact_error(std::vector<uint8_t> artifact, ArtifactError expected)
 {
   const auto parsed = parse_artifact(artifact);
@@ -237,6 +251,11 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), 160U);
   EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
+  ASSERT_EQ(parsed->dispatch_table.size(), 2U);
+  EXPECT_EQ(parsed->dispatch_table[0].method_id, 0U);
+  EXPECT_EQ(parsed->dispatch_table[0].pc, 0U);
+  EXPECT_EQ(parsed->dispatch_table[1].method_id, 1U);
+  EXPECT_EQ(parsed->dispatch_table[1].pc, 0U);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
             kMaxMemoryBytes);
@@ -265,8 +284,7 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactHeaderSizeOffset,
-                 kArtifactHeaderBytes + 4);
+    store_u32_at(artifact, kArtifactHeaderSizeOffset, kArtifactHeaderBytes + 4);
     expect_artifact_error(std::move(artifact), ArtifactError::kBadHeaderSize);
   }
   {
@@ -278,7 +296,8 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
   {
     auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactFlagsOffset, 1);
-    expect_artifact_error(std::move(artifact), ArtifactError::kUnsupportedFlags);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kUnsupportedFlags);
   }
 }
 
@@ -306,8 +325,7 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u64_at(artifact, kArtifactGasDigestOffset,
-                 kGasScheduleDigest ^ 1ULL);
+    store_u64_at(artifact, kArtifactGasDigestOffset, kGasScheduleDigest ^ 1ULL);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kGasScheduleDigestMismatch);
   }
@@ -330,14 +348,12 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
   {
     auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, 0);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kCodeSizeInvalid);
+    expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
     auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, kMaxCodeBytes + 1);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kCodeSizeInvalid);
+    expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
     auto artifact = compiled_artifact_bytes();
@@ -372,11 +388,27 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactDispatchOffsetOffset,
-                 kArtifactHeaderBytes);
+    store_u32_at(artifact, kArtifactDispatchOffsetOffset, kArtifactHeaderBytes);
+    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactDispatchSizeOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchSizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactDispatchSizeOffset, 4);
     expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchUnsupported);
+                          ArtifactError::kDispatchSizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactDispatchSizeOffset,
+                 kMaxDispatchBytes + kDispatchEntryBytes);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchSizeInvalid);
   }
 }
 
@@ -396,12 +428,18 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
+    store_u64_at(artifact, kArtifactDispatchDigestOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchDigestMismatch);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
     const uint32_t code_offset =
         load_u32_le(artifact, kArtifactCodeOffsetOffset);
     const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
     artifact[code_offset] = 0;
-    const auto code = std::span<const uint8_t>(artifact).subspan(code_offset,
-                                                                 code_size);
+    const auto code =
+        std::span<const uint8_t>(artifact).subspan(code_offset, code_size);
     store_u64_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
@@ -409,6 +447,56 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
     auto artifact = compiled_artifact_bytes();
     artifact.resize(kArtifactHeaderBytes - 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
+  }
+}
+
+TEST(Rv32ArtifactTest, rejectsInvalidDispatchTables)
+{
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t dispatch_offset =
+        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+    store_u64_at(artifact, dispatch_offset, 1);
+    refresh_dispatch_digest(artifact);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchTableInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t dispatch_offset =
+        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes, 0);
+    refresh_dispatch_digest(artifact);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchTableInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t dispatch_offset =
+        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+    store_u32_at(artifact, dispatch_offset + kDispatchEntryPcOffset, 2);
+    refresh_dispatch_digest(artifact);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchTableInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t dispatch_offset =
+        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+    const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
+    store_u32_at(artifact, dispatch_offset + kDispatchEntryPcOffset, code_size);
+    refresh_dispatch_digest(artifact);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchTableInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    const uint32_t dispatch_offset =
+        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
+    store_u32_at(artifact, dispatch_offset + kDispatchEntryReservedOffset, 1);
+    refresh_dispatch_digest(artifact);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kDispatchTableInvalid);
   }
 }
 

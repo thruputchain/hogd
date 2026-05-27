@@ -8,11 +8,12 @@ from pathlib import Path
 K_MAX_CODE_BYTES = 64 * 1024
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 1
-ARTIFACT_HEADER_BYTES = 92
+ARTIFACT_FORMAT_VERSION = 2
+ARTIFACT_HEADER_BYTES = 100
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
-ARTIFACT_ENTRY_ABI_VERSION = 0
+ARTIFACT_ENTRY_ABI_VERSION = 1
 ARTIFACT_SYSCALL_ABI_VERSION = 0
+DISPATCH_ENTRY_BYTES = 16
 GAS_TABLE_VERSION = 1
 # Must match hogd/hogexec/runtime/rv32/program.h kGasScheduleDigest.
 GAS_SCHEDULE_DIGEST = 0xD2F3483DC373FADA
@@ -300,11 +301,21 @@ def extract_fixture_input(memory, sections, symbols):
     return memory[symbol.value : symbol.value + symbol.size]
 
 
+def build_dispatch_table():
+    # F2 fixture: both selectors enter the existing compiled SHA256 entry.
+    dispatch_table = struct.pack("<QIIQII", 0, 0, 0, 1, 0, 0)
+    if len(dispatch_table) != 2 * DISPATCH_ENTRY_BYTES:
+        raise ElfError("internal dispatch table size mismatch")
+    return dispatch_table
+
+
 def build_artifact(code, memory):
     code_offset = ARTIFACT_HEADER_BYTES
-    memory_offset = code_offset + len(code)
+    dispatch_table = build_dispatch_table()
+    dispatch_offset = code_offset + len(code)
+    memory_offset = dispatch_offset + len(dispatch_table)
     header = struct.pack(
-        "<8sIIQIIIIQIIIIIIIQQ",
+        "<8sIIQIIIIQIIIIIIIQQQ",
         ARTIFACT_MAGIC,
         ARTIFACT_FORMAT_VERSION,
         ARTIFACT_HEADER_BYTES,
@@ -319,14 +330,15 @@ def build_artifact(code, memory):
         len(memory),
         code_offset,
         memory_offset,
-        0,
-        0,
+        dispatch_offset,
+        len(dispatch_table),
         artifact_digest(code),
         artifact_digest(memory),
+        artifact_digest(dispatch_table),
     )
     if len(header) != ARTIFACT_HEADER_BYTES:
         raise ElfError("internal artifact header size mismatch")
-    return header + code + memory
+    return header + code + dispatch_table + memory
 
 
 def format_array(name, blob):

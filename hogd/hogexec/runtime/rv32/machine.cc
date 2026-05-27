@@ -123,12 +123,17 @@ branch_taken(Op op, uint32_t lhs, uint32_t rhs)
 } // namespace
 
 Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
-                 uint64_t gas)
-  : program_(std::move(program))
+                 uint64_t gas, uint32_t initial_pc)
+  : program_(std::move(program)), initial_pc_(initial_pc)
 {
   if (!program_) {
     construction_trap_ = Trap::kInvalidInstruction;
     set_trap(Trap::kInvalidInstruction);
+    return;
+  }
+  if (!program_->contains_pc(initial_pc_)) {
+    construction_trap_ = Trap::kBadPc;
+    set_trap(Trap::kBadPc);
     return;
   }
   if (memory_bytes > kMaxMemoryBytes) {
@@ -146,7 +151,7 @@ Machine::reset(uint64_t gas)
 {
   registers_.fill(0);
   std::fill(memory_.begin(), memory_.end(), 0);
-  pc_ = 0;
+  pc_ = initial_pc_;
   gas_remaining_ = gas;
   trap_ = Trap::kNone;
   host_trap_code_ = 0;
