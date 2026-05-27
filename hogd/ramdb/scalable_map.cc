@@ -69,13 +69,17 @@ ATTRIBUTE_ALWAYS_INLINE std::tuple<std::unique_lock<std::mutex>, ItemHeader **,
                                    std::atomic<uint16_t> &>
 ScalableMap::acquire_bucket(size_t hash)
 {
+  // mutexes_ is never resized, so its size is safe to read unlocked.
   assert(std::has_single_bit(mutexes_.size()));
-  assert(std::has_single_bit(buckets_.size()));
-  assert(std::has_single_bit(old_size_));
 
   // Then determine which lock to acquire.
   std::mutex &mu = mutexes_[hash & (mutexes_.size() - 1)];
   std::unique_lock<std::mutex> ul(mu);
+
+  // buckets_ and old_size_ are mutated by prepare_expand() under all bucket
+  // mutexes, so only read them once this bucket's mutex is held.
+  assert(std::has_single_bit(buckets_.size()));
+  assert(std::has_single_bit(old_size_));
 
   // Check if the bucket hasn't yet been expanded.
   size_t idx = hash & (old_size_ - 1);
@@ -266,16 +270,30 @@ ScalableMap::remove(std::span<const std::byte> key)
 DBStatus<void>
 ScalableMap::apply_change(ItemHeader *hdr)
 {
-  size_t idx = calculate_hash(hdr->get_key()) & (buckets_.size() - 1);
-  ItemHeader **bu = &buckets_[idx];
-  std::atomic<uint16_t> &cnt = item_counts_[idx];
-
   using enum ItemStorage;
   assert(hdr->storage == kNormal || hdr->storage == kTombstone);
+
+  // The compactor runs concurrently during recovery and relocates items via
+  // modify_locked() under the per-bucket mutex, so go through acquire_bucket()
+  // (like put/remove) rather than touching buckets_ directly.
+  const size_t hash = calculate_hash(hdr->get_key());
+
   switch (hdr->storage) {
 
   case kNormal: // handle put
   {
+    // Allocate before taking the bucket lock: alloc() can block on the
+    // compactor, which also takes that lock — see put().
+    ItemHeader *item = allocator_.alloc(hdr->type, hdr->get_key().size(),
+                                        hdr->get_value().size());
+    if (!item) [[unlikely]]
+      return DBError(DBCode::kNoMemory);
+    std::ranges::copy(hdr->get_key_and_value(),
+                      item->get_key_and_value().begin());
+    item->lsn = hdr->lsn;
+
+    auto [ul, bu, cnt] = acquire_bucket(hash);
+
     // Check if the key already exists.
     for (; *bu != nullptr; bu = &(*bu)->next) {
       if ((*bu)->get_key() == hdr->get_key()) {
@@ -284,6 +302,9 @@ ScalableMap::apply_change(ItemHeader *hdr)
           (*bu)->type = hdr->type;
           (*bu)->lsn = hdr->lsn;
           std::ranges::copy(hdr->get_value(), (*bu)->get_value().begin());
+          // Rewind is safe: this thread just allocated item and nothing else
+          // allocated on it since.
+          allocator_.free<true>(item);
           return {};
         }
 
@@ -295,13 +316,6 @@ ScalableMap::apply_change(ItemHeader *hdr)
     }
 
     // Insert new key-value pair.
-    ItemHeader *item = allocator_.alloc(hdr->type, hdr->get_key().size(),
-                                        hdr->get_value().size());
-    if (!item) [[unlikely]]
-      return DBError(DBCode::kNoMemory);
-    std::ranges::copy(hdr->get_key_and_value(),
-                      item->get_key_and_value().begin());
-    item->lsn = hdr->lsn;
     item->next = *bu;
     *bu = item;
     counter_inc(cnt);
@@ -310,6 +324,7 @@ ScalableMap::apply_change(ItemHeader *hdr)
 
   case kTombstone: // handle remove
   {
+    auto [ul, bu, cnt] = acquire_bucket(hash);
     for (; *bu != nullptr; bu = &(*bu)->next) {
       if ((*bu)->get_key() == hdr->get_key()) {
         unlink(bu);
@@ -345,6 +360,14 @@ ScalableMap::prepare_expand()
     return false;
 
   info("expanding map from {} to {} buckets", buckets_.size(), new_size);
+
+  // Hold every bucket mutex across the reallocation: resize() moves buckets_
+  // (and we replace item_counts_), dangling any pointer/reference a thread got
+  // from acquire_bucket(). Every bucket accessor holds its mutex while
+  // dereferencing, so locking all of them excludes them — notably the compactor
+  // during recovery. mutexes_ is never resized. (cf. register_mutation_cb)
+  std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
+                                                  mutexes_.end()};
 
   // make the item count table larger.
   std::vector<std::atomic<uint16_t>> new_item_counts(new_size);

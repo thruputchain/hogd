@@ -3,6 +3,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <format>
 #include <limits>
@@ -21,11 +24,15 @@
 #include "hogd/base/status.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/disk_writer.h"
+#include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
+#include "hogd/ramdb/scalable_map.h"
 
 namespace hogd {
 
@@ -50,6 +57,41 @@ to_string(std::span<const std::byte> bytes)
 {
   return std::string(reinterpret_cast<const char *>(bytes.data()),
                      bytes.size());
+}
+
+// A few compaction threads is plenty to race recovery; using the full machine
+// would add pool-coordination overhead without improving coverage.
+constexpr size_t kCompactionThreads = 4;
+
+// MapStack mirrors Database's module wiring (loglet allocator, worker pool,
+// item allocator, disk writer, map) so the ScalableMap recovery-vs-compaction
+// tests below can drive recovery-style map mutations against
+// ItemAllocator::compact() directly, with explicit small mutex/bucket orders.
+// Member declaration order matches the init order the circular
+// item_allocator<->map references require.
+struct MapStack {
+  Directory dir;
+  std::unique_ptr<LogletAllocator> la;
+  WorkerPool pool;
+  ItemAllocator ia;
+  DiskWriter dw;
+  ScalableMap map;
+
+  MapStack(Directory d, size_t heap, int mutex_order, int bucket_order)
+    : dir(std::move(d)),
+      la(LogletAllocator::create(heap, kCompactionThreads, [] {})),
+      pool(static_cast<int>(kCompactionThreads)), ia(*la, pool, &map),
+      dw(*la, dir, 0, [] {}), map(ia, dw, mutex_order, bucket_order)
+  {}
+};
+
+std::string
+make_value(uint64_t seed, size_t len)
+{
+  std::string v(len, '\0');
+  for (size_t i = 0; i < len; ++i)
+    v[i] = static_cast<char>(((seed * 1103515245U) + (i * 12345U)) & 0xFFU);
+  return v;
 }
 
 } // namespace
@@ -811,6 +853,232 @@ TEST_F(DatabaseTest, RecoverySkipAlignsPaddedRecord)
   DBStatus<DBItem> got_next = db_->get(std::as_bytes(std::span(next_key)));
   ASSERT_TRUE(got_next);
   EXPECT_EQ(to_string(got_next->value), next_value);
+}
+
+// Recovery writes into the map via ScalableMap::apply_change and grows it via
+// prepare_expand/do_expand while the background compactor relocates items
+// through modify_locked. The pre-fix code made apply_change lockless (#2025)
+// and let prepare_expand reallocate buckets_ without excluding the compactor's
+// in-flight bucket pointer (#2026), both data races. These tests drive those
+// operations concurrently with a deliberately tiny bucket table so expansion
+// fires after only a handful of inserts; under TSAN/ASAN the pre-fix code
+// reports a race/use-after-free and the fixed code is clean and correct.
+TEST(ScalableMapRecoveryConcurrency, ApplyChangeAndExpandRaceCompactor)
+{
+  using enum ItemStorage;
+
+  // 4 buckets / 4 mutexes: prepare_expand fires once size() reaches 8, so a few
+  // hundred keys drive many expansions concurrently with compaction.
+  constexpr int kMapMutexOrder = 2;
+  constexpr int kMapBucketOrder = 2;
+  constexpr size_t kKeys = 3000;
+  constexpr size_t kRounds = 60;
+  // Generous heap so alloc() never reaches the low-mem path (our observer is a
+  // no-op); loglets still fill and roll over to the compactor naturally as
+  // items are re-allocated, so compaction has real work.
+  const size_t heap = 128 * kLogletRegionSize;
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  MapStack s(*dir, heap, kMapMutexOrder, kMapBucketOrder);
+
+  // Compactor thread: relocate live items until recovery completes.
+  std::atomic<bool> done{false};
+  std::thread compactor([&] {
+    while (!done.load(std::memory_order_relaxed)) {
+      s.ia.compact(1.0F);
+      // Pause between passes: compact() is heavyweight (pool fan-out + stats
+      // logging), and a handful of relocations per pass is enough to overlap
+      // recovery's writes.
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    s.ia.compact(1.0F);
+  });
+
+  // Oracle of the final value for each live key.
+  std::unordered_map<std::string, std::string> oracle;
+
+  // A source loglet holds the WAL-style records fed to apply_change.
+  // apply_change copies each record into the map, so the source loglet can be
+  // discarded and replaced once it fills.
+  UniqueLoglet src = make_unique_loglet(*s.la, LogletMode::kMemoryItems);
+  uint64_t lsn = 0;
+
+  auto fresh_record = [&](ItemStorage storage, size_t key_len,
+                          size_t val_len) -> ItemHeader * {
+    ItemHeader *rec = src->alloc(storage, /*type=*/0, key_len, val_len);
+    if (rec == nullptr) {
+      src = make_unique_loglet(*s.la, LogletMode::kMemoryItems);
+      rec = src->alloc(storage, /*type=*/0, key_len, val_len);
+    }
+    return rec;
+  };
+
+  auto apply_put = [&](const std::string &key, const std::string &val) {
+    ItemHeader *rec = fresh_record(kNormal, key.size(), val.size());
+    ASSERT_NE(rec, nullptr);
+    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    rec->lsn = ++lsn;
+    ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
+  };
+
+  auto apply_remove = [&](const std::string &key) {
+    ItemHeader *rec = fresh_record(kTombstone, key.size(), 0);
+    ASSERT_NE(rec, nullptr);
+    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    rec->lsn = ++lsn;
+    ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
+  };
+
+  size_t applied = 0;
+  auto maybe_expand = [&] {
+    // Mimic recovery expanding between batches.
+    if (++applied % 16 == 0 && s.map.prepare_expand())
+      s.map.do_expand();
+  };
+
+  // Workload: insert "permanent" keys that are never modified, plus a rolling
+  // window of unique "filler" keys that are inserted and then removed exactly
+  // once. Net size grows (driving prepare_expand) while the filler removals
+  // create dead space (driving compaction), so apply_change, prepare_expand,
+  // and the compactor overlap throughout. Crucially no key is ever overwritten
+  // or removed-then-reinserted, so the compactor never relocates an item whose
+  // key was concurrently re-pointed (the separate compactor-identity hazard
+  // handled by compact_one's *hptr==src_item check): a permanent key's item is
+  // never replaced, and a removed filler key simply disappears.
+  const size_t kPermanent = kKeys;
+  const size_t per_round = (kPermanent / kRounds) + 1;
+  constexpr size_t kFillersPerRound = 64;
+  uint64_t filler_uid = 0;
+  size_t next_perm = 0;
+  std::vector<std::string> live_fillers;
+
+  for (size_t r = 0; r < kRounds; ++r) {
+    // Grow the map with fresh permanent keys.
+    for (size_t j = 0; j < per_round && next_perm < kPermanent;
+         ++j, ++next_perm) {
+      const std::string key = std::format("perm-{:08}", next_perm);
+      std::string val = make_value(next_perm, 1400 + ((r % 3) * 64));
+      apply_put(key, val);
+      oracle.emplace(key, std::move(val));
+      maybe_expand();
+    }
+
+    // Remove the previous round's fillers (pure deletes -> dead space).
+    for (const std::string &fk : live_fillers) {
+      apply_remove(fk);
+      maybe_expand();
+    }
+    live_fillers.clear();
+
+    // Insert this round's fillers (unique keys, removed next round).
+    for (size_t j = 0; j < kFillersPerRound; ++j) {
+      std::string key = std::format("fill-{:012}", filler_uid++);
+      apply_put(key, make_value(filler_uid, 1300 + ((j % 4) * 96)));
+      live_fillers.push_back(std::move(key));
+      maybe_expand();
+    }
+  }
+
+  // Drop any remaining fillers so only permanents remain.
+  for (const std::string &fk : live_fillers)
+    apply_remove(fk);
+
+  done.store(true, std::memory_order_relaxed);
+  compactor.join();
+
+  // Finish any pending expansion now that nothing runs concurrently.
+  while (s.map.prepare_expand())
+    s.map.do_expand();
+
+  // The map must contain exactly the oracle's key/value pairs.
+  std::unordered_map<std::string, std::string> found;
+  s.map.for_each([&](ItemHeader *h) {
+    std::span<std::byte> k = h->get_key();
+    std::span<std::byte> v = h->get_value();
+    auto [it, inserted] = found.emplace(
+        std::string(reinterpret_cast<const char *>(k.data()), k.size()),
+        std::string(reinterpret_cast<const char *>(v.data()), v.size()));
+    EXPECT_TRUE(inserted) << "duplicate key in map";
+  });
+
+  EXPECT_EQ(found, oracle);
+}
+
+// #2026, deterministically: prepare_expand() reallocates buckets_, which
+// invalidates any ItemHeader** a thread obtained from acquire_bucket(). The
+// compactor holds exactly such a pointer inside its modify_locked() callback.
+// This test holds a bucket pointer via modify_locked() (the same mechanism)
+// while another thread calls prepare_expand(); the all-mutex barrier must make
+// the resize wait until the pointer is released. Without the barrier the resize
+// runs underneath the held pointer and dereferencing it is a heap-use-after-
+// free (ASAN) / data race (TSAN). The unconditional sleep makes the window
+// reliable rather than probabilistic.
+TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
+{
+  using enum ItemStorage;
+
+  constexpr int kMapMutexOrder = 2;
+  constexpr int kMapBucketOrder = 2; // 4 buckets
+  const size_t heap = 16 * kLogletRegionSize;
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  MapStack s(*dir, heap, kMapMutexOrder, kMapBucketOrder);
+
+  // Insert keys without expanding so the table stays at 4 buckets; a later
+  // prepare_expand() will then reallocate it (size 32 -> 32 buckets).
+  UniqueLoglet src = make_unique_loglet(*s.la, LogletMode::kMemoryItems);
+  std::string probe_key;
+  for (int i = 0; i < 32; ++i) {
+    const std::string key = std::format("k-{:04}", i);
+    const std::string val = make_value(i, 32);
+    ItemHeader *rec = src->alloc(kNormal, /*type=*/0, key.size(), val.size());
+    ASSERT_NE(rec, nullptr);
+    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    rec->lsn = static_cast<uint64_t>(i) + 1;
+    ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
+    if (i == 0)
+      probe_key = key;
+  }
+
+  std::atomic<bool> holding{false};
+  std::atomic<bool> may_release{false};
+
+  // Holder: own a bucket pointer (and its mutex) via modify_locked, then read
+  // through it after a concurrent resize may have run.
+  std::thread holder([&] {
+    bool found = s.map.modify_locked(
+        std::as_bytes(std::span(probe_key)), [&](ItemHeader **hptr, size_t) {
+          holding.store(true, std::memory_order_release);
+          while (!may_release.load(std::memory_order_acquire))
+            std::this_thread::yield();
+          // Dereference the held bucket slot. If prepare_expand() reallocated
+          // buckets_ underneath us this touches freed memory.
+          ItemHeader *head = *hptr;
+          EXPECT_NE(head, nullptr);
+        });
+    EXPECT_TRUE(found);
+  });
+
+  while (!holding.load(std::memory_order_acquire))
+    std::this_thread::yield();
+
+  // Attempt the resize while the holder owns a bucket pointer. With the barrier
+  // this blocks until the holder releases; without it, it reallocates now.
+  std::thread resizer([&] {
+    if (s.map.prepare_expand())
+      s.map.do_expand();
+  });
+
+  // Let the resizer (try to) reallocate before the holder dereferences.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  may_release.store(true, std::memory_order_release);
+
+  holder.join();
+  resizer.join();
 }
 
 } // namespace hogd
