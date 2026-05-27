@@ -4668,5 +4668,282 @@ TEST_F(DirectRCQTests, ObserveCountMaxExceedsSingleInsert)
   advance_block();
 }
 
+TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCost)
+{
+  // Grant exactly enough storage for one insert (kBaseItemCost + 1 *
+  // kRCQCostPerEntry).  If the observe-only delta charges any storage at all,
+  // the balance check will fail.
+  int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
+  setup_grant_storage_token(kContractAddress, exact_cost);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_cost");
+
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert one entry — uses the full storage budget.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: observe-only — should cost nothing.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  advance_block();
+
+  // The insert consumed exactly the full storage budget.  The observe-only
+  // delta should have cost nothing, so the remaining balance must be 0.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), 0);
+}
+
+TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostExistingRCQ)
+{
+  // The insert in block 2 reserves the full standalone cost(1) = kBaseItemCost
+  // + 1*per_entry (conservative, assumes empty RCQ).  The actual marginal cost
+  // is only per_entry, so kBaseItemCost is refunded.  Grant cost(4) +
+  // kBaseItemCost so that the reservation succeeds and kBaseItemCost remains
+  // after both blocks.
+  int128_t base_cost = cost_model_->kBaseItemCost;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(4) + base_cost;
+  setup_grant_storage_token(kContractAddress, total_cost);
+
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_exist");
+  auto entryA = make_rcq_entry({0x0A});
+
+  // Block 1: Insert 3 entries.
+  auto tx_setup = make_new_per_tx_db_proxy();
+  tx_setup.add_delta(key,
+                     make_rcq_insert_delta({make_rcq_entry({1}),
+                                            make_rcq_entry({2}),
+                                            make_rcq_entry({3})}),
+                     std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  advance_block();
+
+  // Block 2: TX1 inserts one more entry, TX2 only observes it.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  advance_block();
+
+  // The actual cost of 4 entries is consumed.  The conservative reservation
+  // over-reserved by kBaseItemCost, which was refunded at commit.  The
+  // observe-only delta should have added nothing.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), base_cost);
+}
+
+TEST_F(DirectRCQTests,
+       ObserveOnlyDeltaDoesNotRequireStorageCostConsumeInsertCancel)
+{
+  // Block 1: insert 2 entries.  Block 2: consume 1 past-block entry, insert 1
+  // new entry (net zero change), and a separate TX only observes the new entry.
+  // The observe-only TX should cost nothing.
+  //
+  // The insert in block 2 reserves standalone cost(1) = kBaseItemCost +
+  // per_entry.  Grant cost(2) + kBaseItemCost so the reservation succeeds.
+  int128_t base_cost = cost_model_->kBaseItemCost;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(2) + base_cost +
+                        cost_model_->kRCQCostPerEntry;
+  setup_grant_storage_token(kContractAddress, total_cost);
+
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_observe_ci_cancel");
+  auto entryA = make_rcq_entry({0x0A});
+
+  // Block 1: Insert 2 entries.
+  auto tx_setup = make_new_per_tx_db_proxy();
+  tx_setup.add_delta(key,
+                     make_rcq_insert_delta(
+                         {make_rcq_entry({1}), make_rcq_entry({2})}),
+                     std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  advance_block();
+
+  auto bal_before = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal_before.has_value());
+  EXPECT_EQ(from_xdr(bal_before->nnint()),
+            base_cost + cost_model_->kRCQCostPerEntry);
+
+  // Block 2: TX1 consumes 1 past-block entry and inserts 1 new entry (net
+  // zero).  TX2 only observes the new entry.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 1, {}, {entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  advance_block();
+
+  // The RCQ still has 2 entries (consumed 1, inserted 1), so cost(2) is
+  // locked.  The conservative reservation over-reserved by kBaseItemCost,
+  // which was refunded.  The observe-only delta added nothing.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), base_cost + cost_model_->kRCQCostPerEntry);
+}
+
+TEST_F(DirectRCQTests,
+       ObserveOnlyDeltaDoesNotRequireStorageCostNewRCQConsumeInsertCancel)
+{
+  // Same as the ConsumeInsertCancel variant but without a prior-block snapshot.
+  // All three TXs (insert, consume+insert, observe) land in the same block on
+  // a brand-new key.  The observe-only TX should cost nothing.
+  int128_t base_cost = cost_model_->kBaseItemCost;
+  int128_t total_cost = cost_model_->get_retrocausal_queue_cost(2) + base_cost;
+  setup_grant_storage_token(kContractAddress, total_cost);
+
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_observe_ci_cancel_new");
+  auto entryA = make_rcq_entry({0x0A});
+  auto entryB = make_rcq_entry({0x0B});
+
+  // TX1: insert 2 entries (creates the RCQ this block).
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA, entryB}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
+  auto entryC = make_rcq_entry({0x0C});
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryC}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX3: observe-only.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryC}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  advance_block();
+
+  // 2 entries live (inserted 2+1, consumed 1 current-block).  cost(2) locked.
+  // The observe-only delta added nothing.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), base_cost);
+}
+
+TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostEmptyQueue)
+{
+  // No prior snapshot.  A single block: TX1 inserts 1 entry, TX2 consumes
+  // that current-block entry and inserts a replacement, TX3 only observes.
+  // The queue ends with 1 entry.  The observe-only TX should cost nothing.
+  int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
+  setup_grant_storage_token(kContractAddress, exact_cost);
+
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_empty");
+  auto entryA = make_rcq_entry({0x0A});
+  auto entryB = make_rcq_entry({0x0B});
+
+  // TX1: insert 1 entry.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryB}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX3: observe-only.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryB}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  advance_block();
+
+  // 1 entry live.  cost(1) = exact_cost locked.  The observe-only delta
+  // added nothing, so the balance is fully consumed.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), 0);
+}
+
+TEST_F(DirectRCQTests,
+       ObserveOnlyDeltaDoesNotRequireStorageCostSeparateConsumeInsertObserve)
+{
+  // No prior snapshot.  Three separate TXs in one block: TX1 inserts 1 entry,
+  // TX2 consumes that current-block entry, TX3 only observes.  The queue ends
+  // empty.  The observe-only TX should cost nothing.
+  int128_t exact_cost = cost_model_->get_retrocausal_queue_cost(1);
+  setup_grant_storage_token(kContractAddress, exact_cost);
+
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_observe_sep_ci");
+  auto entryA = make_rcq_entry({0x0A});
+
+  // TX1: insert 1 entry.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+
+  // TX2: consume 1 current-block entry.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+
+  // TX3: observe-only.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_observed_delta({entryA}),
+                std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  advance_block();
+
+  // Queue is empty (inserted 1, consumed 1).  cost(0) = 0 locked.  The full
+  // budget is refunded.  The observe-only delta added nothing.
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal->nnint()), exact_cost);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
