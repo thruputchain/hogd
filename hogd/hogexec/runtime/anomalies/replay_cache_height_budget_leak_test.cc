@@ -30,8 +30,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -49,10 +47,6 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDB)
   {}
-
-  void SetUp() override { cost_model_ = get_default_cost_model(); }
-
-  StorageCostModel const *cost_model_;
 
   auto make_new_per_tx_db_proxy()
   {
@@ -95,7 +89,7 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
         ReplayCacheHeightCount{.height = h, .nonce_count = 1});
 
     ReplayCacheData data;
-    data.nonces.push_back(static_cast<uint64_t>(h));
+    data.nonces.push_back(h);
     ASSERT_TRUE(dao.write_address_replay_cache_data(contract_addr, h, data));
   }
   ASSERT_TRUE(dao.write_address_replay_cache_meta(contract_addr, meta));
