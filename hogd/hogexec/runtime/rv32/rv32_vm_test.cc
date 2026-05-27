@@ -151,7 +151,7 @@ struct TrapHost : Host {
   HostResult ecall(MachineView, const EcallArgs &) noexcept override
   {
     ++calls;
-    return HostResult::trap();
+    return HostResult::trap(0, 77);
   }
 
   int calls = 0;
@@ -1041,6 +1041,7 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     EXPECT_EQ(machine.run(host), StepResult::kTrap);
     EXPECT_EQ(host.calls, 1);
     EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+    EXPECT_EQ(machine.host_trap_code(), 77U);
   }
   {
     const auto program = make_program({0x00000073U});

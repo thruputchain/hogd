@@ -25,6 +25,32 @@
 namespace hogd::rv32 {
 namespace {
 
+InvokeStatus<void>
+host_trap_code_to_invoke_status(uint32_t code)
+{
+  switch (static_cast<HostFnErrorCode>(code)) {
+  case HostFnErrorCode::OutOfGas:
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  case HostFnErrorCode::Return:
+    return {};
+  case HostFnErrorCode::Exit:
+    return InvokeError{InvokeErrorCode::Deterministic};
+  case HostFnErrorCode::Unrecoverable:
+    return InvokeError{InvokeErrorCode::Unrecoverable};
+  case HostFnErrorCode::ValidationFailure:
+    return InvokeError{InvokeErrorCode::ValidationFailure};
+  case HostFnErrorCode::Abandon:
+    return InvokeError{InvokeErrorCode::Abandon};
+  case HostFnErrorCode::NoneOrRecoverable:
+    break;
+  }
+
+  // A host trap with no fatal host code, or with an unknown code, is still a
+  // fatal runtime outcome. Known fatal host codes above mirror the WASM
+  // mapping.
+  return InvokeError{InvokeErrorCode::Unrecoverable};
+}
+
 class Runtime final : public hogd::Runtime {
 public:
   Runtime(RuntimeContractImage image,
@@ -43,6 +69,8 @@ private:
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
     if (*method_id != 0) {
+      // M3 exposes one RV32 test entry point. Named methods become a stable
+      // deterministic miss until M4 adds contract-defined dispatch.
       return {InvokeError{InvokeErrorCode::Deterministic}, 0};
     }
     if (image_.program == nullptr ||
@@ -56,7 +84,9 @@ private:
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
 
-    SyscallBridgeHost host(host_call_context_.get(), &syscall_entry);
+    SyscallBridgeHost host(host_call_context_.get(), image_.entry == nullptr
+                                                         ? &syscall_entry
+                                                         : image_.entry);
     const StepResult step_result = machine.run(host);
     const GasAmount gas_consumed = gas_limit - machine.gas_remaining();
 
@@ -71,18 +101,22 @@ private:
       case Trap::kOutOfGas:
         return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
       case Trap::kHostTrap:
-        return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+        return {host_trap_code_to_invoke_status(machine.host_trap_code()),
+                gas_consumed};
       case Trap::kInvalidInstruction:
       case Trap::kBadPc:
       case Trap::kBadMemory:
       case Trap::kMisalignedAccess:
-      case Trap::kNone:
         return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+      case Trap::kNone:
+        CHECK(false);
+        return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
       }
       break;
     case StepResult::kContinue:
     case StepResult::kEcall:
-      break;
+      CHECK(false);
+      return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
     }
 
     return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
@@ -101,7 +135,9 @@ RuntimeContext::RuntimeContext(
 InvokeErrorCode
 RuntimeContext::verify_contract(Contract const &contract) const
 {
-  CHECK(contract.contract_type() == ContractType::kMockTest);
+  if (contract.contract_type() != ContractType::kMockTest) {
+    return InvokeErrorCode::Deterministic;
+  }
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
   if (it == contracts_.end() || it->second.program == nullptr ||

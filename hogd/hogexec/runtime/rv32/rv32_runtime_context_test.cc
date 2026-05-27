@@ -26,6 +26,7 @@
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -100,6 +101,64 @@ ecall()
   return 0x00000073U;
 }
 
+TrampolineResult
+make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
+{
+  return {.result_code = 17,
+          .panic = std::to_underlying(code),
+          .gas_consumed = gas_consumed};
+}
+
+extern "C" TrampolineResult
+unrecoverable_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::Unrecoverable);
+}
+
+extern "C" TrampolineResult
+validation_failure_entry(ExternHostCallContext /*unused*/,
+                         WasmContext /*unused*/, uint64_t, uint64_t, uint64_t,
+                         uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                         uint64_t, uint64_t, uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::ValidationFailure);
+}
+
+extern "C" TrampolineResult
+abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+              uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+              uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::Abandon);
+}
+
+extern "C" TrampolineResult
+unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  return {.result_code = 17, .panic = 999, .gas_consumed = 4};
+}
+
+extern "C" TrampolineResult
+host_out_of_gas_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+                      uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                      uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                      uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
+}
+
+extern "C" TrampolineResult
+exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
+           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+           uint64_t, uint64_t, uint64_t)
+{
+  return make_host_panic_result(HostFnErrorCode::Exit);
+}
+
 void
 store_le64(std::span<uint8_t> bytes, uint32_t offset, uint64_t value)
 {
@@ -135,6 +194,23 @@ make_initial_return_memory(std::span<const uint8_t> payload)
 }
 
 rv32::RuntimeContractImage
+make_single_ecall_image(HostFn11 entry)
+{
+  constexpr uint32_t kMemoryBytes = 256;
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(10, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+      }),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = kMemoryBytes,
+      .entry = entry,
+  };
+}
+
+rv32::RuntimeContractImage
 make_return_image(std::span<const uint8_t> payload)
 {
   constexpr uint32_t kMemoryBytes = 256;
@@ -147,6 +223,41 @@ make_return_image(std::span<const uint8_t> payload)
       }),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kMemoryBytes,
+  };
+}
+
+rv32::RuntimeContractImage
+make_bad_pc_image()
+{
+  return rv32::RuntimeContractImage{
+      .program = make_program({addi(1, 0, 1)}),
+      .initial_memory = std::vector<uint8_t>(256),
+      .memory_bytes = 256,
+  };
+}
+
+rv32::RuntimeContractImage
+make_bad_memory_image()
+{
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          i_type(0x03, 1, 2, 0, 254),
+      }),
+      .initial_memory = std::vector<uint8_t>(256),
+      .memory_bytes = 256,
+  };
+}
+
+rv32::RuntimeContractImage
+make_misaligned_access_image()
+{
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(1, 0, 1),
+          i_type(0x03, 2, 2, 1, 0),
+      }),
+      .initial_memory = std::vector<uint8_t>(256),
+      .memory_bytes = 256,
   };
 }
 
@@ -173,11 +284,35 @@ make_invalid_syscall_then_return_image()
   };
 }
 
+InvokeResult
+direct_invoke(std::shared_ptr<const Contract> const &contract,
+              rv32::RuntimeContext &rv32_context, SystemCallHandler &handler,
+              GasAmount gas_limit)
+{
+  const DeployedContractHash deployed =
+      NativeContractTestFramework::make_deployed_contract_hash(contract);
+  auto runtime = rv32_context.make_new_runtime(deployed, &handler);
+  EXPECT_TRUE(runtime.has_value());
+  EXPECT_NE(runtime.value(), nullptr);
+  if (!runtime.has_value() || runtime.value() == nullptr) {
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  }
+  return runtime.value()->invoke(0, gas_limit);
+}
+
 std::shared_ptr<const Contract>
 make_rv32_contract_xdr()
 {
   auto contract = std::make_shared<Contract>(ContractType::kMockTest);
   contract->mock_contract_id() = kRv32ContractId;
+  return contract;
+}
+
+std::shared_ptr<const Contract>
+make_wasmi_contract_xdr()
+{
+  auto contract = std::make_shared<Contract>(ContractType::kWasmi);
   return contract;
 }
 
@@ -217,6 +352,26 @@ protected:
     setup_grant_storage_token(kRv32ContractAddress, 1'000'000'000);
   }
 };
+
+void
+expect_syscall_trace_suffix_matches(InvocationFrameTrace const &wasm_trace,
+                                    InvocationFrameTrace const &rv32_trace)
+{
+  ASSERT_GE(wasm_trace.system_calls.size(), 2U);
+  ASSERT_EQ(rv32_trace.system_calls.size(), 2U);
+
+  const size_t wasm_offset = wasm_trace.system_calls.size() - 2;
+  for (size_t i = 0; i < rv32_trace.system_calls.size(); ++i) {
+    auto const &wasm_call = wasm_trace.system_calls[wasm_offset + i];
+    auto const &rv32_call = rv32_trace.system_calls[i];
+    EXPECT_EQ(wasm_call.body.syscall_number(), rv32_call.body.syscall_number());
+    EXPECT_EQ(wasm_call.status.error(), rv32_call.status.error());
+    if (wasm_call.status.error() == HostFnErrorCode::NoneOrRecoverable) {
+      EXPECT_EQ(wasm_call.status.syscall_return_code(),
+                rv32_call.status.syscall_return_code());
+    }
+  }
+}
 
 TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
 {
@@ -269,6 +424,14 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
   ASSERT_NE(rv32_handler.get_trace(), nullptr);
   EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
             rv32_handler.get_trace()->status.status_code());
+  EXPECT_EQ(wasm_handler.get_trace()->status.return_buffer().size(),
+            rv32_handler.get_trace()->status.return_buffer().size());
+  EXPECT_EQ(wasm_handler.get_trace()->storage_writes.size(),
+            rv32_handler.get_trace()->storage_writes.size());
+  expect_syscall_trace_suffix_matches(*wasm_handler.get_trace(),
+                                      *rv32_handler.get_trace());
+  EXPECT_EQ(wasm_handler.get_most_recent_frame_events().size(),
+            rv32_handler.get_most_recent_frame_events().size());
   ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
   ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 1);
@@ -297,31 +460,119 @@ TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
 
 TEST_F(Rv32RuntimeContextTest, DirectInvokeNormalizesOutOfGasConsumption)
 {
-  const std::array<uint8_t, 0> payload = {};
-  auto rv32_context =
-      rv32::RuntimeContext({{kRv32ContractId, make_return_image(payload)}});
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_single_ecall_image(&host_out_of_gas_entry)}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
   auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
                                               rv32_context);
-  const DeployedContractHash deployed =
-      NativeContractTestFramework::make_deployed_contract_hash(contract);
-  auto runtime = rv32_context.make_new_runtime(deployed, &handler);
-  ASSERT_TRUE(runtime.has_value());
-  ASSERT_NE(runtime.value(), nullptr);
 
-  auto result = runtime.value()->invoke(0, 2);
+  auto result = direct_invoke(contract, rv32_context, handler, 10);
 
   ASSERT_FALSE(result.is_root_success());
   ASSERT_EQ(result.result_.error().code(), InvokeErrorCode::OutOfGas);
-  EXPECT_EQ(result.gas_consumed_, 2U);
+  EXPECT_EQ(result.gas_consumed_, 10U);
+}
+
+TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto expect_mapping = [&](HostFn11 entry, InvokeErrorCode expected) {
+    auto rv32_context = rv32::RuntimeContext(
+        {{kRv32ContractId, make_single_ecall_image(entry)}});
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
+    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), expected);
+    EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas + 4U);
+  };
+
+  expect_mapping(&unrecoverable_entry, InvokeErrorCode::Unrecoverable);
+  expect_mapping(&validation_failure_entry, InvokeErrorCode::ValidationFailure);
+  expect_mapping(&abandon_entry, InvokeErrorCode::Abandon);
+  expect_mapping(&unknown_panic_entry, InvokeErrorCode::Unrecoverable);
+}
+
+TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltMapsToDeterministic)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_single_ecall_image(&exit_entry)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                              rv32_context);
+
+  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+}
+
+TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto expect_deterministic = [&](rv32::RuntimeContractImage image) {
+    auto rv32_context =
+        rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
+    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  };
+
+  expect_deterministic(make_bad_pc_image());
+  expect_deterministic(make_bad_memory_image());
+  expect_deterministic(make_misaligned_access_image());
+}
+
+TEST_F(Rv32RuntimeContextTest, SameInputsTrapDeterministically)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+  auto rv32_context =
+      rv32::RuntimeContext({{kRv32ContractId, make_bad_memory_image()}});
+
+  auto handler1 =
+      make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                   rv32_context);
+  auto handler2 =
+      make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                   rv32_context);
+
+  auto result1 = direct_invoke(contract, rv32_context, handler1, kEnoughGas);
+  auto result2 = direct_invoke(contract, rv32_context, handler2, kEnoughGas);
+
+  ASSERT_FALSE(result1.is_root_success());
+  ASSERT_FALSE(result2.is_root_success());
+  EXPECT_EQ(result1.result_.error().code(), result2.result_.error().code());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
 }
 
 TEST_F(Rv32RuntimeContextTest, VerifyRejectsUndefinedRv32MockContract)
 {
   auto rv32_context = rv32::RuntimeContext({});
   auto contract = make_rv32_contract_xdr();
+
+  EXPECT_EQ(rv32_context.verify_contract(*contract),
+            InvokeErrorCode::Deterministic);
+}
+
+TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
+{
+  auto rv32_context = rv32::RuntimeContext({});
+  auto contract = make_wasmi_contract_xdr();
 
   EXPECT_EQ(rv32_context.verify_contract(*contract),
             InvokeErrorCode::Deterministic);

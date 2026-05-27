@@ -149,6 +149,7 @@ Machine::reset(uint64_t gas)
   pc_ = 0;
   gas_remaining_ = gas;
   trap_ = Trap::kNone;
+  host_trap_code_ = 0;
   halted_ = false;
   halt_code_ = 0;
   pending_ecall_.reset();
@@ -330,6 +331,7 @@ Machine::complete_ecall(const HostResult &result)
     return StepResult::kTrap;
   case HostStatus::kTrap:
     ecall_memory_snapshot_.clear();
+    host_trap_code_ = result.value;
     set_trap(Trap::kHostTrap);
     return StepResult::kTrap;
   default:

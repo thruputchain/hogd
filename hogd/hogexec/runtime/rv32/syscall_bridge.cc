@@ -140,7 +140,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::out_of_gas(result.gas_consumed);
   default:
     // Unknown or fatal host panics trap without committing scratch memory.
-    return HostResult::trap(result.gas_consumed);
+    return HostResult::trap(result.gas_consumed,
+                            static_cast<uint32_t>(result.panic));
   }
 }
 

@@ -33,6 +33,7 @@ public:
   }
   [[nodiscard]] uint64_t gas_remaining() const { return gas_remaining_; }
   [[nodiscard]] Trap trap() const { return trap_; }
+  [[nodiscard]] uint32_t host_trap_code() const { return host_trap_code_; }
   [[nodiscard]] bool halted() const { return halted_; }
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::optional<EcallArgs> pending_ecall() const
@@ -62,6 +63,7 @@ private:
   std::vector<uint8_t> memory_;
   uint64_t gas_remaining_ = 0;
   Trap trap_ = Trap::kNone;
+  uint32_t host_trap_code_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   uint32_t halt_code_ = 0;

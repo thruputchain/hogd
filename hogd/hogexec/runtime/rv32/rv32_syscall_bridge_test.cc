@@ -520,6 +520,8 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.value,
+            static_cast<uint32_t>(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
   ASSERT_TRUE(bridge.last_result().has_value());

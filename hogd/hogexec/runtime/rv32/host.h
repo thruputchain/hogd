@@ -119,10 +119,10 @@ struct HostResult {
                       .value = 0,
                       .gas_consumed = gas_consumed};
   }
-  static HostResult trap(uint64_t gas_consumed = 0)
+  static HostResult trap(uint64_t gas_consumed = 0, uint32_t trap_code = 0)
   {
     return HostResult{.status = HostStatus::kTrap,
-                      .value = 0,
+                      .value = trap_code,
                       .gas_consumed = gas_consumed};
   }
 

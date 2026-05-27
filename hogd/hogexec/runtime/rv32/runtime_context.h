@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
@@ -17,6 +18,7 @@ struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
   uint32_t memory_bytes = kMaxMemoryBytes;
+  HostFn11 entry = nullptr;
 };
 
 // Experimental test-only RuntimeContext for the RV32 VM. It deliberately uses
