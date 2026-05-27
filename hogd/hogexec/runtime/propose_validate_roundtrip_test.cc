@@ -937,9 +937,8 @@ TEST_P(ProposeValidateRoundtripTest,
   ASSERT_EQ(validation_handler.try_commit_transaction(),
             ExecResult::ExecResultTxRootFrameReverted)
       << "Manual root revert commits through the revert branch";
-  EXPECT_THROW(
-      advance_block(BlockExecutionMode::kBlockExecutionModeValidation),
-      std::runtime_error)
+  EXPECT_THROW(advance_block(BlockExecutionMode::kBlockExecutionModeValidation),
+               std::runtime_error)
       << "Block close must reject the forged observation with no matching "
          "insert";
 }
