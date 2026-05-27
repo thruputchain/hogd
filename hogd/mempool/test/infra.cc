@@ -4,7 +4,6 @@
 #include <string>
 #include <utility>
 
-#include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
@@ -21,7 +20,6 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
-#include "types.hh"
 
 namespace hogd {
 
