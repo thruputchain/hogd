@@ -17,6 +17,10 @@ Groundhog's execution model.
 
 WASM remains the production path.
 
+A separate, non-binding note on the zero-knowledge optionality this VM choice
+opens — and the architectural properties worth preserving through M5 — lives in
+the product-docs WIP area at `groundhog-product/wip/rv32-zk-optionality.md`.
+
 ## Goals
 
 - Define a Groundhog-specific RISC-V execution profile:
