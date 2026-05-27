@@ -249,13 +249,18 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
-  EXPECT_EQ(parsed->program->byte_size(), 160U);
+  EXPECT_EQ(parsed->program->byte_size(), compiled_sha256_return::kCodeBytes);
   EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
   ASSERT_EQ(parsed->dispatch_table.size(), 2U);
-  EXPECT_EQ(parsed->dispatch_table[0].method_id, 0U);
-  EXPECT_EQ(parsed->dispatch_table[0].pc, 0U);
-  EXPECT_EQ(parsed->dispatch_table[1].method_id, 1U);
-  EXPECT_EQ(parsed->dispatch_table[1].pc, 0U);
+  EXPECT_EQ(parsed->dispatch_table[0].method_id,
+            compiled_sha256_return::kSha256RepeatedMethodId);
+  EXPECT_EQ(parsed->dispatch_table[0].pc,
+            compiled_sha256_return::kSha256RepeatedPc);
+  EXPECT_EQ(parsed->dispatch_table[1].method_id,
+            compiled_sha256_return::kSha256MethodId);
+  EXPECT_EQ(parsed->dispatch_table[1].pc, compiled_sha256_return::kSha256Pc);
+  EXPECT_NE(compiled_sha256_return::kSha256RepeatedPc,
+            compiled_sha256_return::kSha256Pc);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
             kMaxMemoryBytes);
@@ -265,7 +270,9 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_EQ(parsed->initial_memory.size(), kMaxMemoryBytes);
   EXPECT_TRUE(std::ranges::equal(
       std::span<const uint8_t>(compiled_sha256_return::kInput),
-      std::span<const uint8_t>(parsed->initial_memory).subspan(0xa0, 7)));
+      std::span<const uint8_t>(parsed->initial_memory)
+          .subspan(compiled_sha256_return::kFixtureInputOffset,
+                   compiled_sha256_return::kInput.size())));
 }
 
 TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
@@ -456,7 +463,10 @@ TEST(Rv32ArtifactTest, rejectsInvalidDispatchTables)
     auto artifact = compiled_artifact_bytes();
     const uint32_t dispatch_offset =
         load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u64_at(artifact, dispatch_offset, 1);
+    store_u64_at(artifact, dispatch_offset,
+                 compiled_sha256_return::kSha256MethodId);
+    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes,
+                 compiled_sha256_return::kSha256RepeatedMethodId);
     refresh_dispatch_digest(artifact);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kDispatchTableInvalid);
@@ -465,7 +475,8 @@ TEST(Rv32ArtifactTest, rejectsInvalidDispatchTables)
     auto artifact = compiled_artifact_bytes();
     const uint32_t dispatch_offset =
         load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes, 0);
+    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes,
+                 compiled_sha256_return::kSha256RepeatedMethodId);
     refresh_dispatch_digest(artifact);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kDispatchTableInvalid);

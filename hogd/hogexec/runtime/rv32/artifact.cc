@@ -27,13 +27,10 @@ ranges_overlap(uint32_t left_offset, uint32_t left_size, uint32_t right_offset,
 }
 
 std::expected<std::vector<DispatchEntry>, ArtifactError>
-parse_dispatch_table(std::span<const uint8_t> dispatch_table,
-                     uint32_t code_size)
+parse_dispatch_table(std::span<const uint8_t> dispatch_table)
 {
   std::vector<DispatchEntry> entries;
   entries.reserve(dispatch_table.size() / kDispatchEntryBytes);
-  uint64_t previous_method_id = 0;
-  bool first = true;
   for (size_t offset = 0; offset < dispatch_table.size();
        offset += kDispatchEntryBytes) {
     const uint64_t method_id =
@@ -42,13 +39,10 @@ parse_dispatch_table(std::span<const uint8_t> dispatch_table,
         load_u32_le(dispatch_table, offset + kDispatchEntryPcOffset);
     const uint32_t reserved =
         load_u32_le(dispatch_table, offset + kDispatchEntryReservedOffset);
-    if (reserved != 0 || (pc % kInstructionBytes) != 0 || pc >= code_size ||
-        (!first && method_id <= previous_method_id)) {
+    if (reserved != 0) {
       return std::unexpected(ArtifactError::kDispatchTableInvalid);
     }
     entries.push_back(DispatchEntry{.method_id = method_id, .pc = pc});
-    previous_method_id = method_id;
-    first = false;
   }
   return entries;
 }
@@ -189,13 +183,16 @@ parse_artifact(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kDispatchDigestMismatch);
   }
 
+  auto dispatch_table = parse_dispatch_table(dispatch_table_bytes);
+  if (!dispatch_table.has_value()) {
+    return std::unexpected(dispatch_table.error());
+  }
   auto program = Program::create(code);
   if (!program.has_value()) {
     return std::unexpected(ArtifactError::kInvalidProgram);
   }
-  auto dispatch_table = parse_dispatch_table(dispatch_table_bytes, code_size);
-  if (!dispatch_table.has_value()) {
-    return std::unexpected(dispatch_table.error());
+  if (!dispatch_table_is_valid(*dispatch_table, *program)) {
+    return std::unexpected(ArtifactError::kDispatchTableInvalid);
   }
 
   return ArtifactImage{

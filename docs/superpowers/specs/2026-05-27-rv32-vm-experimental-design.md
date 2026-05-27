@@ -434,10 +434,15 @@ on the SDK/toolchain question:
 - Runtime dispatch now resolves method IDs through the artifact dispatch table
   to a validated initial PC. Unknown selectors fail deterministically with zero
   gas before VM construction.
+- This intentionally chooses artifact-visible runtime dispatch over the earlier
+  guest-side fixed entry stub option, because it keeps the method set
+  auditable before VM execution and makes dispatch misses runtime-deterministic.
+- A compiled Rust fixture now contains distinct RV32 entry PCs for the SDK
+  `Sha256Wrapper::sha256` and `Sha256Wrapper::sha256_repeated` method IDs, and
+  RV32/WASM parity tests invoke both methods plus an unknown method.
 - Dispatch remains experimental and `ContractType::kMockTest`-only. The
-  guest-side fixed entry stub plus invocation frame, and a compiled Rust
-  multi-entry fixture with distinct method PCs, are tracked follow-ups before
-  SDK ergonomics are considered complete.
+  guest-side fixed entry stub plus invocation frame remains a documented
+  alternative, but is not the current M4 dispatch direction.
 
 ### Deferred Hardening Before Milestone 5
 

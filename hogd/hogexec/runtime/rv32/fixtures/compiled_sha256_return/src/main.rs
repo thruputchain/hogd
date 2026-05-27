@@ -52,6 +52,17 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 #[no_mangle]
 #[link_section = ".text._start"]
 pub unsafe extern "C" fn _start() -> ! {
+    sha256_return_hash()
+}
+
+#[no_mangle]
+#[link_section = ".text.sha256_repeated"]
+pub unsafe extern "C" fn RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED() -> ! {
+    sha256_return_empty()
+}
+
+#[inline(always)]
+unsafe fn sha256_return_hash() -> ! {
     let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
     let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
 
@@ -66,6 +77,29 @@ pub unsafe extern "C" fn _start() -> ! {
     (*return_frame).words[0] = SYSCALL_RETURN;
     (*return_frame).words[1] = output_ptr as u64;
     (*return_frame).words[2] = HASH_BYTES as u64;
+    issue_syscall(return_frame);
+
+    loop {
+        asm!("", options(nomem, nostack));
+    }
+}
+
+#[inline(always)]
+unsafe fn sha256_return_empty() -> ! {
+    let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
+    let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
+
+    let sha_frame = core::ptr::addr_of_mut!(SHA_FRAME);
+    (*sha_frame).words[0] = SYSCALL_SHA256;
+    (*sha_frame).words[1] = input_ptr as u64;
+    (*sha_frame).words[2] = RV32_COMPILED_SHA256_RETURN_INPUT.len() as u64;
+    (*sha_frame).words[3] = output_ptr as u64;
+    issue_syscall(sha_frame);
+
+    let return_frame = core::ptr::addr_of_mut!(RETURN_FRAME);
+    (*return_frame).words[0] = SYSCALL_RETURN;
+    (*return_frame).words[1] = 0;
+    (*return_frame).words[2] = 0;
     issue_syscall(return_frame);
 
     loop {

@@ -1,6 +1,7 @@
 add_library(
   rv32_vm
   artifact.cc
+  dispatch.cc
   machine.cc
   program.cc
 )

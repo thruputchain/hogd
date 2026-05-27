@@ -52,25 +52,6 @@ host_trap_code_to_invoke_status(uint32_t code)
   return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 
-bool
-dispatch_table_is_valid(const RuntimeContractImage &image)
-{
-  if (image.dispatch_table.empty()) {
-    return false;
-  }
-  uint64_t previous_method_id = 0;
-  bool first = true;
-  for (const auto &entry : image.dispatch_table) {
-    if (image.program == nullptr || !image.program->contains_pc(entry.pc) ||
-        (!first && entry.method_id <= previous_method_id)) {
-      return false;
-    }
-    previous_method_id = entry.method_id;
-    first = false;
-  }
-  return true;
-}
-
 std::optional<uint32_t>
 entry_pc_for_method(const RuntimeContractImage &image, uint64_t method_id)
 {
@@ -101,7 +82,7 @@ private:
     }
     if (image_.program == nullptr ||
         image_.initial_memory.size() > image_.memory_bytes ||
-        !dispatch_table_is_valid(image_)) {
+        !dispatch_table_is_valid(image_.dispatch_table, *image_.program)) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
     auto entry_pc = entry_pc_for_method(image_, *method_id);
@@ -173,7 +154,8 @@ RuntimeContext::verify_contract(Contract const &contract) const
   auto it = contracts_.find(contract_id);
   if (it == contracts_.end() || it->second.program == nullptr ||
       it->second.initial_memory.size() > it->second.memory_bytes ||
-      !dispatch_table_is_valid(it->second)) {
+      !dispatch_table_is_valid(it->second.dispatch_table,
+                               *it->second.program)) {
     return InvokeErrorCode::Deterministic;
   }
   return InvokeErrorCode::None;

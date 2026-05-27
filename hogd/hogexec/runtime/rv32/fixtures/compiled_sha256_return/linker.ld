@@ -10,6 +10,7 @@ SECTIONS
   .text 0 : ALIGN(4)
   {
     KEEP(*(.text._start))
+    KEEP(*(.text.sha256_repeated))
     *(.text .text.*)
   } > RAM
 

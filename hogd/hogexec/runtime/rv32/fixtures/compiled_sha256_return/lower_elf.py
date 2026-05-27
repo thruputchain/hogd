@@ -31,6 +31,9 @@ STT_FUNC = 2
 EM_RISCV = 243
 SHN_ABS = 0xFFF1
 FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
+SHA256_METHOD_ID = 0xCA571C66A719DD56
+SHA256_REPEATED_METHOD_ID = 0x5749E8FA5D1F3CFE
+SHA256_REPEATED_SYMBOL = "RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED"
 
 ALLOC_ALLOWLIST = {
     ".text",
@@ -298,20 +301,44 @@ def extract_fixture_input(memory, sections, symbols):
         raise ElfError(f"{FIXTURE_INPUT_SYMBOL} must have nonzero size")
     if symbol.value + symbol.size > len(memory):
         raise ElfError(f"{FIXTURE_INPUT_SYMBOL} exceeds memory limit")
-    return memory[symbol.value : symbol.value + symbol.size]
+    return symbol.value, memory[symbol.value : symbol.value + symbol.size]
 
 
-def build_dispatch_table():
-    # F2 fixture: both selectors enter the existing compiled SHA256 entry.
-    dispatch_table = struct.pack("<QIIQII", 0, 0, 0, 1, 0, 0)
-    if len(dispatch_table) != 2 * DISPATCH_ENTRY_BYTES:
+def method_pc(symbols, name):
+    symbol = symbol_by_name(symbols, name)
+    if symbol is None:
+        raise ElfError(f"{name} symbol is missing")
+    if symbol.sym_type != STT_FUNC:
+        raise ElfError(f"{name} must be a function symbol")
+    if symbol.value % 4 != 0:
+        raise ElfError(f"{name} must be four-byte aligned")
+    return symbol.value
+
+
+def dispatch_entries(symbols):
+    entries = [
+        (SHA256_REPEATED_METHOD_ID, method_pc(symbols, SHA256_REPEATED_SYMBOL)),
+        (SHA256_METHOD_ID, method_pc(symbols, "_start")),
+    ]
+    entries.sort()
+    return entries
+
+
+def build_dispatch_table(entries, code):
+    dispatch_table = b"".join(
+        struct.pack("<QII", method_id, pc, 0) for method_id, pc in entries
+    )
+    if len(dispatch_table) != len(entries) * DISPATCH_ENTRY_BYTES:
         raise ElfError("internal dispatch table size mismatch")
+    for _method_id, pc in entries:
+        if pc >= len(code):
+            raise ElfError("dispatch entry points outside .text")
     return dispatch_table
 
 
-def build_artifact(code, memory):
+def build_artifact(code, memory, entries):
     code_offset = ARTIFACT_HEADER_BYTES
-    dispatch_table = build_dispatch_table()
+    dispatch_table = build_dispatch_table(entries, code)
     dispatch_offset = code_offset + len(code)
     memory_offset = dispatch_offset + len(dispatch_table)
     header = struct.pack(
@@ -359,7 +386,13 @@ def write_header(path, artifact, metadata):
 namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {K_MAX_MEMORY_BYTES};
+inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
+inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
+inline constexpr uint64_t kSha256RepeatedMethodId = 0x{SHA256_REPEATED_METHOD_ID:016x}ULL;
+inline constexpr uint32_t kSha256Pc = {metadata['sha256_pc']};
+inline constexpr uint32_t kSha256RepeatedPc = {metadata['sha256_repeated_pc']};
+inline constexpr uint32_t kFixtureInputOffset = {metadata['fixture_input_offset']};
 inline constexpr char kFixtureSha256[] = "{metadata['fixture_sha256']}";
 inline constexpr char kElfSha256[] = "{metadata['elf_sha256']}";
 
@@ -389,8 +422,9 @@ def main():
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
     code, memory = validate_sections(data, sections, symbols)
-    fixture_input = extract_fixture_input(memory, sections, symbols)
-    artifact = build_artifact(code, memory)
+    entries = dispatch_entries(symbols)
+    fixture_input_offset, fixture_input = extract_fixture_input(memory, sections, symbols)
+    artifact = build_artifact(code, memory, entries)
     fixture_blob = code + memory
     metadata = {
         "source_sha256": sha256_file(args.source),
@@ -402,8 +436,14 @@ def main():
         "elf_sha256": sha256_file(args.elf),
         "fixture_sha256": sha256_bytes(fixture_blob),
         "artifact_sha256": sha256_bytes(artifact),
+        "dispatch_entries": [
+            {"method_id": f"0x{method_id:016x}", "pc": pc} for method_id, pc in entries
+        ],
+        "sha256_pc": dict(entries)[SHA256_METHOD_ID],
+        "sha256_repeated_pc": dict(entries)[SHA256_REPEATED_METHOD_ID],
         "artifact_bytes": len(artifact),
         "fixture_input": fixture_input,
+        "fixture_input_offset": fixture_input_offset,
         "fixture_input_sha256": sha256_bytes(fixture_input),
         "code_sha256": sha256_bytes(code),
         "initial_memory_sha256": sha256_bytes(memory),
