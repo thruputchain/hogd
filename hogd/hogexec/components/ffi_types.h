@@ -92,9 +92,9 @@ static_assert(sizeof(AuthClaim) == sizeof(hogd::AuthClaim));
 static_assert(alignof(AuthClaim) == alignof(hogd::AuthClaim));
 static_assert(offsetof(AuthClaim, tag) == 0);
 static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
-                        source_address_claim) == sizeof(AuthClaim::Tag));
+                       source_address_claim) == sizeof(AuthClaim::Tag));
 static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body,
-                        pubkey_preimage) == 8);
+                       pubkey_preimage) == 8);
 
 // NOLINTEND(readability-identifier-naming)
 
