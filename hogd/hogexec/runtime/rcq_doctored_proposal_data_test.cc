@@ -183,9 +183,10 @@ TEST_F(RcqDoctoredProposalDataTest,
         marker_branch_taken = true;
         auto marker_key = make_storage_key("marker");
         uint8_t marker[] = {0xEE};
-        auto ws = ctx.handler().set_bytestring(
-            marker_key, std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = ctx.handler().set_bytestring(marker_key,
+                                               std::as_bytes(std::span(marker)),
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
         if (!ws.has_value())
           return ws.error().to_invoke_error();
         if (!ws.value().has_value())
@@ -229,8 +230,9 @@ TEST_F(RcqDoctoredProposalDataTest,
     ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
-  auto handler = make_new_system_call_handler_validation(
-      tx_b, *native_ctx, std::move(doctored_proposal_b));
+  auto handler =
+      make_new_system_call_handler_validation(tx_b, *native_ctx,
+                                              std::move(doctored_proposal_b));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   EXPECT_TRUE(marker_branch_taken);
@@ -292,8 +294,8 @@ TEST_F(RcqDoctoredProposalDataTest,
         return {};
       });
 
-  auto tx_a_ctx =
-      make_ab_context(std::move(a_try_invoke), std::move(b_double_consume_fault));
+  auto tx_a_ctx = make_ab_context(std::move(a_try_invoke),
+                                  std::move(b_double_consume_fault));
 
   auto tx_a = make_invoke_a_tx(0);
   NondeterministicProposalData proposal_a;
@@ -345,12 +347,12 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   {
     auto h1 = make_new_system_call_handler_validation(tx_insert_1, *insert_ctx,
-                                                       insert_p1);
+                                                      insert_p1);
     ASSERT_TRUE(h1.root_invoke().is_root_success());
     ASSERT_EQ(h1.try_commit_transaction(), ExecResult::ExecResultOK);
 
     auto h2 = make_new_system_call_handler_validation(tx_insert_2, *insert_ctx,
-                                                       insert_p2);
+                                                      insert_p2);
     ASSERT_TRUE(h2.root_invoke().is_root_success());
     ASSERT_EQ(h2.try_commit_transaction(), ExecResult::ExecResultOK);
   }
