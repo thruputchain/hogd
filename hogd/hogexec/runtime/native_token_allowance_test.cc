@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -26,7 +28,8 @@
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
