@@ -364,6 +364,38 @@ SystemCallHandler::try_commit_transaction()
   if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .should_revert()) {
+
+    // In validation mode, RCQ observation deltas must still reach HogDB so
+    // block-close matching can reject forged observations.  The normal success
+    // path handles this inside try_acquire_frame_locks(); the manual-revert
+    // path must submit observation-only deltas explicitly.
+    if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+      auto const &observations =
+          std::get<ValidationModeData>(execution_mode_data_)
+              .observations_to_validate();
+      for (auto const &[addrkey, entries] : observations) {
+        if (!entries.empty()) {
+          StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+          delta.retrocausal_queue().observed_concurrent_entries = {
+              entries.begin(), entries.end()};
+          db_proxy_.add_delta(addrkey, std::move(delta),
+                              std::to_underlying(StorageDeltaFlags::None));
+        }
+      }
+      auto push_res = db_proxy_.try_push_current_subtransaction();
+      if (!push_res.has_value()) {
+        return to_exec_result(push_res.error().code());
+      }
+      if (!push_res.value()) {
+        two_phase_commit_failed_ = true;
+        auto abort_status = abort_transaction();
+        if (!abort_status.has_value()) {
+          return to_exec_result(abort_status.error().code());
+        }
+        return ExecResult::ExecResultTxNonDeterministicError;
+      }
+    }
+
     auto res = db_proxy_.commit_transaction();
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
