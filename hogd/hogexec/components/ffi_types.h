@@ -42,7 +42,10 @@ union PublicKey {
 static_assert(std::is_trivially_copyable_v<PublicKey>);
 static_assert(std::is_standard_layout_v<PublicKey>);
 static_assert(sizeof(PublicKey) == sizeof(hogd::PublicKey));
+static_assert(alignof(PublicKey) == alignof(hogd::PublicKey));
 static_assert(offsetof(PublicKey, tag) == 0);
+static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, ed25519) ==
+              sizeof(PublicKey::Tag));
 
 struct PubkeyAccountPreimage {
   PublicKey pubkey;
@@ -50,8 +53,12 @@ struct PubkeyAccountPreimage {
 };
 
 static_assert(std::is_trivially_copyable_v<PubkeyAccountPreimage>);
+static_assert(std::is_standard_layout_v<PubkeyAccountPreimage>);
 static_assert(sizeof(PubkeyAccountPreimage) ==
               sizeof(hogd::PubkeyAccountPreimage));
+static_assert(offsetof(PubkeyAccountPreimage, pubkey) == 0);
+static_assert(offsetof(PubkeyAccountPreimage, nonce) ==
+              offsetof(hogd::PubkeyAccountPreimage, nonce));
 
 union AuthClaim {
   enum Tag : int32_t {
@@ -82,7 +89,12 @@ union AuthClaim {
 static_assert(std::is_trivially_copyable_v<AuthClaim>);
 static_assert(std::is_standard_layout_v<AuthClaim>);
 static_assert(sizeof(AuthClaim) == sizeof(hogd::AuthClaim));
+static_assert(alignof(AuthClaim) == alignof(hogd::AuthClaim));
 static_assert(offsetof(AuthClaim, tag) == 0);
+static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
+                       source_address_claim) == sizeof(AuthClaim::Tag));
+static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body,
+                       pubkey_preimage) == 8);
 
 // NOLINTEND(readability-identifier-naming)
 
