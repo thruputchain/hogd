@@ -90,8 +90,7 @@ public:
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
                        .gas_limit = UINT64_MAX,
-                       .calldata = Calldata(calldata.begin(),
-                                            calldata.end())}};
+                       .calldata = Calldata(calldata.begin(), calldata.end())}};
   }
 };
 
@@ -104,8 +103,7 @@ public:
 //
 // WAI: a different proposer could legitimately insert {20} before {10},
 // making index 0 return {20} honestly.
-TEST_F(RCQObservationByValueTest,
-       PeekObservationSwappedToAnotherInsertedValue)
+TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
 {
   std::vector<uint8_t> observed_values;
 
@@ -124,8 +122,7 @@ TEST_F(RCQObservationByValueTest,
       [&observed_values](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto peek_res =
-            ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -193,8 +190,9 @@ TEST_F(RCQObservationByValueTest,
     ASSERT_TRUE(h20.root_invoke().is_root_success());
     ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
 
-    auto hpeek = make_new_system_call_handler_validation(
-        tx_peek, *ctx, std::move(swapped_peek_p));
+    auto hpeek =
+        make_new_system_call_handler_validation(tx_peek, *ctx,
+                                                std::move(swapped_peek_p));
     ASSERT_TRUE(hpeek.root_invoke().is_root_success());
     ASSERT_EQ(hpeek.try_commit_transaction(), ExecResult::ExecResultOK);
   }
@@ -207,8 +205,8 @@ TEST_F(RCQObservationByValueTest,
       << "value-based reconciliation accepts the swapped observation because "
          "{20} was inserted in the same block";
 
-  auto result = lookup_storage_item_from_db(
-      make_contract_data_addrkey(kAddr, "result"));
+  auto result =
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "result"));
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->bytestring(), (Bytestring{20}));
 }
@@ -244,8 +242,7 @@ TEST_F(RCQObservationByValueTest,
       [&consumed_values](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto consume_res =
-            ctx.handler().retrocausal_queue_consume(key, false);
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
         if (!consume_res.has_value())
           return consume_res.error().to_invoke_error();
         if (!consume_res.value().has_value())
@@ -297,13 +294,14 @@ TEST_F(RCQObservationByValueTest,
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   {
-    auto ha = make_new_system_call_handler_validation(tx_insert, *ctx,
-                                                      insert_p);
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
     ASSERT_TRUE(ha.root_invoke().is_root_success());
     ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
 
-    auto hb = make_new_system_call_handler_validation(tx_consume, *ctx,
-                                                      std::move(swapped_consume_p));
+    auto hb =
+        make_new_system_call_handler_validation(tx_consume, *ctx,
+                                                std::move(swapped_consume_p));
     ASSERT_TRUE(hb.root_invoke().is_root_success());
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
@@ -316,8 +314,8 @@ TEST_F(RCQObservationByValueTest,
       << "value-based reconciliation accepts the swapped consume because "
          "{20} was inserted in the same block";
 
-  auto result = lookup_storage_item_from_db(
-      make_contract_data_addrkey(kAddr, "result"));
+  auto result =
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "result"));
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->bytestring(), (Bytestring{20}));
 }
@@ -333,8 +331,7 @@ TEST_F(RCQObservationByValueTest,
 // WAI: the RCQ invariant only requires that the observed value is inserted
 // *somewhere in the block* by a committing TX — it does not require temporal
 // ordering.  The observer and inserter can be the same transaction.
-TEST_F(RCQObservationByValueTest,
-       ForgedPeekSatisfiedByLaterSelfInsert)
+TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 {
   static constexpr uint8_t kEntry = 0xA7;
 
@@ -342,8 +339,7 @@ TEST_F(RCQObservationByValueTest,
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
 
-        auto peek_res =
-            ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -409,8 +405,8 @@ TEST_F(RCQObservationByValueTest,
   ASSERT_NO_THROW(
       advance_block(BlockExecutionMode::kBlockExecutionModeValidation));
 
-  auto marker = lookup_storage_item_from_db(
-      make_contract_data_addrkey(kAddr, "marker"));
+  auto marker =
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "marker"));
   ASSERT_TRUE(marker.has_value());
   EXPECT_EQ(marker->bytestring(), make_bytestring("ok"));
 }
@@ -425,15 +421,13 @@ TEST_F(RCQObservationByValueTest,
 // WAI: the RCQ invariant does not require linearizability — the observation
 // only needs a matching insert somewhere in the block, regardless of
 // transaction execution order.
-TEST_F(RCQObservationByValueTest,
-       ObserverSeesLaterInserterEntry)
+TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
 {
   auto contract = make_contract(
       // method 0: peek and write what we see
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto peek_res =
-            ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -501,8 +495,8 @@ TEST_F(RCQObservationByValueTest,
     ASSERT_TRUE(ha.root_invoke().is_root_success());
     ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
 
-    auto hb = make_new_system_call_handler_validation(tx_insert, *ctx,
-                                                      insert_p);
+    auto hb =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
     ASSERT_TRUE(hb.root_invoke().is_root_success());
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
@@ -512,8 +506,8 @@ TEST_F(RCQObservationByValueTest,
       << "block closes because {42} was inserted by a committing TX, even "
          "though the insert happened after the observation";
 
-  auto saw = lookup_storage_item_from_db(
-      make_contract_data_addrkey(kAddr, "saw"));
+  auto saw =
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "saw"));
   ASSERT_TRUE(saw.has_value());
   EXPECT_EQ(saw->bytestring(), (Bytestring{42}));
 }

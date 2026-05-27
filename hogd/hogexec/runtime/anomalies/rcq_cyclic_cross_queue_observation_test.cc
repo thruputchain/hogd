@@ -88,8 +88,7 @@ public:
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
                        .gas_limit = UINT64_MAX,
-                       .calldata = Calldata(calldata.begin(),
-                                            calldata.end())}};
+                       .calldata = Calldata(calldata.begin(), calldata.end())}};
   }
 };
 
@@ -102,8 +101,7 @@ public:
 //
 // With crafted ndet data, both succeed: each observation is matched by the
 // other transaction's insert.
-TEST_F(RCQCyclicCrossQueueTest,
-       CyclicCrossQueueObservationsSucceed)
+TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
 {
   static constexpr uint8_t kValA = 0xAA;
   static constexpr uint8_t kValB = 0xBB;
@@ -113,8 +111,7 @@ TEST_F(RCQCyclicCrossQueueTest,
       // queue_b
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key_a = make_storage_key("queue_a");
-        auto peek_res =
-            ctx.handler().retrocausal_queue_consume(key_a, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true);
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -144,8 +141,7 @@ TEST_F(RCQCyclicCrossQueueTest,
       // queue_a
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key_b = make_storage_key("queue_b");
-        auto peek_res =
-            ctx.handler().retrocausal_queue_consume(key_b, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true);
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -193,12 +189,10 @@ TEST_F(RCQCyclicCrossQueueTest,
   }
 
   EXPECT_FALSE(
-      lookup_storage_item_from_db(
-          make_contract_data_addrkey(kAddr, "marker_a"))
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "marker_a"))
           .has_value());
   EXPECT_FALSE(
-      lookup_storage_item_from_db(
-          make_contract_data_addrkey(kAddr, "marker_b"))
+      lookup_storage_item_from_db(make_contract_data_addrkey(kAddr, "marker_b"))
           .has_value());
 
   // Forge ndet data for both TXs.
