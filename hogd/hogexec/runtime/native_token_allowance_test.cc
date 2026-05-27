@@ -23,6 +23,7 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
+#include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -599,6 +600,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost() * 4);
 
+  // Owner method 0: seed allowance for spender.
+  // Owner method 1: adjust allowance for spender by +10.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -631,9 +634,22 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
       });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
 
+  // Spender method 0: invoke owner method 1 (adjust +10), then
+  // transfer_from. Both hit the same (owner, spender) allowance in one tx.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength out_len{};
+        RuntimeMemoryLength out_auth_len{};
+        auto inv = ctx.syscall<SyscallNo::kInvoke>(
+            kOwnerAddr, uint64_t{1}, static_cast<GasAmount>(UINT64_MAX),
+            std::span<const std::byte>{}, InvokeFlagSet{0},
+            std::span<const std::byte>{}, out_len, out_auth_len);
+        if (!inv.has_value() ||
+            *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "invoke owner for adjust_allowance failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_xfer =
@@ -688,23 +704,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
 
   advance_block();
 
-  // Tx 2: owner adjusts allowance +10 (intermediate = INT128_MAX + 5).
-  {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
-        *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
-  }
-
-  // Tx 3: spender transfers 10000 from owner.
-  // Net allowance delta = -9990; committed value = INT128_MAX - 9995.
+  // Tx 2: spender invokes owner (adjust +10) then transfer_from(10000).
+  // Net allowance delta = +10 - 10000 = -9990; committed = INT128_MAX - 9995.
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
@@ -770,9 +771,22 @@ TEST_F(NativeTokenAllowanceTest,
       });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
 
+  // Spender method 0: invoke owner method 1 (adjust +10), then
+  // transfer_from(3). Net delta = +7, committed = INT128_MAX + 2 → overflow.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        RuntimeMemoryLength out_len{};
+        RuntimeMemoryLength out_auth_len{};
+        auto inv = ctx.syscall<SyscallNo::kInvoke>(
+            kOwnerAddr, uint64_t{1}, static_cast<GasAmount>(UINT64_MAX),
+            std::span<const std::byte>{}, InvokeFlagSet{0},
+            std::span<const std::byte>{}, out_len, out_auth_len);
+        if (!inv.has_value() ||
+            *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "invoke owner for adjust_allowance failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_xfer =
@@ -825,23 +839,8 @@ TEST_F(NativeTokenAllowanceTest,
 
   advance_block();
 
-  // Tx 2: owner adjusts +10, then spender transfer_from only 3.
+  // Tx 2: spender invokes owner (adjust +10) then transfer_from only 3.
   // Net allowance delta = +7; committed value = INT128_MAX + 2, overflow.
-  // These must be separate transactions since different callers.
-  {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
-        *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
-  }
-
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
@@ -853,8 +852,7 @@ TEST_F(NativeTokenAllowanceTest,
                                              .calldata = {}}}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 }
 
