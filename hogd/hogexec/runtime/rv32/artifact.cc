@@ -1,32 +1,12 @@
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <utility>
 
 namespace hogd::rv32 {
 namespace {
-
-uint32_t
-load_u32(std::span<const uint8_t> bytes, size_t offset)
-{
-  return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8) |
-         (uint32_t{bytes[offset + 2]} << 16) |
-         (uint32_t{bytes[offset + 3]} << 24);
-}
-
-uint64_t
-load_u64(std::span<const uint8_t> bytes, size_t offset)
-{
-  uint64_t value = 0;
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    value |= uint64_t{bytes[offset + i]} << (i * 8);
-  }
-  return value;
-}
 
 bool
 range_within(uint32_t offset, uint32_t size, size_t total)
@@ -50,10 +30,10 @@ ranges_overlap(uint32_t left_offset, uint32_t left_size,
 uint64_t
 artifact_digest(std::span<const uint8_t> bytes)
 {
-  uint64_t digest = 1469598103934665603ULL;
-  digest = gas_schedule_digest_u64(digest, bytes.size());
+  uint64_t digest = kFnvOffsetBasis;
+  digest = fnv_digest_u64(digest, bytes.size());
   for (const uint8_t byte : bytes) {
-    digest = gas_schedule_digest_byte(digest, byte);
+    digest = fnv_digest_byte(digest, byte);
   }
   return digest;
 }
@@ -68,23 +48,33 @@ parse_artifact(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kBadMagic);
   }
 
-  const uint32_t format_version = load_u32(bytes, 8);
-  const uint32_t header_size = load_u32(bytes, 12);
-  const uint64_t vm_profile_digest = load_u64(bytes, 16);
-  const uint32_t flags = load_u32(bytes, 24);
-  const uint32_t entry_abi_version = load_u32(bytes, 28);
-  const uint32_t syscall_abi_version = load_u32(bytes, 32);
-  const uint32_t gas_schedule_version = load_u32(bytes, 36);
-  const uint64_t gas_digest = load_u64(bytes, 40);
-  const uint32_t memory_bytes = load_u32(bytes, 48);
-  const uint32_t code_size = load_u32(bytes, 52);
-  const uint32_t initial_memory_size = load_u32(bytes, 56);
-  const uint32_t code_offset = load_u32(bytes, 60);
-  const uint32_t initial_memory_offset = load_u32(bytes, 64);
-  const uint32_t dispatch_table_offset = load_u32(bytes, 68);
-  const uint32_t dispatch_table_size = load_u32(bytes, 72);
-  const uint64_t code_digest = load_u64(bytes, 76);
-  const uint64_t initial_memory_digest = load_u64(bytes, 84);
+  const uint32_t format_version =
+      load_u32_le(bytes, kArtifactFormatVersionOffset);
+  const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
+  const uint64_t vm_profile_digest =
+      load_u64_le(bytes, kArtifactVmProfileOffset);
+  const uint32_t flags = load_u32_le(bytes, kArtifactFlagsOffset);
+  const uint32_t entry_abi_version =
+      load_u32_le(bytes, kArtifactEntryAbiOffset);
+  const uint32_t syscall_abi_version =
+      load_u32_le(bytes, kArtifactSyscallAbiOffset);
+  const uint32_t gas_schedule_version =
+      load_u32_le(bytes, kArtifactGasVersionOffset);
+  const uint64_t gas_digest = load_u64_le(bytes, kArtifactGasDigestOffset);
+  const uint32_t memory_bytes = load_u32_le(bytes, kArtifactMemoryBytesOffset);
+  const uint32_t code_size = load_u32_le(bytes, kArtifactCodeSizeOffset);
+  const uint32_t initial_memory_size =
+      load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
+  const uint32_t code_offset = load_u32_le(bytes, kArtifactCodeOffsetOffset);
+  const uint32_t initial_memory_offset =
+      load_u32_le(bytes, kArtifactInitialMemoryOffsetOffset);
+  const uint32_t dispatch_table_offset =
+      load_u32_le(bytes, kArtifactDispatchOffsetOffset);
+  const uint32_t dispatch_table_size =
+      load_u32_le(bytes, kArtifactDispatchSizeOffset);
+  const uint64_t code_digest = load_u64_le(bytes, kArtifactCodeDigestOffset);
+  const uint64_t initial_memory_digest =
+      load_u64_le(bytes, kArtifactInitialMemoryDigestOffset);
 
   if (format_version != kArtifactFormatVersion) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
@@ -119,6 +109,8 @@ parse_artifact(std::span<const uint8_t> bytes)
   if (initial_memory_size > memory_bytes) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
+  // M4 stores a full memory image so each loaded VM state has exactly one
+  // valid artifact byte encoding. Sparse sections can be a later format.
   if (initial_memory_size != memory_bytes) {
     return std::unexpected(ArtifactError::kInitialMemorySizeMismatch);
   }
@@ -132,6 +124,7 @@ parse_artifact(std::span<const uint8_t> bytes)
   const size_t code_end = size_t{code_offset} + code_size;
   const size_t initial_memory_end =
       size_t{initial_memory_offset} + initial_memory_size;
+  // Keep the v1 layout canonical: header, code, memory, and no hidden bytes.
   if (code_offset != header_size || initial_memory_offset != code_end ||
       initial_memory_end != bytes.size()) {
     return std::unexpected(ArtifactError::kInvalidOffsets);

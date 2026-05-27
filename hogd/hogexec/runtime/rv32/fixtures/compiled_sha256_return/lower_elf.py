@@ -14,7 +14,10 @@ ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
 ARTIFACT_ENTRY_ABI_VERSION = 0
 ARTIFACT_SYSCALL_ABI_VERSION = 0
 GAS_TABLE_VERSION = 1
+# Must match hogd/hogexec/runtime/rv32/program.h kGasScheduleDigest.
 GAS_SCHEDULE_DIGEST = 0xD2F3483DC373FADA
+FNV_OFFSET_BASIS = 1469598103934665603
+FNV_PRIME = 1099511628211
 SHT_SYMTAB = 2
 SHT_STRTAB = 3
 SHT_RELA = 4
@@ -53,7 +56,7 @@ def sha256_bytes(blob):
 
 
 def artifact_digest_byte(digest, value):
-    return ((digest ^ value) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return ((digest ^ value) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
 
 
 def artifact_digest_u64(digest, value):
@@ -64,7 +67,7 @@ def artifact_digest_u64(digest, value):
 
 
 def artifact_digest(blob):
-    digest = 1469598103934665603
+    digest = FNV_OFFSET_BASIS
     digest = artifact_digest_u64(digest, len(blob))
     for byte in blob:
         digest = artifact_digest_byte(digest, byte)

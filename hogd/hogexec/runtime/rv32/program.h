@@ -7,6 +7,8 @@
 #include <span>
 #include <vector>
 
+#include "hogd/hogexec/runtime/rv32/encoding.h"
+
 namespace hogd::rv32 {
 
 constexpr uint32_t kInstructionBytes = 4;
@@ -180,23 +182,19 @@ constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
 constexpr uint64_t
 gas_schedule_digest_byte(uint64_t digest, uint8_t value)
 {
-  return (digest ^ value) * 1099511628211ULL;
+  return fnv_digest_byte(digest, value);
 }
 
 constexpr uint64_t
 gas_schedule_digest_u64(uint64_t digest, uint64_t value)
 {
-  for (int i = 0; i < 8; ++i) {
-    digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(value));
-    value >>= 8;
-  }
-  return digest;
+  return fnv_digest_u64(digest, value);
 }
 
 constexpr uint64_t
 gas_schedule_digest()
 {
-  uint64_t digest = 1469598103934665603ULL;
+  uint64_t digest = kFnvOffsetBasis;
   digest = gas_schedule_digest_u64(digest, kGasTableVersion);
   digest = gas_schedule_digest_u64(digest, kOpCount);
   for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {

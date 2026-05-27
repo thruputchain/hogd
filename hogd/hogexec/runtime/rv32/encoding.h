@@ -1,0 +1,46 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+namespace hogd::rv32 {
+
+inline constexpr uint64_t kFnvOffsetBasis = 1469598103934665603ULL;
+inline constexpr uint64_t kFnvPrime = 1099511628211ULL;
+
+constexpr uint32_t
+load_u32_le(std::span<const uint8_t> bytes, size_t offset)
+{
+  return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8) |
+         (uint32_t{bytes[offset + 2]} << 16) |
+         (uint32_t{bytes[offset + 3]} << 24);
+}
+
+constexpr uint64_t
+load_u64_le(std::span<const uint8_t> bytes, size_t offset)
+{
+  uint64_t value = 0;
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    value |= uint64_t{bytes[offset + i]} << (i * 8);
+  }
+  return value;
+}
+
+constexpr uint64_t
+fnv_digest_byte(uint64_t digest, uint8_t value)
+{
+  return (digest ^ value) * kFnvPrime;
+}
+
+constexpr uint64_t
+fnv_digest_u64(uint64_t digest, uint64_t value)
+{
+  for (int i = 0; i < 8; ++i) {
+    digest = fnv_digest_byte(digest, static_cast<uint8_t>(value));
+    value >>= 8;
+  }
+  return digest;
+}
+
+} // namespace hogd::rv32

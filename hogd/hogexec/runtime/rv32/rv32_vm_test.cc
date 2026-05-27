@@ -19,24 +19,6 @@ namespace {
 
 namespace compiled_sha256_return = fixtures::compiled_sha256_return;
 
-constexpr size_t kArtifactFormatVersionOffset = 8;
-constexpr size_t kArtifactHeaderSizeOffset = 12;
-constexpr size_t kArtifactVmProfileOffset = 16;
-constexpr size_t kArtifactFlagsOffset = 24;
-constexpr size_t kArtifactEntryAbiOffset = 28;
-constexpr size_t kArtifactSyscallAbiOffset = 32;
-constexpr size_t kArtifactGasVersionOffset = 36;
-constexpr size_t kArtifactGasDigestOffset = 40;
-constexpr size_t kArtifactMemoryBytesOffset = 48;
-constexpr size_t kArtifactCodeSizeOffset = 52;
-constexpr size_t kArtifactInitialMemorySizeOffset = 56;
-constexpr size_t kArtifactCodeOffsetOffset = 60;
-constexpr size_t kArtifactInitialMemoryOffsetOffset = 64;
-constexpr size_t kArtifactDispatchOffsetOffset = 68;
-constexpr size_t kArtifactDispatchSizeOffset = 72;
-constexpr size_t kArtifactCodeDigestOffset = 76;
-constexpr size_t kArtifactInitialMemoryDigestOffset = 84;
-
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
 {
@@ -62,14 +44,6 @@ compiled_artifact_bytes()
 {
   return std::vector<uint8_t>(compiled_sha256_return::kArtifact.begin(),
                               compiled_sha256_return::kArtifact.end());
-}
-
-uint32_t
-load_u32_at(std::span<const uint8_t> bytes, size_t offset)
-{
-  return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8) |
-         (uint32_t{bytes[offset + 2]} << 16) |
-         (uint32_t{bytes[offset + 3]} << 24);
 }
 
 void
@@ -263,6 +237,12 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), 160U);
   EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
+  EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
+                        kArtifactMemoryBytesOffset),
+            kMaxMemoryBytes);
+  EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
+                        kArtifactInitialMemorySizeOffset),
+            kMaxMemoryBytes);
   ASSERT_EQ(parsed->initial_memory.size(), kMaxMemoryBytes);
   EXPECT_TRUE(std::ranges::equal(
       std::span<const uint8_t>(compiled_sha256_return::kInput),
@@ -343,7 +323,19 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kMemorySizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, 0);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kCodeSizeInvalid);
+  }
+  {
+    auto artifact = compiled_artifact_bytes();
+    store_u32_at(artifact, kArtifactCodeSizeOffset, kMaxCodeBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kCodeSizeInvalid);
   }
@@ -368,7 +360,8 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    const uint32_t code_offset = load_u32_at(artifact, kArtifactCodeOffsetOffset);
+    const uint32_t code_offset =
+        load_u32_le(artifact, kArtifactCodeOffsetOffset);
     store_u32_at(artifact, kArtifactInitialMemoryOffsetOffset, code_offset);
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
   }
@@ -403,8 +396,9 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    const uint32_t code_offset = load_u32_at(artifact, kArtifactCodeOffsetOffset);
-    const uint32_t code_size = load_u32_at(artifact, kArtifactCodeSizeOffset);
+    const uint32_t code_offset =
+        load_u32_le(artifact, kArtifactCodeOffsetOffset);
+    const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
     artifact[code_offset] = 0;
     const auto code = std::span<const uint8_t>(artifact).subspan(code_offset,
                                                                  code_size);

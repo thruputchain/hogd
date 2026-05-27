@@ -24,14 +24,6 @@ sign_extend(uint32_t value, uint32_t bits_count)
   return static_cast<int32_t>(extended);
 }
 
-uint32_t
-load_u32_le(std::span<const uint8_t> code, size_t offset)
-{
-  return uint32_t{code[offset]} | (uint32_t{code[offset + 1]} << 8) |
-         (uint32_t{code[offset + 2]} << 16) |
-         (uint32_t{code[offset + 3]} << 24);
-}
-
 DecodedInstruction
 base_decode(uint32_t word)
 {
