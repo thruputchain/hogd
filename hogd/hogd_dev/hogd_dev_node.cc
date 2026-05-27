@@ -38,7 +38,6 @@
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
-#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"

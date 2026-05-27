@@ -154,6 +154,8 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
+    CHECK(ready());
+
     // [last_committed_block_] is updated by [schedulercoord_commit_block()]
     // under the [commit_lock_] lock.
     x23::CoroGuard cg;
@@ -173,6 +175,8 @@ public:
   // are still running.
   static x23::Async<void> schedulercoord_shutdown()
   {
+    CHECK(ready());
+
     // TODO(jhumphri): Implement.
     co_return;
   }
@@ -180,6 +184,8 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
+    CHECK(ready());
+
     x23::CoroGuard commit_cg;
     co_await commit_cg(commit_lock_);
 
@@ -219,6 +225,8 @@ public:
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
+    CHECK(ready());
+
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
