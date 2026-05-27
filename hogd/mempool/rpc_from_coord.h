@@ -112,6 +112,17 @@ public:
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
+
+    // Only one coordinator is allowed to register with the mempool.
+    size_t expected_coordinators_registered = 0;
+    if (!num_coordinators_registered_.compare_exchange_strong(
+            /*expected=*/expected_coordinators_registered, /*desired=*/1,
+            /*order=*/std::memory_order_relaxed)) {
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationAlreadyRegistered;
+    }
+    CHECK(!ready());
+
     Registration::registration().register_coordinator(card);
     co_await finish_init();
 
@@ -597,6 +608,7 @@ private:
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 
+  std::atomic<size_t> num_coordinators_registered_ = 0;
   std::atomic<bool> ready_ = false;
 
   std::chrono::steady_clock::time_point last_ =

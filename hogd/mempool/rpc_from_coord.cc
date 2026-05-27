@@ -165,6 +165,8 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  CHECK(ready());
+
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
   auto delta_raw = std::chrono::duration_cast<std::chrono::milliseconds>(delta);
@@ -286,6 +288,8 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
+  CHECK(ready());
+
   // We deliberately do not discard *vetted* txs even if the mempool is at
   // capacity because we want to avoid this deadlock:
   // 1. The mempool receives a block to validate.
@@ -873,6 +877,8 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 {
+  CHECK(ready());
+
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
   nomination_telemetry.attempted = true;
@@ -1269,6 +1275,8 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
+  CHECK(ready());
+
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
   auto record_stage = [&](double &stage_out) {
@@ -1638,6 +1646,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
+  CHECK(ready());
+
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
   {
@@ -1962,6 +1972,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
 
+  CHECK(ready());
   CHECK_EQ(height, auth_data_height_.load() + 1);
 
   x23::CoroGuard cg;
