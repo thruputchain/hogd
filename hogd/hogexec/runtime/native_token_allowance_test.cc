@@ -604,8 +604,9 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r = client.invoke_opt<"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kSeedAllowance));
+        auto r = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
+                                                       make_difference(
+                                                           kSeedAllowance));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -635,8 +636,9 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_xfer = client.invoke_opt<"transfer_from">(
-            ctx, kOwnerAddr, kReceiverAddr, make_amount(kTransferAmount));
+        auto r_xfer =
+            client.invoke_opt<"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
+                                               make_amount(kTransferAmount));
         if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
             !r_xfer.value().value().has_value() ||
             !r_xfer.value().value().value().is_ok()) {
@@ -741,8 +743,9 @@ TEST_F(NativeTokenAllowanceTest,
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r = client.invoke_opt<"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kSeedAllowance));
+        auto r = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
+                                                       make_difference(
+                                                           kSeedAllowance));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -755,8 +758,8 @@ TEST_F(NativeTokenAllowanceTest,
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_adj = client.invoke_opt<"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(10));
+        auto r_adj = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
+                                                           make_difference(10));
         if (!r_adj.has_value() || !r_adj.value().has_value() ||
             !r_adj.value().value().has_value() ||
             !r_adj.value().value().value().is_ok()) {
@@ -772,8 +775,9 @@ TEST_F(NativeTokenAllowanceTest,
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_xfer = client.invoke_opt<"transfer_from">(
-            ctx, kOwnerAddr, kReceiverAddr, make_amount(3));
+        auto r_xfer =
+            client.invoke_opt<"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
+                                               make_amount(3));
         if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
             !r_xfer.value().value().has_value() ||
             !r_xfer.value().value().value().is_ok()) {
@@ -909,8 +913,7 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
 
 // 11. transfer_from where owner == caller skips allowance: no allowance
 // row is created and no storage cost is consumed by the native token contract.
-TEST_F(NativeTokenAllowanceTest,
-       SelfTransferFromSkipsAllowanceAndNoStorageCost)
+TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(197);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(198);
@@ -977,8 +980,8 @@ TEST_F(NativeTokenAllowanceTest,
   EXPECT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value())
       << "self transfer_from must not create an allowance row";
 
-  auto native_token_balance_item = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(
+  auto native_token_balance_item =
+      lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
           GenesisConfigurationLoader::kPresetNativeTokenAddress));
   ASSERT_TRUE(native_token_balance_item.has_value());
   EXPECT_EQ(from_xdr(native_token_balance_item->nnint()), 0)
