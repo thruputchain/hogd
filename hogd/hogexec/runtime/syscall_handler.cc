@@ -432,6 +432,10 @@ SystemCallHandler::try_commit_transaction()
       BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
   if (!res.has_value()) {
     two_phase_commit_failed_ = true;
+    auto abort_res = abort_transaction();
+    if (!abort_res.has_value()) {
+      return to_exec_result(abort_res.error().code());
+    }
     return to_exec_result(res.error().code());
   }
 
