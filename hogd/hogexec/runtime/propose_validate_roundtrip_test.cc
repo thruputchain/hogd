@@ -868,6 +868,81 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
       << "More consumed than inserted should fail finalization";
 }
 
+// Root manual revert must still submit observation deltas to HogDB.
+// A forged observation on an empty queue that triggers manual revert
+// must be rejected at block close.
+TEST_P(ProposeValidateRoundtripTest,
+       RootManualRevertSkipsForgedRCQObservationValidation)
+{
+  if (GetParam() != TestDB::kHogDB)
+    GTEST_SKIP() << "RCQ observation validation requires kHogDB";
+
+  static constexpr uint8_t kForgedEntry = 0xE7;
+
+  auto revert_on_forged_observation = make_contract(
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        auto observed = ctx.handler().retrocausal_queue_consume(key, true);
+        if (!observed.has_value())
+          return observed.error().to_invoke_error();
+
+        if (observed.value().has_value() &&
+            observed.value().value().size() == 1 &&
+            observed.value().value()[0] == kForgedEntry) {
+          ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+          return {};
+        }
+
+        auto marker = std::string_view("honest");
+        auto [write_status, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), make_storage_key("marker"),
+            std::as_bytes(std::span(marker)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!write_status.has_value() ||
+            write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(0, std::move(revert_on_forged_observation));
+  auto ctx = std::make_unique<NativeContext>(std::move(cmap));
+  auto tx = make_invoke_a_tx(0);
+
+  {
+    auto proposal_handler = make_new_system_call_handler(tx, *ctx);
+    ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
+    auto honest_proposal = proposal_handler.get_proposal_data();
+    ASSERT_EQ(honest_proposal.nondeterministic_bit_count, 1U);
+    ASSERT_EQ(honest_proposal.observed_queue_entry_sequence.size(), 0U);
+    ASSERT_EQ(honest_proposal.nondeterministic_bits[0] & uint8_t{1}, 0U)
+        << "Honest proposal on an empty queue must observe no entry";
+    ASSERT_EQ(proposal_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+  }
+
+  NondeterministicProposalData forged;
+  forged.nondeterministic_bit_count = 1;
+  forged.nondeterministic_bits = {uint8_t{1}};
+  forged.observed_queue_entry_sequence = {QueueEntry{kForgedEntry}};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
+  ASSERT_TRUE(validation_handler.root_invoke().is_root_success())
+      << "The forged observation is consumed and makes the contract choose "
+         "manual root-frame revert";
+  ASSERT_EQ(validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultTxRootFrameReverted)
+      << "Manual root revert commits through the revert branch";
+  EXPECT_THROW(advance_block(BlockExecutionMode::kBlockExecutionModeValidation),
+               std::runtime_error)
+      << "Block close must reject the forged observation with no matching "
+         "insert";
+}
+
 TEST_P(ProposeValidateRoundtripTest,
        ValidationRejectsOverDepthTryInvokeTrueBits)
 {
