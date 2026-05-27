@@ -38,15 +38,23 @@ The thinnest vertical answers all four with minimum surface.
 A `no_std` Rust contract reproducing Milestone 3's SHA256-then-Return behavior,
 compiled to `riscv32im-unknown-none-elf` out of band, lowered host-side into the
 existing `RuntimeContractImage`, run through the **unchanged** `rv32::RuntimeContext`,
-asserting the **same parity Milestone 3 proved**:
+asserting parity on every host-visible effect this contract actually produces:
 
 - invoke status,
 - return buffer,
-- SHA256 syscall trace,
+- SHA256 syscall trace and arguments,
 - Return syscall body,
-- storage-write / event / transaction-stat counts and bodies,
+- syscall trace and transaction stats,
 
 plus same-input determinism.
+
+This slice deliberately does **not** claim storage-write or event-body parity.
+The SHA256-then-Return contract writes no storage and emits no events, so those
+comparisons would be vacuous (`0 == 0`) and prove nothing — the same hole the M3
+review flagged. Asserting them here would manufacture a misleading green. Proving
+the storage and event paths requires a second compiled contract that actually
+exercises them, captured as followup F5; it is intentionally out of Slice 1 so
+the toolchain-viability proof is not entangled with runtime-effect breadth.
 
 Green parity means the toolchain, memory model, entry convention, and syscall
 round-trip are all validated. Anything beyond that proof is out of scope for this
@@ -54,7 +62,7 @@ slice.
 
 SHA256-then-Return is chosen deliberately over a Return-only or pure-arithmetic
 contract because it is the only shape that forces a real **syscall round-trip**
-(unknown #4) while reusing the M3 parity harness unchanged.
+(unknown #4) while reusing the M3 parity harness for the effects it does produce.
 
 ## The Consume/Author Boundary
 
@@ -86,8 +94,9 @@ disposable spike glue.
    and fixed buffers. No allocator, no heap.
 2. **Linker script** — lays out the address space (see Memory and Address Model).
 3. **Regeneration script** — invokes the Rust build out of band, runs the
-   lowering tool, and writes the committed fixture. Documented and checked in;
-   **not** wired into the CMake build.
+   lowering tool, and writes the committed fixture plus its metadata sidecar (see
+   Reproducibility). Documented and checked in; **not** wired into the CMake
+   build.
 4. **Lowering tool** — a host-side helper that parses the ELF, splits sections
    into code image versus initial linear memory by virtual address, and emits the
    fixture bytes. ELF parsing lives only here. It runs **only at regeneration
@@ -118,6 +127,22 @@ Rust no_std contract  --(cargo, out of band)-->  riscv32im ELF
 
 CI runs only the right-hand side. It needs no Rust toolchain because the fixture
 is committed; the regeneration script is run by hand when the contract changes.
+
+## Reproducibility
+
+Because the Rust source, linker script, lowering tool, and committed image can
+otherwise drift silently, the fixture must be reproducible and self-describing:
+
+- Regeneration from a clean checkout must produce a **byte-identical** image. The
+  build is pinned (fixed `rustc`/target, deterministic flags, no timestamps or
+  paths leaking into the output) so the fixture is a pure function of its
+  inputs.
+- A committed metadata sidecar records, at minimum: the contract source hash, the
+  linker script hash, the lowering tool hash, the ELF hash, the lowered image
+  hash, the `rustc` version, the target triple, and the build flags.
+- The regeneration script fails if a freshly built image does not match the
+  committed image and metadata, so drift is caught at regeneration time rather
+  than discovered later.
 
 ## Memory and Address Model
 
@@ -152,16 +177,60 @@ lowering mistake surfaces immediately as a SHA256 digest mismatch.
 Both the code image and the linear-memory footprint must independently fit within
 their existing limits (`kMaxCodeBytes` and `kMaxMemoryBytes`, both 64 KiB).
 
+### Lowering Validation Rules
+
+The `pc == vaddr` scheme and the dead-low-bytes shortcut are only safe if no
+data-bearing content hides in executable space and no unexpected memory-resident
+sections exist. The lowering tool must therefore **reject** rather than silently
+accept anything outside an explicit allowlist. It must:
+
+- accept only a known section allowlist: `.text` (code image) and the
+  data-bearing `SHF_ALLOC` sections placed above it (`.rodata`, `.srodata`,
+  `.data`, `.sdata`, `.bss`, `.sbss`);
+- reject any other `SHF_ALLOC` section, so a stray literal pool, jump table,
+  `.srodata`-style constant, or compiler-introduced data section in or around
+  `.text` is a hard failure, not dead-but-wrong bytes;
+- reject any section carrying `SHF_EXECINSTR` other than `.text`, and reject any
+  data-bearing bytes inside the `.text` virtual-address range;
+- reject the presence of dynamic relocations or any unresolved relocation
+  records — the image must be fully linked and position-fixed;
+- verify `.text` starts at vaddr 0 with `_start` first, and that every
+  data-bearing section's vaddr lies above `.text` and within `kMaxMemoryBytes`.
+
+The Rust build is configured to keep constants and jump tables out of `.text`
+(no in-text constant pools), and the lowering tool's allowlist is the backstop
+that fails loudly if a toolchain change violates that assumption.
+
 ## Entry and Syscall ABI
 
 - **Entry**: a single fixed entry through the linker-placed `_start` stub at
   `pc = 0`. No method-selector dispatch table in this slice. `Machine`'s `pc = 0`
-  initial-state invariant is left untouched.
+  initial-state invariant is left untouched. `_start` **must not return**: a guest
+  invocation terminates only by issuing the Return (or Exit) syscall, which the
+  bridge maps to `HostResult::Halt`. Running off the end of the code image is
+  `Trap::BadPc`, so a missing terminating syscall fails loudly rather than
+  silently succeeding. `_start` relies on the VM-provided `sp` (memory size
+  rounded down to 16 bytes) and assumes a 16-byte-aligned stack; it does not set
+  up its own stack.
 - **Syscall**: the contract reuses the **existing M2/M3 frame ABI unchanged** —
   `a0` points at a guest-memory frame, `a7` carries the bridge version, the frame
   holds the syscall number and ten 64-bit argument words followed by a result
   footer. The Rust glue only writes that frame and executes `ecall`; the bridge,
-  parser, alias guard, tracing, and gas machinery are unchanged.
+  parser, alias guard, tracing, and gas machinery are unchanged. Because the
+  compiler is otherwise free to use `a0`/`a7`, the syscall is emitted as inline
+  assembly that makes the ABI explicit:
+  - the frame is built in guest memory at a frame pointer that is
+    `alignof(uint64_t)`-aligned — the bridge already traps on a misaligned `a0`,
+    so misalignment is a hard failure, not undefined behavior;
+  - `a0` is loaded with the frame pointer and `a7` with the bridge version
+    immediately before the `ecall`, in the same asm block;
+  - the asm block marks `a0`–`a7` (and any temporaries it uses) as clobbered so
+    the compiler does not assume they survive the call;
+  - the result footer (`result_code`, `panic`, `gas_consumed`) is read back from
+    the committed frame in linear memory **after** the `ecall` returns, not from
+    a register;
+  - on `HostResult::Continue`, `a0` holds the return value per the bridge
+    convention.
 
 ## Out of Scope (Guards)
 
@@ -177,20 +246,31 @@ This slice does **not**:
 
 - **F0** — Migrate the crude author-side (contract, linker script, syscall-frame
   writes) out of hogd fixtures into sdk_rs as the real contract-authoring
-  surface, once viability is proven. Cross-referenced from the main spec's
-  deferred-hardening list.
+  surface, once viability is proven. Tracked as an M4 followup here; not folded
+  into the main spec's pre-M5 deferred-hardening list, since it is SDK structure
+  rather than runtime hardening.
 - **F1** — Define the versioned Groundhog artifact format (lessons-doc R1); emit
   side in sdk_rs, consume/validate side in hogd. This is M4 slice 2.
 - **F2** — Replace the single fixed entry with a method-selector dispatch table
   (R2).
 - **F3** — Typed Rust syscall/entry wrappers and ergonomic macros in sdk_rs (R3).
 - **F4** — ABI-version mismatch tests (R4) and prior-art test corpus import (R5).
+- **F5** — A second compiled contract that actually writes storage and emits
+  events, proving storage-write and event-body RV32/WASM parity that the
+  SHA256-then-Return contract cannot. Closes the parity gap this slice
+  deliberately leaves open.
 
 ## Review Gate
 
 - The parity and determinism tests pass — the Milestone 3 gate, now fed by
-  compiled Rust instead of a hand-assembled image.
+  compiled Rust instead of a hand-assembled image — for exactly the host-visible
+  effects the contract produces, with no vacuous (`0 == 0`) storage/event
+  assertions.
 - CI needs no Rust toolchain; the committed fixture is sufficient.
 - A reviewer confirms `Machine`, `Program`, and the syscall bridge are untouched
   and that no protocol-visible behavior changed.
-- The regeneration script is documented and reproduces the committed fixture.
+- The lowering tool enforces the section allowlist and relocation rules, rejecting
+  unexpected `SHF_ALLOC`/executable sections and any data-bearing content in
+  `.text`.
+- The regeneration script reproduces the committed fixture byte-for-byte from a
+  clean checkout, and the committed metadata sidecar matches.
