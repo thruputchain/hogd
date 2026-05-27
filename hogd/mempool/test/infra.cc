@@ -30,8 +30,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   : mempool_coord_server_(
         RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(),
                                          mempool_auth_server_->impl(),
-                                         kNetworkId,
-                                         mempool_tx_size_limit))
+                                         kNetworkId, mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.
