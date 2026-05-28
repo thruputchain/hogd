@@ -129,6 +129,42 @@ This intentionally replaced the earlier guest-side fixed-entry stub idea. The
 guest-side shape may still be useful for a future SDK, but it is not the current
 dispatch mechanism.
 
+## Rust Fixture And Lowering
+
+The committed Rust fixture proves that real `no_std` Rust compiled to
+`riscv32im-unknown-none-elf` can run through the unchanged VM and match WASM on
+host-visible behavior.
+
+The VM is Harvard-style:
+
+- PC indexes immutable `Program` code.
+- Loads/stores address guest data memory.
+- Code bytes are not executable guest memory.
+
+The fixture layout makes link-time virtual addresses match PC-space:
+
+- `.text` starts at virtual address `0`.
+- `.rodata`, `.data`, `.bss`, frames, buffers, and stack live above `.text`
+  inside the 64 KiB memory limit.
+- Low guest-memory bytes corresponding to `.text` are dead space.
+- Initial memory is a full 64 KiB image, not sparse sections.
+
+The fixture lowerer must fail loudly on unsupported compiler output:
+
+- `.text` starts at `0`;
+- no unresolved relocations;
+- no unsupported allocated sections;
+- no executable section other than `.text`;
+- no overlapping data sections;
+- no data/object symbols in `.text`;
+- dispatch entry symbols resolve to valid `.text` PCs;
+- build metadata records relevant source/config hashes.
+
+The Rust fixture uses the normal RV32 bridge ABI: guest writes a syscall frame,
+puts its address in `a0`, puts the bridge version in `a7`, executes `ecall`, and
+reads the footer after return. Normal completion is the Return syscall; `_start`
+must not return.
+
 ## Milestone Status
 
 - M1 VM core: complete.

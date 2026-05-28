@@ -102,6 +102,10 @@ Current role:
 
 - Committed compiled Rust regression fixture.
 - Reproducible metadata-backed build.
+- `hogd` owns the consume side: VM, artifact parser, runtime parity tests, and
+  this fixture lowerer.
+- A future `sdk_rs` path should own the author side: contract crate,
+  entry/dispatch macros, typed syscall wrappers, and production lowerer.
 - Strict lowerer for the fixture: rejects unsupported allocated sections,
   relocations, executable non-text sections, overlapping data, data symbols in
   `.text`, and invalid dispatch symbols.

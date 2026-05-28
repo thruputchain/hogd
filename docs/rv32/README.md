@@ -11,9 +11,6 @@
 - [rv32-rust-vm-lessons.md](rv32-rust-vm-lessons.md)
   - Prior-art notes from CKB-VM and PolkaVM.
   - Explains why the artifact/runtime boundary looks the way it does.
-- [rv32-m4-slice1-design.md](rv32-m4-slice1-design.md)
-  - Point-in-time M4 Slice 1 plan for proving compiled Rust viability.
-  - Kept for toolchain/lowering context; later M4 slices are now implemented.
 - [rv32-vm-baseline.md](rv32-vm-baseline.md)
   - Initial Release benchmark baseline versus wasmi.
 
