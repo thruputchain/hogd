@@ -380,8 +380,10 @@ inline constexpr uint64_t kSha256RepeatedMethodId = 0x{SHA256_REPEATED_METHOD_ID
 inline constexpr uint32_t kSha256Pc = {metadata['sha256_pc']};
 inline constexpr uint32_t kSha256RepeatedPc = {metadata['sha256_repeated_pc']};
 inline constexpr uint32_t kFixtureInputOffset = {metadata['fixture_input_offset']};
-inline constexpr char kFixtureSha256[] = "{metadata['fixture_sha256']}";
-inline constexpr char kElfSha256[] = "{metadata['elf_sha256']}";
+inline constexpr char kFixtureSha256[] =
+    "{metadata['fixture_sha256']}";
+inline constexpr char kElfSha256[] =
+    "{metadata['elf_sha256']}";
 
 {format_array("kInput", metadata["fixture_input"])}
 

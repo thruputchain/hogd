@@ -13,8 +13,10 @@ inline constexpr uint64_t kSha256RepeatedMethodId = 0x5749e8fa5d1f3cfeULL;
 inline constexpr uint32_t kSha256Pc = 0;
 inline constexpr uint32_t kSha256RepeatedPc = 160;
 inline constexpr uint32_t kFixtureInputOffset = 320;
-inline constexpr char kFixtureSha256[] = "147af09e99ff264ce8c1c9a5545d28c919c69015784f14b8cb750f34962a2a51";
-inline constexpr char kElfSha256[] = "8aea2d48321f2382d170ab2e881e165dd0171ccdcd7b90093eebdb73b6883b44";
+inline constexpr char kFixtureSha256[] =
+    "147af09e99ff264ce8c1c9a5545d28c919c69015784f14b8cb750f34962a2a51";
+inline constexpr char kElfSha256[] =
+    "8aea2d48321f2382d170ab2e881e165dd0171ccdcd7b90093eebdb73b6883b44";
 
 inline constexpr std::array<uint8_t, 7> kInput = {
     0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x0d,
