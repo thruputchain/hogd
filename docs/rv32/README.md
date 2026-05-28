@@ -13,6 +13,10 @@
   - Explains why the artifact/runtime boundary looks the way it does.
 - [rv32-vm-baseline.md](rv32-vm-baseline.md)
   - Initial Release benchmark baseline versus wasmi.
+- [rv32-conformance-and-performance.md](rv32-conformance-and-performance.md)
+  - In-tree conformance scope and Linux-review benchmark counters.
+- [riscv-tests-license.md](riscv-tests-license.md)
+  - License notice for adapted `riscv-tests` conformance vectors.
 
 This directory is the working record for the experimental in-tree RV32IM VM.
 RV32 is still test-only: no `ContractType::kRv32`, no deployed-contract path,
@@ -34,6 +38,10 @@ and no protocol-visible behavior.
   - Disposable Rust/lowerer spike used as a regression fixture, not the final SDK.
 - Tests and benchmark:
   - `rv32_vm_test.cc`: VM, artifact, gas, and instruction behavior.
+  - `rv32_conformance_test.cc`: declarative RV32IM conformance corpus.
+  - `rv32_borrowed_conformance_test.cc`: adapted `riscv-tests` vectors.
+  - `rv32_differential_conformance_test.cc`: fixed-seed random programs checked
+    against a test-only reference model.
   - `rv32_syscall_bridge_test.cc`: bridge atomicity and marshalling.
   - `rv32_syscall_entry_bridge_test.cc`: real `syscall_entry` bridge tests.
   - `rv32_runtime_context_test.cc`: RV32/WASM parity and outcome mapping.
@@ -47,5 +55,5 @@ and has RV32/WASM parity tests for success and error outcomes.
 
 The core is solid enough to keep owning. Before protocol exposure, the remaining
 work is activation hardening: cross-platform determinism runs, a production SDK
-lowerer, an RV32I/RV32M conformance corpus, fuzzing/error-triage polish, and
-explicit protocol discipline around artifact hashing and gas version bumps.
+lowerer, expanded RV32I/RV32M conformance coverage, fuzzing/error-triage polish,
+and explicit protocol discipline around artifact hashing and gas version bumps.

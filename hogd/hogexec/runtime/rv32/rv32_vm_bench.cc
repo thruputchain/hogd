@@ -5,7 +5,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,9 +12,12 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
+#include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
@@ -25,99 +27,16 @@ constexpr uint32_t kBenchMemoryBytes = 4096;
 constexpr uint64_t kBenchGasLimit = 1'000'000'000;
 constexpr uint32_t kFibInput = 20;
 constexpr uint32_t kFib20Result = 6765;
+constexpr int32_t kHostFnNoneOrRecoverable = 0;
 
-void
-append_u32(std::vector<uint8_t> &code, uint32_t word)
-{
-  code.push_back(static_cast<uint8_t>(word));
-  code.push_back(static_cast<uint8_t>(word >> 8));
-  code.push_back(static_cast<uint8_t>(word >> 16));
-  code.push_back(static_cast<uint8_t>(word >> 24));
-}
-
-uint32_t
-i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
-{
-  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 |
-         static_cast<uint32_t>(rs1) << 15 |
-         static_cast<uint32_t>(funct3) << 12 | static_cast<uint32_t>(rd) << 7 |
-         opcode;
-}
-
-uint32_t
-j_type(uint8_t rd, int32_t imm)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffffU;
-  return ((uimm >> 20) & 0x1U) << 31 | ((uimm >> 1) & 0x3ffU) << 21 |
-         ((uimm >> 11) & 0x1U) << 20 | ((uimm >> 12) & 0xffU) << 12 |
-         static_cast<uint32_t>(rd) << 7 | 0x6fU;
-}
-
-uint32_t
-addi(uint8_t rd, uint8_t rs1, int32_t imm)
-{
-  return i_type(0x13U, rd, 0, rs1, imm);
-}
-
-uint32_t
-op(uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t funct3, uint8_t funct7)
-{
-  return static_cast<uint32_t>(funct7) << 25 |
-         static_cast<uint32_t>(rs2) << 20 | static_cast<uint32_t>(rs1) << 15 |
-         static_cast<uint32_t>(funct3) << 12 | static_cast<uint32_t>(rd) << 7 |
-         0x33U;
-}
-
-uint32_t
-branch(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffU;
-  return ((uimm >> 12) & 0x1U) << 31 | ((uimm >> 5) & 0x3fU) << 25 |
-         static_cast<uint32_t>(rs2) << 20 | static_cast<uint32_t>(rs1) << 15 |
-         static_cast<uint32_t>(funct3) << 12 | ((uimm >> 1) & 0xfU) << 8 |
-         ((uimm >> 11) & 0x1U) << 7 | 0x63U;
-}
-
-uint32_t
-store(uint8_t rs1, uint8_t rs2, int32_t imm, uint8_t funct3)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
-  return ((uimm >> 5) << 25) | static_cast<uint32_t>(rs2) << 20 |
-         static_cast<uint32_t>(rs1) << 15 |
-         static_cast<uint32_t>(funct3) << 12 | ((uimm & 0x1fU) << 7) | 0x23U;
-}
-
-uint32_t
-load(uint8_t rd, uint8_t rs1, int32_t imm, uint8_t funct3)
-{
-  return i_type(0x03U, rd, funct3, rs1, imm);
-}
-
-uint32_t
-jalr(uint8_t rd, uint8_t rs1, int32_t imm)
-{
-  return i_type(0x67U, rd, 0, rs1, imm);
-}
-
-std::shared_ptr<const Program>
-make_program(std::span<const uint32_t> words)
-{
-  std::vector<uint8_t> code;
-  for (const uint32_t word : words) {
-    append_u32(code, word);
-  }
-  auto program = Program::create(code);
-  if (!program.has_value()) {
-    std::abort();
-  }
-  return std::make_shared<Program>(std::move(*program));
-}
-
-std::shared_ptr<const Program>
-make_program(std::initializer_list<uint32_t> words)
-{
-  return make_program(std::span<const uint32_t>(words.begin(), words.size()));
-}
+using test_program::addi;
+using test_program::branch;
+using test_program::j_type;
+using test_program::jalr;
+using test_program::load;
+using test_program::make_program;
+using test_program::op;
+using test_program::store;
 
 class HaltHost : public Host {
 public:
@@ -132,40 +51,96 @@ struct Rv32RunStats {
   StepResult result = StepResult::kTrap;
   uint64_t instructions = 0;
   uint64_t gas_consumed = 0;
+  uint64_t guest_gas_consumed = 0;
+  uint64_t host_gas_consumed = 0;
+  uint64_t loads = 0;
+  uint64_t stores = 0;
+  uint64_t branches = 0;
+  uint64_t branches_taken = 0;
+  uint64_t jumps = 0;
+  uint64_t ecalls = 0;
+  uint64_t traps = 0;
 };
 
-Rv32RunStats
-run_rv32_program(Machine &machine, Host &host, uint64_t gas_limit)
+void
+record_instruction(Rv32RunStats &stats, const DecodedInstruction &instruction,
+                   uint32_t pc_before, uint32_t pc_after)
 {
-  uint64_t instructions = 0;
+  ++stats.instructions;
+  switch (instruction.kind) {
+  case InstructionKind::kLoad:
+    ++stats.loads;
+    break;
+  case InstructionKind::kStore:
+    ++stats.stores;
+    break;
+  case InstructionKind::kBranch:
+    ++stats.branches;
+    if (pc_after != pc_before + kInstructionBytes) {
+      ++stats.branches_taken;
+    }
+    break;
+  case InstructionKind::kJal:
+  case InstructionKind::kJalr:
+    ++stats.jumps;
+    break;
+  case InstructionKind::kEcall:
+    ++stats.ecalls;
+    break;
+  default:
+    break;
+  }
+}
+
+Rv32RunStats
+run_rv32_program(Machine &machine, Host &host, const Program &program,
+                 uint64_t gas_limit)
+{
+  Rv32RunStats stats;
   for (;;) {
+    const uint32_t pc_before = machine.pc();
+    const uint64_t gas_before = machine.gas_remaining();
+    const DecodedInstruction *instruction = nullptr;
+    if (program.contains_pc(pc_before)) {
+      instruction = &program.instruction_at_aligned_pc(pc_before);
+    }
     const StepResult result = machine.step();
+    if (instruction != nullptr && machine.gas_remaining() != gas_before) {
+      record_instruction(stats, *instruction, pc_before, machine.pc());
+    }
     switch (result) {
     case StepResult::kContinue:
-      ++instructions;
       continue;
     case StepResult::kEcall:
     {
-      ++instructions;
       const auto pending_ecall = machine.pending_ecall();
       if (!pending_ecall.has_value()) {
         std::abort();
       }
       const EcallArgs ecall_args = pending_ecall.value();
       const HostResult host_result = host.ecall(machine.view(), ecall_args);
+      stats.host_gas_consumed += host_result.gas_consumed;
       const StepResult completed = machine.complete_ecall(host_result);
       if (completed == StepResult::kContinue) {
         continue;
       }
-      return Rv32RunStats{.result = completed,
-                          .instructions = instructions,
-                          .gas_consumed = gas_limit - machine.gas_remaining()};
+      stats.result = completed;
+      stats.gas_consumed = gas_limit - machine.gas_remaining();
+      stats.guest_gas_consumed = stats.gas_consumed - stats.host_gas_consumed;
+      if (completed == StepResult::kTrap) {
+        ++stats.traps;
+      }
+      return stats;
     }
     case StepResult::kHalted:
     case StepResult::kTrap:
-      return Rv32RunStats{.result = result,
-                          .instructions = instructions,
-                          .gas_consumed = gas_limit - machine.gas_remaining()};
+      stats.result = result;
+      stats.gas_consumed = gas_limit - machine.gas_remaining();
+      stats.guest_gas_consumed = stats.gas_consumed - stats.host_gas_consumed;
+      if (result == StepResult::kTrap) {
+        ++stats.traps;
+      }
+      return stats;
     default:
       std::abort();
     }
@@ -180,24 +155,70 @@ run_rv32_benchmark(benchmark::State &state,
   HaltHost host;
   int64_t executed_instructions = 0;
   int64_t consumed_gas = 0;
+  int64_t consumed_guest_gas = 0;
+  int64_t consumed_host_gas = 0;
+  int64_t loads = 0;
+  int64_t stores = 0;
+  int64_t branches = 0;
+  int64_t branches_taken = 0;
+  int64_t jumps = 0;
+  int64_t ecalls = 0;
+  int64_t traps = 0;
 
   for (auto _ : state) {
     state.PauseTiming();
     machine.reset(kBenchGasLimit);
     state.ResumeTiming();
 
-    const Rv32RunStats stats = run_rv32_program(machine, host, kBenchGasLimit);
+    const Rv32RunStats stats =
+        run_rv32_program(machine, host, *program, kBenchGasLimit);
     if (stats.result != StepResult::kHalted) {
       std::abort();
     }
     executed_instructions += static_cast<int64_t>(stats.instructions);
     consumed_gas += static_cast<int64_t>(stats.gas_consumed);
+    consumed_guest_gas += static_cast<int64_t>(stats.guest_gas_consumed);
+    consumed_host_gas += static_cast<int64_t>(stats.host_gas_consumed);
+    loads += static_cast<int64_t>(stats.loads);
+    stores += static_cast<int64_t>(stats.stores);
+    branches += static_cast<int64_t>(stats.branches);
+    branches_taken += static_cast<int64_t>(stats.branches_taken);
+    jumps += static_cast<int64_t>(stats.jumps);
+    ecalls += static_cast<int64_t>(stats.ecalls);
+    traps += static_cast<int64_t>(stats.traps);
     benchmark::DoNotOptimize(machine.halt_code());
   }
 
   state.SetItemsProcessed(executed_instructions);
   state.counters["gas"] =
       benchmark::Counter(static_cast<double>(consumed_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.guest_gas"] =
+      benchmark::Counter(static_cast<double>(consumed_guest_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.host_gas"] =
+      benchmark::Counter(static_cast<double>(consumed_host_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.loads"] =
+      benchmark::Counter(static_cast<double>(loads),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.stores"] =
+      benchmark::Counter(static_cast<double>(stores),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.branches"] =
+      benchmark::Counter(static_cast<double>(branches),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.branches_taken"] =
+      benchmark::Counter(static_cast<double>(branches_taken),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.jumps"] =
+      benchmark::Counter(static_cast<double>(jumps),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.ecalls"] =
+      benchmark::Counter(static_cast<double>(ecalls),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.traps"] =
+      benchmark::Counter(static_cast<double>(traps),
                          benchmark::Counter::kAvgIterations);
 }
 
@@ -215,9 +236,9 @@ make_recursive_fibonacci_program()
 
       addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
       addi(kT0, 0, 2),         branch(4, kA0, kT0, 36), addi(kA0, kA0, -1),
-      j_type(kRa, -24),        store(kSp, kA0, 4, 2),   load(kA0, kSp, 8, 2),
-      addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, kSp, 4, 2),
-      op(kA0, kA0, kT1, 0, 0), load(kRa, kSp, 12, 2),   addi(kSp, kSp, 16),
+      j_type(kRa, -24),        store(kSp, kA0, 4, 2),   load(kA0, 2, kSp, 8),
+      addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, 2, kSp, 4),
+      op(kA0, kA0, kT1, 0, 0), load(kRa, 2, kSp, 12),   addi(kSp, kSp, 16),
       jalr(0, kRa, 0),
   });
 }
@@ -345,7 +366,7 @@ bm_load_store_loop(benchmark::State &state)
       addi(1, 0, 64),
       addi(2, 0, 100),
       store(1, 2, 0, 2),
-      load(3, 1, 0, 2),
+      load(3, 2, 1, 0),
       addi(2, 2, -1),
       branch(1, 2, 0, -12),
       0x00000073U,
@@ -360,7 +381,8 @@ bm_rv32_fibonacci_recursive_20(benchmark::State &state)
   const auto program = make_recursive_fibonacci_program();
   Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
   HaltHost host;
-  const Rv32RunStats stats = run_rv32_program(machine, host, kBenchGasLimit);
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *program, kBenchGasLimit);
   if (stats.result != StepResult::kHalted ||
       machine.halt_code() != kFib20Result) {
     std::abort();
@@ -383,6 +405,61 @@ bm_wasmi_built_contract_fibonacci_recursive_20(benchmark::State &state)
                                                 "fibonacci_raw.wasm"));
 }
 
+void
+store_u64_le(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
+{
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  }
+}
+
+TrampolineResult
+bridge_noop_entry(ExternHostCallContext /*context*/, WasmContext wasm_context,
+                  uint64_t /*arg0*/, uint64_t /*arg1*/, uint64_t /*arg2*/,
+                  uint64_t /*arg3*/, uint64_t /*arg4*/, uint64_t /*arg5*/,
+                  uint64_t /*arg6*/, uint64_t /*arg7*/, uint64_t /*arg8*/,
+                  uint64_t /*arg9*/, uint64_t /*arg10*/)
+{
+  if (wasm_context.memory.sz > kSyscallFrameBytes) {
+    wasm_context.memory.mem[kSyscallFrameBytes] ^= 0x5aU;
+  }
+  return TrampolineResult{.result_code = 0,
+                          .panic = kHostFnNoneOrRecoverable,
+                          .gas_consumed = 0};
+}
+
+void
+bm_syscall_bridge_roundtrip(benchmark::State &state)
+{
+  const auto memory_bytes = static_cast<size_t>(state.range(0));
+  std::vector<uint8_t> memory(memory_bytes);
+  std::array<uint32_t, kRegisterCount> registers = {};
+  for (size_t i = 0; i < kSyscallFrameArgWords; ++i) {
+    store_u64_le(memory, i * sizeof(uint64_t), 0x0102030405060708ULL + i);
+  }
+
+  SyscallBridgeHost bridge(nullptr, bridge_noop_entry);
+  MachineView view(0, kBenchGasLimit, registers, memory);
+  int64_t calls = 0;
+  for (auto _ : state) {
+    const HostResult result =
+        bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = kSyscallBridgeVersion});
+    if (result.status != HostStatus::kContinue ||
+        result.continue_value() != 0) {
+      std::abort();
+    }
+    ++calls;
+    benchmark::DoNotOptimize(memory.data());
+  }
+
+  state.SetItemsProcessed(calls);
+  state.SetBytesProcessed(calls * static_cast<int64_t>(memory.size()));
+  state.counters["rv32.bridge_memory_bytes"] =
+      benchmark::Counter(static_cast<double>(memory.size()));
+  state.counters["rv32.bridge_frame_bytes"] =
+      benchmark::Counter(static_cast<double>(kSyscallFrameBytes));
+}
+
 // Google Benchmark registers through static objects; keep the benchmark file
 // tidy-clean without changing the library registration model.
 // NOLINTBEGIN(bugprone-throwing-static-initialization)
@@ -391,6 +468,7 @@ BENCHMARK(bm_load_store_loop);
 BENCHMARK(bm_rv32_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
+BENCHMARK(bm_syscall_bridge_roundtrip)->Arg(4096)->Arg(65536);
 // NOLINTEND(bugprone-throwing-static-initialization)
 
 } // namespace

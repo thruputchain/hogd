@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
+#include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 
 // Some legacy VM tests keep descriptive snake_case names and compact aggregate
@@ -32,26 +33,18 @@ namespace hogd::rv32 {
 namespace {
 
 namespace compiled_sha256_return = fixtures::compiled_sha256_return;
-
-void
-append_u32(std::vector<uint8_t> &code, uint32_t word)
-{
-  code.push_back(static_cast<uint8_t>(word));
-  code.push_back(static_cast<uint8_t>(word >> 8));
-  code.push_back(static_cast<uint8_t>(word >> 16));
-  code.push_back(static_cast<uint8_t>(word >> 24));
-}
-
-std::vector<uint8_t>
-code_from_words(std::initializer_list<uint32_t> words)
-{
-  std::vector<uint8_t> code;
-  code.reserve(words.size() * kInstructionBytes);
-  for (const uint32_t word : words) {
-    append_u32(code, word);
-  }
-  return code;
-}
+using test_program::addi;
+using test_program::append_u32;
+using test_program::b_type;
+using test_program::code_from_words;
+using test_program::i_type;
+using test_program::j_type;
+using test_program::jalr;
+using test_program::load;
+using test_program::make_program;
+using test_program::r_type;
+using test_program::s_type;
+using test_program::u_type;
 
 std::vector<uint8_t>
 compiled_artifact_bytes()
@@ -104,83 +97,6 @@ expect_artifact_error(std::vector<uint8_t> artifact, ArtifactError expected)
   const auto parsed = parse_artifact(artifact);
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error(), expected);
-}
-
-std::shared_ptr<const Program>
-make_program(std::initializer_list<uint32_t> words)
-{
-  const auto code = code_from_words(words);
-  auto result =
-      Program::create(std::span<const uint8_t>(code.data(), code.size()));
-  if (!result.has_value()) {
-    ADD_FAILURE() << "failed to create test program";
-    return {};
-  }
-  return std::make_shared<Program>(std::move(*result));
-}
-
-uint32_t
-r_type(uint8_t funct7, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t rd)
-{
-  return uint32_t{funct7} << 25 | uint32_t{rs2} << 20 | uint32_t{rs1} << 15 |
-         uint32_t{funct3} << 12 | uint32_t{rd} << 7 | 0x33U;
-}
-
-uint32_t
-i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
-{
-  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
-         uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
-}
-
-uint32_t
-s_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
-  return (uimm >> 5) << 25 | uint32_t{rs2} << 20 | uint32_t{rs1} << 15 |
-         uint32_t{funct3} << 12 | (uimm & 0x1fU) << 7 | 0x23U;
-}
-
-uint32_t
-b_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffU;
-  return ((uimm >> 12) & 0x1U) << 31 | ((uimm >> 5) & 0x3fU) << 25 |
-         uint32_t{rs2} << 20 | uint32_t{rs1} << 15 | uint32_t{funct3} << 12 |
-         ((uimm >> 1) & 0xfU) << 8 | ((uimm >> 11) & 0x1U) << 7 | 0x63U;
-}
-
-uint32_t
-u_type(uint32_t opcode, uint8_t rd, uint32_t imm)
-{
-  return (imm & 0xfffff000U) | uint32_t{rd} << 7 | opcode;
-}
-
-uint32_t
-j_type(uint8_t rd, int32_t imm)
-{
-  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffffU;
-  return ((uimm >> 20) & 0x1U) << 31 | ((uimm >> 1) & 0x3ffU) << 21 |
-         ((uimm >> 11) & 0x1U) << 20 | ((uimm >> 12) & 0xffU) << 12 |
-         uint32_t{rd} << 7 | 0x6fU;
-}
-
-uint32_t
-addi(uint8_t rd, uint8_t rs1, int32_t imm)
-{
-  return i_type(0x13, rd, 0, rs1, imm);
-}
-
-uint32_t
-load(uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
-{
-  return i_type(0x03, rd, funct3, rs1, imm);
-}
-
-uint32_t
-jalr(uint8_t rd, uint8_t rs1, int32_t imm)
-{
-  return i_type(0x67, rd, 0, rs1, imm);
 }
 
 struct HaltHost : Host {

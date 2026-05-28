@@ -65,6 +65,57 @@ target_link_libraries(
 gtest_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
 
 add_executable(
+  rv32_conformance_test
+  rv32_conformance_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_conformance_test
+  rv32_vm
+  GTest::gtest
+)
+gtest_discover_tests(
+  rv32_conformance_test
+  TEST_PREFIX rv32.conformance.
+  NO_PRETTY_VALUES
+)
+
+add_executable(
+  rv32_borrowed_conformance_test
+  rv32_borrowed_conformance_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_borrowed_conformance_test
+  rv32_vm
+  GTest::gtest
+)
+gtest_discover_tests(
+  rv32_borrowed_conformance_test
+  TEST_PREFIX rv32.borrowed.
+  NO_PRETTY_VALUES
+)
+
+add_executable(
+  rv32_differential_conformance_test
+  rv32_differential_conformance_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_differential_conformance_test
+  rv32_vm
+  GTest::gtest
+)
+gtest_discover_tests(
+  rv32_differential_conformance_test
+  TEST_PREFIX rv32.differential.
+  NO_PRETTY_VALUES
+)
+
+add_executable(
   rv32_syscall_bridge_test
   rv32_syscall_bridge_test.cc
   rv32_vm_test_main.cc
@@ -103,7 +154,7 @@ if(BUILD_BENCHMARKS)
 
   target_link_libraries(
     rv32_vm_bench
-    rv32_vm
+    rv32_syscall_bridge
     benchmark::benchmark
     unified_lib
   )
