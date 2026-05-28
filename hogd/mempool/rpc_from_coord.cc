@@ -1670,6 +1670,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     last_stage_ts = now;
   };
   double stage_wait_commit_lock = 0.0;
+  double stage_wait_hog_age_lock = 0.0;
   double stage_wait_validations = 0.0;
   double stage_precheck_validations = 0.0;
   double stage_wait_nominated_lock = 0.0;
@@ -1684,20 +1685,21 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
     info("schedulercoord_commit_block() stages: "
-         "wait_commit_lock={:.6f}, wait_validations={:.6f}, "
+         "wait_commit_lock={:.6f}, wait_hog_age_lock={:.6f}, "
+         "wait_validations={:.6f}, "
          "precheck_validations={:.6f}, wait_nominated_lock={:.6f}, "
          "precheck_block_presence={:.6f}, build_handles={:.6f}, "
          "compute_reenqueue_set={:.6f}, remove_from_scheduler={:.6f}, "
          "await_handles={:.6f}, write_average_hog_ages={:.6f}, "
          "finalize={:.6f}, total={:.6f}, outcome={}, "
          "block_id={}, handles={}, reenqueue_size={}, remove_size={}",
-         stage_wait_commit_lock, stage_wait_validations,
-         stage_precheck_validations, stage_wait_nominated_lock,
-         stage_precheck_block_presence, stage_build_handles,
-         stage_compute_reenqueue_set, stage_remove_from_scheduler,
-         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
-         timer.elapsed(), outcome, block_id, handles_size, reenqueue_size,
-         remove_from_scheduler_size);
+         stage_wait_commit_lock, stage_wait_hog_age_lock,
+         stage_wait_validations, stage_precheck_validations,
+         stage_wait_nominated_lock, stage_precheck_block_presence,
+         stage_build_handles, stage_compute_reenqueue_set,
+         stage_remove_from_scheduler, stage_await_handles,
+         stage_write_average_hog_ages, stage_finalize, timer.elapsed(), outcome,
+         block_id, handles_size, reenqueue_size, remove_from_scheduler_size);
   };
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -1735,6 +1737,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   x23::CoroGuard commit_cg;
   co_await commit_cg(commit_lock_);
   record_stage(stage_wait_commit_lock);
+
+  x23::CoroGuard hog_age_cg;
+  co_await hog_age_cg(scheduler_->pending_hog_age_update_lock_);
+  record_stage(stage_wait_hog_age_lock);
 
   x23::Vec<x23::Async<void>> commit_handles;
   commit_handles.reserve(validated_block_cache_.size());
@@ -1903,6 +1909,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   if (commit_window_stats.nomination.attempted) {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
          "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_hog_age_lock={:.6f}, "
          "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
          "stage_wait_nominated_lock={:.6f}, "
          "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
@@ -1915,12 +1922,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "nominated_txs={}, failed_txs={}}}, validations={}, "
          "validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
-         stage_precheck_validations, stage_wait_nominated_lock,
-         stage_precheck_block_presence, stage_build_handles,
-         stage_compute_reenqueue_set, stage_remove_from_scheduler,
-         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
-         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_hog_age_lock,
+         stage_wait_validations, stage_precheck_validations,
+         stage_wait_nominated_lock, stage_precheck_block_presence,
+         stage_build_handles, stage_compute_reenqueue_set,
+         stage_remove_from_scheduler, stage_await_handles,
+         stage_write_average_hog_ages, stage_finalize, scheduler_size,
+         total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.nomination.succeeded,
          commit_window_stats.nomination.block_id,
@@ -1934,6 +1942,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   else {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
          "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_hog_age_lock={:.6f}, "
          "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
          "stage_wait_nominated_lock={:.6f}, "
          "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
@@ -1944,12 +1953,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "submitted_vetted={}, submitted_unvetted={}, nomination=none, "
          "validations={}, validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
-         stage_precheck_validations, stage_wait_nominated_lock,
-         stage_precheck_block_presence, stage_build_handles,
-         stage_compute_reenqueue_set, stage_remove_from_scheduler,
-         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
-         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_hog_age_lock,
+         stage_wait_validations, stage_precheck_validations,
+         stage_wait_nominated_lock, stage_precheck_block_presence,
+         stage_build_handles, stage_compute_reenqueue_set,
+         stage_remove_from_scheduler, stage_await_handles,
+         stage_write_average_hog_ages, stage_finalize, scheduler_size,
+         total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.validations.size(), validation_summary.str());
   }

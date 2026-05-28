@@ -170,7 +170,11 @@ public:
   // Debug.
   void dump_runqueue();
 
+  // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
+  // updates.
+  x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
+
   x23::CoroLock global_lock_;
 
 private:

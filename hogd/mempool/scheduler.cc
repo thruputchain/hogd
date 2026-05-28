@@ -748,6 +748,9 @@ Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
 x23::Async<void>
 Scheduler::process_transfers(const HogsTransferred &transfers)
 {
+  x23::CoroGuard hog_age_cg;
+  co_await hog_age_cg(pending_hog_age_update_lock_);
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
