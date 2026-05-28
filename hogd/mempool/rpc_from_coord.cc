@@ -1623,6 +1623,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   record_stage(stage_verify_block_hash);
   if (block_hash != nomination.block_hash) {
     co_await finish_block_handle;
+    // The event block and DB snapshot were closed above, but a hash mismatch
+    // means this block is never added to [validated_block_cache_], so
+    // [schedulercoord_commit_block] will never abandon it. Abandon both here to
+    // avoid leaking the event block context and orphaning its events file.
+    co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
     validation_telemetry.outcome = validation_outcome_str(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
