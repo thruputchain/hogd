@@ -15,6 +15,9 @@
   - Initial Release benchmark baseline versus wasmi.
 - [rv32-conformance-and-performance.md](rv32-conformance-and-performance.md)
   - In-tree conformance scope and Linux-review benchmark counters.
+- [rv32-upstream-test-plan.md](rv32-upstream-test-plan.md)
+  - Step-by-step plan for using upstream `riscv-tests` artifacts, rejection
+    fixtures, and benchmark workloads.
 - [riscv-tests-license.md](riscv-tests-license.md)
   - License notice for adapted `riscv-tests` conformance vectors.
 
@@ -42,6 +45,8 @@ and no protocol-visible behavior.
   - `rv32_borrowed_conformance_test.cc`: adapted `riscv-tests` vectors.
   - `rv32_spec_model_crosscheck_test.cc`: fixed-seed random programs checked
     against an in-tree test-only reference model.
+  - `rv32_upstream_artifact_test.cc`: synthetic upstream-shaped RV32UI/RV32UM
+    artifacts run through the runtime boundary.
   - `rv32_syscall_bridge_test.cc`: bridge atomicity and marshalling.
   - `rv32_syscall_entry_bridge_test.cc`: real `syscall_entry` bridge tests.
   - `rv32_runtime_context_test.cc`: RV32/WASM parity and outcome mapping.
