@@ -1019,4 +1019,68 @@ TEST(ItemLockTest, PermanentExclusiveCommitWhileReservationsRace)
   }
 }
 
+TEST(ItemLockTest, StaleUncommittedReadCannotBypassPermanentExclusive)
+{
+  constexpr size_t kPayloadBytes = 1024;
+  constexpr size_t kAttempts = 500;
+
+  auto const hardware_threads =
+      std::max(4U, std::thread::hardware_concurrency());
+  auto const racers = std::min(64U, hardware_threads * 4U);
+
+  std::vector<uint8_t> payload(kPayloadBytes, 0x5a);
+  auto ctx = make_dummy_context();
+
+  for (size_t attempt = 0; attempt < kAttempts; ++attempt) {
+    ItemLock lock(0);
+    auto exclusive = make_bytestring_change(payload);
+    exclusive.set_permanent_exclusive();
+
+    auto initial_lock =
+        lock.try_atomic_change_lock(nullptr, &exclusive, ctx);
+    ASSERT_TRUE(initial_lock.has_value());
+
+    std::atomic<bool> any_accepted{false};
+    std::atomic<bool> stop{false};
+    std::barrier<> start(static_cast<std::ptrdiff_t>(racers + 1));
+
+    std::vector<std::thread> threads;
+    threads.reserve(racers);
+    for (unsigned i = 0; i < racers; ++i) {
+      threads.emplace_back([&]() {
+        auto nonexclusive = make_bytestring_change(payload);
+        start.arrive_and_wait();
+
+        while (!stop.load(std::memory_order_acquire)) {
+          auto res = lock.try_atomic_change_lock(nullptr, &nonexclusive, ctx);
+          if (res.has_value()) {
+            any_accepted.store(true, std::memory_order_release);
+            stop.store(true, std::memory_order_release);
+            return;
+          }
+
+          if (lock.is_finalized()) {
+            return;
+          }
+          std::this_thread::yield();
+        }
+      });
+    }
+
+    start.arrive_and_wait();
+    auto commit_res = lock.commit_change(exclusive, ctx);
+    ASSERT_TRUE(commit_res.has_value());
+
+    stop.store(true, std::memory_order_release);
+    for (auto &thread : threads) {
+      thread.join();
+    }
+
+    EXPECT_FALSE(any_accepted.load())
+        << "stale nonexclusive reservation accepted after permanent-exclusive "
+           "finalization on attempt "
+        << attempt;
+  }
+}
+
 } // namespace hogd
