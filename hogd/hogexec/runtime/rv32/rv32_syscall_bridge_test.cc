@@ -248,7 +248,7 @@ TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
       bridge.ecall(view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
 
   ASSERT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xfffffff9U);
+  EXPECT_EQ(result.continue_value(), 0xfffffff9U);
   EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
   EXPECT_EQ(captured.args[0], 0x0102030405060708ULL);
@@ -277,7 +277,7 @@ TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
                         {static_cast<uint64_t>(ParserProbeMode::kSpans), kInput,
                          1, kOutput, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
   EXPECT_EQ(memory[kOutput], 0x44U);
   EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), 0);
 
@@ -285,7 +285,7 @@ TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
                              {static_cast<uint64_t>(ParserProbeMode::kSpans),
                               memory.size(), 0, memory.size(), 0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
@@ -298,21 +298,21 @@ TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
                         {static_cast<uint64_t>(ParserProbeMode::kSpans), 159, 2,
                          128, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
   EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 
   result = call_parser_probe(memory, kFrameAddress,
                              {static_cast<uint64_t>(ParserProbeMode::kSpans),
                               120, 1, 159, 2});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
   EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 
   result = call_parser_probe(memory, kFrameAddress,
                              {static_cast<uint64_t>(ParserProbeMode::kSpans),
                               120, 8, 124, 4});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
   EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 }
 
@@ -325,54 +325,54 @@ TEST(Rv32SyscallBridgeTest, parserProbeEnforcesCanonicalScalars)
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kBool), 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kBool), 0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kBool), 2});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
                          0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
                          std::numeric_limits<int32_t>::max()});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
                          std::numeric_limits<uint64_t>::max()});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.continue_value(), 0U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
                          0xffffFFFFU});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
                          0x0000000080000000ULL});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeUsesUint64MaxOptionalPointerSentinel)
@@ -387,28 +387,29 @@ TEST(Rv32SyscallBridgeTest, parserProbeUsesUint64MaxOptionalPointerSentinel)
                         {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
                          std::numeric_limits<uint64_t>::max()});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 1U);
+  EXPECT_EQ(result.continue_value(), 1U);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
                          0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, static_cast<uint32_t>(ParserProbeMode::kOptionalU32));
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(ParserProbeMode::kOptionalU32));
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
                          179});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 0xffffFFFFU);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 
   result =
       call_parser_probe(memory, kFrameAddress,
                         {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
                          kValueAddress});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value, 37U);
+  EXPECT_EQ(result.continue_value(), 37U);
 }
 
 TEST(Rv32SyscallBridgeTest, trapsWithoutCallingNullEntry)
@@ -421,6 +422,7 @@ TEST(Rv32SyscallBridgeTest, trapsWithoutCallingNullEntry)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
   EXPECT_FALSE(bridge.last_result().has_value());
 }
 
@@ -434,6 +436,7 @@ TEST(Rv32SyscallBridgeTest, trapsIfHostEntryThrows)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
   EXPECT_FALSE(bridge.last_result().has_value());
 }
 
@@ -448,6 +451,7 @@ TEST(Rv32SyscallBridgeTest, trapsBeforeCallingHostForInvalidFrame)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
   EXPECT_EQ(captured.calls, 0);
   EXPECT_FALSE(bridge.last_result().has_value());
 }
@@ -463,6 +467,7 @@ TEST(Rv32SyscallBridgeTest, trapsBeforeCallingHostForMisalignedFrame)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 1, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
   EXPECT_EQ(captured.calls, 0);
 }
 
@@ -477,6 +482,7 @@ TEST(Rv32SyscallBridgeTest, trapsOnUnsupportedBridgeVersion)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 1});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
   EXPECT_EQ(captured.calls, 0);
 }
 
@@ -520,7 +526,8 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
-  EXPECT_EQ(result.value,
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
+  EXPECT_EQ(result.trap_payload().code,
             static_cast<uint32_t>(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
@@ -548,7 +555,7 @@ TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
   const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
 
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.value,
+  EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
@@ -568,7 +575,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
                      .gas_consumed = 4};
   HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
   EXPECT_EQ(result.status, HostStatus::kHalt);
-  EXPECT_EQ(result.value, 0U);
+  EXPECT_EQ(result.halt_code(), 0U);
   EXPECT_EQ(result.gas_consumed, 4U);
 
   captured.result = {.result_code = 9,
@@ -576,7 +583,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
                      .gas_consumed = 4};
   result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
   EXPECT_EQ(result.status, HostStatus::kHalt);
-  EXPECT_EQ(result.value, 9U);
+  EXPECT_EQ(result.halt_code(), 9U);
   EXPECT_EQ(result.gas_consumed, 4U);
 }
 
@@ -644,7 +651,7 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
       second_bridge.ecall(second_view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
 
   EXPECT_EQ(first_result.status, second_result.status);
-  EXPECT_EQ(first_result.value, second_result.value);
+  EXPECT_EQ(first_result.continue_value(), second_result.continue_value());
   EXPECT_EQ(first_result.gas_consumed, second_result.gas_consumed);
   EXPECT_EQ(first_memory, second_memory);
   ASSERT_TRUE(first_bridge.last_result().has_value());

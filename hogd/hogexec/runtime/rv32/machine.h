@@ -33,7 +33,18 @@ public:
   }
   [[nodiscard]] uint64_t gas_remaining() const { return gas_remaining_; }
   [[nodiscard]] Trap trap() const { return trap_; }
-  [[nodiscard]] uint32_t host_trap_code() const { return host_trap_code_; }
+  [[nodiscard]] HostTrapPayload host_trap_payload() const
+  {
+    return host_trap_payload_.value_or(HostTrapPayload{});
+  }
+  [[nodiscard]] uint32_t host_trap_code() const
+  {
+    return host_trap_payload().code;
+  }
+  [[nodiscard]] HostTrapKind host_trap_kind() const
+  {
+    return host_trap_payload().kind;
+  }
   [[nodiscard]] bool halted() const { return halted_; }
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::optional<EcallArgs> pending_ecall() const
@@ -49,6 +60,7 @@ private:
 
   bool consume_gas(uint64_t amount);
   void set_trap(Trap trap);
+  void set_host_trap(HostTrapPayload payload);
   void write_reg(uint8_t index, uint32_t value);
   bool validate_control_target(uint32_t target);
   bool check_load(uint32_t address, uint32_t width);
@@ -64,7 +76,7 @@ private:
   std::vector<uint8_t> memory_;
   uint64_t gas_remaining_ = 0;
   Trap trap_ = Trap::kNone;
-  uint32_t host_trap_code_ = 0;
+  std::optional<HostTrapPayload> host_trap_payload_;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   uint32_t halt_code_ = 0;

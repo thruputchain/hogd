@@ -113,6 +113,9 @@ private:
       case Trap::kOutOfGas:
         return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
       case Trap::kHostTrap:
+        if (machine.host_trap_kind() == HostTrapKind::kDeterministic) {
+          return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+        }
         return {host_trap_code_to_invoke_status(machine.host_trap_code()),
                 gas_consumed};
       case Trap::kInvalidInstruction:

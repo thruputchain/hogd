@@ -200,7 +200,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
-  EXPECT_EQ(result.value,
+  EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
   EXPECT_GT(result.gas_consumed, 0U);
   const SHA256Hash expected = sha256(input);
@@ -281,7 +281,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
-  EXPECT_EQ(result.value,
+  EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
   EXPECT_EQ(memory, before);
 }
@@ -323,7 +323,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvokeArgTenFaultLeavesGuestMemoryUnchanged)
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
-  EXPECT_EQ(result.value,
+  EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeFault));
   EXPECT_EQ(memory, before);
 }
@@ -343,8 +343,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
-  EXPECT_EQ(result.value, static_cast<uint32_t>(
-                              SyscallErrorCode::kSyscallErrorCodeNoSyscall));
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(
+                SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
             static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),

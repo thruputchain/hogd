@@ -1,9 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <variant>
 
 #include "hogd/hogexec/runtime/rv32/program.h"
 
@@ -40,6 +42,26 @@ enum class HostStatus {
   kHalt,
   kOutOfGas,
   kTrap,
+};
+
+enum class HostTrapKind {
+  kDeterministic,
+  kFatal,
+};
+
+struct HostContinuePayload {
+  uint32_t value = 0;
+};
+
+struct HostHaltPayload {
+  uint32_t code = 0;
+};
+
+struct HostOutOfGasPayload {};
+
+struct HostTrapPayload {
+  HostTrapKind kind = HostTrapKind::kFatal;
+  uint32_t code = 0;
 };
 
 struct EcallArgs {
@@ -101,34 +123,65 @@ private:
 struct HostResult {
   static HostResult continue_with(uint32_t value = 0, uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kContinue,
-                      .value = value,
-                      .gas_consumed = gas_consumed};
+    return HostResult(HostStatus::kContinue, gas_consumed,
+                      HostContinuePayload{.value = value});
   }
   static HostResult halt(uint32_t code = 0, uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kHalt,
-                      .value = code,
-                      .gas_consumed = gas_consumed};
+    return HostResult(HostStatus::kHalt, gas_consumed,
+                      HostHaltPayload{.code = code});
   }
   // Host OutOfGas rolls back host memory effects but does not rewind the
   // already-executed ECALL instruction.
   static HostResult out_of_gas(uint64_t gas_consumed = 0)
   {
-    return HostResult{.status = HostStatus::kOutOfGas,
-                      .value = 0,
-                      .gas_consumed = gas_consumed};
+    return HostResult(HostStatus::kOutOfGas, gas_consumed,
+                      HostOutOfGasPayload{});
   }
   static HostResult trap(uint64_t gas_consumed = 0, uint32_t trap_code = 0)
   {
-    return HostResult{.status = HostStatus::kTrap,
-                      .value = trap_code,
-                      .gas_consumed = gas_consumed};
+    return HostResult(HostStatus::kTrap, gas_consumed,
+                      HostTrapPayload{.kind = HostTrapKind::kFatal,
+                                      .code = trap_code});
+  }
+  static HostResult deterministic_trap(uint64_t gas_consumed = 0,
+                                       uint32_t trap_code = 0)
+  {
+    return HostResult(HostStatus::kTrap, gas_consumed,
+                      HostTrapPayload{.kind = HostTrapKind::kDeterministic,
+                                      .code = trap_code});
+  }
+
+  [[nodiscard]] uint32_t continue_value() const
+  {
+    assert(status == HostStatus::kContinue);
+    return std::get<HostContinuePayload>(payload_).value;
+  }
+
+  [[nodiscard]] uint32_t halt_code() const
+  {
+    assert(status == HostStatus::kHalt);
+    return std::get<HostHaltPayload>(payload_).code;
+  }
+
+  [[nodiscard]] HostTrapPayload trap_payload() const
+  {
+    assert(status == HostStatus::kTrap);
+    return std::get<HostTrapPayload>(payload_);
   }
 
   HostStatus status = HostStatus::kContinue;
-  uint32_t value = 0;
   uint64_t gas_consumed = 0;
+
+private:
+  using Payload = std::variant<HostContinuePayload, HostHaltPayload,
+                               HostOutOfGasPayload, HostTrapPayload>;
+
+  HostResult(HostStatus status_value, uint64_t gas, Payload payload)
+    : status(status_value), gas_consumed(gas), payload_(payload)
+  {}
+
+  Payload payload_ = HostContinuePayload{};
 };
 
 class Host {

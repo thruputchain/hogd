@@ -261,6 +261,23 @@ make_single_ecall_image(HostFn11 entry)
 }
 
 rv32::RuntimeContractImage
+make_bridge_abi_fault_image(uint32_t frame_address, uint32_t bridge_version)
+{
+  constexpr uint32_t kMemoryBytes = 256;
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
+  return rv32::RuntimeContractImage{
+      .program = make_program({
+          addi(10, 0, frame_address),
+          addi(17, 0, bridge_version),
+          ecall(),
+      }),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = kMemoryBytes,
+      .entry = &unrecoverable_entry,
+  };
+}
+
+rv32::RuntimeContractImage
 make_return_image(std::span<const uint8_t> payload)
 {
   constexpr uint32_t kMemoryBytes = 256;
@@ -1323,6 +1340,34 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   expect_mapping(&validation_failure_entry, InvokeErrorCode::ValidationFailure);
   expect_mapping(&abandon_entry, InvokeErrorCode::Abandon);
   expect_mapping(&unknown_panic_entry, InvokeErrorCode::Unrecoverable);
+}
+
+TEST_F(Rv32RuntimeContextTest, BridgeAbiFaultsMapToDeterministic)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto expect_deterministic = [&](rv32::RuntimeContractImage image) {
+    auto rv32_context =
+        rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
+    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas);
+  };
+
+  expect_deterministic(
+      make_bridge_abi_fault_image(kFrameAddress,
+                                  rv32::kSyscallBridgeVersion + 1));
+  expect_deterministic(
+      make_bridge_abi_fault_image(kFrameAddress + 1,
+                                  rv32::kSyscallBridgeVersion));
+  expect_deterministic(
+      make_bridge_abi_fault_image(200, rv32::kSyscallBridgeVersion));
 }
 
 TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)

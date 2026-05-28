@@ -154,7 +154,7 @@ Machine::reset(uint64_t gas)
   pc_ = initial_pc_;
   gas_remaining_ = gas;
   trap_ = Trap::kNone;
-  host_trap_code_ = 0;
+  host_trap_payload_.reset();
   halted_ = false;
   halt_code_ = 0;
   pending_ecall_.reset();
@@ -193,8 +193,18 @@ void
 Machine::set_trap(Trap trap)
 {
   trap_ = trap;
+  if (trap != Trap::kHostTrap) {
+    host_trap_payload_.reset();
+  }
   halted_ = true;
   pending_ecall_.reset();
+}
+
+void
+Machine::set_host_trap(HostTrapPayload payload)
+{
+  host_trap_payload_ = payload;
+  set_trap(Trap::kHostTrap);
 }
 
 void
@@ -300,7 +310,7 @@ StepResult
 Machine::complete_ecall(const HostResult &result)
 {
   if (!pending_ecall_.has_value()) {
-    set_trap(Trap::kHostTrap);
+    set_host_trap(HostTrapPayload{});
     return StepResult::kTrap;
   }
   pending_ecall_.reset();
@@ -320,11 +330,11 @@ Machine::complete_ecall(const HostResult &result)
     // Host memory writes happen during Host::ecall through MachineView. The
     // only VM register mutation on a continuing ecall is the returned a0 value.
     ecall_memory_snapshot_.clear();
-    write_reg(10, result.value);
+    write_reg(10, result.continue_value());
     return StepResult::kContinue;
   case HostStatus::kHalt:
     ecall_memory_snapshot_.clear();
-    halt_code_ = result.value;
+    halt_code_ = result.halt_code();
     halted_ = true;
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
@@ -336,13 +346,12 @@ Machine::complete_ecall(const HostResult &result)
     return StepResult::kTrap;
   case HostStatus::kTrap:
     ecall_memory_snapshot_.clear();
-    host_trap_code_ = result.value;
-    set_trap(Trap::kHostTrap);
+    set_host_trap(result.trap_payload());
     return StepResult::kTrap;
   default:
     assert(false && "invalid host status");
     ecall_memory_snapshot_.clear();
-    set_trap(Trap::kHostTrap);
+    set_host_trap(HostTrapPayload{});
     return StepResult::kTrap;
   }
 }
@@ -369,7 +378,7 @@ Machine::run(Host &host)
       return result;
     default:
       assert(false && "invalid step result");
-      set_trap(Trap::kHostTrap);
+      set_host_trap(HostTrapPayload{});
       return StepResult::kTrap;
     }
   }

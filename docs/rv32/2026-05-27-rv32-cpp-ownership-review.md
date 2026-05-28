@@ -120,32 +120,23 @@ What works well:
   parser, output, trace, and gas behavior are not reimplemented in the VM core.
 - Fault writeback gating is now conservative enough for M4: parser/output
   faults, OOG, bridge traps, and fatal host panics do not commit scratch memory.
+- `HostResult` now carries status-specific typed payloads instead of a shared
+  return/halt/trap integer, and host traps carry an explicit deterministic vs
+  fatal kind.
+- `Machine` sets `Trap::kHostTrap` and its payload together, avoiding a
+  convention-only `trap_` / code split.
+- Guest-caused bridge ABI faults now classify as deterministic runtime
+  failures: unsupported bridge version, misaligned frame pointer, and
+  unreadable syscall frame are pinned by runtime tests.
 
 Ownership concerns:
 
-- `HostResult::value` is overloaded as a return value, halt code, and host trap
-  code. The current code reads it correctly by status, but this is exactly the
-  kind of convention-dependent payload a strong C++ reviewer will dislike.
-- `Machine` has both `trap_` and `host_trap_code_`, with `host_trap_code_`
-  meaningful only for `Trap::kHostTrap`. That is understandable, but still a
-  status/payload split enforced by discipline rather than type shape.
-- Guest-caused bridge ABI faults currently enter the generic host trap path.
-  Before protocol exposure, invalid bridge version, misaligned frame pointer,
-  unreadable frame, and code-zero host traps should classify as deterministic
-  guest failures, not fatal host failures.
 - `SyscallBridgeHost` still makes a full scratch memory copy per ECALL. This is
   fine for M4 and useful for atomicity, but it is not the final performance or
   determinism story.
 
 M5 cleanup:
 
-- Replace `HostResult::value` with typed payloads, for example distinct
-  `ContinueValue`, `HaltCode`, and `HostTrapCode`, or a tagged union whose
-  payload cannot be read under the wrong status.
-- Move host trap code into the trap-setting API, or otherwise make
-  `Trap::kHostTrap` and its payload atomic.
-- Split guest bridge ABI faults from genuine internal host traps and map them
-  to deterministic runtime failure.
 - Revisit scratch-copy writeback after typed fault classification is in place.
 
 Call: keep with cleanup before M5.
@@ -280,10 +271,13 @@ and differential testing as part of the cost of ownership.
 
 ## M5 Readiness Checklist
 
-Before RV32 becomes protocol-visible:
+Completed in M5 host-boundary hardening:
 
 - Typed host result payloads and atomic host trap-code handling.
 - Deterministic classification for guest-caused bridge ABI faults.
+
+Before RV32 becomes protocol-visible:
+
 - Cryptographic artifact content commitments.
 - Gas schedule digest covers both RV32 instruction costs and syscall costs.
 - Differential RV32/WASM error contracts for deterministic failure,

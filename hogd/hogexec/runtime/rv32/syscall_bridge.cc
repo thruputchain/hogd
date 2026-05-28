@@ -61,9 +61,11 @@ HostResult
 SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
 {
   last_result_.reset();
-  if (entry_ == nullptr || args.a7 != kSyscallBridgeVersion ||
-      args.a0 % alignof(uint64_t) != 0) {
+  if (entry_ == nullptr) {
     return HostResult::trap();
+  }
+  if (args.a7 != kSyscallBridgeVersion || args.a0 % alignof(uint64_t) != 0) {
+    return HostResult::deterministic_trap();
   }
 
   // M2 bridge ABI: a0 points at 11 little-endian u64 words matching
@@ -72,7 +74,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   // mutable WasmContext.memory shape used by the existing syscall parser.
   std::array<uint8_t, kSyscallFrameBytes> frame = {};
   if (!view.read_memory(args.a0, frame)) {
-    return HostResult::trap();
+    return HostResult::deterministic_trap();
   }
 
   std::array<uint64_t, kSyscallFrameArgWords> words = {};
