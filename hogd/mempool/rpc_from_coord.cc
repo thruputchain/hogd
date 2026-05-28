@@ -1679,7 +1679,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   double stage_compute_reenqueue_set = 0.0;
   double stage_remove_from_scheduler = 0.0;
   double stage_await_handles = 0.0;
-  double stage_write_average_hog_ages = 0.0;
   double stage_finalize = 0.0;
   auto emit_commit_stats = [&](const char *outcome, size_t handles_size,
                                size_t reenqueue_size,
@@ -1690,16 +1689,16 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "precheck_validations={:.6f}, wait_nominated_lock={:.6f}, "
          "precheck_block_presence={:.6f}, build_handles={:.6f}, "
          "compute_reenqueue_set={:.6f}, remove_from_scheduler={:.6f}, "
-         "await_handles={:.6f}, write_average_hog_ages={:.6f}, "
+         "await_handles={:.6f}, "
          "finalize={:.6f}, total={:.6f}, outcome={}, "
          "block_id={}, handles={}, reenqueue_size={}, remove_size={}",
          stage_wait_commit_lock, stage_wait_hog_age_lock,
          stage_wait_validations, stage_precheck_validations,
          stage_wait_nominated_lock, stage_precheck_block_presence,
          stage_build_handles, stage_compute_reenqueue_set,
-         stage_remove_from_scheduler, stage_await_handles,
-         stage_write_average_hog_ages, stage_finalize, timer.elapsed(), outcome,
-         block_id, handles_size, reenqueue_size, remove_from_scheduler_size);
+         stage_remove_from_scheduler, stage_await_handles, stage_finalize,
+         timer.elapsed(), outcome, block_id, handles_size, reenqueue_size,
+         remove_from_scheduler_size);
   };
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -1878,7 +1877,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // (i.e., all [commit_handles] have been co_await'd). As a side note, it is
   // okay for [commit_snapshot()] and [abandon_snapshot()] to race.
   co_await scheduler_->write_all_average_hog_ages_to_db();
-  record_stage(stage_write_average_hog_ages);
 
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
   // elements in the vectors in [nominated_block_cache_], so if we clear those
@@ -1923,7 +1921,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
          "stage_compute_reenqueue_set={:.6f}, "
          "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
-         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "stage_finalize={:.6f}, "
          "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination={{succeeded="
          "{}, block_id={}, height={}, duration={:.6f}, scheduled_txs={}, "
@@ -1934,9 +1932,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          stage_wait_validations, stage_precheck_validations,
          stage_wait_nominated_lock, stage_precheck_block_presence,
          stage_build_handles, stage_compute_reenqueue_set,
-         stage_remove_from_scheduler, stage_await_handles,
-         stage_write_average_hog_ages, stage_finalize, scheduler_size,
-         total_submitted, commit_window_stats.submitted_vetted,
+         stage_remove_from_scheduler, stage_await_handles, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.nomination.succeeded,
          commit_window_stats.nomination.block_id,
@@ -1956,7 +1953,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
          "stage_compute_reenqueue_set={:.6f}, "
          "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
-         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "stage_finalize={:.6f}, "
          "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination=none, "
          "validations={}, validation_details=[{}]",
@@ -1965,9 +1962,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          stage_wait_validations, stage_precheck_validations,
          stage_wait_nominated_lock, stage_precheck_block_presence,
          stage_build_handles, stage_compute_reenqueue_set,
-         stage_remove_from_scheduler, stage_await_handles,
-         stage_write_average_hog_ages, stage_finalize, scheduler_size,
-         total_submitted, commit_window_stats.submitted_vetted,
+         stage_remove_from_scheduler, stage_await_handles, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.validations.size(), validation_summary.str());
   }
