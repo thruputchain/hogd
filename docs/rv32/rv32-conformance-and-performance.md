@@ -89,3 +89,4 @@ scaling may be enabled on review machines.
 |---|---|---:|---:|---:|---|
 | Specialize RV32 memory load/store widths | Kept | 5,473 ns -> 5,503 ns (-0.55%) | 6,263 ns -> 6,110 ns (+2.44%) | 3,634,579 ns -> 3,436,290 ns (+5.46%) | Explicit little-endian byte/halfword/word paths; conformance passed. |
 | Cache decoded instruction fetch in `Machine` | Not kept | 5,400 ns -> 5,294 ns (+1.96%) | 6,021 ns -> 6,029 ns (-0.12%) | 3,446,402 ns -> 3,336,487 ns (+3.19%) | Reviewer found a stale-span risk; after fixing lifetime/immutability concerns, final release numbers were mixed/flat. |
+| Inline branch condition dispatch | Not kept | 5,581 ns -> 5,382 ns (+3.56%) | 6,136 ns -> 6,129 ns (+0.11%) | 3,462,189 ns -> 3,533,395 ns (-2.06%) | Conformance passed, but reviewer flagged duplicated consensus-sensitive target handling and Fib20 regressed. |
