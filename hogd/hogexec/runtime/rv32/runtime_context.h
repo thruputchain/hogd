@@ -15,6 +15,8 @@
 
 namespace hogd::rv32 {
 
+// Test-runtime image after artifact parsing/lowering. Production activation
+// still needs a deployed-artifact store and selector; this is not that layer.
 struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;

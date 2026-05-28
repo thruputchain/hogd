@@ -15,6 +15,10 @@ namespace hogd::rv32 {
 
 class MachineTestPeer;
 
+// Deterministic RV32IM interpreter state. The VM owns registers, PC, data
+// memory, gas, and trap state; immutable code lives in Program. Runtime-side
+// dispatch may choose any validated initial PC, but reset always returns to the
+// constructor's initial PC.
 class Machine {
 public:
   Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,

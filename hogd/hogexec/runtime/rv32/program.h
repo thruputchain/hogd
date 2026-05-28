@@ -261,6 +261,8 @@ struct ProgramResult {
   ProgramError error = ProgramError::kNone;
 };
 
+// Immutable, already-decoded RV32IM code. Program is the validation boundary:
+// Machine never executes raw bytes and never lets guest memory alias code.
 class Program {
 public:
   static ProgramResult validate(std::span<const uint8_t> code);

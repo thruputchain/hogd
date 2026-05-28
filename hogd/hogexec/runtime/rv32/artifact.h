@@ -47,7 +47,7 @@ static_assert(kArtifactDispatchDigestOffset + kArtifactDigestBytes ==
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// Experimental M5 artifact header, little-endian:
+// RV32 artifact v3 header, little-endian:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
@@ -85,8 +85,10 @@ struct ArtifactImage {
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
+[[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
+[[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
 parse_artifact(std::span<const uint8_t> bytes);
 

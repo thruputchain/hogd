@@ -24,6 +24,7 @@ struct DispatchEntry {
   uint32_t pc = 0;
 };
 
+[[nodiscard]]
 bool dispatch_table_is_valid(std::span<const DispatchEntry> dispatch_table,
                              Program const &program);
 

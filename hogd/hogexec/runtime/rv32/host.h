@@ -77,6 +77,8 @@ struct EcallArgs {
   uint32_t a7 = 0;
 };
 
+// Narrow host-facing view of live machine state. Hosts can inspect registers
+// and mutate data memory, but cannot see or modify immutable Program code.
 class MachineView {
 public:
   MachineView(uint32_t pc, uint64_t gas_remaining,
@@ -122,6 +124,9 @@ private:
   std::span<uint8_t> memory_;
 };
 
+// Result of one host ECALL. The status and payload are constructed together so
+// callers cannot accidentally interpret a return value as a halt code or trap
+// code; gas_consumed is debited before the payload is committed.
 struct HostResult {
   static HostResult continue_with(uint32_t value = 0, uint64_t gas_consumed = 0)
   {

@@ -27,6 +27,22 @@ load_u64_le(std::span<const uint8_t> bytes, size_t offset)
   return value;
 }
 
+constexpr void
+store_u32_le(std::span<uint8_t> bytes, size_t offset, uint32_t value)
+{
+  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  }
+}
+
+constexpr void
+store_u64_le(std::span<uint8_t> bytes, size_t offset, uint64_t value)
+{
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  }
+}
+
 constexpr uint64_t
 fnv_digest_byte(uint64_t digest, uint8_t value)
 {

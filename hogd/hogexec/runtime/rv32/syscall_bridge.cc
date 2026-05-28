@@ -9,47 +9,27 @@
 
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/runtime_exports.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "syscall_error.hh"
 
 namespace hogd::rv32 {
 namespace {
 
-uint64_t
-load_le64(std::span<const uint8_t> bytes, size_t offset)
-{
-  uint64_t value = 0;
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    value |= uint64_t{bytes[offset + i]} << (i * 8);
-  }
-  return value;
-}
-
-void
-store_le32(std::span<uint8_t> bytes, size_t offset, uint32_t value)
-{
-  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
-  }
-}
-
-void
-store_le64(std::span<uint8_t> bytes, size_t offset, uint64_t value)
-{
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
-  }
-}
-
-void
+bool
 store_result_footer(std::span<uint8_t> memory, uint32_t frame_address,
                     const TrampolineResult &result)
 {
+  if (!memory_range_in_bounds(memory.size(), frame_address,
+                              kSyscallFrameBytes)) {
+    return false;
+  }
   const size_t offset = size_t{frame_address} + kSyscallFrameResultOffset;
-  store_le32(memory, offset, static_cast<uint32_t>(result.result_code));
-  store_le32(memory, offset + sizeof(uint32_t),
-             static_cast<uint32_t>(result.panic));
-  store_le64(memory, offset + (2 * sizeof(uint32_t)), result.gas_consumed);
+  store_u32_le(memory, offset, static_cast<uint32_t>(result.result_code));
+  store_u32_le(memory, offset + sizeof(uint32_t),
+               static_cast<uint32_t>(result.panic));
+  store_u64_le(memory, offset + (2 * sizeof(uint32_t)), result.gas_consumed);
+  return true;
 }
 
 } // namespace
@@ -81,7 +61,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
 
   std::array<uint64_t, kSyscallFrameArgWords> words = {};
   for (size_t i = 0; i < words.size(); ++i) {
-    words[i] = load_le64(frame, i * sizeof(uint64_t));
+    words[i] = load_u64_le(frame, i * sizeof(uint64_t));
   }
 
   const std::span<const uint8_t> view_memory = view.memory();
@@ -117,7 +97,9 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
                                            result.result_code),
                                        result.gas_consumed);
     }
-    store_result_footer(memory, args.a0, result);
+    if (!store_result_footer(memory, args.a0, result)) {
+      return HostResult::deterministic_trap(result.gas_consumed);
+    }
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
@@ -126,13 +108,17 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   case std::to_underlying(HostFnErrorCode::Return):
     // Return and Exit terminate the VM invocation cleanly after committing the
     // same scratch/footer writes the WASM path would expose.
-    store_result_footer(memory, args.a0, result);
+    if (!store_result_footer(memory, args.a0, result)) {
+      return HostResult::deterministic_trap(result.gas_consumed);
+    }
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
     return HostResult::halt(0, result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Exit):
-    store_result_footer(memory, args.a0, result);
+    if (!store_result_footer(memory, args.a0, result)) {
+      return HostResult::deterministic_trap(result.gas_consumed);
+    }
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
