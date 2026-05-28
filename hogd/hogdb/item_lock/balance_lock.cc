@@ -98,10 +98,22 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
   // time (not part of blockchain state — ChangeSet will skip hash element
   // construction because is_state_item returns false for kHogAge).
   if (!snapshot_balance_.snapshot_value().has_value()) {
-    uint128_t value_uint128 = value;
     HogAge age = {
         .address = ctx.key.to_contract_address(),
-        .num_hogs = {to_xdr(value_uint128), to_xdr(uint128_t{0}),
+        // We set the hog balance for all groups in [HogAge] to 0 to avoid the
+        // issue described in #1511 on GitHub. Specifically, if we were to set
+        // (let's say) the number of hogs in [kHogAgeGroupToSchedule] to
+        // [value] rather than 0, the following would happen:
+        // 1. A new contract is created at some address X and Y hogs are
+        //    transferred to this address.
+        // 2. hogdb creates a new HogAge struct for address X and writes Y hogs
+        //    to the [kHogAgeGroupToSchedule] group in the struct.
+        // 3. hogdb sends a [HogsTransferred] struct to the mempool which
+        //    indicates that Y hogs were transferred to address X.
+        // 4. In the mempool scheduler, Y hogs are added to the
+        //    [kHogAgeGroupReceived] group for address X, so then address X's
+        //    [HogAge] struct has Y + Y = 2Y hogs in total, which is incorrect.
+        .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
                      to_xdr(uint128_t{0})},
         .average_ages = {ctx.block_height, BlockHeight{0}, BlockHeight{0}},
     };
