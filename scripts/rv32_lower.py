@@ -368,17 +368,26 @@ def validate_sections(
 
 
 def discover_dispatch_entries(
-    symbols: list[Symbol], code_size: int
+    sections: list[Section],
+    symbols: list[Symbol],
+    code_size: int,
 ) -> list[tuple[int, int]]:
     """
     Scan the symbol table for `#[contract]`-macro entry points.
 
     The SDK macro emits each method as
     `#[export_name = "<16-UPPER-HEX>"]` (the ContractEntrypointID).
-    We accept any globally-bound function symbol matching that shape.
+    We accept globally-bound function symbols matching that shape that
+    *also* resolve to the `.text` section — not any low-valued absolute
+    or non-text symbol that happens to match the hex regex.
 
     Returns: sorted list of (method_id, pc) tuples.
     """
+    text_sections = [s for s in sections if s.name == ".text"]
+    if len(text_sections) != 1:
+        raise ElfError("expected exactly one .text section")
+    text_index = text_sections[0].index
+
     entries: dict[int, int] = {}
     for symbol in symbols:
         if not ENTRYPOINT_SYMBOL_RE.match(symbol.name):
@@ -391,6 +400,14 @@ def discover_dispatch_entries(
             # Local symbols matching the hex shape would be a name collision
             # rather than an intended export. Skip them silently.
             continue
+        if symbol.section_index != text_index:
+            # Reject absolute symbols (SHN_ABS), undefined symbols, and
+            # symbols in any other section. A dispatch entry must point
+            # into executable code.
+            raise ElfError(
+                f"entry point {symbol.name!r} does not resolve to .text "
+                f"(section_index={symbol.section_index})"
+            )
         if symbol.value % 4 != 0:
             raise ElfError(
                 f"entry point {symbol.name!r} is not four-byte aligned "
@@ -400,6 +417,12 @@ def discover_dispatch_entries(
             raise ElfError(
                 f"entry point {symbol.name!r} pc={symbol.value} "
                 f"falls outside .text (code_size={code_size})"
+            )
+        if symbol.size != 0 and symbol.value + symbol.size > code_size:
+            raise ElfError(
+                f"entry point {symbol.name!r} extends past .text "
+                f"(pc={symbol.value}, size={symbol.size}, "
+                f"code_size={code_size})"
             )
         method_id = int(symbol.name, 16)
         if method_id in entries and entries[method_id] != symbol.value:
@@ -585,7 +608,7 @@ def main() -> None:
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
     code, memory = validate_sections(data, sections, symbols)
-    entries = discover_dispatch_entries(symbols, len(code))
+    entries = discover_dispatch_entries(sections, symbols, len(code))
     artifact = build_artifact(code, memory, entries)
     verify_artifact(artifact)
 

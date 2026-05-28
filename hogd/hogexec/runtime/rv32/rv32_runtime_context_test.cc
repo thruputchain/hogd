@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdlib>
+#include <fstream>
 #include <initializer_list>
+#include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <span>
@@ -1875,6 +1879,95 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
   EXPECT_EQ(result.gas_consumed_, 0U);
+}
+
+// SPIKE smoke test for SDK-lowered RV32 artifacts.
+//
+// Set RV32_SMOKE_ARTIFACT to a `.rv32a` path produced by
+// scripts/rv32_lower.py against an sdk_rs counter-rv32 ELF. The test
+// parses, validates, and invokes the first dispatch entry, and prints
+// the observed outcome. It's intentionally informational — EXPECT, not
+// ASSERT — so a failure here surfaces the actual VM/SDK gap rather
+// than just printing a green/red ctest line.
+//
+// Until cross-repo CI builds the SDK contract automatically, the env
+// var is the cleanest way to plumb the artifact in without committing
+// a binary blob to the hogd tree.
+TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
+{
+  const char *artifact_path = std::getenv("RV32_SMOKE_ARTIFACT");
+  if (artifact_path == nullptr) {
+    GTEST_SKIP() << "set RV32_SMOKE_ARTIFACT=/path/to/contract.rv32a to run "
+                    "this end-to-end smoke test";
+  }
+
+  std::ifstream input(artifact_path, std::ios::binary);
+  ASSERT_TRUE(input.is_open()) << "cannot open " << artifact_path;
+  std::vector<uint8_t> artifact_bytes(
+      (std::istreambuf_iterator<char>(input)),
+      std::istreambuf_iterator<char>());
+  ASSERT_GT(artifact_bytes.size(), 0U);
+  std::cerr << "[smoke] loaded artifact: " << artifact_bytes.size()
+            << " bytes from " << artifact_path << "\n";
+
+  auto parsed = rv32::parse_artifact(artifact_bytes);
+  ASSERT_TRUE(parsed.has_value())
+      << "parse_artifact rejected the lowered artifact (error="
+      << static_cast<int>(parsed.error()) << ")";
+  std::cerr << "[smoke] parsed: code_bytes=" << parsed->program->byte_size()
+            << " dispatch_entries=" << parsed->dispatch_table.size()
+            << " memory_bytes=" << parsed->memory_bytes << "\n";
+  ASSERT_FALSE(parsed->dispatch_table.empty());
+
+  rv32::RuntimeContractImage image{
+      .program = parsed->program,
+      .initial_memory = std::move(parsed->initial_memory),
+      .dispatch_table = std::move(parsed->dispatch_table),
+      .memory_bytes = parsed->memory_bytes,
+  };
+
+  // Pick the lowest-ID dispatch entry as the smoke target. For counter
+  // this lands on whichever of initialize/increment/decrement/get
+  // sorts first by ContractEntrypointID hash.
+  const auto smoke_entry = image.dispatch_table.front();
+  std::cerr << "[smoke] invoking method_id=0x" << std::hex
+            << smoke_entry.method_id << " at pc=" << std::dec << smoke_entry.pc
+            << "\n";
+
+  auto rv32_context =
+      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler = make_new_system_call_handler(
+      make_root_transaction(kParityGas, smoke_entry.method_id), rv32_context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+
+  const auto result = handler.root_invoke();
+
+  if (handler.get_trace() != nullptr) {
+    std::cerr << "[smoke] trace status_code="
+              << static_cast<int>(handler.get_trace()->status.status_code())
+              << " syscalls=" << handler.get_trace()->system_calls.size()
+              << "\n";
+  }
+  const auto frame_output = handler.get_most_recent_frame_output();
+  std::cerr << "[smoke] frame status_code="
+            << static_cast<int>(frame_output.status_code())
+            << " return_bytes=" << frame_output.return_buffer().size() << "\n";
+  if (handler.get_transaction_stats() != nullptr) {
+    std::cerr << "[smoke] stats invalid_syscall_count="
+              << handler.get_transaction_stats()->invalid_syscall_count
+              << "\n";
+  }
+
+  // The interesting signal: did the macro-emitted entry point actually
+  // execute as a VM entry point? Success means the lowerer + macro +
+  // runtime composition works end-to-end. A non-success outcome is
+  // expected to be informative (which kind of failure?), not green.
+  EXPECT_TRUE(result.is_root_success())
+      << "lowered artifact did not return cleanly — check trace status above";
 }
 
 } // namespace
