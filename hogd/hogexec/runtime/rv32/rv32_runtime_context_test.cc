@@ -1903,9 +1903,8 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 
   std::ifstream input(artifact_path, std::ios::binary);
   ASSERT_TRUE(input.is_open()) << "cannot open " << artifact_path;
-  std::vector<uint8_t> artifact_bytes(
-      (std::istreambuf_iterator<char>(input)),
-      std::istreambuf_iterator<char>());
+  std::vector<uint8_t> artifact_bytes((std::istreambuf_iterator<char>(input)),
+                                      std::istreambuf_iterator<char>());
   ASSERT_GT(artifact_bytes.size(), 0U);
   std::cerr << "[smoke] loaded artifact: " << artifact_bytes.size()
             << " bytes from " << artifact_path << "\n";
@@ -1958,8 +1957,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
             << " return_bytes=" << frame_output.return_buffer().size() << "\n";
   if (handler.get_transaction_stats() != nullptr) {
     std::cerr << "[smoke] stats invalid_syscall_count="
-              << handler.get_transaction_stats()->invalid_syscall_count
-              << "\n";
+              << handler.get_transaction_stats()->invalid_syscall_count << "\n";
   }
 
   // The interesting signal: did the macro-emitted entry point actually
