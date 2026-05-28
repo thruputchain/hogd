@@ -1036,8 +1036,7 @@ TEST(ItemLockTest, StaleUncommittedReadCannotBypassPermanentExclusive)
     auto exclusive = make_bytestring_change(payload);
     exclusive.set_permanent_exclusive();
 
-    auto initial_lock =
-        lock.try_atomic_change_lock(nullptr, &exclusive, ctx);
+    auto initial_lock = lock.try_atomic_change_lock(nullptr, &exclusive, ctx);
     ASSERT_TRUE(initial_lock.has_value());
 
     std::atomic<bool> any_accepted{false};
