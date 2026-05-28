@@ -29,7 +29,7 @@ STT_FUNC = 2
 EM_RISCV = 243
 SHN_ABS = 0xFFF1
 FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
-# Fixture dispatch is intentionally explicit while the real SDK lowerer is still
+# Fixture dispatch is intentionally explicit while the real SDK lowerer is
 # pending: _start backs Sha256Wrapper::sha256, and the named non-callgraph
 # function below backs Sha256Wrapper::sha256_repeated. The C++ parity test
 # static_asserts these MethodIDs against the generated WASM contract metadata.
@@ -70,7 +70,9 @@ class ElfError(RuntimeError):
 
 
 class Section:
-    def __init__(self, index, name, sh_type, flags, addr, offset, size, link, entsize):
+    def __init__(
+        self, index, name, sh_type, flags, addr, offset, size, link, entsize
+    ):
         self.index = index
         self.name = name
         self.sh_type = sh_type
@@ -139,7 +141,7 @@ def parse_elf(path):
         raw_sections.append(struct.unpack_from("<IIIIIIIIII", data, off))
 
     shstr = raw_sections[e_shstrndx]
-    shstr_blob = data[shstr[4] : shstr[4] + shstr[5]]
+    shstr_blob = data[shstr[4]:shstr[4] + shstr[5]]
     sections = []
     for index, raw in enumerate(raw_sections):
         name = read_c_string(shstr_blob, raw[0]) if raw[0] else ""
@@ -170,15 +172,24 @@ def parse_symbols(data, sections):
         strings = sections[section.link]
         if strings.sh_type != SHT_STRTAB:
             raise ElfError("symbol table link must point to a string table")
-        string_blob = data[strings.offset : strings.offset + strings.size]
+        string_blob = data[strings.offset:strings.offset + strings.size]
         if section.entsize != 16:
             raise ElfError("unexpected ELF32 symbol size")
-        for off in range(section.offset, section.offset + section.size, section.entsize):
-            st_name, st_value, st_size, st_info, _st_other, st_shndx = struct.unpack_from(
-                "<IIIBBH", data, off
-            )
+        for off in range(
+            section.offset, section.offset + section.size, section.entsize
+        ):
+            (
+                st_name,
+                st_value,
+                st_size,
+                st_info,
+                _st_other,
+                st_shndx,
+            ) = struct.unpack_from("<IIIBBH", data, off)
             name = read_c_string(string_blob, st_name) if st_name != 0 else ""
-            symbols.append(Symbol(name, st_value, st_size, st_info & 0x0F, st_shndx))
+            symbols.append(
+                Symbol(name, st_value, st_size, st_info & 0x0F, st_shndx)
+            )
     return symbols
 
 
@@ -204,7 +215,9 @@ def spans_overlap(a_start, a_end, b_start, b_end):
 
 
 def validate_sections(data, sections, symbols):
-    text_sections = [section for section in sections if section.name == ".text"]
+    text_sections = [
+        section for section in sections if section.name == ".text"
+    ]
     if len(text_sections) != 1:
         raise ElfError("expected exactly one .text section")
     text = text_sections[0]
@@ -234,11 +247,20 @@ def validate_sections(data, sections, symbols):
         symbol_section = section_for_symbol(symbol, sections)
         if symbol_section is None:
             continue
-        if symbol_section.index == text.index and (
-            symbol.sym_type == STT_OBJECT or symbol.name.startswith("$d")
+        if (
+            symbol_section.index == text.index
+            and (
+                symbol.sym_type == STT_OBJECT
+                or symbol.name.startswith("$d")
+            )
         ):
-            raise ElfError(f"data symbol {symbol.name} is not allowed in .text")
-        if symbol.sym_type == STT_OBJECT and text.addr <= symbol.value < text_end:
+            raise ElfError(
+                f"data symbol {symbol.name} is not allowed in .text"
+            )
+        if (
+            symbol.sym_type == STT_OBJECT
+            and text.addr <= symbol.value < text_end
+        ):
             raise ElfError(f"object symbol {symbol.name} resolves into .text")
 
     memory = bytearray(K_MAX_MEMORY_BYTES)
@@ -256,23 +278,31 @@ def validate_sections(data, sections, symbols):
             continue
         if section.addr < text_end:
             raise ElfError(
-                f"data section {section.name} overlaps .text range ending at {text_end}"
+                f"data section {section.name} overlaps .text range ending at "
+                f"{text_end}"
             )
         for other_name, other_start, other_end in data_ranges:
-            if spans_overlap(section.addr, section.addr + section.size, other_start, other_end):
+            if spans_overlap(
+                section.addr,
+                section.addr + section.size,
+                other_start,
+                other_end,
+            ):
                 raise ElfError(f"section {section.name} overlaps {other_name}")
-        data_ranges.append((section.name, section.addr, section.addr + section.size))
+        data_ranges.append(
+            (section.name, section.addr, section.addr + section.size)
+        )
         if section.addr + section.size > K_MAX_MEMORY_BYTES:
             raise ElfError(f"section {section.name} exceeds memory limit")
         if section.nobits:
             continue
         if section.offset + section.size > len(data):
             raise ElfError(f"section {section.name} extends past end of file")
-        memory[section.addr : section.addr + section.size] = data[
-            section.offset : section.offset + section.size
+        memory[section.addr:section.addr + section.size] = data[
+            section.offset:section.offset + section.size
         ]
 
-    return data[text.offset : text.offset + text.size], bytes(memory)
+    return data[text.offset:text.offset + text.size], bytes(memory)
 
 
 def extract_fixture_input(memory, sections, symbols):
@@ -288,7 +318,7 @@ def extract_fixture_input(memory, sections, symbols):
         raise ElfError(f"{FIXTURE_INPUT_SYMBOL} must have nonzero size")
     if symbol.value + symbol.size > len(memory):
         raise ElfError(f"{FIXTURE_INPUT_SYMBOL} exceeds memory limit")
-    return symbol.value, memory[symbol.value : symbol.value + symbol.size]
+    return symbol.value, memory[symbol.value:symbol.value + symbol.size]
 
 
 def method_pc(symbols, name):
@@ -304,7 +334,10 @@ def method_pc(symbols, name):
 
 def dispatch_entries(symbols):
     entries = [
-        (SHA256_REPEATED_METHOD_ID, method_pc(symbols, SHA256_REPEATED_SYMBOL)),
+        (
+            SHA256_REPEATED_METHOD_ID,
+            method_pc(symbols, SHA256_REPEATED_SYMBOL),
+        ),
         (SHA256_METHOD_ID, method_pc(symbols, "_start")),
     ]
     entries.sort()
@@ -358,13 +391,21 @@ def build_artifact(code, memory, entries):
 def format_array(name, blob):
     out = [f"inline constexpr std::array<uint8_t, {len(blob)}> {name} = {{"]
     for i in range(0, len(blob), 12):
-        chunk = ", ".join(f"0x{byte:02x}" for byte in blob[i : i + 12])
+        chunk = ", ".join(f"0x{byte:02x}" for byte in blob[i:i + 12])
         out.append(f"    {chunk},")
     out.append("};")
     return "\n".join(out)
 
 
 def write_header(path, artifact, metadata):
+    repeated_method_id = (
+        "inline constexpr uint64_t kSha256RepeatedMethodId = "
+        f"0x{SHA256_REPEATED_METHOD_ID:016x}ULL;"
+    )
+    input_offset = (
+        "inline constexpr uint32_t kFixtureInputOffset = "
+        f"{metadata['fixture_input_offset']};"
+    )
     body = f"""#pragma once
 
 #include <array>
@@ -376,10 +417,10 @@ inline constexpr uint32_t kMemoryBytes = {K_MAX_MEMORY_BYTES};
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
-inline constexpr uint64_t kSha256RepeatedMethodId = 0x{SHA256_REPEATED_METHOD_ID:016x}ULL;
+{repeated_method_id}
 inline constexpr uint32_t kSha256Pc = {metadata['sha256_pc']};
 inline constexpr uint32_t kSha256RepeatedPc = {metadata['sha256_repeated_pc']};
-inline constexpr uint32_t kFixtureInputOffset = {metadata['fixture_input_offset']};
+{input_offset}
 inline constexpr char kFixtureSha256[] =
     "{metadata['fixture_sha256']}";
 inline constexpr char kElfSha256[] =
@@ -412,7 +453,9 @@ def main():
     symbols = parse_symbols(data, sections)
     code, memory = validate_sections(data, sections, symbols)
     entries = dispatch_entries(symbols)
-    fixture_input_offset, fixture_input = extract_fixture_input(memory, sections, symbols)
+    fixture_input_offset, fixture_input = extract_fixture_input(
+        memory, sections, symbols
+    )
     artifact = build_artifact(code, memory, entries)
     fixture_blob = code + memory
     metadata = {
@@ -426,7 +469,8 @@ def main():
         "fixture_sha256": sha256_bytes(fixture_blob),
         "artifact_sha256": sha256_bytes(artifact),
         "dispatch_entries": [
-            {"method_id": f"0x{method_id:016x}", "pc": pc} for method_id, pc in entries
+            {"method_id": f"0x{method_id:016x}", "pc": pc}
+            for method_id, pc in entries
         ],
         "sha256_pc": dict(entries)[SHA256_METHOD_ID],
         "sha256_repeated_pc": dict(entries)[SHA256_REPEATED_METHOD_ID],
@@ -445,7 +489,9 @@ def main():
     write_header(args.header, artifact, metadata)
     serializable = dict(metadata)
     serializable["fixture_input"] = fixture_input.hex()
-    Path(args.metadata).write_text(json.dumps(serializable, indent=2, sort_keys=True) + "\n")
+    Path(args.metadata).write_text(
+        json.dumps(serializable, indent=2, sort_keys=True) + "\n"
+    )
 
 
 if __name__ == "__main__":

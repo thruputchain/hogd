@@ -21,7 +21,7 @@
   "fixture_sha256": "147af09e99ff264ce8c1c9a5545d28c919c69015784f14b8cb750f34962a2a51",
   "initial_memory_sha256": "cce1bfbce39026995e5c924db1c642dbe6ab6e16cf0ffc59efea08ff9a0183c5",
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
-  "lowering_tool_sha256": "4d9a0f292abfc77e32775a0c8b668cb95c224e0b1bc617813e9a9de439385309",
+  "lowering_tool_sha256": "9f70272cca50393e5749f579f4d0ccbdfe63ecc6c43159d7d8fff8cdcfde60fe",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
