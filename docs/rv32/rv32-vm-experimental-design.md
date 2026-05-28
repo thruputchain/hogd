@@ -1,0 +1,169 @@
+# Experimental RV32 VM Design
+
+## Purpose
+
+Groundhog currently executes deployed user contracts through WASM. The RV32 work
+is an in-tree C++ interpreter experiment: can we own a small deterministic VM
+instead of inheriting all execution behavior from a vendored engine?
+
+WASM remains production. RV32 is isolated behind `ContractType::kMockTest`.
+
+A separate product note on optional ZK implications lives outside this repo at
+`~/docs/groundhog-product/wip/rv32-zk-optionality.md`.
+
+## Current Implementation
+
+The implemented profile is `groundhog-rv32im-ilp32-v1`:
+
+- ISA: RV32I plus M.
+- Unsupported: compressed instructions, atomics, floats, vectors, CSRs,
+  privileged instructions, threads, JIT/AOT.
+- Endianness: little-endian.
+- Memory: one bounded guest data memory, currently 64 KiB max.
+- Code: separate immutable `Program` image; guest memory is not executable.
+- Entry: runtime supplies an initial PC. Artifact dispatch maps method ID to PC.
+- Host boundary: `ecall` only.
+
+Important files:
+
+- `program.{h,cc}` validates bytes and decodes once into `DecodedInstruction`.
+- `machine.{h,cc}` owns registers, PC, memory, gas, traps, and execution.
+- `host.h` defines `Host`, `MachineView`, `HostResult`, traps, and step results.
+- `syscall_bridge.{h,cc}` adapts RV32 `ecall` frames to `syscall_entry`.
+- `artifact.{h,cc}` parses the strict artifact format.
+- `dispatch.{h,cc}` validates artifact method dispatch tables.
+- `runtime_context.{h,cc}` is the test-only parity runtime.
+
+## Execution Rules
+
+- `x0` is always zero.
+- `sp` starts at memory size rounded down to 16 bytes.
+- Fetch requires a valid 4-byte-aligned PC in the immutable `Program`.
+- Bad fetch traps before gas.
+- Valid fetched instructions charge gas before semantic checks or mutation.
+- Insufficient gas wins and leaves architectural state unchanged.
+- Loads/stores require natural alignment and full bounds.
+- Bad jump targets trap before writing link registers or changing PC.
+- Division by zero and signed overflow follow RV32M rules, not C++ UB.
+- Running off the code image is `Trap::kBadPc`, not success.
+- Normal guest completion is a host halt result from an `ecall`.
+
+## Gas
+
+Instruction gas is a fixed constexpr table in `program.h`:
+
+- base RV32I instructions: `1`
+- multiply ops: `3`
+- divide/remainder ops: `8`
+
+`kGasScheduleDigest` now covers both RV32 instruction costs and the live host
+syscall costs from `gas_cost_table.h`. `kGasTableVersion` is still `1` while
+RV32 is experimental; protocol activation must treat digest-affecting changes as
+version bumps.
+
+`ecall` charges instruction gas first. Reported host gas is debited in
+`Machine::complete_ecall` before committing `a0`, halt state, trap state, or
+host memory effects.
+
+## Host Boundary
+
+The bridge ABI is memory-frame based:
+
+- `a0`: guest address of the syscall frame.
+- `a7`: RV32 syscall bridge version.
+- Frame: syscall number plus ten little-endian `uint64_t` argument words.
+- Footer: `TrampolineResult` result code, panic code, and gas consumed.
+
+The bridge reuses the shared `syscall_entry` path, so parser, aliasing, tracing,
+gas, and output behavior remain aligned with WASM.
+
+Atomicity policy:
+
+- success, `Return`, and `Exit` write back scratch memory;
+- parser/output fault returns the fault code in `a0` without writeback;
+- OOG, bridge ABI faults, host throws, and fatal/unknown host panics do not
+  write back scratch memory;
+- host OOG and over-budget host gas roll guest memory back to the pre-host
+  ECALL snapshot.
+
+Host traps carry typed payloads:
+
+- `HostTrapKind::kDeterministic` for guest-caused bridge ABI faults;
+- `HostTrapKind::kFatal` for genuine host/internal failures.
+
+## Artifact Format
+
+The current artifact format is v3:
+
+- magic: `GHRV32A1`
+- header bytes: `172`
+- VM profile digest
+- entry ABI version: `1`
+- syscall ABI version: `0`
+- gas schedule version and digest
+- memory size, code size, initial memory size
+- offsets for code, dispatch table, and initial memory
+- SHA256 commitments for code, initial memory, and dispatch table
+
+Parser rules:
+
+- little-endian explicit reads only;
+- no host struct overlays;
+- exact canonical layout: header, code, dispatch, memory, no gaps/trailing bytes;
+- full initial memory image required;
+- dispatch table required, sorted by method ID, reserved bytes zero;
+- dispatch PCs must be valid `Program` PCs.
+
+The artifact parser does not parse ELF. ELF is fixture/lowerer input only.
+
+## Dispatch
+
+M4 chose runtime-side artifact dispatch:
+
+- the artifact contains method ID to PC entries;
+- runtime validates the table before VM construction;
+- known methods run at the selected validated PC;
+- unknown methods fail as deterministic misses with zero gas.
+
+This intentionally replaced the earlier guest-side fixed-entry stub idea. The
+guest-side shape may still be useful for a future SDK, but it is not the current
+dispatch mechanism.
+
+## Milestone Status
+
+- M1 VM core: complete.
+  - RV32IM validation, decode, execution, traps, gas, and mock host calls.
+- M2 host bridge: complete.
+  - Shared `syscall_entry`, host gas debit, writeback gating, fault atomicity.
+- M3 runtime parity: complete.
+  - Test-only `RuntimeContext`, WASM/RV32 parity for traces, return buffers,
+    storage writes, events, stats, and outcome mapping.
+- M4 compiled Rust/artifact/dispatch: complete.
+  - Committed Rust fixture, strict artifact parser, runtime dispatch table,
+    multi-method compiled fixture with WASM parity.
+- Early M5 hardening: partly complete.
+  - Typed host payloads, deterministic bridge-fault classification, SHA256
+    artifact commitments, gas digest including syscall costs, and differential
+    error outcome tests are in place.
+
+## Remaining Before Protocol Exposure
+
+- Cross-platform determinism runs on supported validator platforms.
+- Production SDK lowerer: method manifest, typed syscall wrappers, reproducible
+  metadata, and enforceable `.text` data policy.
+- Imported or recreated RV32I/RV32M conformance corpus.
+- Fuzzing and sharper parser/dispatch error codes for triage.
+- Activation rule: artifact verification must either use the consensus SHA256
+  wrapper or carry an explicit equivalence check for direct OpenSSL SHA256.
+- Activation rule: any digest-affecting gas schedule change bumps
+  `kGasTableVersion`.
+
+## Review Gates
+
+Do not expose RV32 to protocol until:
+
+- RV32 and WASM agree on host-visible outcomes for shared contracts.
+- Guest traps, host traps, validation failure, abandon, and OOG are pinned.
+- Artifact validation rejects malformed inputs deterministically.
+- Cross-platform determinism is demonstrated.
+- Conformance and fuzzing cover decode, memory, traps, and RV32I/RV32M semantics.

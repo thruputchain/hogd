@@ -1,39 +1,54 @@
 # RV32 Experimental VM Docs
 
-An experimental, in-tree RV32IM interpreter for Groundhog, built as a hedge
-against depending solely on the WASM/wasmi execution path. These notes capture
-the design, the prior-art reasoning, and the viability evidence.
+## File Layout
 
-Read this first — the shape of the experiment:
+- [rv32-vm-experimental-design.md](rv32-vm-experimental-design.md)
+  - Current architecture and milestone status.
+  - Best starting point for implementation state.
+- [rv32-cpp-ownership-review.md](rv32-cpp-ownership-review.md)
+  - "Do we like owning this C++ forever?" review.
+  - Tracks closed and remaining M5 readiness gates.
+- [rv32-rust-vm-lessons.md](rv32-rust-vm-lessons.md)
+  - Prior-art notes from CKB-VM and PolkaVM.
+  - Explains why the artifact/runtime boundary looks the way it does.
+- [rv32-m4-slice1-design.md](rv32-m4-slice1-design.md)
+  - Point-in-time M4 Slice 1 plan for proving compiled Rust viability.
+  - Kept for toolchain/lowering context; later M4 slices are now implemented.
+- [rv32-vm-baseline.md](rv32-vm-baseline.md)
+  - Initial Release benchmark baseline versus wasmi.
 
-- The **VM core is deliberately small, explicit, and auditable.** A C++ ownership
-  review concluded it is solid enough to own as consensus-adjacent code (see the
-  ownership review below).
-- From that core we **worked outward through milestones — toolchain, artifact
-  format, method dispatch — specifically to determine viability**, not to ship a
-  finished product.
-- The **edges are intentionally not the final shape.** The host/runtime/artifact
-  boundaries carry known pre-protocol cleanup, tracked as M5 gates. RV32 stays
-  isolated behind `ContractType::kMockTest` and is not protocol-visible.
+This directory is the working record for the experimental in-tree RV32IM VM.
+RV32 is still test-only: no `ContractType::kRv32`, no deployed-contract path,
+and no protocol-visible behavior.
 
-Recommended reading order:
+## Implementation Layers
 
-1. [Experimental RV32 VM Design](2026-05-27-rv32-vm-experimental-design.md)
-   - Main project spec, design decisions, and milestone tracker.
-2. [RV32 Rust VM Prior Art Lessons](2026-05-27-rv32-rust-vm-lessons.md)
-   - Why build in-tree rather than vendor, and what to borrow from CKB-VM and
-     PolkaVM.
-3. [M4 Slice 1: Compiled Rust Runs With Parity](2026-05-27-rv32-m4-slice1-design.md)
-   - The toolchain-viability slice and the (non-obvious) memory/address model it
-     established, which led into the artifact and dispatch work.
-4. [RV32 C++ Ownership Review](2026-05-27-rv32-cpp-ownership-review.md)
-   - The "would we want to own this forever?" read: the core is solid, the edges
-     are M5 gates.
-5. [RV32 VM Benchmark Baseline](2026-05-27-rv32-vm-baseline.md)
-   - Initial Release-build wall-time comparison against wasmi (viability
-     evidence).
+- VM core: `program.{h,cc}`, `machine.{h,cc}`, `host.h`, `encoding.h`.
+  - Validates RV32IM code, decodes once, executes deterministic instructions,
+    meters gas, and exposes `ecall`.
+- Host bridge: `syscall_bridge.{h,cc}`.
+  - Converts RV32 memory-frame `ecall`s into the shared `syscall_entry` path.
+- Artifact and dispatch: `artifact.{h,cc}`, `dispatch.{h,cc}`.
+  - Parses the strict v3 artifact format, validates SHA256 section commitments,
+    and maps method IDs to validated PCs.
+- Experimental runtime: `runtime_context.{h,cc}`.
+  - Test-only `ContractType::kMockTest` runtime used for RV32/WASM parity.
+- Fixture/lowerer: `fixtures/compiled_sha256_return/`.
+  - Disposable Rust/lowerer spike used as a regression fixture, not the final SDK.
+- Tests and benchmark:
+  - `rv32_vm_test.cc`: VM, artifact, gas, and instruction behavior.
+  - `rv32_syscall_bridge_test.cc`: bridge atomicity and marshalling.
+  - `rv32_syscall_entry_bridge_test.cc`: real `syscall_entry` bridge tests.
+  - `rv32_runtime_context_test.cc`: RV32/WASM parity and outcome mapping.
+  - `rv32_vm_bench.cc`: interpreter baseline.
 
-Current status: Milestones 1-4 are complete for the experimental, test-only
-scope. The next decision point is M5 readiness — hardening the
-host/runtime/artifact edges before any protocol exposure. The full gate list is
-the M5 Readiness Checklist in the ownership review.
+## Current Status
+
+Milestones 1-4 are complete for the experimental scope. The VM runs hand-built
+programs and a compiled Rust fixture, uses a versioned artifact with dispatch,
+and has RV32/WASM parity tests for success and error outcomes.
+
+The core is solid enough to keep owning. Before protocol exposure, the remaining
+work is activation hardening: cross-platform determinism runs, a production SDK
+lowerer, an RV32I/RV32M conformance corpus, fuzzing/error-triage polish, and
+explicit protocol discipline around artifact hashing and gas version bumps.
