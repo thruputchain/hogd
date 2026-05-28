@@ -980,10 +980,8 @@ fn test_h001_module_validate_skips_table_pool_limit() {
 
     unsafe {
         let global_context = new_wasmtime_global_context(8);
-        let context = new_wasmtime_context(
-            no_get_mock_contract_get_fn,
-            global_context,
-        );
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
 
         let verified =
             wasmtime_verify_contract(context, bytes.as_ptr(), bytes.len());
