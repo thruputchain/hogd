@@ -1,3 +1,5 @@
+find_package(OpenSSL REQUIRED)
+
 add_library(
   rv32_vm
   artifact.cc
@@ -10,6 +12,12 @@ target_include_directories(
   rv32_vm
   PUBLIC
   ${CMAKE_SOURCE_DIR}
+)
+
+target_link_libraries(
+  rv32_vm
+  PRIVATE
+  OpenSSL::Crypto
 )
 
 add_library(

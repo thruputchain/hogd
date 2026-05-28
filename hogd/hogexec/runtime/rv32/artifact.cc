@@ -1,10 +1,13 @@
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <span>
 #include <utility>
 #include <vector>
+
+#include <openssl/sha.h>
 
 namespace hogd::rv32 {
 namespace {
@@ -47,16 +50,24 @@ parse_dispatch_table(std::span<const uint8_t> dispatch_table)
   return entries;
 }
 
+ArtifactDigest
+load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
+{
+  ArtifactDigest digest = {};
+  std::ranges::copy(bytes.subspan(offset, kArtifactDigestBytes),
+                    digest.begin());
+  return digest;
+}
+
 } // namespace
 
-uint64_t
+ArtifactDigest
 artifact_digest(std::span<const uint8_t> bytes)
 {
-  uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_u64(digest, bytes.size());
-  for (const uint8_t byte : bytes) {
-    digest = fnv_digest_byte(digest, byte);
-  }
+  ArtifactDigest digest = {};
+  static constexpr std::array<uint8_t, 1> kEmpty = {0};
+  const uint8_t *input = bytes.empty() ? kEmpty.data() : bytes.data();
+  SHA256(input, bytes.size(), digest.data());
   return digest;
 }
 
@@ -94,11 +105,12 @@ parse_artifact(std::span<const uint8_t> bytes)
       load_u32_le(bytes, kArtifactDispatchOffsetOffset);
   const uint32_t dispatch_table_size =
       load_u32_le(bytes, kArtifactDispatchSizeOffset);
-  const uint64_t code_digest = load_u64_le(bytes, kArtifactCodeDigestOffset);
-  const uint64_t initial_memory_digest =
-      load_u64_le(bytes, kArtifactInitialMemoryDigestOffset);
-  const uint64_t dispatch_digest =
-      load_u64_le(bytes, kArtifactDispatchDigestOffset);
+  const ArtifactDigest code_digest =
+      load_artifact_digest(bytes, kArtifactCodeDigestOffset);
+  const ArtifactDigest initial_memory_digest =
+      load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset);
+  const ArtifactDigest dispatch_digest =
+      load_artifact_digest(bytes, kArtifactDispatchDigestOffset);
 
   if (format_version != kArtifactFormatVersion) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
@@ -160,7 +172,7 @@ parse_artifact(std::span<const uint8_t> bytes)
       size_t{dispatch_table_offset} + dispatch_table_size;
   const size_t initial_memory_end =
       size_t{initial_memory_offset} + initial_memory_size;
-  // Keep the v2 layout canonical: header, code, dispatch, memory, no hidden
+  // Keep the v3 layout canonical: header, code, dispatch, memory, no hidden
   // bytes. Sparse sections can be a later format.
   if (code_offset != header_size || dispatch_table_offset != code_end ||
       initial_memory_offset != dispatch_table_end ||

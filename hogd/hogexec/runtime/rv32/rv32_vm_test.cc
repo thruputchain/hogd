@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -64,6 +66,13 @@ store_u64_at(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
 }
 
 void
+store_digest_at(std::vector<uint8_t> &bytes, size_t offset,
+                const ArtifactDigest &digest)
+{
+  std::ranges::copy(digest, bytes.begin() + static_cast<ptrdiff_t>(offset));
+}
+
+void
 refresh_dispatch_digest(std::vector<uint8_t> &artifact)
 {
   const uint32_t dispatch_offset =
@@ -73,8 +82,8 @@ refresh_dispatch_digest(std::vector<uint8_t> &artifact)
   const auto dispatch =
       std::span<const uint8_t>(artifact).subspan(dispatch_offset,
                                                  dispatch_size);
-  store_u64_at(artifact, kArtifactDispatchDigestOffset,
-               artifact_digest(dispatch));
+  store_digest_at(artifact, kArtifactDispatchDigestOffset,
+                  artifact_digest(dispatch));
 }
 
 void
@@ -423,19 +432,20 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
 {
   {
     auto artifact = compiled_artifact_bytes();
-    store_u64_at(artifact, kArtifactCodeDigestOffset, 0);
+    store_digest_at(artifact, kArtifactCodeDigestOffset, ArtifactDigest{});
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kCodeDigestMismatch);
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u64_at(artifact, kArtifactInitialMemoryDigestOffset, 0);
+    store_digest_at(artifact, kArtifactInitialMemoryDigestOffset,
+                    ArtifactDigest{});
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kInitialMemoryDigestMismatch);
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u64_at(artifact, kArtifactDispatchDigestOffset, 0);
+    store_digest_at(artifact, kArtifactDispatchDigestOffset, ArtifactDigest{});
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kDispatchDigestMismatch);
   }
@@ -447,7 +457,7 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
     artifact[code_offset] = 0;
     const auto code =
         std::span<const uint8_t>(artifact).subspan(code_offset, code_size);
-    store_u64_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
+    store_digest_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
   {
@@ -762,6 +772,10 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
     const char *name;
     uint64_t cost;
   };
+  struct ExpectedSyscallGasEntry {
+    const char *name;
+    uint64_t cost;
+  };
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
       {Op::kLui, "LUI", 1},     {Op::kAuipc, "AUIPC", 1},
@@ -789,16 +803,28 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kRemu, "REMU", 8},   {Op::kFence, "FENCE", 1},
       {Op::kEcall, "ECALL", 1},
   }};
+  const std::array<ExpectedSyscallGasEntry, 4> expected_syscalls = {{
+      {"SHA256HashBase", hogd::kSHA256HashBaseCost},
+      {"SHA256HashByte", hogd::kSHA256HashByteCost},
+      {"NoSyscall", hogd::kNoSyscallCost},
+      {"GenericBadSyscall", hogd::kGenericBadSyscallCost},
+  }};
 
   EXPECT_EQ(kOpCount, 47U);
   EXPECT_EQ(kGasTableVersion, 1U);
-  EXPECT_EQ(kGasScheduleDigest, 0xd2f3483dc373fadaULL);
+  EXPECT_EQ(kGasScheduleDigest, 0xec026096ed9849f7ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
     EXPECT_STREQ(kInstructionGasSchedule[i].name, expected[i].name);
     EXPECT_EQ(kInstructionGasSchedule[i].cost, expected[i].cost);
     EXPECT_EQ(kInstructionGasCosts[i], expected[i].cost);
+  }
+  ASSERT_EQ(hogd::kSyscallGasCostSchedule.size(), expected_syscalls.size());
+  for (size_t i = 0; i < expected_syscalls.size(); ++i) {
+    EXPECT_STREQ(hogd::kSyscallGasCostSchedule[i].name,
+                 expected_syscalls[i].name);
+    EXPECT_EQ(hogd::kSyscallGasCostSchedule[i].cost, expected_syscalls[i].cost);
   }
 }
 

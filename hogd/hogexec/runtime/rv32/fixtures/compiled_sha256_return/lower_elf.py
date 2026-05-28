@@ -8,17 +8,15 @@ from pathlib import Path
 K_MAX_CODE_BYTES = 64 * 1024
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 2
-ARTIFACT_HEADER_BYTES = 100
+ARTIFACT_FORMAT_VERSION = 3
+ARTIFACT_HEADER_BYTES = 172
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
 ARTIFACT_ENTRY_ABI_VERSION = 1
 ARTIFACT_SYSCALL_ABI_VERSION = 0
 DISPATCH_ENTRY_BYTES = 16
 GAS_TABLE_VERSION = 1
 # Must match hogd/hogexec/runtime/rv32/program.h kGasScheduleDigest.
-GAS_SCHEDULE_DIGEST = 0xD2F3483DC373FADA
-FNV_OFFSET_BASIS = 1469598103934665603
-FNV_PRIME = 1099511628211
+GAS_SCHEDULE_DIGEST = 0xEC026096ED9849F7
 SHT_SYMTAB = 2
 SHT_STRTAB = 3
 SHT_RELA = 4
@@ -63,23 +61,8 @@ def sha256_bytes(blob):
     return hashlib.sha256(blob).hexdigest()
 
 
-def artifact_digest_byte(digest, value):
-    return ((digest ^ value) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
-
-
-def artifact_digest_u64(digest, value):
-    for _ in range(8):
-        digest = artifact_digest_byte(digest, value & 0xFF)
-        value >>= 8
-    return digest
-
-
 def artifact_digest(blob):
-    digest = FNV_OFFSET_BASIS
-    digest = artifact_digest_u64(digest, len(blob))
-    for byte in blob:
-        digest = artifact_digest_byte(digest, byte)
-    return digest
+    return hashlib.sha256(blob).digest()
 
 
 class ElfError(RuntimeError):
@@ -346,7 +329,7 @@ def build_artifact(code, memory, entries):
     dispatch_offset = code_offset + len(code)
     memory_offset = dispatch_offset + len(dispatch_table)
     header = struct.pack(
-        "<8sIIQIIIIQIIIIIIIQQQ",
+        "<8sIIQIIIIQIIIIIII32s32s32s",
         ARTIFACT_MAGIC,
         ARTIFACT_FORMAT_VERSION,
         ARTIFACT_HEADER_BYTES,

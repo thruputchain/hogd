@@ -165,9 +165,10 @@ What works well:
 
 Ownership concerns:
 
-- `artifact_digest` is FNV. It is honestly documented as not protocol-grade, but
-  the name will become dangerous if it survives into any untrusted artifact
-  gate.
+- Artifact section digests are now SHA256 commitments in the v3 header. The
+  remaining non-cryptographic digest is the versioned gas-schedule fingerprint,
+  which is an intentional compatibility/version pin rather than a content
+  authenticity check.
 - `ArtifactError::kInvalidOffsets` and `kDispatchTableInvalid` each combine
   several conditions. That is acceptable for M4 tests, but fuzz triage and
   operational debugging will want sharper error classes.
@@ -177,10 +178,9 @@ Ownership concerns:
 
 M5 cleanup:
 
-- Replace FNV artifact digests with a cryptographic content commitment before
-  protocol exposure.
-- Fold syscall gas costs into the gas-schedule digest so total RV32 cost is
-  versioned, not only instruction cost.
+- Closed: replace FNV artifact digests with SHA256 section commitments.
+- Closed: fold syscall gas costs into the gas-schedule digest so total RV32
+  cost is versioned, not only instruction cost.
 - Split the broad artifact/dispatch errors enough for fuzzing and review.
 - Keep the canonical layout rule unless a new artifact version explicitly
   changes it.
