@@ -44,6 +44,8 @@ enum class HostStatus {
   kTrap,
 };
 
+// Host traps carry consensus-visible classification: guest-caused bridge ABI
+// faults are deterministic, while genuine host failures remain fatal.
 enum class HostTrapKind {
   kDeterministic,
   kFatal,
@@ -155,19 +157,25 @@ struct HostResult {
   [[nodiscard]] uint32_t continue_value() const
   {
     assert(status == HostStatus::kContinue);
-    return std::get<HostContinuePayload>(payload_).value;
+    const auto *payload = std::get_if<HostContinuePayload>(&payload_);
+    assert(payload != nullptr);
+    return payload == nullptr ? 0 : payload->value;
   }
 
   [[nodiscard]] uint32_t halt_code() const
   {
     assert(status == HostStatus::kHalt);
-    return std::get<HostHaltPayload>(payload_).code;
+    const auto *payload = std::get_if<HostHaltPayload>(&payload_);
+    assert(payload != nullptr);
+    return payload == nullptr ? 0 : payload->code;
   }
 
   [[nodiscard]] HostTrapPayload trap_payload() const
   {
     assert(status == HostStatus::kTrap);
-    return std::get<HostTrapPayload>(payload_);
+    const auto *payload = std::get_if<HostTrapPayload>(&payload_);
+    assert(payload != nullptr);
+    return payload == nullptr ? HostTrapPayload{} : *payload;
   }
 
   HostStatus status = HostStatus::kContinue;

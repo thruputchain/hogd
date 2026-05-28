@@ -469,6 +469,7 @@ TEST(Rv32SyscallBridgeTest, trapsBeforeCallingHostForMisalignedFrame)
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
   EXPECT_EQ(captured.calls, 0);
+  EXPECT_FALSE(bridge.last_result().has_value());
 }
 
 TEST(Rv32SyscallBridgeTest, trapsOnUnsupportedBridgeVersion)
@@ -484,6 +485,7 @@ TEST(Rv32SyscallBridgeTest, trapsOnUnsupportedBridgeVersion)
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
   EXPECT_EQ(captured.calls, 0);
+  EXPECT_FALSE(bridge.last_result().has_value());
 }
 
 TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)

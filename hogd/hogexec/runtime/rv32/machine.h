@@ -35,6 +35,8 @@ public:
   [[nodiscard]] Trap trap() const { return trap_; }
   [[nodiscard]] HostTrapPayload host_trap_payload() const
   {
+    assert(trap_ == Trap::kHostTrap);
+    assert(host_trap_payload_.has_value());
     return host_trap_payload_.value_or(HostTrapPayload{});
   }
   [[nodiscard]] uint32_t host_trap_code() const

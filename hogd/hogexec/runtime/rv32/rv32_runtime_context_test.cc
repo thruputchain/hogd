@@ -173,6 +173,14 @@ unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
 }
 
 extern "C" TrampolineResult
+throwing_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+{
+  throw 1;
+}
+
+extern "C" TrampolineResult
 host_out_of_gas_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                       uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
                       uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
@@ -1368,6 +1376,23 @@ TEST_F(Rv32RuntimeContextTest, BridgeAbiFaultsMapToDeterministic)
                                   rv32::kSyscallBridgeVersion));
   expect_deterministic(
       make_bridge_abi_fault_image(200, rv32::kSyscallBridgeVersion));
+}
+
+TEST_F(Rv32RuntimeContextTest, FatalCodeZeroHostTrapMapsToUnrecoverable)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_single_ecall_image(&throwing_entry)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                              rv32_context);
+
+  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+  EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas);
 }
 
 TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
