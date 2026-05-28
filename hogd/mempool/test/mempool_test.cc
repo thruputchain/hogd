@@ -5,12 +5,15 @@
 #include <memory>
 #include <set>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "block.hh"
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/deploy_and_transfer.h"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "genesis.hh"
@@ -43,6 +46,21 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 100;
+
+using deploy_and_transfer_client_t =
+    ContractTraitClient<deploy_and_transfer::DeployAndTransfer>;
+
+SHA256Hash
+make_test_nonce(uint64_t value)
+{
+  return sha256(value);
+}
+
+std::tuple<uint64_t, uint64_t>
+make_amount(uint128_t amount)
+{
+  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+}
 
 void
 set_cached_hog_age_to_zero(MempoolTestInfra &server,
@@ -433,6 +451,79 @@ TEST(Mempool, NominateCommit)
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, NominateCommitDeployAndTransferContract)
+{
+  constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
+  constexpr uint128_t kTransferAmount = 100'000'000;
+  const SHA256Hash deploy_nonce = make_test_nonce(1);
+  std::shared_ptr<Contract> fibonacci_contract = load_contract("fibonacci.wasm");
+  ASSERT_TRUE(fibonacci_contract);
+  const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
+  const ContractAddress deployed_address =
+      sha256(ContractDeploymentHashPreimage{
+          .deployer_address = kDeployAndTransferAddress,
+          .nonce = deploy_nonce,
+          .contract_hash = fibonacci_hash});
+
+  deploy_and_transfer_client_t deploy_and_transfer_client(
+      kDeployAndTransferAddress);
+  SignedTransaction tx{
+      .tx = Transaction{
+          .invocation =
+              deploy_and_transfer_client
+                  .make_invocation<"deploy_and_transfer">(
+                      /*gas_amount=*/5'000'000'000, deploy_nonce,
+                      fibonacci_hash, make_amount(kTransferAmount)),
+          .uniquifier = {.block_expiry_height =
+                             std::numeric_limits<BlockHeight>::max(),
+                         .nonce = 1},
+          .contracts_to_deploy = {*fibonacci_contract},
+      }};
+
+  MempoolTestInfra server;
+  server.deploy_built_contract_to_address(kDeployAndTransferAddress,
+                                          "deploy_and_transfer.wasm");
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{tx})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  auto res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(
+      get_tip.db_tip())();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  SignedTransactionBatch parsed_txs;
+  ASSERT_TRUE(
+      parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+  ASSERT_EQ(parsed_txs.size(), 1UL);
+  EXPECT_EQ(parsed_txs[0], tx);
+
+  SignedTransactionHashBatch tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(
+      res_nominate.nominated_block().nomination.transactions_hash,
+      tx_hashes)());
+  ASSERT_EQ(tx_hashes.size(), 1UL);
+  EXPECT_EQ(tx_hashes[0], sha256(tx.tx));
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  HogDBStatus<DeployedContractHash> deployed_metadata =
+      server.read_address_metadata(deployed_address);
+  ASSERT_TRUE(deployed_metadata.has_value());
+  EXPECT_EQ(deployed_metadata->hash, fibonacci_hash);
+
+  HogDBStatus<int128_t> deployed_balance =
+      server.read_address_balance(deployed_address);
+  ASSERT_TRUE(deployed_balance.has_value());
+  EXPECT_GT(*deployed_balance, 0);
 }
 
 TEST(Mempool, CommitBlockNotFound)

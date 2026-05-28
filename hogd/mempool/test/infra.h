@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <utility>
 
@@ -166,6 +167,37 @@ public:
   {
     CHECK(get_db().write_dbtip(db_tip).has_value());
     ctx_->set_tip(db_tip);
+  }
+
+  void deploy_built_contract_to_address(const ContractAddress &address,
+                                        std::string_view wasm_filename)
+  {
+    std::shared_ptr<Contract> contract = load_contract(wasm_filename);
+    auto bytes = x23::serialize(*contract);
+    auto contract_hash = sha256(*contract);
+    CHECK(get_db()
+              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
+              .has_value());
+    CHECK(
+        get_db()
+            .write_address_metadata(
+                address,
+                DeployedContractHash{.hash = contract_hash,
+                                     .contract_size =
+                                         static_cast<uint32_t>(bytes.size())})
+            .has_value());
+    grant_initial_tokens_for_account(address);
+  }
+
+  HogDBStatus<int128_t> read_address_balance(const ContractAddress &address)
+  {
+    return get_db().read_address_balance(address);
+  }
+
+  HogDBStatus<DeployedContractHash>
+  read_address_metadata(const ContractAddress &address)
+  {
+    return get_db().read_address_metadata(address);
   }
 
   // This getter is used by [auth_test.cc].

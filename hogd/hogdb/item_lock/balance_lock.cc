@@ -98,6 +98,8 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
   // time (not part of blockchain state — ChangeSet will skip hash element
   // construction because is_state_item returns false for kHogAge).
   if (!snapshot_balance_.snapshot_value().has_value()) {
+    info("BalanceLock stage_committed_changes for account {}",
+         ctx.key.get_address());
     HogAge age = {
         .address = ctx.key.to_contract_address(),
         // We set the hog balance for all groups in [HogAge] to 0 to avoid the

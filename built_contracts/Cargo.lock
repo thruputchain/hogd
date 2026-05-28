@@ -351,6 +351,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "deploy_and_transfer"
+version = "0.1.0"
+dependencies = [
+ "deploy_and_transfer",
+ "groundhog-erc20-if",
+ "sdk",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
