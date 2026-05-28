@@ -27,9 +27,10 @@ add_library(
 
 add_custom_target(
   rv32_syscall_xdr_hh
-  DEPENDS
-  ${CMAKE_BINARY_DIR}/hogd/xdr/ffi_enums.hh
-  ${CMAKE_BINARY_DIR}/hogd/xdr/syscall_error.hh
+)
+add_dependencies(
+  rv32_syscall_xdr_hh
+  build_protocol
 )
 
 target_link_libraries(
