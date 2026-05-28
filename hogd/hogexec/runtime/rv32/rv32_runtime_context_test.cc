@@ -31,6 +31,9 @@
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
+#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -71,6 +74,11 @@ constexpr GasAmount kParityGas = 10'000;
 constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
 constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
 constexpr std::string_view kEffectEventData = "rv32 parity event";
+constexpr GasAmount kWasmErrorHostGas = 100;
+constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
+    WasmEngine::kWasmi,
+    WasmEngine::kWasmtime,
+};
 
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
@@ -134,8 +142,14 @@ ecall()
 TrampolineResult
 make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
 {
-  return {.result_code = 17,
-          .panic = std::to_underlying(code),
+  return to_trampoline_result(HostFnError{code}, gas_consumed);
+}
+
+TrampolineResult
+make_exit_result(uint32_t code, uint64_t gas_consumed = 4)
+{
+  return {.result_code = static_cast<int32_t>(code),
+          .panic = std::to_underlying(HostFnErrorCode::Exit),
           .gas_consumed = gas_consumed};
 }
 
@@ -169,7 +183,7 @@ unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
                     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 {
-  return {.result_code = 17, .panic = 999, .gas_consumed = 4};
+  return {.result_code = 0, .panic = 999, .gas_consumed = 4};
 }
 
 extern "C" TrampolineResult
@@ -194,7 +208,7 @@ exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
            uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
            uint64_t, uint64_t, uint64_t)
 {
-  return make_host_panic_result(HostFnErrorCode::Exit);
+  return make_exit_result(17);
 }
 
 extern "C" TrampolineResult
@@ -203,6 +217,44 @@ return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
              uint64_t, uint64_t, uint64_t, uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::Return);
+}
+
+extern "C" TrampolineResult
+wasm_unrecoverable_entry(ExternHostCallContext /*unused*/,
+                         WasmContext /*unused*/)
+{
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable},
+                              kWasmErrorHostGas);
+}
+
+extern "C" TrampolineResult
+wasm_validation_failure_entry(ExternHostCallContext /*unused*/,
+                              WasmContext /*unused*/)
+{
+  return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure},
+                              kWasmErrorHostGas);
+}
+
+extern "C" TrampolineResult
+wasm_abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
+{
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon},
+                              kWasmErrorHostGas);
+}
+
+extern "C" TrampolineResult
+wasm_good_call_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
+{
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone},
+                              kWasmErrorHostGas);
+}
+
+extern "C" TrampolineResult
+wasm_consume_too_much_gas_entry(ExternHostCallContext /*unused*/,
+                                WasmContext wasm_context)
+{
+  return to_trampoline_result(HostFnError{HostFnErrorCode::OutOfGas},
+                              wasm_context.gas_remaining);
 }
 
 void
@@ -507,6 +559,54 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
                         .gas_consumed_ = 0};
   }
   return runtime.value()->invoke(method_id, gas_limit);
+}
+
+InvokeResult
+invoke_wasm_error_contract(WasmEngine engine, HostFn0 external_call,
+                           std::string_view method, GasAmount gas_limit)
+{
+  WasmTestFramework wasm;
+  Contract contract;
+  contract.contract_type(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_error_handling.wasm");
+  const DeployedContractHash deployed{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+
+  wasm.setup_wasm_context(engine);
+  EXPECT_TRUE(wasm.link_fn("test", "good_call", &wasm_good_call_entry));
+  EXPECT_TRUE(wasm.link_fn("test", "external_call", external_call));
+  wasm.make_syscall_handler(contract);
+  auto runtime =
+      wasm.get_context()->make_new_runtime(deployed,
+                                           wasm.get_syscall_handler());
+  EXPECT_TRUE(runtime.has_value());
+  if (!runtime.has_value()) {
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  }
+  EXPECT_NE(runtime.value(), nullptr);
+  if (runtime.value() == nullptr) {
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  }
+  return runtime.value()->invoke(method, gas_limit);
+}
+
+void
+expect_matching_error(InvokeResult const &wasm_result,
+                      InvokeResult const &rv32_result, InvokeErrorCode expected)
+{
+  ASSERT_FALSE(wasm_result.is_root_success());
+  ASSERT_FALSE(rv32_result.is_root_success());
+  ASSERT_EQ(wasm_result.result_.error().code(), expected);
+  EXPECT_EQ(rv32_result.result_.error().code(), expected);
+  EXPECT_EQ(wasm_result.result_.error().code(),
+            rv32_result.result_.error().code());
 }
 
 std::shared_ptr<const Contract>
@@ -1324,6 +1424,84 @@ TEST_F(Rv32RuntimeContextTest, DirectInvokeNormalizesOutOfGasConsumption)
   ASSERT_FALSE(result.is_root_success());
   ASSERT_EQ(result.result_.error().code(), InvokeErrorCode::OutOfGas);
   EXPECT_EQ(result.gas_consumed_, 10U);
+}
+
+TEST_F(Rv32RuntimeContextTest, HostErrorContractsMatchWasmOutcomes)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto expect_parity = [&](HostFn0 wasm_entry, HostFn11 rv32_entry,
+                           InvokeErrorCode expected) {
+    for (const WasmEngine engine : kDifferentialWasmEngines) {
+      auto rv32_context = rv32::RuntimeContext(
+          {{kRv32ContractId, make_single_ecall_image(rv32_entry)}});
+      auto handler =
+          make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                       rv32_context);
+
+      const auto wasm_result =
+          invoke_wasm_error_contract(engine, wasm_entry, "call1", kEnoughGas);
+      const auto rv32_result =
+          direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+      expect_matching_error(wasm_result, rv32_result, expected);
+    }
+  };
+
+  expect_parity(&wasm_unrecoverable_entry, &unrecoverable_entry,
+                InvokeErrorCode::Unrecoverable);
+  expect_parity(&wasm_validation_failure_entry, &validation_failure_entry,
+                InvokeErrorCode::ValidationFailure);
+  expect_parity(&wasm_abandon_entry, &abandon_entry, InvokeErrorCode::Abandon);
+}
+
+TEST_F(Rv32RuntimeContextTest, DeterministicTrapContractMatchesWasmOutcome)
+{
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  for (const WasmEngine engine : kDifferentialWasmEngines) {
+    auto rv32_context =
+        rv32::RuntimeContext({{kRv32ContractId, make_bad_pc_image()}});
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
+
+    const auto wasm_result =
+        invoke_wasm_error_contract(engine, &wasm_good_call_entry, "unreachable",
+                                   kEnoughGas);
+    const auto rv32_result =
+        direct_invoke(contract, rv32_context, handler, kEnoughGas);
+
+    expect_matching_error(wasm_result, rv32_result,
+                          InvokeErrorCode::Deterministic);
+  }
+}
+
+TEST_F(Rv32RuntimeContextTest, OutOfGasContractMatchesWasmOutcome)
+{
+  constexpr GasAmount kGasLimit = 10;
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  for (const WasmEngine engine : kDifferentialWasmEngines) {
+    auto rv32_context = rv32::RuntimeContext(
+        {{kRv32ContractId, make_single_ecall_image(&host_out_of_gas_entry)}});
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kGasLimit),
+                                     rv32_context);
+
+    const auto wasm_result =
+        invoke_wasm_error_contract(engine, &wasm_consume_too_much_gas_entry,
+                                   "call1", kGasLimit);
+    const auto rv32_result =
+        direct_invoke(contract, rv32_context, handler, kGasLimit);
+
+    expect_matching_error(wasm_result, rv32_result, InvokeErrorCode::OutOfGas);
+    EXPECT_EQ(wasm_result.gas_consumed_, kGasLimit);
+    EXPECT_EQ(rv32_result.gas_consumed_, kGasLimit);
+  }
 }
 
 TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)

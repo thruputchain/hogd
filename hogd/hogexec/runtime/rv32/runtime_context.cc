@@ -30,25 +30,22 @@ InvokeStatus<void>
 host_trap_code_to_invoke_status(uint32_t code)
 {
   switch (static_cast<HostFnErrorCode>(code)) {
-  case HostFnErrorCode::OutOfGas:
-    return InvokeError{InvokeErrorCode::OutOfGas};
-  case HostFnErrorCode::Return:
-    return {};
-  case HostFnErrorCode::Exit:
-    return InvokeError{InvokeErrorCode::Deterministic};
   case HostFnErrorCode::Unrecoverable:
     return InvokeError{InvokeErrorCode::Unrecoverable};
   case HostFnErrorCode::ValidationFailure:
     return InvokeError{InvokeErrorCode::ValidationFailure};
   case HostFnErrorCode::Abandon:
     return InvokeError{InvokeErrorCode::Abandon};
+  case HostFnErrorCode::OutOfGas:
+  case HostFnErrorCode::Return:
+  case HostFnErrorCode::Exit:
   case HostFnErrorCode::NoneOrRecoverable:
     break;
   }
 
-  // A host trap with no fatal host code, or with an unknown code, is still a
-  // fatal runtime outcome. Known fatal host codes above mirror the WASM
-  // mapping.
+  // Only fatal-class host trap codes mirror the WASM mapping here. Return,
+  // Exit, and OutOfGas are handled before HostTrap by SyscallBridgeHost and the
+  // VM trap/halt status; seeing them as trap payloads is a fatal inconsistency.
   return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 

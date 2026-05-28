@@ -232,6 +232,7 @@ gtest_discover_tests(rv32_runtime_context_test
 
 add_dependencies(
   rv32_runtime_context_test
+  test_error_handling_wasm
   all_wasm_contracts
   all_wasm_headers
 )
