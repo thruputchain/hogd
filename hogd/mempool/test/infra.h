@@ -178,14 +178,13 @@ public:
     CHECK(get_db()
               .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
               .has_value());
-    CHECK(
-        get_db()
-            .write_address_metadata(
-                address,
-                DeployedContractHash{.hash = contract_hash,
-                                     .contract_size =
-                                         static_cast<uint32_t>(bytes.size())})
-            .has_value());
+    CHECK(get_db()
+              .write_address_metadata(
+                  address,
+                  DeployedContractHash{.hash = contract_hash,
+                                       .contract_size =
+                                           static_cast<uint32_t>(bytes.size())})
+              .has_value());
     grant_initial_tokens_for_account(address);
   }
 

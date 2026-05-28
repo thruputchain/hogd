@@ -458,24 +458,24 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
   constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
   constexpr uint128_t kTransferAmount = 100'000'000;
   const SHA256Hash deploy_nonce = make_test_nonce(1);
-  std::shared_ptr<Contract> fibonacci_contract = load_contract("fibonacci.wasm");
+  std::shared_ptr<Contract> fibonacci_contract =
+      load_contract("fibonacci.wasm");
   ASSERT_TRUE(fibonacci_contract);
   const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
   const ContractAddress deployed_address =
-      sha256(ContractDeploymentHashPreimage{
-          .deployer_address = kDeployAndTransferAddress,
-          .nonce = deploy_nonce,
-          .contract_hash = fibonacci_hash});
+      sha256(ContractDeploymentHashPreimage{.deployer_address =
+                                                kDeployAndTransferAddress,
+                                            .nonce = deploy_nonce,
+                                            .contract_hash = fibonacci_hash});
 
   deploy_and_transfer_client_t deploy_and_transfer_client(
       kDeployAndTransferAddress);
   SignedTransaction tx{
       .tx = Transaction{
           .invocation =
-              deploy_and_transfer_client
-                  .make_invocation<"deploy_and_transfer">(
-                      /*gas_amount=*/5'000'000'000, deploy_nonce,
-                      fibonacci_hash, make_amount(kTransferAmount)),
+              deploy_and_transfer_client.make_invocation<"deploy_and_transfer">(
+                  /*gas_amount=*/5'000'000'000, deploy_nonce, fibonacci_hash,
+                  make_amount(kTransferAmount)),
           .uniquifier = {.block_expiry_height =
                              std::numeric_limits<BlockHeight>::max(),
                          .nonce = 1},
@@ -493,8 +493,8 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  auto res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(
-      get_tip.db_tip())();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
