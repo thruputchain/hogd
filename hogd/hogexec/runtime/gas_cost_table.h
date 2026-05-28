@@ -35,10 +35,10 @@ struct SyscallGasCostEntry {
 // return zero direct host gas today; child invocation gas is metered by the
 // invoked VM or WASM runtime rather than a fixed syscall-cost constant.
 constexpr std::array<SyscallGasCostEntry, 4> kSyscallGasCostSchedule = {{
-    {"SHA256HashBase", kSHA256HashBaseCost},
-    {"SHA256HashByte", kSHA256HashByteCost},
-    {"NoSyscall", kNoSyscallCost},
-    {"GenericBadSyscall", kGenericBadSyscallCost},
+    {.name = "SHA256HashBase", .cost = kSHA256HashBaseCost},
+    {.name = "SHA256HashByte", .cost = kSHA256HashByteCost},
+    {.name = "NoSyscall", .cost = kNoSyscallCost},
+    {.name = "GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};
 
 } // namespace hogd
