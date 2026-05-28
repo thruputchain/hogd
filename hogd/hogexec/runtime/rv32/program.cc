@@ -2,6 +2,12 @@
 
 #include <array>
 #include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <span>
+
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 
 namespace hogd::rv32 {
 namespace {

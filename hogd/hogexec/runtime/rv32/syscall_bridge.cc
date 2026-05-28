@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/hogexec/runtime/runtime_exports.h"
+#include "hogd/hogexec/runtime/rv32/host.h"
 #include "syscall_error.hh"
 
 namespace hogd::rv32 {
@@ -47,7 +49,7 @@ store_result_footer(std::span<uint8_t> memory, uint32_t frame_address,
   store_le32(memory, offset, static_cast<uint32_t>(result.result_code));
   store_le32(memory, offset + sizeof(uint32_t),
              static_cast<uint32_t>(result.panic));
-  store_le64(memory, offset + 2 * sizeof(uint32_t), result.gas_consumed);
+  store_le64(memory, offset + (2 * sizeof(uint32_t)), result.gas_consumed);
 }
 
 } // namespace

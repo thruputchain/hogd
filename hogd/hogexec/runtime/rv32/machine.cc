@@ -3,7 +3,14 @@
 #include <algorithm>
 #include <bit>
 #include <cassert>
+#include <cstdint>
 #include <limits>
+#include <memory>
+#include <span>
+#include <utility>
+
+#include "hogd/hogexec/runtime/rv32/host.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
 namespace {
@@ -150,7 +157,7 @@ void
 Machine::reset(uint64_t gas)
 {
   registers_.fill(0);
-  std::fill(memory_.begin(), memory_.end(), 0);
+  std::ranges::fill(memory_, 0);
   pc_ = initial_pc_;
   gas_remaining_ = gas;
   trap_ = Trap::kNone;
@@ -366,7 +373,12 @@ Machine::run(Host &host)
       continue;
     case StepResult::kEcall:
     {
-      const HostResult host_result = host.ecall(view(), *pending_ecall_);
+      if (!pending_ecall_.has_value()) {
+        set_host_trap(HostTrapPayload{});
+        return StepResult::kTrap;
+      }
+      const EcallArgs pending_ecall = pending_ecall_.value();
+      const HostResult host_result = host.ecall(view(), pending_ecall);
       const StepResult completed = complete_ecall(host_result);
       if (completed == StepResult::kContinue) {
         continue;

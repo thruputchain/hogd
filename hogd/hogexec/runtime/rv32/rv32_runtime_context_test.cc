@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -21,11 +20,13 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
@@ -35,10 +36,17 @@
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/vec.h"
+
+// Test callback fixtures intentionally mirror C host function ABIs, and the
+// test fixture combines gtest with the existing native-contract harness.
+// NOLINTBEGIN(readability-named-parameter,misc-multiple-inheritance)
 
 namespace hogd {
 namespace {
@@ -109,7 +117,7 @@ make_program(std::initializer_list<uint32_t> words)
 uint32_t
 i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
 {
-  return (uint32_t(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
+  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
 }
 
@@ -122,7 +130,7 @@ addi(uint8_t rd, uint8_t rs1, int32_t imm)
 uint32_t
 s_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0xfffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
   return (uimm >> 5) << 25 | uint32_t{rs2} << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | (uimm & 0x1fU) << 7 | 0x23U;
 }
@@ -277,7 +285,7 @@ write_return_frame(std::span<uint8_t> memory, std::span<const uint8_t> payload)
       0,
   };
   for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(memory, kFrameAddress + i * sizeof(uint64_t), frame_words[i]);
+    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), frame_words[i]);
   }
   std::ranges::copy(payload, memory.begin() + kReturnBufferAddress);
 }
@@ -289,7 +297,7 @@ write_syscall_frame(std::span<uint8_t> memory, uint32_t frame_address,
   ASSERT_LE(words.size(), rv32::kSyscallFrameArgWords);
   size_t i = 0;
   for (const uint64_t word : words) {
-    store_le64(memory, frame_address + i * sizeof(uint64_t), word);
+    store_le64(memory, frame_address + (i * sizeof(uint64_t)), word);
     ++i;
   }
 }
@@ -400,7 +408,7 @@ make_sha256_then_return_image(std::span<const uint8_t> input)
       kShaOutputAddress,
   };
   for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(initial_memory, kFrameAddress + i * sizeof(uint64_t),
+    store_le64(initial_memory, kFrameAddress + (i * sizeof(uint64_t)),
                frame_words[i]);
   }
   std::ranges::copy(input, initial_memory.begin() + kShaInputAddress);
@@ -1519,7 +1527,7 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
 
     ASSERT_FALSE(result.is_root_success());
     EXPECT_EQ(result.result_.error().code(), expected);
-    EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas + 4U);
+    EXPECT_EQ(result.gas_consumed_, (3U * rv32::kBaseInstructionGas) + 4U);
   };
 
   expect_mapping(&unrecoverable_entry, InvokeErrorCode::Unrecoverable);
@@ -1586,7 +1594,7 @@ TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
   auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
 
   ASSERT_TRUE(result.is_root_success());
-  EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas + 4U);
+  EXPECT_EQ(result.gas_consumed_, (3U * rv32::kBaseInstructionGas) + 4U);
 }
 
 TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltCodeMapsToDeterministic)
@@ -1695,3 +1703,5 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
 
 } // namespace
 } // namespace hogd
+
+// NOLINTEND(readability-named-parameter,misc-multiple-inheritance)

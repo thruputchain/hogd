@@ -2,12 +2,19 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
 #include <utility>
 #include <vector>
 
 #include <openssl/sha.h>
+
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
 namespace {

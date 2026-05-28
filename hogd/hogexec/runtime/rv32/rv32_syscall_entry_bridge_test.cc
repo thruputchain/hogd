@@ -6,21 +6,23 @@
 #include <cstdint>
 #include <expected>
 #include <initializer_list>
-#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "invoke_flag.hh"
@@ -28,7 +30,12 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
+
+// Integration test fixtures use descriptive local constexpr names; keep the
+// code close to the syscall frame vocabulary.
+// NOLINTBEGIN(readability-identifier-naming)
 
 namespace {
 
@@ -70,7 +77,7 @@ write_frame(std::span<uint8_t> memory, std::span<const uint64_t> words)
 {
   ASSERT_LE(words.size(), hogd::rv32::kSyscallFrameArgWords);
   for (size_t i = 0; i < words.size(); ++i) {
-    store_le64(memory, kFrameAddress + i * sizeof(uint64_t), words[i]);
+    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), words[i]);
   }
 }
 
@@ -108,7 +115,7 @@ make_program(std::initializer_list<uint32_t> words)
 uint32_t
 i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
 {
-  return (uint32_t(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
+  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
 }
 
@@ -124,6 +131,7 @@ ecall()
   return 0x00000073U;
 }
 
+// NOLINTNEXTLINE(misc-multiple-inheritance)
 class Rv32SyscallEntryBridgeTest : public ::testing::Test,
                                    public NativeContractTestFramework {
 public:
@@ -217,9 +225,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
 {
-  constexpr uint32_t frame_address = 0;
+  constexpr uint32_t kLocalFrameAddress = 0;
   const auto program = make_program({
-      addi(10, 0, frame_address),
+      addi(10, 0, kLocalFrameAddress),
       addi(17, 0, rv32::kSyscallBridgeVersion),
       ecall(),
   });
@@ -246,10 +254,11 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
   EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
   EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
   EXPECT_EQ(machine.step(), rv32::StepResult::kEcall);
-  ASSERT_TRUE(machine.pending_ecall().has_value());
+  const auto pending_ecall = machine.pending_ecall();
+  ASSERT_TRUE(pending_ecall.has_value());
   const uint64_t before_host = machine.gas_remaining();
   const rv32::HostResult host_result =
-      bridge.ecall(machine.view(), *machine.pending_ecall());
+      bridge.ecall(machine.view(), pending_ecall.value_or(rv32::EcallArgs{}));
   ASSERT_EQ(host_result.status, rv32::HostStatus::kContinue);
   ASSERT_GT(host_result.gas_consumed, 0U);
   EXPECT_EQ(machine.complete_ecall(host_result), rv32::StepResult::kContinue);
@@ -257,7 +266,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
 
   EXPECT_EQ(machine.gas_remaining(), before_host - host_result.gas_consumed);
   EXPECT_EQ(machine.gas_remaining(), kPlentyOfGas -
-                                         3 * rv32::kBaseInstructionGas -
+                                         (3 * rv32::kBaseInstructionGas) -
                                          host_result.gas_consumed);
 }
 
@@ -380,9 +389,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
 {
-  constexpr uint32_t frame_address = 64;
+  constexpr uint32_t kLocalFrameAddress = 64;
   const auto program = make_program({
-      addi(10, 0, frame_address),
+      addi(10, 0, kLocalFrameAddress),
       addi(17, 0, rv32::kSyscallBridgeVersion),
       ecall(),
   });
@@ -394,7 +403,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
       static_cast<uint64_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0,
   };
   write_frame(frame, frame_words);
-  ASSERT_TRUE(machine.view().write_memory(frame_address, frame));
+  ASSERT_TRUE(machine.view().write_memory(kLocalFrameAddress, frame));
 
   auto handler = make_handler();
   auto host_context = make_new_host_call_context(&handler);
@@ -407,12 +416,15 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
   EXPECT_TRUE(machine.halted());
   EXPECT_EQ(machine.halt_code(), 0U);
   const auto memory = machine.memory();
-  EXPECT_EQ(load_le32(memory, frame_address + rv32::kSyscallFrameResultOffset),
+  EXPECT_EQ(load_le32(memory,
+                      kLocalFrameAddress + rv32::kSyscallFrameResultOffset),
             0);
   EXPECT_EQ(load_le32(memory,
-                      frame_address + rv32::kSyscallFrameResultOffset + 4),
+                      kLocalFrameAddress + rv32::kSyscallFrameResultOffset + 4),
             static_cast<int32_t>(HostFnErrorCode::Return));
 }
 
 } // namespace
 } // namespace hogd
+
+// NOLINTEND(readability-identifier-naming)

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -13,13 +14,25 @@
 
 #include "ffi_enums.hh"
 #include "hogd/hogexec/components/alias_guard.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
+#include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
-#include "hogd/hogexec/runtime/rv32/test_support.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "syscall_error.hh"
 
+// Test host functions mirror a C ABI with many intentionally-unused slots.
+// NOLINTBEGIN(readability-named-parameter)
+
 namespace hogd::rv32 {
+
+using std::int32_t;
+using std::size_t;
+using std::uint32_t;
+using std::uint64_t;
+using std::uint8_t;
+
 namespace {
 
 void
@@ -69,7 +82,7 @@ make_program(std::initializer_list<uint32_t> words)
 uint32_t
 i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
 {
-  return (uint32_t(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
+  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
 }
 
@@ -227,6 +240,14 @@ call_parser_probe(std::vector<uint8_t> &memory, uint32_t frame_address,
   return bridge.ecall(view, EcallArgs{.a0 = frame_address, .a7 = 0});
 }
 
+TrampolineResult
+require_last_result(const SyscallBridgeHost &bridge)
+{
+  const auto result = bridge.last_result();
+  EXPECT_TRUE(result.has_value());
+  return result.value_or(TrampolineResult{});
+}
+
 TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
@@ -257,8 +278,8 @@ TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
   EXPECT_EQ(captured.memory_size, memory.size());
   EXPECT_EQ(captured.first_memory_byte, 0x5cU);
   EXPECT_EQ(memory[7], 0xa5U);
-  ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->gas_consumed, 12U);
+  const TrampolineResult last_result = require_last_result(bridge);
+  EXPECT_EQ(last_result.gas_consumed, 12U);
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset], 0xf9U);
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 4], 0U);
   EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 8], 12U);
@@ -505,9 +526,8 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   EXPECT_EQ(result.status, HostStatus::kOutOfGas);
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
-  ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->panic,
-            std::to_underlying(HostFnErrorCode::OutOfGas));
+  const TrampolineResult last_result = require_last_result(bridge);
+  EXPECT_EQ(last_result.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
   EXPECT_EQ(memory[7], 0x11U);
   EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
 }
@@ -533,8 +553,8 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
             static_cast<uint32_t>(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
-  ASSERT_TRUE(bridge.last_result().has_value());
-  EXPECT_EQ(bridge.last_result()->panic,
+  const TrampolineResult last_result = require_last_result(bridge);
+  EXPECT_EQ(last_result.panic,
             std::to_underlying(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(memory[7], 0x11U);
   EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
@@ -610,9 +630,10 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
   EXPECT_EQ(machine.step(), StepResult::kContinue);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
   EXPECT_EQ(machine.step(), StepResult::kEcall);
-  ASSERT_TRUE(machine.pending_ecall().has_value());
+  const auto pending_ecall = machine.pending_ecall();
+  ASSERT_TRUE(pending_ecall.has_value());
   const HostResult result =
-      bridge.ecall(machine.view(), *machine.pending_ecall());
+      bridge.ecall(machine.view(), pending_ecall.value_or(EcallArgs{}));
   EXPECT_EQ(machine.complete_ecall(result), StepResult::kContinue);
   EXPECT_EQ(machine.reg(10), 1234U);
   EXPECT_EQ(captured.calls, 1);
@@ -656,14 +677,12 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
   EXPECT_EQ(first_result.continue_value(), second_result.continue_value());
   EXPECT_EQ(first_result.gas_consumed, second_result.gas_consumed);
   EXPECT_EQ(first_memory, second_memory);
-  ASSERT_TRUE(first_bridge.last_result().has_value());
-  ASSERT_TRUE(second_bridge.last_result().has_value());
-  EXPECT_EQ(first_bridge.last_result()->result_code,
-            second_bridge.last_result()->result_code);
-  EXPECT_EQ(first_bridge.last_result()->panic,
-            second_bridge.last_result()->panic);
-  EXPECT_EQ(first_bridge.last_result()->gas_consumed,
-            second_bridge.last_result()->gas_consumed);
+  const TrampolineResult first_last_result = require_last_result(first_bridge);
+  const TrampolineResult second_last_result =
+      require_last_result(second_bridge);
+  EXPECT_EQ(first_last_result.result_code, second_last_result.result_code);
+  EXPECT_EQ(first_last_result.panic, second_last_result.panic);
+  EXPECT_EQ(first_last_result.gas_consumed, second_last_result.gas_consumed);
 }
 
 TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
@@ -688,4 +707,6 @@ TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
 }
 
 } // namespace
+
+// NOLINTEND(readability-named-parameter)
 } // namespace hogd::rv32

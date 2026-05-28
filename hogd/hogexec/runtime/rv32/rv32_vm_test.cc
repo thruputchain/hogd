@@ -4,17 +4,29 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <random>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
+#include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
+
+// Some legacy VM tests keep descriptive snake_case names and compact aggregate
+// tables; the checks still run through clang-tidy for the production code
+// paths.
+// NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed)
 
 namespace hogd::rv32 {
 namespace {
@@ -117,14 +129,14 @@ r_type(uint8_t funct7, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t rd)
 uint32_t
 i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
 {
-  return (uint32_t(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
+  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
 }
 
 uint32_t
 s_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0xfffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
   return (uimm >> 5) << 25 | uint32_t{rs2} << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | (uimm & 0x1fU) << 7 | 0x23U;
 }
@@ -132,7 +144,7 @@ s_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
 uint32_t
 b_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0x1fffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffU;
   return ((uimm >> 12) & 0x1U) << 31 | ((uimm >> 5) & 0x3fU) << 25 |
          uint32_t{rs2} << 20 | uint32_t{rs1} << 15 | uint32_t{funct3} << 12 |
          ((uimm >> 1) & 0xfU) << 8 | ((uimm >> 11) & 0x1U) << 7 | 0x63U;
@@ -147,7 +159,7 @@ u_type(uint32_t opcode, uint8_t rd, uint32_t imm)
 uint32_t
 j_type(uint8_t rd, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0x1fffffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffffU;
   return ((uimm >> 20) & 0x1U) << 31 | ((uimm >> 1) & 0x3ffU) << 21 |
          ((uimm >> 11) & 0x1U) << 20 | ((uimm >> 12) & 0xffU) << 12 |
          uint32_t{rd} << 7 | 0x6fU;
@@ -186,8 +198,10 @@ struct HaltHost : Host {
 };
 
 struct ContinueThenHaltHost : Host {
-  HostResult ecall(MachineView, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)view;
+    (void)args;
     ++calls;
     return calls == 1 ? HostResult::continue_with(123) : HostResult::halt();
   }
@@ -196,8 +210,9 @@ struct ContinueThenHaltHost : Host {
 };
 
 struct MemoryHost : Host {
-  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)args;
     const std::array<uint8_t, 4> data = {1, 2, 3, 4};
     wrote = view.write_memory(8, data);
     return HostResult::halt();
@@ -207,8 +222,10 @@ struct MemoryHost : Host {
 };
 
 struct TrapHost : Host {
-  HostResult ecall(MachineView, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)view;
+    (void)args;
     ++calls;
     return HostResult::trap(0, 77);
   }
@@ -217,8 +234,10 @@ struct TrapHost : Host {
 };
 
 struct OutOfGasHost : Host {
-  HostResult ecall(MachineView, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)view;
+    (void)args;
     ++calls;
     return HostResult::out_of_gas();
   }
@@ -227,8 +246,9 @@ struct OutOfGasHost : Host {
 };
 
 struct MutatingOutOfGasHost : Host {
-  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)args;
     ++calls;
     const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
     wrote = view.write_memory(4, data);
@@ -240,8 +260,9 @@ struct MutatingOutOfGasHost : Host {
 };
 
 struct MutatingTrapHost : Host {
-  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)args;
     ++calls;
     const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
     wrote = view.write_memory(4, data);
@@ -1346,9 +1367,11 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     MachineTestPeer::set_reg(machine, 10, 1);
     MachineTestPeer::set_reg(machine, 17, 99);
     EXPECT_EQ(machine.step(), StepResult::kEcall);
-    ASSERT_TRUE(machine.pending_ecall().has_value());
-    EXPECT_EQ(machine.pending_ecall()->a0, 1U);
-    EXPECT_EQ(machine.pending_ecall()->a7, 99U);
+    const auto pending_ecall = machine.pending_ecall();
+    ASSERT_TRUE(pending_ecall.has_value());
+    const EcallArgs ecall = pending_ecall.value_or(EcallArgs{});
+    EXPECT_EQ(ecall.a0, 1U);
+    EXPECT_EQ(ecall.a7, 99U);
     EXPECT_EQ(machine.pc(), 4U);
     EXPECT_EQ(machine.gas_remaining(), 0U);
     EXPECT_EQ(machine.complete_ecall(HostResult::continue_with(55)),
@@ -1419,9 +1442,10 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     Machine machine(program, 16, 100);
     MutatingOutOfGasHost host;
     EXPECT_EQ(machine.step(), StepResult::kEcall);
-    ASSERT_TRUE(machine.pending_ecall().has_value());
+    const auto pending_ecall = machine.pending_ecall();
+    ASSERT_TRUE(pending_ecall.has_value());
     const HostResult result =
-        host.ecall(machine.view(), *machine.pending_ecall());
+        host.ecall(machine.view(), pending_ecall.value_or(EcallArgs{}));
     EXPECT_EQ(machine.memory()[4], 0xaaU);
     EXPECT_EQ(machine.complete_ecall(result), StepResult::kTrap);
     EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
@@ -1515,3 +1539,5 @@ TEST(Rv32ConformanceTest, randomized_store_bounds_are_deterministic)
 
 } // namespace
 } // namespace hogd::rv32
+
+// NOLINTEND(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed)

@@ -1,5 +1,10 @@
 #include "hogd/hogexec/runtime/rv32/dispatch.h"
 
+#include <cstdint>
+#include <span>
+
+#include "hogd/hogexec/runtime/rv32/program.h"
+
 namespace hogd::rv32 {
 
 bool

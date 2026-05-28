@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -16,12 +15,13 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
-#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "types.hh"
 
 namespace hogd::rv32 {
 namespace {
@@ -67,7 +67,7 @@ public:
     : hogd::Runtime(std::move(host_call_context)), image_(std::move(image))
   {}
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(std::string_view method_name, uint64_t gas_limit) override
   {
@@ -134,6 +134,7 @@ private:
     return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
   }
 
+private:
   RuntimeContractImage image_;
 };
 

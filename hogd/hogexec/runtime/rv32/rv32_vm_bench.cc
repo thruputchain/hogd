@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>
@@ -12,7 +13,9 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
@@ -35,17 +38,19 @@ append_u32(std::vector<uint8_t> &code, uint32_t word)
 uint32_t
 i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
 {
-  return (uint32_t(imm) & 0xfffU) << 20 | uint32_t(rs1) << 15 |
-         uint32_t(funct3) << 12 | uint32_t(rd) << 7 | opcode;
+  return (static_cast<uint32_t>(imm) & 0xfffU) << 20 |
+         static_cast<uint32_t>(rs1) << 15 |
+         static_cast<uint32_t>(funct3) << 12 | static_cast<uint32_t>(rd) << 7 |
+         opcode;
 }
 
 uint32_t
 j_type(uint8_t rd, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0x1fffffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffffU;
   return ((uimm >> 20) & 0x1U) << 31 | ((uimm >> 1) & 0x3ffU) << 21 |
          ((uimm >> 11) & 0x1U) << 20 | ((uimm >> 12) & 0xffU) << 12 |
-         uint32_t(rd) << 7 | 0x6fU;
+         static_cast<uint32_t>(rd) << 7 | 0x6fU;
 }
 
 uint32_t
@@ -57,25 +62,29 @@ addi(uint8_t rd, uint8_t rs1, int32_t imm)
 uint32_t
 op(uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t funct3, uint8_t funct7)
 {
-  return uint32_t(funct7) << 25 | uint32_t(rs2) << 20 | uint32_t(rs1) << 15 |
-         uint32_t(funct3) << 12 | uint32_t(rd) << 7 | 0x33U;
+  return static_cast<uint32_t>(funct7) << 25 |
+         static_cast<uint32_t>(rs2) << 20 | static_cast<uint32_t>(rs1) << 15 |
+         static_cast<uint32_t>(funct3) << 12 | static_cast<uint32_t>(rd) << 7 |
+         0x33U;
 }
 
 uint32_t
 branch(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
 {
-  const uint32_t uimm = uint32_t(imm) & 0x1fffU;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffU;
   return ((uimm >> 12) & 0x1U) << 31 | ((uimm >> 5) & 0x3fU) << 25 |
-         uint32_t(rs2) << 20 | uint32_t(rs1) << 15 | uint32_t(funct3) << 12 |
-         ((uimm >> 1) & 0xfU) << 8 | ((uimm >> 11) & 0x1U) << 7 | 0x63U;
+         static_cast<uint32_t>(rs2) << 20 | static_cast<uint32_t>(rs1) << 15 |
+         static_cast<uint32_t>(funct3) << 12 | ((uimm >> 1) & 0xfU) << 8 |
+         ((uimm >> 11) & 0x1U) << 7 | 0x63U;
 }
 
 uint32_t
 store(uint8_t rs1, uint8_t rs2, int32_t imm, uint8_t funct3)
 {
-  const uint32_t uimm = uint32_t(imm) & 0xfffU;
-  return ((uimm >> 5) << 25) | uint32_t(rs2) << 20 | uint32_t(rs1) << 15 |
-         uint32_t(funct3) << 12 | ((uimm & 0x1fU) << 7) | 0x23U;
+  const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
+  return ((uimm >> 5) << 25) | static_cast<uint32_t>(rs2) << 20 |
+         static_cast<uint32_t>(rs1) << 15 |
+         static_cast<uint32_t>(funct3) << 12 | ((uimm & 0x1fU) << 7) | 0x23U;
 }
 
 uint32_t
@@ -112,8 +121,9 @@ make_program(std::initializer_list<uint32_t> words)
 
 class HaltHost : public Host {
 public:
-  HostResult ecall(MachineView view, const EcallArgs &) noexcept override
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
+    (void)args;
     return HostResult::halt(view.reg(10));
   }
 };
@@ -137,7 +147,11 @@ run_rv32_program(Machine &machine, Host &host, uint64_t gas_limit)
     case StepResult::kEcall:
     {
       ++instructions;
-      const EcallArgs ecall_args = *machine.pending_ecall();
+      const auto pending_ecall = machine.pending_ecall();
+      if (!pending_ecall.has_value()) {
+        std::abort();
+      }
+      const EcallArgs ecall_args = pending_ecall.value();
       const HostResult host_result = host.ecall(machine.view(), ecall_args);
       const StepResult completed = machine.complete_ecall(host_result);
       if (completed == StepResult::kContinue) {
@@ -190,21 +204,21 @@ run_rv32_benchmark(benchmark::State &state,
 std::shared_ptr<const Program>
 make_recursive_fibonacci_program()
 {
-  constexpr uint8_t ra = 1;
-  constexpr uint8_t sp = 2;
-  constexpr uint8_t t0 = 5;
-  constexpr uint8_t t1 = 6;
-  constexpr uint8_t a0 = 10;
+  constexpr uint8_t kRa = 1;
+  constexpr uint8_t kSp = 2;
+  constexpr uint8_t kT0 = 5;
+  constexpr uint8_t kT1 = 6;
+  constexpr uint8_t kA0 = 10;
 
   return make_program({
-      addi(a0, 0, kFibInput), j_type(ra, 8),         0x00000073U,
+      addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
 
-      addi(sp, sp, -16),      store(sp, ra, 12, 2),  store(sp, a0, 8, 2),
-      addi(t0, 0, 2),         branch(4, a0, t0, 36), addi(a0, a0, -1),
-      j_type(ra, -24),        store(sp, a0, 4, 2),   load(a0, sp, 8, 2),
-      addi(a0, a0, -2),       j_type(ra, -40),       load(t1, sp, 4, 2),
-      op(a0, a0, t1, 0, 0),   load(ra, sp, 12, 2),   addi(sp, sp, 16),
-      jalr(0, ra, 0),
+      addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
+      addi(kT0, 0, 2),         branch(4, kA0, kT0, 36), addi(kA0, kA0, -1),
+      j_type(kRa, -24),        store(kSp, kA0, 4, 2),   load(kA0, kSp, 8, 2),
+      addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, kSp, 4, 2),
+      op(kA0, kA0, kT1, 0, 0), load(kRa, kSp, 12, 2),   addi(kSp, kSp, 16),
+      jalr(0, kRa, 0),
   });
 }
 
@@ -369,11 +383,15 @@ bm_wasmi_built_contract_fibonacci_recursive_20(benchmark::State &state)
                                                 "fibonacci_raw.wasm"));
 }
 
+// Google Benchmark registers through static objects; keep the benchmark file
+// tidy-clean without changing the library registration model.
+// NOLINTBEGIN(bugprone-throwing-static-initialization)
 BENCHMARK(bm_dispatch_arithmetic);
 BENCHMARK(bm_load_store_loop);
 BENCHMARK(bm_rv32_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 } // namespace
 } // namespace hogd::rv32
