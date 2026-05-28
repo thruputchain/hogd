@@ -140,9 +140,9 @@ struct TestEventAggregatorSchedRpc {
   }
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  x23::Async<RPCError> eventsched_commit_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_commit_block(BlockID /*block_id*/)
   {
-    co_return RPCError::kRPCUnimplemented;
+    co_return RPCError::kRPCNone;
   }
 
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)

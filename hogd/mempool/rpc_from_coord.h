@@ -460,6 +460,7 @@ private:
                                             BlockExecutionMode mode);
   x23::Async<RPCError> eventsched_open_block(BlockID block_id);
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
+  x23::Async<RPCError> eventsched_commit_block(BlockID block_id);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,

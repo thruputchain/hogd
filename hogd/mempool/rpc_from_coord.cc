@@ -367,6 +367,12 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   // TODO(geoff): consider whether this should be called from commit instead
 }
 
+x23::Async<RPCError>
+MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id)
+{
+  co_return co_await event_sched_client_->eventsched_commit_block(block_id);
+}
+
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height)
@@ -879,10 +885,13 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.block_hash,
                       cache.db_tip.events_hash);
+  x23::Async<RPCError> event_commit_handle =
+      eventsched_commit_block(cache.block_id);
   {
     DbBlockResult result = co_await commit_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
+  CHECK_EQ(co_await event_commit_handle, RPCError::kRPCNone);
   record_stage(stage_await_commit_snapshot);
 
   info("commit_block() stages: await_commit_snapshot={:.6f}, total={:.6f}, "
@@ -1801,6 +1810,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       // We nominated a block, so we need to abandon the block.
       snapshot_handles.push_back(
           abandon_snapshot(nominated_block_cache_.block_id));
+      commit_handles.push_back(
+          [](MempoolCoordinatorRpc &self, BlockID id) -> x23::Async<void> {
+            CHECK_EQ(co_await self.eventsched_abandon_block(id),
+                     RPCError::kRPCNone);
+          }(*this, nominated_block_cache_.block_id));
     }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
@@ -1809,6 +1823,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
       snapshot_handles.push_back(abandon_snapshot(cache.block_id));
+      commit_handles.push_back(
+          [](MempoolCoordinatorRpc &self, BlockID id) -> x23::Async<void> {
+            CHECK_EQ(co_await self.eventsched_abandon_block(id),
+                     RPCError::kRPCNone);
+          }(*this, cache.block_id));
     }
   }
   record_stage(stage_build_handles);
