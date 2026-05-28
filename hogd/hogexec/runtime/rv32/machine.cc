@@ -272,18 +272,43 @@ Machine::check_store(uint32_t address, uint32_t width)
 uint32_t
 Machine::load(uint32_t address, uint32_t width) const
 {
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < width; ++i) {
-    value |= uint32_t{memory_[address + i]} << (i * 8);
+  // Width is always one of RV32 byte/halfword/word; spell out little-endian
+  // accesses so hot load/store paths do not pay a variable-width byte loop.
+  switch (width) {
+  case 1:
+    return memory_[address];
+  case 2:
+    return uint32_t{memory_[address]} | uint32_t{memory_[address + 1]} << 8;
+  case 4:
+    return uint32_t{memory_[address]} | uint32_t{memory_[address + 1]} << 8 |
+           uint32_t{memory_[address + 2]} << 16 |
+           uint32_t{memory_[address + 3]} << 24;
+  default:
+    assert(false && "invalid RV32 load width");
+    return 0;
   }
-  return value;
 }
 
 void
 Machine::store(uint32_t address, uint32_t width, uint32_t value)
 {
-  for (uint32_t i = 0; i < width; ++i) {
-    memory_[address + i] = static_cast<uint8_t>(value >> (i * 8));
+  switch (width) {
+  case 1:
+    memory_[address] = static_cast<uint8_t>(value);
+    return;
+  case 2:
+    memory_[address] = static_cast<uint8_t>(value);
+    memory_[address + 1] = static_cast<uint8_t>(value >> 8);
+    return;
+  case 4:
+    memory_[address] = static_cast<uint8_t>(value);
+    memory_[address + 1] = static_cast<uint8_t>(value >> 8);
+    memory_[address + 2] = static_cast<uint8_t>(value >> 16);
+    memory_[address + 3] = static_cast<uint8_t>(value >> 24);
+    return;
+  default:
+    assert(false && "invalid RV32 store width");
+    return;
   }
 }
 
