@@ -78,6 +78,10 @@ pub fn verify_contract_meter(
         max_imported_functions: 1,
         max_table_initial_size: MAX_TABLE_ELEMENTS,
         reject_floats: true,
+        allowed_custom_sections: vec![
+            "name".to_string(),
+            "groundhogspecv0".to_string(),
+        ],
         ..groundhog_wasm_meter::Config::default()
     };
     let module_info = match groundhog_wasm_meter::verify(contract_data, &config)
