@@ -7,6 +7,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <mutex>
 #include <span>
@@ -272,9 +273,15 @@ ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
   // append the modification record.
   ItemHeader *dst = ll->clone(src);
   assert(dst != nullptr);
-  // use wal lsn for put()s; keep src lsn during snapshot.
-  if (!use_src_lsn)
-    dst->lsn = w_.cur_lsn_;
+  // zero the alignment padding so the record/CRC don't carry stale memory; the
+  // lsn re-assignment and key/value copy below overwrite anything this clear
+  // overlaps. The guard avoids forming an out-of-range pointer when the
+  // payload is empty.
+  if (std::span<std::byte> all = dst->get_all();
+      all.size() >= alignof(ItemHeader)) [[likely]]
+    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
+                alignof(ItemHeader));
+  dst->lsn = use_src_lsn ? src->lsn : w_.cur_lsn_;
   dst->next = nullptr;
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {dst->lsn};
@@ -293,6 +300,13 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
   // append the removal record.
   ItemHeader *hdr = ll->alloc(ItemStorage::kTombstone, 0, key.size(), 0);
   assert(hdr != nullptr);
+  // zero the alignment padding; the lsn store and key copy below overwrite
+  // any overlap. The guard avoids forming an out-of-range pointer when the
+  // payload is empty (reachable via remove() with an empty key).
+  if (std::span<std::byte> all = hdr->get_all();
+      all.size() >= alignof(ItemHeader)) [[likely]]
+    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
+                alignof(ItemHeader));
   hdr->lsn = w_.cur_lsn_;
   std::ranges::copy(key, hdr->get_key().begin());
   return {};

@@ -64,6 +64,17 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 
   std::unique_lock<x23::TestLock> lock(lock_);
 
+  // Recheck after acquiring the mutex — an exclusive commit may have
+  // finalized while we were waiting.
+  lock_state = lock_state_.load(std::memory_order_acquire);
+  if (lock_state == kFinalizedPermamentExclusiveLock) {
+    return HogDBError{HogDBCode::kConflict};
+  }
+  if (lock_state == kFinalized) {
+    lock.unlock();
+    return handle_try_atomic_from_finalized(before, after, ctx_with_snapshot);
+  }
+
   if (before == nullptr) {
     CHECK_CONST_PTR(after);
 

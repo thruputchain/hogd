@@ -937,6 +937,219 @@ fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
     }
 }
 
+fn oversized_table_contract_bytes() -> &'static [u8] {
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let wat = r#"
+                (module
+                  (table 65 funcref)
+                  (func (export "0000000000000001"))
+                  (memory 1 1)
+                  (export "memory" (memory 0)))
+            "#;
+            let raw =
+                wat::parse_str(wat).expect("oversized table WAT must parse");
+            groundhog_wasm_meter::instrument(
+                &raw,
+                &groundhog_wasm_meter::Config::default(),
+            )
+            .expect("oversized table contract must be meter-valid")
+        })
+        .as_slice()
+}
+
+#[test]
+fn test_h001_module_validate_skips_table_pool_limit() {
+    let bytes = oversized_table_contract_bytes();
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let module_new_error = wasmtime::Module::new(&engine, bytes).expect_err(
+        "Module::new must reject the table minimum against the pool limit",
+    );
+    let module_new_error = format!("{module_new_error:#}");
+    assert!(
+        module_new_error.contains("table")
+            && module_new_error.contains("65")
+            && module_new_error.contains("64"),
+        "expected pooling allocator table-minimum rejection, got: {module_new_error}"
+    );
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let verified =
+            wasmtime_verify_contract(context, bytes.as_ptr(), bytes.len());
+        assert_ne!(
+            verified, 0,
+            "upload verifier must reject contracts whose table minimum \
+             exceeds the pooling allocator limit"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+fn h004_read_var_u32(bytes: &[u8], pos: &mut usize) -> u32 {
+    let mut result = 0u32;
+    let mut shift = 0;
+    loop {
+        let byte = bytes[*pos];
+        *pos += 1;
+        result |= ((byte & 0x7f) as u32) << shift;
+        if byte & 0x80 == 0 {
+            return result;
+        }
+        shift += 7;
+    }
+}
+
+fn h004_skip_name(bytes: &[u8], pos: &mut usize) {
+    let len = h004_read_var_u32(bytes, pos) as usize;
+    *pos += len;
+}
+
+fn h004_mutate_first_import_to_funcexact(mut wasm: Vec<u8>) -> Vec<u8> {
+    let mut pos = 8;
+    while pos < wasm.len() {
+        let section_id = wasm[pos];
+        pos += 1;
+        let section_len = h004_read_var_u32(&wasm, &mut pos) as usize;
+        let section_start = pos;
+        let section_end = section_start + section_len;
+        if section_id == 2 {
+            let mut import_pos = section_start;
+            let _import_count = h004_read_var_u32(&wasm, &mut import_pos);
+            h004_skip_name(&wasm, &mut import_pos);
+            h004_skip_name(&wasm, &mut import_pos);
+            assert_eq!(wasm[import_pos], 0x00);
+            wasm[import_pos] = 0x20;
+            return wasm;
+        }
+        pos = section_end;
+    }
+    panic!("no import section found");
+}
+
+#[test]
+fn test_h004_funcexact_import_rejected_by_verify() {
+    let wat = r#"
+        (module
+          (type $syscall_t (func (param i64) (result i32)))
+          (import "marmot" "syscall" (func $syscall (type $syscall_t)))
+          (func (export "0000000000000001")
+            i64.const 7
+            call $syscall
+            drop)
+          (memory 1 1)
+          (export "memory" (memory 0)))
+    "#;
+    let wasm = wat::parse_str(wat).expect("PoC WAT must parse");
+    let instrumented = groundhog_wasm_meter::instrument(
+        &wasm,
+        &groundhog_wasm_meter::Config::default(),
+    )
+    .expect("PoC contract must instrument");
+    let mutated = h004_mutate_first_import_to_funcexact(instrumented);
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let verified =
+            wasmtime_verify_contract(context, mutated.as_ptr(), mutated.len());
+        assert_ne!(
+            verified, 0,
+            "FuncExact import descriptor must be rejected at verify time"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+fn append_u32_leb(mut value: u32, out: &mut Vec<u8>) {
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if value == 0 {
+            break;
+        }
+    }
+}
+
+fn append_custom_section(wasm: &[u8], section_name: &str) -> Vec<u8> {
+    let mut out = wasm.to_vec();
+    let mut custom_payload = Vec::new();
+    append_u32_leb(section_name.len() as u32, &mut custom_payload);
+    custom_payload.extend(section_name.as_bytes());
+    out.push(0);
+    append_u32_leb(custom_payload.len() as u32, &mut out);
+    out.extend(custom_payload);
+    out
+}
+
+#[test]
+fn test_webidl_custom_section_rejected_by_verify() {
+    let wasm_bytes = load_wasm_file("simple_add.wasm");
+    let with_webidl = append_custom_section(wasm_bytes, "webidl-bindings");
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let verified = wasmtime_verify_contract(
+            context,
+            with_webidl.as_ptr(),
+            with_webidl.len(),
+        );
+        assert_ne!(
+            verified, 0,
+            "webidl-bindings custom section must be rejected at verify time"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+#[test]
+fn test_wasm_interface_types_custom_section_rejected_by_verify() {
+    let wasm_bytes = load_wasm_file("simple_add.wasm");
+    let with_wit = append_custom_section(wasm_bytes, "wasm-interface-types");
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let verified = wasmtime_verify_contract(
+            context,
+            with_wit.as_ptr(),
+            with_wit.len(),
+        );
+        assert_ne!(
+            verified, 0,
+            "wasm-interface-types custom section must be rejected at verify time"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
 fn float_contract_bytes() -> &'static [u8] {
     let wat = r#"
         (module
