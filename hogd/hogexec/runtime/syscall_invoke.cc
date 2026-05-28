@@ -181,14 +181,13 @@ syscall_GetCalldata_inner(
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Invoke_inner(
     SystemCallHandler &syscall_handler, WrappedGasAmount remaining_gas,
-    const ContractAddress &input_address, uint64_t input_entrypoint_id,
-    GasAmount input_gas_limit, std::span<const std::byte> input_calldata,
-    InvokeFlagSet input_flags,
+    const ContractAddress &input_address,
+    std::span<const std::byte> input_calldata,
     std::span<const std::byte> input_owned_auth_token_ids,
-    RuntimeMemoryLength &output_return_buffer_len,
-    RuntimeMemoryLength &output_returned_auth_token_len) noexcept
+    const CopyableInvokeInputs &input_inputs,
+    CopyableInvokeOutputs &output_outputs) noexcept
 {
-  if (!SystemCallHandler::validate_invoke_flags(input_flags)) {
+  if (!SystemCallHandler::validate_invoke_flags(input_inputs.flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
@@ -240,10 +239,10 @@ syscall_Invoke_inner(
   }
 
   auto [invoke_res, gas_amount] =
-      syscall_handler.invoke(input_address, input_entrypoint_id,
-                             std::min<GasAmount>(input_gas_limit,
+      syscall_handler.invoke(input_address, input_inputs.entrypoint_id,
+                             std::min<GasAmount>(input_inputs.gas_limit,
                                                  remaining_gas.get()),
-                             std::move(calldata), input_flags,
+                             std::move(calldata), input_inputs.flags,
                              owned_auth_token_ids_vec);
 
   // invocation returned successfully
@@ -260,18 +259,18 @@ syscall_Invoke_inner(
     SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
 
     if (return_buffer.has_value()) {
-      output_return_buffer_len = (*return_buffer)->size();
+      output_outputs.return_buffer_len = (*return_buffer)->size();
     }
     else {
-      output_return_buffer_len = 0;
+      output_outputs.return_buffer_len = 0;
     }
-    output_returned_auth_token_len =
+    output_outputs.returned_auth_token_len =
         syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
     return {*invoke_res, WrappedGasAmount{gas_amount}};
   }
   // Invocation encountered some error
-  output_return_buffer_len = 0;
-  output_returned_auth_token_len = 0;
+  output_outputs.return_buffer_len = 0;
+  output_outputs.returned_auth_token_len = 0;
 
   auto host_fn_res = [&]() -> HostFnStatus<SyscallErrorCode> {
     if (invoke_res.has_value()) {

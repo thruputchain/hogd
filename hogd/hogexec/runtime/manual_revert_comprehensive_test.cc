@@ -179,12 +179,14 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
         }
 
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = 0,
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressChild, 0, UINT64_MAX, Calldata{}, 0,
-              std::span<uint32_t>{}, output_return_buffer_len,
-              output_returned_auth_token_len);
+              kAddressChild, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -546,12 +548,14 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                   }
 
                   auto r2 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = 0,
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressB, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressB, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r2.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -587,12 +591,14 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                   }
 
                   auto r3 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = 0,
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressC, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressC, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r3.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -916,12 +922,14 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
         }
 
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressChild, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressChild, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           ADD_FAILURE() << "try_invoke on child failed unexpectedly";
@@ -966,12 +974,14 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
         }
 
         auto r2 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressGrandchild, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressGrandchild, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           ADD_FAILURE() << "try_invoke on grandchild failed unexpectedly";

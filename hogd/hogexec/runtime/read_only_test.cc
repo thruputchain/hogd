@@ -270,12 +270,14 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto res = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressLeaf, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressLeaf, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -290,12 +292,14 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   fns_root.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto res = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::ReadOnly),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressMiddle, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::ReadOnly), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

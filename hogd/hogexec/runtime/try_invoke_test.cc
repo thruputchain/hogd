@@ -125,12 +125,14 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           auto calldata = ctx.handler().get_calldata();
 
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                addr_storage, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                addr_storage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r0.has_value()) {
@@ -138,12 +140,14 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           }
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                addr_storage, 1, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                addr_storage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r1.has_value()) {
@@ -264,13 +268,14 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
     fns_caller.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressWriter, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+                kAddressWriter, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r0.has_value()) {
@@ -382,25 +387,29 @@ make_try_invoke_handle_errors_context()
   fns_o.emplace(0,
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsWriter,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 1,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsWriter, 1, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsWriter,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -410,13 +419,15 @@ make_try_invoke_handle_errors_context()
   fns_o.emplace(1,
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsWriter,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -430,13 +441,15 @@ make_try_invoke_handle_errors_context()
   fns_f.emplace(0,
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsWriter,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -450,25 +463,29 @@ make_try_invoke_handle_errors_context()
   fns_b.emplace(0,
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsFault, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::None),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsFault,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 1,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kTryInvokeHandleErrorsWriter, 1, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kTryInvokeHandleErrorsWriter,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -697,13 +714,14 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           // Invoke callee method 0 in try_invoke frame with arguments [-5]
           Calldata args = {static_cast<uint8_t>(-5)};
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressCallee, 0, UINT64_MAX, args,
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+                kAddressCallee, args, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
 
           if (!r0.has_value()) {
@@ -827,13 +845,14 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                     // Try invoke writer method 0 with "hello"
                     Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_hello,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_hello, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r0.has_value() ||
                         r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -843,13 +862,14 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                     // Try invoke writer method 0 with "world"
                     Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                     auto r1 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_world,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_world, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r1.has_value() ||
                         r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -864,13 +884,14 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                     // exclusive lock)
                     Calldata args_foo = {'f', 'o', 'o'};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_foo,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_foo, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r0.has_value()) {
                       ADD_FAILURE() << "should not have system error";
@@ -993,13 +1014,14 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                     // Try invoke writer method 0 with "hello"
                     Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_hello,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_hello, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r0.has_value() ||
                         r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1009,13 +1031,14 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                     // Try invoke writer method 0 with "world"
                     Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                     auto r1 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_world,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_world, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r1.has_value() ||
                         r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1030,13 +1053,14 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                     // exclusive lock)
                     Calldata args_foo = {'f', 'o', 'o'};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args_foo,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args_foo, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
                     if (!r0.has_value()) {
                       ADD_FAILURE() << "should not have system error";
@@ -1195,13 +1219,14 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                     // [-5]
                     Calldata args = {static_cast<uint8_t>(-5)};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args, std::span<uint32_t>{}, inputs,
+                          CopyableInvokeOutputs{});
                     }();
 
                     if (!r0.has_value()) {
@@ -1222,13 +1247,14 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                     // Invoke writer method 0 with arguments [1]
                     Calldata args = {1};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 0, UINT64_MAX, args,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, args, std::span<uint32_t>{}, inputs,
+                          CopyableInvokeOutputs{});
                     }();
 
                     if (!r0.has_value()) {
@@ -1357,13 +1383,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                     Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          writer_addr, 0, UINT64_MAX, args_first_invoke,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          writer_addr, args_first_invoke, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
 
                     if (!r0.has_value()) {
@@ -1377,13 +1404,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                     Calldata args_second_invoke = {5, 10};
                     auto r1 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          writer_addr, 0, UINT64_MAX, args_second_invoke,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          writer_addr, args_second_invoke, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
 
                     if (!r1.has_value()) {
@@ -1409,13 +1437,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                     Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
                     auto r0 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 0,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          writer_addr, 0, UINT64_MAX, args_invoke,
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          writer_addr, args_invoke, std::span<uint32_t>{},
+                          inputs, CopyableInvokeOutputs{});
                     }();
 
                     if (!r0.has_value()) {
@@ -1699,13 +1728,14 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   // First, try_invoke writer method 1 (should fail)
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 1,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 1, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -1716,13 +1746,14 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                   }
                   // Then, try_invoke writer method 0 (should succeed)
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value() ||
                       r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1868,12 +1899,14 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 0
         auto r0 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1881,12 +1914,14 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
         }
         // Try invoke writer method 1
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1894,12 +1929,14 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
         }
         // Try invoke writer method 2 (should fail)
         auto r2 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 2,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 2, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -2061,12 +2098,14 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 0 (short)
         auto r0 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2074,12 +2113,14 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
         }
         // Try invoke writer method 1 (medium)
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2087,12 +2128,14 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
         }
         // Try invoke writer method 2 (long) -- should fail
         auto r2 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 2,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 2, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -2222,13 +2265,14 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   // Try invoke writer method 0 (long)
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value() ||
                       r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2236,13 +2280,14 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                   }
                   // Try invoke writer method 1 (short)
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 1,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 1, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value() ||
                       r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2377,13 +2422,15 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                   [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                     // Try invoke writer method 1 (short write)
                     auto r1 = [&]() {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = 1,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, 1, UINT64_MAX, Calldata{},
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressWriter, std::span<const std::byte>{},
+                          std::span<uint32_t>{}, inputs,
+                          CopyableInvokeOutputs{});
                     }();
                     if (!r1.has_value() ||
                         r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2400,13 +2447,14 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   // Try invoke writer method 0 (long write)
                   auto r0 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r0.has_value() ||
                       r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2415,13 +2463,15 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
                   // Regular invoke on intermediate contract (old method 2)
                   auto r2 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressTryInvokeThenError, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::None),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressTryInvokeThenError,
+                        std::span<const std::byte>{}, std::span<uint32_t>{},
+                        inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r2.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -2559,12 +2609,14 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
         // Invoke receiver contract to use the tokens
         auto r_receive = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              receiver_addr, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              receiver_addr, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto g_receive = GasAmount{0};
 
@@ -2770,13 +2822,14 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                kNNIntInterleavingWriter, 1, UINT64_MAX, calldata0,
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+                kNNIntInterleavingWriter, calldata0, std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r0.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -2789,13 +2842,14 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                kNNIntInterleavingWriter, 0, UINT64_MAX, calldata1,
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+                kNNIntInterleavingWriter, calldata1, std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -2998,16 +3052,17 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [=](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength output_return_buffer_len = 0,
-                            output_returned_auth_token_len = 0;
         Calldata calldata = {};
         // 1. try_invoke on a missing contract
         {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = 1000,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           auto res = ctx.syscall<SyscallNo::kInvoke>(
-              missing_contract_addr, 0, 1000,
-              std::as_bytes(std::span(calldata)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              missing_contract_addr, std::as_bytes(std::span(calldata)),
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
 
           if (!res.has_value() ||
               res.value() !=
@@ -3018,11 +3073,14 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
         // 2. try_invoke on error_contract, but with a method that does not
         // exist
         {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 999,
+              .gas_limit = 1000,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           auto res = ctx.syscall<SyscallNo::kInvoke>(
-              error_contract_addr, 999, 1000,
-              std::as_bytes(std::span(calldata)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              error_contract_addr, std::as_bytes(std::span(calldata)),
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           if (!res.has_value() ||
               res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -3033,10 +3091,14 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
         // limit 50 (not enough)
         {
           auto gas_before = ctx.total_gas_consumed();
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = 50,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           auto res = ctx.syscall<SyscallNo::kInvoke>(
-              error_contract_addr, 0, 50, std::as_bytes(std::span(calldata)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              error_contract_addr, std::as_bytes(std::span(calldata)),
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           auto gas_used = ctx.total_gas_consumed() - gas_before;
           // This should return as a deterministic error (handleable), with
           // 50 gas consumed
@@ -3052,10 +3114,14 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
         // 4. try_invoke on error_contract, correct method, with gas limit
         // 1000 (enough)
         {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = 1000,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           auto res = ctx.syscall<SyscallNo::kInvoke>(
-              error_contract_addr, 0, 1000, std::as_bytes(std::span(calldata)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              error_contract_addr, std::as_bytes(std::span(calldata)),
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           if (!res.has_value() ||
               res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -3065,10 +3131,14 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
         // 5. try_invoke on error_contract, valid method, with gas limit
         // 1000 (enough)
         {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = 1000,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           auto res = ctx.syscall<SyscallNo::kInvoke>(
-              error_contract_addr, 1, 1000, std::as_bytes(std::span(calldata)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              error_contract_addr, std::as_bytes(std::span(calldata)),
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -3176,13 +3246,14 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   // Try invoke writer method 0
                   auto r2 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        kAddressWriter, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r2.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -3203,12 +3274,14 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke middle method 0
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressMiddle, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -3221,12 +3294,14 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
         // Writer storage should not retain the write; verify via writer
         // method 1 (same contract that would have held the key).
         auto r_w = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
           return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressWriter, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r_w.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -3346,13 +3421,15 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
     fns_o.emplace(0,
                   [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                     auto invoke_target = [&](Runtime::MethodID method) {
-                      RuntimeMemoryLength output_return_buffer_len = 0,
-                                          output_returned_auth_token_len = 0;
+                      CopyableInvokeInputs inputs{
+                          .entrypoint_id = method,
+                          .gas_limit = UINT64_MAX,
+                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                      };
                       return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressTarget, method, UINT64_MAX, Calldata{},
-                          std::to_underlying(InvokeFlag::TryInvoke),
-                          std::span<uint32_t>{}, output_return_buffer_len,
-                          output_returned_auth_token_len);
+                          kAddressTarget, std::span<const std::byte>{},
+                          std::span<uint32_t>{}, inputs,
+                          CopyableInvokeOutputs{});
                     };
 
                     auto r0 = invoke_target(0);
@@ -3455,13 +3532,14 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
     fns_o.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto invoke_target = [&](Runtime::MethodID method) {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = method,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressTarget, method, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+                kAddressTarget, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           };
 
           // insert -> consume -> insert (grow, shrink, grow)
@@ -3536,11 +3614,14 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           int successes = 0;
           for (int i = 0; i < kChildCap + 1; i++) {
-            RuntimeMemoryLength out_ret = 0, out_auth = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                kAddressNoop, 0, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, out_ret, out_auth);
+                kAddressNoop, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
             if (!r.has_value()) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }
@@ -3612,11 +3693,14 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           int successes = 0;
           for (int i = 0; i < kChildCap + 1; i++) {
-            RuntimeMemoryLength out_ret = 0, out_auth = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
             auto r = ctx.syscall<SyscallNo::kInvoke>(
-                kAddressNoop, 0, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, out_ret, out_auth);
+                kAddressNoop, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
             if (!r.has_value()) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }

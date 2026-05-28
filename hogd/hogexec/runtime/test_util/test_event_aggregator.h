@@ -139,6 +139,11 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.close_block(block_id, block_height);
   }
 
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  x23::Async<RPCError> eventsched_commit_block(BlockID block_id) {
+    co_return RPCError::kRPCUnimplemented;
+  }
+  
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)
   {
     co_return (

@@ -129,12 +129,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     fns_orchestrator.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -142,12 +145,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
           }
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 1, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -155,12 +161,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {
@@ -297,12 +306,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     fns_orchestrator.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -310,12 +322,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
           }
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 1, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -323,12 +338,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {
@@ -465,12 +483,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     fns_orchestrator.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -478,12 +499,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           }
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 1, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -491,12 +515,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            CopyableInvokeOutputs outputs{};
             return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, 0, UINT64_MAX, Calldata{},
-                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                output_return_buffer_len, output_returned_auth_token_len);
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {

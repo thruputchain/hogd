@@ -83,12 +83,14 @@ protected:
 
   static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
-    RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = method,
+        .gas_limit = UINT64_MAX,
+        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+    };
     return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, method, UINT64_MAX, Calldata{},
-        std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-        output_return_buffer_len, output_returned_auth_token_len);
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        CopyableInvokeOutputs{});
   }
 
   static std::unique_ptr<RuntimeContext> make_rcq_insert_context()

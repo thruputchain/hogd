@@ -651,14 +651,13 @@ template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
            SyscallNo syscall_no, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-           uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7,
-           uint64_t arg8, uint64_t arg9, uint64_t arg10) noexcept
+           uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7) noexcept
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
 
   auto input_args =
-      std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
+      std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
 
   std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
                                                 wasm_context.memory.mem),

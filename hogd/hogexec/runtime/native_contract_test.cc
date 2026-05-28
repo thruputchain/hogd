@@ -123,13 +123,14 @@ TEST_F(NativeContractTest, BasicInstantiate)
                       calldata.data() + sizeof(Runtime::MethodID),
                       invoked_addr.size());
 
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = invoked_id,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-              invoked_addr, invoked_id, std::numeric_limits<GasAmount>::max(),
-              Calldata{}, std::to_underlying(InvokeFlag::None),
-              std::span<uint32_t>{}, output_return_buffer_len,
-              output_returned_auth_token_len);
+              invoked_addr, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
 
           if (invoke_res) {
             return (invoke_res.value() ==
@@ -219,15 +220,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
           auto gas_before = ctx.gas_remaining();
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressConsumer, 0, UINT64_MAX,
+              kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r1_status, g1] = r1;
@@ -240,15 +243,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
         auto r2 = [&]() {
           auto gas_before = ctx.gas_remaining();
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressConsumer, 0, UINT64_MAX,
+              kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r2_status, g2] = r2;
@@ -261,15 +266,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
         auto r3 = [&]() {
           auto gas_before = ctx.gas_remaining();
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressConsumer, 0, UINT64_MAX,
+              kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r3_status, g3] = r3;
@@ -288,12 +295,14 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
           auto gas_before = ctx.gas_remaining();
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
           auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressMiddle, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
         }();
         auto const &[invoke_status, g] = r;
@@ -371,20 +380,26 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
-        RuntimeMemoryLength output_return_buffer_len = 0,
-                            output_returned_auth_token_len = 0;
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = 256,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
         auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-            kAddressConsumer, 0, 256, Calldata{0x00, 0x00, 0x00, 0xFF},
-            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeInputs inputs2{
+            .entrypoint_id = 0,
+            .gas_limit = 255,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
         invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-            kAddressConsumer, 0, 255, Calldata{0x00, 0x00, 0x00, 0xFF},
-            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::span<uint32_t>{}, inputs2, CopyableInvokeOutputs{});
         if (!invoke_status.has_value() ||
             invoke_status.value() !=
                 SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -760,12 +775,14 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   fns_parent.emplace(
       0,
       [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength output_return_buffer_len = 0;
-        RuntimeMemoryLength output_returned_auth_token_len = 0;
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = ctx.gas_remaining(),
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
         auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, 0, ctx.gas_remaining(), Calldata{},
-            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE()
               << "TryInvoke returned system error (lock probe reached "

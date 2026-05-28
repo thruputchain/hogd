@@ -312,15 +312,16 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                     kReceiverAddr,
                     make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
                 auto r1 = [&]() {
-                  RuntimeMemoryLength output_return_buffer_len = 0,
-                                      output_returned_auth_token_len = 0;
+                  CopyableInvokeInputs inputs{
+                      .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      .gas_limit = UINT64_MAX,
+                      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                  };
+                  CopyableInvokeOutputs outputs{};
                   return ctx.syscall<SyscallNo::kInvoke>(
                       native_token_addr,
-                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                      UINT64_MAX, calldata1,
-                      std::to_underlying(InvokeFlag::TryInvoke),
-                      std::span<uint32_t>{}, output_return_buffer_len,
-                      output_returned_auth_token_len);
+                      std::as_bytes(std::span(calldata1.data(), calldata1.size())),
+                      std::span<const std::byte>{}, inputs, outputs);
                 }();
 
                 if (!r1.has_value()) {
@@ -335,15 +336,16 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                 // 2. Call transfer with same arguments, NOT in try_invoke frame
                 // - should succeed (creates the balance)
                 auto r2 = [&]() {
-                  RuntimeMemoryLength output_return_buffer_len = 0,
-                                      output_returned_auth_token_len = 0;
+                  CopyableInvokeInputs inputs{
+                      .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      .gas_limit = UINT64_MAX,
+                      .flags = std::to_underlying(InvokeFlag::None),
+                  };
+                  CopyableInvokeOutputs outputs{};
                   return ctx.syscall<SyscallNo::kInvoke>(
                       native_token_addr,
-                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                      UINT64_MAX, calldata1,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{}, output_return_buffer_len,
-                      output_returned_auth_token_len);
+                      std::as_bytes(std::span(calldata1.data(), calldata1.size())),
+                      std::span<const std::byte>{}, inputs, outputs);
                 }();
 
                 if (!r2.has_value()) {
@@ -359,15 +361,15 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                     kReceiverAddr,
                     make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
                 auto r3 = [&]() {
-                  RuntimeMemoryLength output_return_buffer_len = 0,
-                                      output_returned_auth_token_len = 0;
+                  CopyableInvokeInputs inputs{
+                      .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                      .gas_limit = UINT64_MAX,
+                      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                  };
                   return ctx.syscall<SyscallNo::kInvoke>(
                       native_token_addr,
-                      sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                      UINT64_MAX, calldata2,
-                      std::to_underlying(InvokeFlag::TryInvoke),
-                      std::span<uint32_t>{}, output_return_buffer_len,
-                      output_returned_auth_token_len);
+                      std::as_bytes(std::span(calldata2.data(), calldata2.size())),
+                      std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
                 }();
 
                 if (!r3.has_value()) {
@@ -458,14 +460,15 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
     auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
-          calldata_transfer, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_transfer,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_transfer.has_value() ||
@@ -478,14 +481,15 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
     // error (inner Deterministic becomes DeterministicWasm to caller).
     auto calldata_get = erc20_meta::make_calldata<"get_balance">();
     auto r_get = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"get_balance">()), UINT64_MAX,
-          calldata_get, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_get,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_get.has_value() ||
@@ -557,14 +561,15 @@ TEST_F(BalanceCostTrackingTest,
     auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
-          calldata_transfer, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_transfer,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_transfer.has_value() ||
@@ -576,14 +581,15 @@ TEST_F(BalanceCostTrackingTest,
     auto calldata_get =
         erc20_meta::make_calldata<"get_balance_of">(kSenderAddr);
     auto r_get = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"get_balance_of">()), UINT64_MAX,
-          calldata_get, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_get,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_get.has_value() ||
@@ -654,14 +660,15 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
     auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"transfer">()), UINT64_MAX,
-          calldata_transfer, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_transfer,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_transfer.has_value() ||
@@ -672,14 +679,15 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
     auto calldata_get = erc20_meta::make_calldata<"get_balance">();
     auto r_get = [&]() {
-      RuntimeMemoryLength output_return_buffer_len = 0,
-                          output_returned_auth_token_len = 0;
+      CopyableInvokeInputs inputs{
+          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+          .gas_limit = UINT64_MAX,
+          .flags = std::to_underlying(InvokeFlag::None),
+      };
       return ctx.syscall<SyscallNo::kInvoke>(
           native_token_addr,
-          sdk_method_id(erc20_meta::entrypoint<"get_balance">()), UINT64_MAX,
-          calldata_get, std::to_underlying(InvokeFlag::None),
-          std::span<uint32_t>{}, output_return_buffer_len,
-          output_returned_auth_token_len);
+          calldata_get,
+          std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
     }();
 
     if (!r_get.has_value() ||

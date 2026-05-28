@@ -642,12 +642,14 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength out_len{};
-        RuntimeMemoryLength out_auth_len{};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = uint64_t{1},
+            .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+            .flags = InvokeFlagSet{0},
+        };
         auto inv = ctx.syscall<SyscallNo::kInvoke>(
-            kOwnerAddr, uint64_t{1}, static_cast<GasAmount>(UINT64_MAX),
-            std::span<const std::byte>{}, InvokeFlagSet{0},
-            std::span<const std::byte>{}, out_len, out_auth_len);
+            kOwnerAddr, std::span<const std::byte>{},
+            std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
         if (!inv.has_value() ||
             *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "invoke owner for adjust_allowance failed";
@@ -779,12 +781,14 @@ TEST_F(NativeTokenAllowanceTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength out_len{};
-        RuntimeMemoryLength out_auth_len{};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = uint64_t{1},
+            .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+            .flags = InvokeFlagSet{0},
+        };
         auto inv = ctx.syscall<SyscallNo::kInvoke>(
-            kOwnerAddr, uint64_t{1}, static_cast<GasAmount>(UINT64_MAX),
-            std::span<const std::byte>{}, InvokeFlagSet{0},
-            std::span<const std::byte>{}, out_len, out_auth_len);
+            kOwnerAddr, std::span<const std::byte>{},
+            std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
         if (!inv.has_value() ||
             *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "invoke owner for adjust_allowance failed";
