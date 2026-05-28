@@ -1,10 +1,13 @@
 #include <benchmark/benchmark.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,10 +16,14 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/runtime_exports.h"
+#include "hogd/hogexec/runtime/rv32/artifact.h"
+#include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/rust/wasmi/bindings.h"
 
@@ -27,7 +34,17 @@ constexpr uint32_t kBenchMemoryBytes = 4096;
 constexpr uint64_t kBenchGasLimit = 1'000'000'000;
 constexpr uint32_t kFibInput = 20;
 constexpr uint32_t kFib20Result = 6765;
+// Keep rv32_vm_bench independent from generated XDR headers; these values are
+// pinned by the syscall/HostFn ABI exercised by the bridge benchmarks below.
 constexpr int32_t kHostFnNoneOrRecoverable = 0;
+constexpr int32_t kHostFnReturn = 3;
+constexpr int32_t kSyscallErrorNone = 0;
+constexpr int32_t kSyscallErrorFault = 1;
+constexpr uint64_t kSyscallSha256 = 0;
+constexpr uint64_t kSyscallReturn = 6;
+constexpr size_t kSha256DigestBytes = 32;
+constexpr uint32_t kArtifactFrameAddress = 64;
+constexpr uint32_t kArtifactReturnBufferAddress = 192;
 
 using test_program::addi;
 using test_program::branch;
@@ -62,6 +79,12 @@ struct Rv32RunStats {
   uint64_t traps = 0;
 };
 
+enum class ArtifactValidation {
+  kArithmeticControlFlow,
+  kMemoryTransform,
+  kCompiledSha256Return,
+};
+
 void
 record_instruction(Rv32RunStats &stats, const DecodedInstruction &instruction,
                    uint32_t pc_before, uint32_t pc_after)
@@ -90,6 +113,67 @@ record_instruction(Rv32RunStats &stats, const DecodedInstruction &instruction,
   default:
     break;
   }
+}
+
+bool
+memory_matches(std::span<const uint8_t> memory, uint32_t offset,
+               std::span<const uint8_t> expected)
+{
+  return size_t{offset} <= memory.size() &&
+         expected.size() <= memory.size() - size_t{offset} &&
+         std::ranges::equal(memory.subspan(offset, expected.size()), expected);
+}
+
+bool
+range_fits(uint64_t offset, uint64_t length, uint64_t size)
+{
+  return offset <= size && length <= size - offset;
+}
+
+uint64_t
+load_bench_u64_le(std::span<const uint8_t> memory, size_t offset)
+{
+  uint64_t value = 0;
+  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+    value |= uint64_t{memory[offset + i]} << (i * 8);
+  }
+  return value;
+}
+
+std::array<uint8_t, kSha256DigestBytes>
+bench_sha256_digest(std::span<const uint8_t> input)
+{
+  uint32_t state = 0x811c9dc5U;
+  for (const uint8_t byte : input) {
+    state ^= byte;
+    state *= 0x01000193U;
+    state = (state << 5) | (state >> 27);
+  }
+
+  std::array<uint8_t, kSha256DigestBytes> digest = {};
+  for (size_t i = 0; i < digest.size(); ++i) {
+    state ^= static_cast<uint32_t>(i + input.size());
+    state *= 0x01000193U;
+    digest[i] = static_cast<uint8_t>(state >> ((i % 4) * 8));
+  }
+  return digest;
+}
+
+bool
+return_frame_matches(std::span<const uint8_t> memory, uint32_t frame_address,
+                     std::span<const uint8_t> expected)
+{
+  if (!range_fits(frame_address, kSyscallFrameBytes, memory.size()) ||
+      load_bench_u64_le(memory, frame_address) != kSyscallReturn ||
+      load_bench_u64_le(memory, frame_address + (2 * sizeof(uint64_t))) !=
+          expected.size()) {
+    return false;
+  }
+  const uint64_t output_address =
+      load_bench_u64_le(memory, frame_address + sizeof(uint64_t));
+  return output_address <= std::numeric_limits<uint32_t>::max() &&
+         memory_matches(memory, static_cast<uint32_t>(output_address),
+                        expected);
 }
 
 Rv32RunStats
@@ -147,6 +231,54 @@ run_rv32_program(Machine &machine, Host &host, const Program &program,
   }
 }
 
+bool
+validate_artifact_memory(std::span<const uint8_t> memory,
+                         ArtifactValidation validation,
+                         uint32_t final_frame_address)
+{
+  switch (validation) {
+  case ArtifactValidation::kArithmeticControlFlow:
+  {
+    constexpr std::array<uint8_t, 4> expected = {15, 0, 0, 0};
+    return memory_matches(memory, kArtifactReturnBufferAddress, expected);
+  }
+  case ArtifactValidation::kMemoryTransform:
+  {
+    std::array<uint8_t, 16> expected = {};
+    for (size_t i = 0; i < expected.size(); ++i) {
+      expected[i] = static_cast<uint8_t>(0x31U + i);
+    }
+    return memory_matches(memory, kArtifactReturnBufferAddress, expected);
+  }
+  case ArtifactValidation::kCompiledSha256Return:
+  {
+    const std::span<const uint8_t> input(
+        fixtures::compiled_sha256_return::kInput);
+    const std::array<uint8_t, kSha256DigestBytes> expected =
+        bench_sha256_digest(input);
+    return return_frame_matches(memory, final_frame_address, expected);
+  }
+  }
+  std::abort();
+}
+
+void
+preflight_artifact_benchmark(const ArtifactImage &artifact, Host &host,
+                             ArtifactValidation validation)
+{
+  Machine machine(artifact.program, artifact.memory_bytes, kBenchGasLimit);
+  if (!machine.view().write_memory(0, artifact.initial_memory)) {
+    std::abort();
+  }
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *artifact.program, kBenchGasLimit);
+  if (stats.result != StepResult::kHalted || machine.halt_code() != 0 ||
+      !validate_artifact_memory(machine.memory(), validation,
+                                machine.reg(10))) {
+    std::abort();
+  }
+}
+
 void
 run_rv32_benchmark(benchmark::State &state,
                    const std::shared_ptr<const Program> &program)
@@ -173,6 +305,85 @@ run_rv32_benchmark(benchmark::State &state,
     const Rv32RunStats stats =
         run_rv32_program(machine, host, *program, kBenchGasLimit);
     if (stats.result != StepResult::kHalted) {
+      std::abort();
+    }
+    executed_instructions += static_cast<int64_t>(stats.instructions);
+    consumed_gas += static_cast<int64_t>(stats.gas_consumed);
+    consumed_guest_gas += static_cast<int64_t>(stats.guest_gas_consumed);
+    consumed_host_gas += static_cast<int64_t>(stats.host_gas_consumed);
+    loads += static_cast<int64_t>(stats.loads);
+    stores += static_cast<int64_t>(stats.stores);
+    branches += static_cast<int64_t>(stats.branches);
+    branches_taken += static_cast<int64_t>(stats.branches_taken);
+    jumps += static_cast<int64_t>(stats.jumps);
+    ecalls += static_cast<int64_t>(stats.ecalls);
+    traps += static_cast<int64_t>(stats.traps);
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+
+  state.SetItemsProcessed(executed_instructions);
+  state.counters["gas"] =
+      benchmark::Counter(static_cast<double>(consumed_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.guest_gas"] =
+      benchmark::Counter(static_cast<double>(consumed_guest_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.host_gas"] =
+      benchmark::Counter(static_cast<double>(consumed_host_gas),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.loads"] =
+      benchmark::Counter(static_cast<double>(loads),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.stores"] =
+      benchmark::Counter(static_cast<double>(stores),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.branches"] =
+      benchmark::Counter(static_cast<double>(branches),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.branches_taken"] =
+      benchmark::Counter(static_cast<double>(branches_taken),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.jumps"] =
+      benchmark::Counter(static_cast<double>(jumps),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.ecalls"] =
+      benchmark::Counter(static_cast<double>(ecalls),
+                         benchmark::Counter::kAvgIterations);
+  state.counters["rv32.traps"] =
+      benchmark::Counter(static_cast<double>(traps),
+                         benchmark::Counter::kAvgIterations);
+}
+
+void
+run_rv32_artifact_benchmark(benchmark::State &state,
+                            const ArtifactImage &artifact, Host &host,
+                            ArtifactValidation validation)
+{
+  preflight_artifact_benchmark(artifact, host, validation);
+  Machine machine(artifact.program, artifact.memory_bytes, kBenchGasLimit);
+  int64_t executed_instructions = 0;
+  int64_t consumed_gas = 0;
+  int64_t consumed_guest_gas = 0;
+  int64_t consumed_host_gas = 0;
+  int64_t loads = 0;
+  int64_t stores = 0;
+  int64_t branches = 0;
+  int64_t branches_taken = 0;
+  int64_t jumps = 0;
+  int64_t ecalls = 0;
+  int64_t traps = 0;
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    if (!machine.view().write_memory(0, artifact.initial_memory)) {
+      std::abort();
+    }
+    state.ResumeTiming();
+
+    const Rv32RunStats stats =
+        run_rv32_program(machine, host, *artifact.program, kBenchGasLimit);
+    if (stats.result != StepResult::kHalted || machine.halt_code() != 0) {
       std::abort();
     }
     executed_instructions += static_cast<int64_t>(stats.instructions);
@@ -413,6 +624,129 @@ store_u64_le(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
   }
 }
 
+void
+write_bench_syscall_frame(std::vector<uint8_t> &memory, uint32_t frame_address,
+                          std::initializer_list<uint64_t> words)
+{
+  size_t i = 0;
+  for (const uint64_t word : words) {
+    store_u64_le(memory, frame_address + (i * sizeof(uint64_t)), word);
+    ++i;
+  }
+}
+
+ArtifactImage
+parse_artifact_or_abort(std::span<const uint8_t> artifact)
+{
+  auto parsed = parse_artifact(artifact);
+  if (!parsed.has_value()) {
+    std::abort();
+  }
+  return std::move(*parsed);
+}
+
+ArtifactImage
+make_bench_artifact(std::initializer_list<uint32_t> words,
+                    std::vector<uint8_t> initial_memory)
+{
+  const std::array<DispatchEntry, 1> dispatch = {{{.method_id = 0, .pc = 0}}};
+  return parse_artifact_or_abort(
+      test_artifact::build_artifact(words, initial_memory, dispatch));
+}
+
+ArtifactImage
+make_arithmetic_control_flow_artifact()
+{
+  std::vector<uint8_t> memory(256);
+  write_bench_syscall_frame(memory, kArtifactFrameAddress,
+                            {kSyscallReturn, kArtifactReturnBufferAddress, 4, 0,
+                             0, 0});
+
+  return make_bench_artifact(
+      {
+          addi(6, 0, 0),
+          addi(5, 0, 6),
+          addi(5, 5, -1),
+          op(6, 6, 5, 0, 0),
+          branch(1, 5, 0, -8),
+          addi(8, 0, kArtifactReturnBufferAddress),
+          store(8, 6, 0, 2),
+          addi(10, 0, kArtifactFrameAddress),
+          addi(17, 0, kSyscallBridgeVersion),
+          0x00000073U,
+      },
+      std::move(memory));
+}
+
+ArtifactImage
+make_memory_transform_artifact()
+{
+  constexpr uint32_t kSourceAddress = 224;
+  constexpr uint32_t kCopyBytes = 16;
+  std::vector<uint8_t> memory(256);
+  write_bench_syscall_frame(memory, kArtifactFrameAddress,
+                            {kSyscallReturn, kArtifactReturnBufferAddress,
+                             kCopyBytes, 0, 0, 0});
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    memory[kSourceAddress + i] = static_cast<uint8_t>(0x30U + i);
+  }
+
+  return make_bench_artifact(
+      {
+          addi(1, 0, kSourceAddress),
+          addi(2, 0, kArtifactReturnBufferAddress),
+          addi(3, 0, kCopyBytes),
+          load(4, 0, 1, 0),
+          addi(4, 4, 1),
+          store(2, 4, 0, 0),
+          addi(1, 1, 1),
+          addi(2, 2, 1),
+          addi(3, 3, -1),
+          branch(1, 3, 0, -24),
+          addi(10, 0, kArtifactFrameAddress),
+          addi(17, 0, kSyscallBridgeVersion),
+          0x00000073U,
+      },
+      std::move(memory));
+}
+
+TrampolineResult
+artifact_bench_entry(ExternHostCallContext /*context*/,
+                     WasmContext wasm_context, uint64_t arg0, uint64_t arg1,
+                     uint64_t arg2, uint64_t arg3, uint64_t /*arg4*/,
+                     uint64_t /*arg5*/, uint64_t /*arg6*/, uint64_t /*arg7*/,
+                     uint64_t /*arg8*/, uint64_t /*arg9*/, uint64_t /*arg10*/)
+{
+  if (arg0 == kSyscallReturn) {
+    return TrampolineResult{.result_code = 0,
+                            .panic = kHostFnReturn,
+                            .gas_consumed = 4};
+  }
+  if (arg0 == kSyscallSha256) {
+    if (!range_fits(arg1, arg2, wasm_context.memory.sz) ||
+        !range_fits(arg3, kSha256DigestBytes, wasm_context.memory.sz)) {
+      return TrampolineResult{.result_code = kSyscallErrorFault,
+                              .panic = kHostFnNoneOrRecoverable,
+                              .gas_consumed = 4};
+    }
+    const auto input_offset = static_cast<size_t>(arg1);
+    const auto input_size = static_cast<size_t>(arg2);
+    const auto output_offset = static_cast<size_t>(arg3);
+    const auto digest = bench_sha256_digest(
+        std::span<const uint8_t>(wasm_context.memory.mem + input_offset,
+                                 input_size));
+    for (size_t i = 0; i < kSha256DigestBytes; ++i) {
+      wasm_context.memory.mem[output_offset + i] = digest[i];
+    }
+    return TrampolineResult{.result_code = kSyscallErrorNone,
+                            .panic = kHostFnNoneOrRecoverable,
+                            .gas_consumed = 4};
+  }
+  return TrampolineResult{.result_code = kSyscallErrorFault,
+                          .panic = kHostFnNoneOrRecoverable,
+                          .gas_consumed = 4};
+}
+
 TrampolineResult
 bridge_noop_entry(ExternHostCallContext /*context*/, WasmContext wasm_context,
                   uint64_t /*arg0*/, uint64_t /*arg1*/, uint64_t /*arg2*/,
@@ -460,6 +794,34 @@ bm_syscall_bridge_roundtrip(benchmark::State &state)
       benchmark::Counter(static_cast<double>(kSyscallFrameBytes));
 }
 
+void
+bm_rv32_artifact_arithmetic_control_flow(benchmark::State &state)
+{
+  const ArtifactImage artifact = make_arithmetic_control_flow_artifact();
+  SyscallBridgeHost host(nullptr, &artifact_bench_entry);
+  run_rv32_artifact_benchmark(state, artifact, host,
+                              ArtifactValidation::kArithmeticControlFlow);
+}
+
+void
+bm_rv32_artifact_memory_transform(benchmark::State &state)
+{
+  const ArtifactImage artifact = make_memory_transform_artifact();
+  SyscallBridgeHost host(nullptr, &artifact_bench_entry);
+  run_rv32_artifact_benchmark(state, artifact, host,
+                              ArtifactValidation::kMemoryTransform);
+}
+
+void
+bm_rv32_artifact_compiled_sha256_return(benchmark::State &state)
+{
+  const ArtifactImage artifact =
+      parse_artifact_or_abort(fixtures::compiled_sha256_return::kArtifact);
+  SyscallBridgeHost host(nullptr, &artifact_bench_entry);
+  run_rv32_artifact_benchmark(state, artifact, host,
+                              ArtifactValidation::kCompiledSha256Return);
+}
+
 // Google Benchmark registers through static objects; keep the benchmark file
 // tidy-clean without changing the library registration model.
 // NOLINTBEGIN(bugprone-throwing-static-initialization)
@@ -469,6 +831,9 @@ BENCHMARK(bm_rv32_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
 BENCHMARK(bm_syscall_bridge_roundtrip)->Arg(4096)->Arg(65536);
+BENCHMARK(bm_rv32_artifact_arithmetic_control_flow);
+BENCHMARK(bm_rv32_artifact_memory_transform);
+BENCHMARK(bm_rv32_artifact_compiled_sha256_return);
 // NOLINTEND(bugprone-throwing-static-initialization)
 
 } // namespace

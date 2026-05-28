@@ -32,6 +32,7 @@
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
@@ -448,6 +449,82 @@ make_compiled_sha256_then_return_image()
       .dispatch_table = std::move(artifact->dispatch_table),
       .memory_bytes = artifact->memory_bytes,
   };
+}
+
+rv32::RuntimeContractImage
+make_artifact_runtime_image(std::initializer_list<uint32_t> words,
+                            std::vector<uint8_t> initial_memory,
+                            std::vector<rv32::DispatchEntry> dispatch_table = {
+                                {.method_id = 0, .pc = 0}})
+{
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact(words, initial_memory,
+                                          dispatch_table);
+  auto parsed = rv32::parse_artifact(artifact);
+  if (!parsed.has_value()) {
+    ADD_FAILURE() << "failed to parse synthetic RV32 artifact";
+    return {};
+  }
+  return rv32::RuntimeContractImage{
+      .program = std::move(parsed->program),
+      .initial_memory = std::move(parsed->initial_memory),
+      .dispatch_table = std::move(parsed->dispatch_table),
+      .memory_bytes = parsed->memory_bytes,
+  };
+}
+
+rv32::RuntimeContractImage
+make_artifact_arithmetic_control_flow_image()
+{
+  const std::array<uint8_t, 4> return_placeholder = {};
+  std::vector<uint8_t> initial_memory =
+      make_initial_return_memory(return_placeholder);
+
+  return make_artifact_runtime_image(
+      {
+          addi(6, 0, 0),
+          addi(5, 0, 6),
+          addi(5, 5, -1),
+          rv32::test_program::op(6, 6, 5, 0, 0),
+          rv32::test_program::branch(1, 5, 0, -8),
+          addi(8, 0, kReturnBufferAddress),
+          sw(6, 8, 0),
+          addi(10, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+      },
+      std::move(initial_memory));
+}
+
+rv32::RuntimeContractImage
+make_artifact_memory_transform_image()
+{
+  constexpr uint32_t kSourceAddress = 224;
+  constexpr uint32_t kCopyBytes = 16;
+  const std::array<uint8_t, kCopyBytes> return_placeholder = {};
+  std::vector<uint8_t> initial_memory =
+      make_initial_return_memory(return_placeholder);
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    initial_memory[kSourceAddress + i] = static_cast<uint8_t>(0x30U + i);
+  }
+
+  return make_artifact_runtime_image(
+      {
+          addi(1, 0, kSourceAddress),
+          addi(2, 0, kReturnBufferAddress),
+          addi(3, 0, kCopyBytes),
+          i_type(0x03, 4, 0, 1, 0),
+          addi(4, 4, 1),
+          rv32::test_program::store(2, 4, 0, 0),
+          addi(1, 1, 1),
+          addi(2, 2, 1),
+          addi(3, 3, -1),
+          rv32::test_program::branch(1, 3, 0, -24),
+          addi(10, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+      },
+      std::move(initial_memory));
 }
 
 rv32::RuntimeContractImage
@@ -1324,6 +1401,103 @@ TEST_F(Rv32RuntimeContextTest,
     EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
               handler2.get_trace()->system_calls[i].gas_remaining_at_end);
   }
+}
+
+TEST_F(Rv32RuntimeContextTest,
+       ArtifactArithmeticControlFlowReturnsDeterministicBytes)
+{
+  const std::array<uint8_t, 4> expected = {15, 0, 0, 0};
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_artifact_arithmetic_control_flow_image()}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler1 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  auto handler2 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  handler1.enable_tracing();
+  handler2.enable_tracing();
+
+  const auto result1 = handler1.root_invoke();
+  const auto result2 = handler2.root_invoke();
+
+  ASSERT_TRUE(result1.is_root_success());
+  ASSERT_TRUE(result2.is_root_success());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+  const auto output1 = handler1.get_most_recent_frame_output();
+  const auto output2 = handler2.get_most_recent_frame_output();
+  ASSERT_EQ(output1.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(output2.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected));
+  EXPECT_TRUE(
+      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+  ASSERT_NE(handler1.get_trace(), nullptr);
+  ASSERT_NE(handler2.get_trace(), nullptr);
+  EXPECT_EQ(handler1.get_trace()->system_calls.size(), 1U);
+  EXPECT_EQ(handler2.get_trace()->system_calls.size(), 1U);
+}
+
+TEST_F(Rv32RuntimeContextTest, ArtifactMemoryTransformReturnsDeterministicBytes)
+{
+  std::array<uint8_t, 16> expected = {};
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = static_cast<uint8_t>(0x31U + i);
+  }
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, make_artifact_memory_transform_image()}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  auto handler1 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+  auto handler2 =
+      make_new_system_call_handler(make_root_transaction(kParityGas),
+                                   rv32_context);
+
+  const auto result1 = handler1.root_invoke();
+  const auto result2 = handler2.root_invoke();
+
+  ASSERT_TRUE(result1.is_root_success());
+  ASSERT_TRUE(result2.is_root_success());
+  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+  const auto output1 = handler1.get_most_recent_frame_output();
+  const auto output2 = handler2.get_most_recent_frame_output();
+  ASSERT_EQ(output1.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(output2.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected));
+  EXPECT_TRUE(
+      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+}
+
+TEST_F(Rv32RuntimeContextTest, ArtifactMissingDispatchMethodIsDeterministic)
+{
+  const std::array<uint8_t, 1> payload = {0};
+  auto image = make_artifact_runtime_image(
+      {
+          addi(10, 0, kFrameAddress),
+          addi(17, 0, rv32::kSyscallBridgeVersion),
+          ecall(),
+      },
+      make_initial_return_memory(payload), {{.method_id = 1, .pc = 0}});
+  auto rv32_context =
+      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+  auto handler = make_new_system_call_handler(make_root_transaction(kParityGas),
+                                              rv32_context);
+  handler.enable_tracing();
+
+  const auto result = handler.root_invoke();
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(result.gas_consumed_, 0U);
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->system_calls.empty());
 }
 
 TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodToSelectedPc)

@@ -12,10 +12,9 @@
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 
-// Operand/result vectors adapted from the riscv-tests RV32UI/RV32UM test
-// subtree vendored in PolkaVM commit bd2d14ed105467fd158b4744fd92f7045d288bb8.
-// PolkaVM's root license is MIT/Apache-2.0; the borrowed test subtree carries
-// its own Regents BSD-style notice. See docs/rv32/riscv-tests-license.md.
+// Operand/result vectors adapted from selected upstream riscv-tests RV32UI
+// wrappers, their included RV64UI bodies, and RV32UM assembly tests. See
+// docs/rv32/riscv-tests-license.md.
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers)
 
 namespace hogd::rv32 {
@@ -267,8 +266,9 @@ std::vector<RrVector>
 rr_vectors()
 {
   // Sources: riscv-tests
-  // tests/rv32ui/{add,sub,and,or,xor,slt,sltu,sll,srl,sra}.S and
-  // tests/rv32um/{mul,mulh,mulhsu,mulhu,div,divu,rem,remu}.S.
+  // isa/rv32ui/{add,sub,and,or,xor,slt,sltu,sll,srl,sra}.S wrappers,
+  // included isa/rv64ui bodies, and
+  // isa/rv32um/{mul,mulh,mulhsu,mulhu,div,divu,rem,remu}.S.
   constexpr RrOp kAdd{"add", 0x00, 0};
   constexpr RrOp kSub{"sub", 0x20, 0};
   constexpr RrOp kSll{"sll", 0x00, 1};
@@ -310,17 +310,20 @@ rr_vectors()
       {"div_signed_overflow", kDiv, 0x80000000U, 0xffffffffU, 0x80000000U},
       {"div_signed_by_zero", kDiv, 0x00000001U, 0x00000000U, 0xffffffffU},
       {"divu_large", kDivu, 0xffffffecU, 0x00000006U, 0x2aaaaaa7U},
+      {"divu_by_zero", kDivu, 0x80000000U, 0x00000000U, 0xffffffffU},
       {"rem_signed_negative", kRem, 0xffffffecU, 0x00000006U, 0xfffffffeU},
+      {"rem_signed_overflow", kRem, 0x80000000U, 0xffffffffU, 0x00000000U},
       {"rem_signed_by_zero", kRem, 0x80000000U, 0x00000000U, 0x80000000U},
       {"remu_large", kRemu, 0xffffffecU, 0xfffffffaU, 0xffffffecU},
+      {"remu_by_zero", kRemu, 0x80000000U, 0x00000000U, 0x80000000U},
   };
 }
 
 std::vector<ImmVector>
 imm_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{addi,slti,sltiu,xori,ori,andi,slli,
-  // srli,srai}.S.
+  // Sources: riscv-tests isa/rv32ui/{addi,slti,sltiu,xori,ori,andi,slli,
+  // srli,srai}.S wrappers and included isa/rv64ui bodies.
   return {
       {"addi_sign_extreme", {"addi", 0, 0x800}, 0x80000000U, 0x7ffff800U},
       {"addi_wrap", {"addi", 0, 0x001}, 0x7fffffffU, 0x80000000U},
@@ -338,8 +341,8 @@ imm_vectors()
 std::vector<BranchVector>
 branch_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{beq,bne,blt,bge,bltu,bgeu}.S
-  // TEST_BR2_OP_TAKEN/NOTTAKEN operand matrices.
+  // Sources: riscv-tests isa/rv32ui/{beq,bne,blt,bge,bltu,bgeu}.S wrappers
+  // and included isa/rv64ui bodies' TEST_BR2_OP_TAKEN/NOTTAKEN matrices.
   constexpr BranchOp kBeq{"beq", 0};
   constexpr BranchOp kBne{"bne", 1};
   constexpr BranchOp kBlt{"blt", 4};
@@ -414,8 +417,8 @@ branch_vectors()
 std::vector<LoadVector>
 load_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{lb,lbu,lh,lhu,lw}.S TEST_LD_OP basic
-  // and negative-offset cases.
+  // Sources: riscv-tests isa/rv32ui/{lb,lbu,lh,lhu,lw}.S wrappers and included
+  // isa/rv64ui bodies' TEST_LD_OP basic and negative-offset cases.
   constexpr LoadOp kLb{"lb", 0};
   constexpr LoadOp kLh{"lh", 1};
   constexpr LoadOp kLw{"lw", 2};
@@ -518,8 +521,8 @@ load_vectors()
 std::vector<StoreVector>
 store_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{sb,sh,sw}.S TEST_ST_OP basic and
-  // negative-offset cases.
+  // Sources: riscv-tests isa/rv32ui/{sb,sh,sw}.S wrappers and included
+  // isa/rv64ui bodies' TEST_ST_OP basic and negative-offset cases.
   constexpr StoreOp kSb{"sb", 0};
   constexpr StoreOp kSh{"sh", 1};
   constexpr StoreOp kSw{"sw", 2};
@@ -560,8 +563,8 @@ store_vectors()
 std::vector<UpperVector>
 upper_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{lui,auipc}.S basic cases, adapted to
-  // direct PC-relative expectations.
+  // Sources: riscv-tests isa/rv32ui/{lui,auipc}.S wrappers and included
+  // isa/rv64ui bodies' basic cases, adapted to direct PC-relative expectations.
   return {
       {"lui_zero", 0x37U, 0x00000000U, 0, 0x00000000U},
       {"lui_negative", 0x37U, 0xfffff000U, 0, 0xfffff000U},
@@ -574,8 +577,9 @@ upper_vectors()
 std::vector<JumpVector>
 jump_vectors()
 {
-  // Sources: riscv-tests tests/rv32ui/{jal,jalr}.S basic, x0 link discard,
-  // rd==rs1, and low-bit masking cases.
+  // Sources: riscv-tests isa/rv32ui/{jal,jalr}.S wrappers and included
+  // isa/rv64ui bodies' basic, x0 link discard, rd==rs1, and low-bit masking
+  // cases.
   return {
       {"jal_skips_delay_slot_like_code", j_type(4, 12), 0, 4, 4, 0x33},
       {"jal_x0_discards_link", j_type(0, 12), 0, 0, 0, 0x33},

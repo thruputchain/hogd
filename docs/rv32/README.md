@@ -40,8 +40,8 @@ and no protocol-visible behavior.
   - `rv32_vm_test.cc`: VM, artifact, gas, and instruction behavior.
   - `rv32_conformance_test.cc`: declarative RV32IM conformance corpus.
   - `rv32_borrowed_conformance_test.cc`: adapted `riscv-tests` vectors.
-  - `rv32_differential_conformance_test.cc`: fixed-seed random programs checked
-    against a test-only reference model.
+  - `rv32_spec_model_crosscheck_test.cc`: fixed-seed random programs checked
+    against an in-tree test-only reference model.
   - `rv32_syscall_bridge_test.cc`: bridge atomicity and marshalling.
   - `rv32_syscall_entry_bridge_test.cc`: real `syscall_entry` bridge tests.
   - `rv32_runtime_context_test.cc`: RV32/WASM parity and outcome mapping.
@@ -54,6 +54,7 @@ programs and a compiled Rust fixture, uses a versioned artifact with dispatch,
 and has RV32/WASM parity tests for success and error outcomes.
 
 The core is solid enough to keep owning. Before protocol exposure, the remaining
-work is activation hardening: cross-platform determinism runs, a production SDK
-lowerer, expanded RV32I/RV32M conformance coverage, fuzzing/error-triage polish,
-and explicit protocol discipline around artifact hashing and gas version bumps.
+work is activation hardening: an external-oracle differential pass,
+cross-platform determinism runs, a production SDK lowerer, expanded RV32I/RV32M
+conformance coverage, fuzzing/error-triage polish, and explicit protocol
+discipline around artifact hashing and gas version bumps.

@@ -4,6 +4,7 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <span>
@@ -285,7 +286,7 @@ Machine::load(uint32_t address, uint32_t width) const
            uint32_t{memory_[address + 3]} << 24;
   default:
     assert(false && "invalid RV32 load width");
-    return 0;
+    std::abort();
   }
 }
 
@@ -308,7 +309,7 @@ Machine::store(uint32_t address, uint32_t width, uint32_t value)
     return;
   default:
     assert(false && "invalid RV32 store width");
-    return;
+    std::abort();
   }
 }
 

@@ -1,17 +1,21 @@
 # Borrowed RV32 Test Vector License Notice
 
 Some RV32 conformance vectors in `rv32_borrowed_conformance_test.cc` are adapted
-from the `riscv-tests` test sources vendored by PolkaVM:
+from the upstream `riscv-tests` ISA test sources:
 
-- Repository: `git@github.com:paritytech/polkavm.git`
-- Commit: `bd2d14ed105467fd158b4744fd92f7045d288bb8`
-- Source path: `guest-programs/riscv-tests/tests`
+- Repository: `https://github.com/riscv-software-src/riscv-tests`
+- Local source checkout inspected: commit
+  `1eb47d946c55f55cab8653c224c2993acc0276bd`
+- Source paths: selected `isa/rv32ui/*.S` wrappers, their included
+  `isa/rv64ui/*.S` bodies, and selected `isa/rv32um/*.S` tests.
 
-PolkaVM itself is licensed under MIT OR Apache-2.0 at the repository root. The
-borrowed vectors are not adapted from PolkaVM-specific runtime code; they come
-from the vendored `riscv-tests` subtree, whose assembly sources reference the
-subtree-local `tests/LICENSE`. That subtree carries the following BSD-style
-notice, retained here for the adapted vectors.
+What was adapted: operand/result values and edge-case expectations from the
+RV32UI/RV32UM assembly tests were transcribed into C++ tables. No upstream
+assembly source, ELF harness, linker script, or binary test artifact is vendored
+into this repository.
+
+The upstream repository carries the following BSD-style notice, retained here
+for the adapted vectors.
 
 Copyright (c) 2012-2015, The Regents of the University of California
 (Regents). All Rights Reserved.

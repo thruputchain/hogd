@@ -47,6 +47,9 @@ Possible polish:
 - Consider `std::expected` for `DecodeResult` / `ProgramResult` later.
 - Add address/gas wrapper types only if they reduce real ambiguity.
 - Keep growing conformance tests; readable code still needs independent oracles.
+- The in-tree spec-model cross-check is useful regression coverage, but it is
+  not an independent oracle. Keep Spike/sail-riscv or equivalent external
+  differential testing open until it lands.
 
 ## Host Boundary
 
@@ -128,12 +131,15 @@ Closed:
 - SHA256 artifact section commitments.
 - Gas digest includes syscall costs.
 - Differential RV32/WASM error outcome tests.
+- RV32I/RV32M conformance corpus first pass.
+- In-tree spec-model cross-check.
 
 Still open before protocol exposure:
 
 - Cross-platform deterministic runs.
+- External-oracle differential testing.
 - Production SDK lowerer design.
-- RV32I/RV32M conformance corpus.
+- RV32I/RV32M conformance expansion as bugs surface.
 - Parser/dispatch fuzzing and sharper error codes.
 - Activation-time SHA256 wrapper/equivalence decision.
 - Activation-time gas version bump discipline.

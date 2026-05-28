@@ -179,15 +179,17 @@ must not return.
     multi-method compiled fixture with WASM parity.
 - Early M5 hardening: partly complete.
   - Typed host payloads, deterministic bridge-fault classification, SHA256
-    artifact commitments, gas digest including syscall costs, and differential
-    error outcome tests are in place.
+    artifact commitments, gas digest including syscall costs, RV32/WASM
+    differential error outcome tests, a first-pass conformance corpus, and an
+    in-tree spec-model cross-check are in place.
 
 ## Remaining Before Protocol Exposure
 
 - Cross-platform determinism runs on supported validator platforms.
+- External-oracle differential testing with Spike, sail-riscv, or equivalent.
 - Production SDK lowerer: method manifest, typed syscall wrappers, reproducible
   metadata, and enforceable `.text` data policy.
-- Imported or recreated RV32I/RV32M conformance corpus.
+- Continued RV32I/RV32M conformance expansion as bugs surface.
 - Fuzzing and sharper parser/dispatch error codes for triage.
 - Activation rule: artifact verification must either use the consensus SHA256
   wrapper or carry an explicit equivalence check for direct OpenSSL SHA256.
@@ -203,3 +205,5 @@ Do not expose RV32 to protocol until:
 - Artifact validation rejects malformed inputs deterministically.
 - Cross-platform determinism is demonstrated.
 - Conformance and fuzzing cover decode, memory, traps, and RV32I/RV32M semantics.
+- External-oracle differential testing with Spike, sail-riscv, or equivalent is
+  green.

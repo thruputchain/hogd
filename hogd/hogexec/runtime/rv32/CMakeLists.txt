@@ -99,19 +99,19 @@ gtest_discover_tests(
 )
 
 add_executable(
-  rv32_differential_conformance_test
-  rv32_differential_conformance_test.cc
+  rv32_spec_model_crosscheck_test
+  rv32_spec_model_crosscheck_test.cc
   rv32_vm_test_main.cc
 )
 
 target_link_libraries(
-  rv32_differential_conformance_test
+  rv32_spec_model_crosscheck_test
   rv32_vm
   GTest::gtest
 )
 gtest_discover_tests(
-  rv32_differential_conformance_test
-  TEST_PREFIX rv32.differential.
+  rv32_spec_model_crosscheck_test
+  TEST_PREFIX rv32.crosscheck.
   NO_PRETTY_VALUES
 )
 

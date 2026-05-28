@@ -17,6 +17,10 @@
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 
+// This is an in-tree spec-model cross-check, not an external differential
+// oracle. It is designed to catch local VM regressions quickly while
+// Spike/sail-riscv or another independent oracle remains an open M5 gate.
+
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name)
 
 namespace hogd::rv32 {
@@ -42,7 +46,7 @@ struct SpecInstruction {
   uint64_t gas = kBaseInstructionGas;
 };
 
-struct DifferentialCase {
+struct CrosscheckCase {
   std::string name;
   std::vector<SpecInstruction> instructions;
   std::array<uint32_t, kRegisterCount> initial_regs = {};
@@ -828,11 +832,11 @@ random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
               std::bit_cast<int32_t>(imm));
 }
 
-DifferentialCase
+CrosscheckCase
 make_random_case(uint64_t seed, size_t instruction_count)
 {
   std::mt19937_64 rng(seed);
-  DifferentialCase test_case;
+  CrosscheckCase test_case;
   test_case.name = "seed_" + std::to_string(seed);
   test_case.initial_memory.resize(512);
   for (uint8_t &byte : test_case.initial_memory) {
@@ -853,10 +857,10 @@ make_random_case(uint64_t seed, size_t instruction_count)
   return test_case;
 }
 
-std::vector<DifferentialCase>
-make_random_cases()
+std::vector<CrosscheckCase>
+make_random_crosscheck_cases()
 {
-  std::vector<DifferentialCase> cases;
+  std::vector<CrosscheckCase> cases;
   cases.reserve(64);
   for (uint64_t i = 0; i < 64; ++i) {
     cases.push_back(make_random_case(0xbadc0ffee0ddf00dULL + i, 96));
@@ -876,7 +880,7 @@ words_for(std::span<const SpecInstruction> instructions)
 }
 
 void
-compare_to_machine(const DifferentialCase &test_case)
+compare_to_machine(const CrosscheckCase &test_case)
 {
   const std::vector<uint32_t> words = words_for(test_case.instructions);
   const auto program =
@@ -919,20 +923,20 @@ compare_to_machine(const DifferentialCase &test_case)
       << test_case.name;
 }
 
-TEST(Rv32DifferentialConformanceTest, randomizedStraightLineProgramsMatchSpec)
+TEST(Rv32SpecModelCrosscheckTest, randomizedProgramsMatchSpec)
 {
-  for (const DifferentialCase &test_case : make_random_cases()) {
+  for (const CrosscheckCase &test_case : make_random_crosscheck_cases()) {
     SCOPED_TRACE(test_case.name);
     compare_to_machine(test_case);
   }
 }
 
-TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
+TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpec)
 {
   std::array<uint32_t, kRegisterCount> regs = {};
   std::vector<uint8_t> memory(64, 0xa5);
 
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "taken_branch_to_bad_pc",
       .instructions = {op_imm(Op::kAddi, 1, 0, 1),
                        spec(branch(0, 1, 1, 12), Op::kBeq, 0, 1, 1, 12),
@@ -942,7 +946,7 @@ TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
       .gas_limit = 10,
   });
 
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "jal_to_bad_pc",
       .instructions = {spec(j_type(1, 8), Op::kJal, 1, 0, 0, 8)},
       .initial_regs = regs,
@@ -950,7 +954,7 @@ TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
       .gas_limit = 10,
   });
 
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "jalr_to_bad_pc",
       .instructions = {op_imm(Op::kAddi, 1, 0, 13),
                        spec(jalr(2, 1, 0), Op::kJalr, 2, 1, 0, 0),
@@ -961,7 +965,7 @@ TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
   });
 
   regs[1] = 3;
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "misaligned_load",
       .instructions = {spec(load(2, 2, 1, 0), Op::kLw, 2, 1, 0, 0),
                        spec(0x00000073U, Op::kEcall)},
@@ -971,7 +975,7 @@ TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
   });
 
   regs[1] = 68;
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "out_of_bounds_store",
       .instructions = {spec(store(1, 2, 0, 2), Op::kSw, 0, 1, 2, 0),
                        spec(0x00000073U, Op::kEcall)},
@@ -981,7 +985,7 @@ TEST(Rv32DifferentialConformanceTest, semanticTrapsMatchSpec)
   });
 
   regs = {};
-  compare_to_machine(DifferentialCase{
+  compare_to_machine(CrosscheckCase{
       .name = "out_of_gas_before_first_mutation",
       .instructions = {op_imm(Op::kAddi, 1, 0, 1),
                        spec(0x00000073U, Op::kEcall)},
