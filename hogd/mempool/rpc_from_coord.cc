@@ -1867,17 +1867,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_await_handles);
 
-  // We write the hog ages to the database down here because we need to commit
-  // the hog ages above first ([scheduler_->commit_pending_nomination()] and
-  // [scheduler_->apply_committed_block_hog_ages]).
-  //
-  // Additionally, we cannot have db writes race with snapshot commit as
-  // otherwise ramdb state will be corrupted (based on a conversation with Geoff
-  // and Ryan). Thus, we do these writes after the snapshot commit is complete
-  // (i.e., all [commit_handles] have been co_await'd). As a side note, it is
-  // okay for [commit_snapshot()] and [abandon_snapshot()] to race.
-  co_await scheduler_->write_all_average_hog_ages_to_db();
-
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
   // elements in the vectors in [nominated_block_cache_], so if we clear those
   // vectors, we will experience segfaults because we will later attempt to
