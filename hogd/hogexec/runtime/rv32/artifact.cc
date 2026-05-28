@@ -65,7 +65,11 @@ ArtifactDigest
 artifact_digest(std::span<const uint8_t> bytes)
 {
   ArtifactDigest digest = {};
+  // Keep rv32_vm dependency-narrow for now. Protocol activation should either
+  // use the consensus SHA256 wrapper or keep an explicit equivalence check.
   static constexpr std::array<uint8_t, 1> kEmpty = {0};
+  // OpenSSL ignores the input pointer when len is zero; provide a non-null
+  // placeholder so the call shape remains valid for empty sections too.
   const uint8_t *input = bytes.empty() ? kEmpty.data() : bytes.data();
   SHA256(input, bytes.size(), digest.data());
   return digest;

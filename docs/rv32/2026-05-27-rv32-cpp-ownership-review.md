@@ -275,11 +275,15 @@ Completed in M5 host-boundary hardening:
 
 - Typed host result payloads and atomic host trap-code handling.
 - Deterministic classification for guest-caused bridge ABI faults.
+- Cryptographic artifact content commitments.
+- Gas schedule digest covers both RV32 instruction costs and syscall costs.
 
 Before RV32 becomes protocol-visible:
 
-- Cryptographic artifact content commitments.
-- Gas schedule digest covers both RV32 instruction costs and syscall costs.
+- Artifact verification uses the consensus SHA256 wrapper, or carries an
+  explicit equivalence check for the direct OpenSSL verifier used by rv32_vm.
+- Any digest-affecting gas schedule change bumps `kGasTableVersion`; during the
+  experiment the digest itself is already pinned and validated.
 - Differential RV32/WASM error contracts for deterministic failure,
   validation failure, abandon, OOG, and host trap classes.
 - Cross-platform deterministic test runs on supported validator platforms.
