@@ -1,20 +1,29 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -354,6 +363,111 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
       get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
   EXPECT_TRUE(
       get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+}
+
+// Regression test for issue #2399.
+//
+// During validation, a root frame that manually reverts must still submit RCQ
+// observation-only deltas so HogDB can reject forged proposal observations.  If
+// that observation push fails with a system error (e.g. the block was
+// invalidated by a committed sibling), try_commit_transaction() must abort the
+// underlying HogDB transaction before returning -- exactly like the normal
+// root-success lock-push failure path -- so the InvokeTX and its block
+// reference are released rather than leaked open.
+TEST_F(DirectStalenessTest,
+       ManualRevertObservationPushSystemErrorAbortsInvokeTx)
+{
+  static constexpr uint8_t kForgedEntry = 0xA5;
+  static constexpr TransactionID kTxId = 4242;
+  constexpr ContractAddress kContractAddr = make_contract_address(0);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto observed = ctx.handler().retrocausal_queue_consume(
+            NativeContractTestFramework::make_storage_key("rcq0"), true);
+        if (!observed.has_value()) {
+          return observed.error().to_invoke_error();
+        }
+        if (!observed.value().has_value() ||
+            observed.value().value().size() != 1 ||
+            observed.value().value()[0] != kForgedEntry) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        return {};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  NativeContext runtime_context(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(kContractAddr, contract);
+  setup_grant_storage_token(kContractAddr, 1'000'000'000);
+  advance_block();
+
+  BlockID block_a = get_block_number();
+  BlockID parent_id = get_db_tip().id;
+  constexpr BlockID kSiblingOffset = 1000;
+  BlockID block_b = block_a + kSiblingOffset;
+  auto create_block_b = get_coord_client().dbsched_create_snapshot(
+      parent_id, block_b, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(create_block_b, DbSchedResult::DbSchedResultOK);
+
+  NondeterministicProposalData forged;
+  forged.nondeterministic_bit_count = 1;
+  forged.nondeterministic_bits = {uint8_t{1}};
+  forged.observed_queue_entry_sequence = {QueueEntry{kForgedEntry}};
+
+  Transaction tx{.invocation = Invocation{
+                     .invoked_address = kContractAddr,
+                     .entrypoint = entrypoint_from_method_id(0),
+                     .gas_limit = std::numeric_limits<GasAmount>::max(),
+                     .calldata = {}}};
+
+  StorageSnapshotCache block_b_cache(block_b, get_db_proxy());
+  EventServerProxy event_proxy(
+      x23::HostPort{"localhost", get_event_exec_port()});
+  SystemCallHandler handler(
+      tx, block_b_cache,
+      PerTransactionDatabaseProxy(get_db_proxy(), block_b, kTxId),
+      PerTransactionEventServerProxy(event_proxy, block_b, kTxId),
+      ValidationModeCtor{std::move(forged)}, runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success())
+      << "The validation proposal data should drive the contract into a "
+         "manual root-frame revert";
+
+  close_and_commit_block(block_a);
+
+  auto stale_read = get_db_proxy().get_db_tip(block_b);
+  ASSERT_FALSE(stale_read.has_value());
+  ASSERT_EQ(stale_read.error().code(), SystemErrorCode::Abandon);
+
+  // The manual-revert observation push fails with a system error; the executor
+  // surfaces it as ExecResultSystemError.
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultSystemError);
+
+  // Because try_commit_transaction() aborted the HogDB transaction before
+  // returning, the InvokeTX's block reference is released and the first abandon
+  // removes the stale block immediately.
+  EXPECT_EQ(get_coord_client().dbsched_abandon_snapshot(block_b),
+            DbSchedResult::DbSchedResultOK);
+
+  // With the InvokeTX already closed and block_b removed, a fresh proxy can no
+  // longer find or abort the original (block_b, tx_id) transaction.  Before the
+  // fix this abort succeeded, proving the InvokeTX had been leaked open.
+  PerTransactionDatabaseProxy cleanup(get_db_proxy(), block_b, kTxId);
+  EXPECT_FALSE(cleanup.abort_transaction().has_value())
+      << "manual-revert observation push system error left the InvokeTX open";
+
+  EXPECT_EQ(get_coord_client().dbsched_abandon_snapshot(block_b),
+            DbSchedResult::DbSchedResultError);
 }
 
 } // namespace hogd
