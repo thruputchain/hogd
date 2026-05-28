@@ -1738,6 +1738,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await commit_cg(commit_lock_);
   record_stage(stage_wait_commit_lock);
 
+  // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
+  // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
+  // We want to ensure that on a block commit, we are able to apply the pending
+  // hog ages in the scheduler *before* the hog transfer deltas are received
+  // from hogdb. Otherwise, if the transfer deltas are applied first, it is
+  // possible that they will transfer hogs between accounts, and then when we
+  // apply the pending hog ages after, we may try to move hogs between scheduler
+  // groups for an account that no longer has any hogs.
   x23::CoroGuard hog_age_cg;
   co_await hog_age_cg(scheduler_->pending_hog_age_update_lock_);
   record_stage(stage_wait_hog_age_lock);
