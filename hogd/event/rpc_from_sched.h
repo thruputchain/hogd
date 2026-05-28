@@ -21,6 +21,10 @@ public:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
                                                       BlockHeight block_height);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  x23::Async<RPCError> eventsched_commit_block(BlockID block_id) {
+    co_return RPCError::kRPCUnimplemented;
+  }
 
 private:
   EventRPCContext &ctx_;

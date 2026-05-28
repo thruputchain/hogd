@@ -394,6 +394,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/hogexec/components/ffi_types.h"
 #include "invoke_flag.hh"
+#include "invoke_args.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"

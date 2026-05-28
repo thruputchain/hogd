@@ -184,15 +184,17 @@ make_native_initial_token_claim_contract()
         }
 
         // Call the initialize entrypoint with provided calldata
-        auto method_id = sdk_method_id(entrypoint);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = sdk_method_id(entrypoint),
+            .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+                CopyableInvokeOutputs outputs{};
 
-        RuntimeMemoryLength output_return_buffer_len{},
-            output_returned_auth_token_len{};
         auto invoke_result = ctx.syscall<SyscallNo::kInvoke>(
-            deployed_addr, method_id, UINT64_MAX,
+            deployed_addr,
             std::as_bytes(std::span(calldata)),
-            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+            /*auth tokens*/std::span<uint32_t>{}, inputs, outputs);
 
         if (!invoke_result.has_value()) {
           return NativeContractBuilder::host_fn_error_conversion(

@@ -10,7 +10,6 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
@@ -57,16 +56,17 @@ public:
               std::span(trait_meta_t::template entrypoint<Name>().data(), 8))),
           Name.get(), x23::show(calldata));
 
-    RuntimeMemoryLength output_return_buffer_len{};
-    RuntimeMemoryLength output_returned_auth_token_len{};
+    CopyableInvokeOutputs outputs{};
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = sdk_method_id(trait_meta_t::template entrypoint<Name>()),
+        .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+        .flags = Flags,
+    };
 
     auto invoke_result = ctx.template syscall<SyscallNo::kInvoke>(
         contract_address_,
-        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-        static_cast<GasAmount>(UINT64_MAX),
-        std::as_bytes(std::span(calldata.data(), calldata.size())), Flags,
-        std::span<const std::byte>{}, output_return_buffer_len,
-        output_returned_auth_token_len);
+        std::as_bytes(std::span(calldata.data(), calldata.size())),
+        std::span<const std::byte>{}, inputs, outputs);
 
     if (!invoke_result.has_value()) {
       trace("Invoke HostFnError: {}", invoke_result.error());
@@ -92,6 +92,10 @@ public:
     assert(**return_buffer);
     auto const *unwrapped_return_buffer = **return_buffer;
     assert(unwrapped_return_buffer);
+    if (outputs.return_buffer_len != unwrapped_return_buffer->size()) {
+      trace("Unrecoverable: Return buffer size mismatch: {} != {}", outputs.return_buffer_len, unwrapped_return_buffer->size());
+      return HostFnError{HostFnErrorCode::Unrecoverable};
+    }
     std::span<const std::byte> return_span =
         std::as_bytes(std::span(unwrapped_return_buffer->data(),
                                 unwrapped_return_buffer->size()));
