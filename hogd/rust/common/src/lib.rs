@@ -8,6 +8,8 @@ pub use trampoline_bindings::*;
 use core::slice;
 use core::str::Utf8Error;
 
+pub const MAX_TABLE_ELEMENTS: u64 = 64;
+
 type ForeignHostCallContext = *mut core::ffi::c_void;
 
 /// An opaque, generic function pointer type used as a carrier for
@@ -74,6 +76,7 @@ pub fn verify_contract_meter(
 ) -> InvokeErrorCode {
     let config = groundhog_wasm_meter::Config {
         max_imported_functions: 1,
+        max_table_initial_size: MAX_TABLE_ELEMENTS,
         reject_floats: true,
         ..groundhog_wasm_meter::Config::default()
     };

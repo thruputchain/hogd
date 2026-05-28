@@ -126,7 +126,7 @@ impl WasmtimeGlobalContext {
     pub fn new_config() -> Config {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
         let num_slots: u32 = 1024;
-        let table_size: usize = 64;
+        let table_size: usize = common::MAX_TABLE_ELEMENTS as usize;
 
         // Winch does not support runtime bounds checks (signals_based_traps = false)
         // so we ban memory.grow, so as to eliminate syscalls on the hot path.

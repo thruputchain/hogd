@@ -937,6 +937,67 @@ fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
     }
 }
 
+fn oversized_table_contract_bytes() -> &'static [u8] {
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let wat = r#"
+                (module
+                  (table 65 funcref)
+                  (func (export "0000000000000001"))
+                  (memory 1 1)
+                  (export "memory" (memory 0)))
+            "#;
+            let raw =
+                wat::parse_str(wat).expect("oversized table WAT must parse");
+            groundhog_wasm_meter::instrument(
+                &raw,
+                &groundhog_wasm_meter::Config::default(),
+            )
+            .expect("oversized table contract must be meter-valid")
+        })
+        .as_slice()
+}
+
+#[test]
+fn test_h001_module_validate_skips_table_pool_limit() {
+    let bytes = oversized_table_contract_bytes();
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let module_new_error = wasmtime::Module::new(&engine, bytes).expect_err(
+        "Module::new must reject the table minimum against the pool limit",
+    );
+    let module_new_error = format!("{module_new_error:#}");
+    assert!(
+        module_new_error.contains("table")
+            && module_new_error.contains("65")
+            && module_new_error.contains("64"),
+        "expected pooling allocator table-minimum rejection, got: {module_new_error}"
+    );
+
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context = new_wasmtime_context(
+            no_get_mock_contract_get_fn,
+            global_context,
+        );
+
+        let verified =
+            wasmtime_verify_contract(context, bytes.as_ptr(), bytes.len());
+        assert_ne!(
+            verified, 0,
+            "upload verifier must reject contracts whose table minimum \
+             exceeds the pooling allocator limit"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
 fn float_contract_bytes() -> &'static [u8] {
     let wat = r#"
         (module
