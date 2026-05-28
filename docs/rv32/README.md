@@ -45,6 +45,8 @@ and no protocol-visible behavior.
   - `rv32_borrowed_conformance_test.cc`: adapted `riscv-tests` vectors.
   - `rv32_spec_model_crosscheck_test.cc`: fixed-seed random programs checked
     against an in-tree test-only reference model.
+  - `rv32_unsupported_profile_test.cc`: upstream-inspired unsupported-profile
+    rejection fixtures at program and artifact boundaries.
   - `rv32_upstream_artifact_test.cc`: synthetic upstream-shaped RV32UI/RV32UM
     artifacts run through the runtime boundary.
   - `rv32_syscall_bridge_test.cc`: bridge atomicity and marshalling.

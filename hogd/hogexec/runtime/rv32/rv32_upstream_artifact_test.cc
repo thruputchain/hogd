@@ -79,8 +79,7 @@ make_return_memory()
       0,
   };
   for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)),
-               frame_words[i]);
+    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), frame_words[i]);
   }
   return memory;
 }
@@ -164,40 +163,37 @@ upstream_artifact_cases()
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_add",
        .words = wrap_with_pass_fail(
-           {addi(1, 0, 7), addi(2, 0, 8), op(5, 1, 2, 0, 0),
-            addi(6, 0, 15)}),
+           {addi(1, 0, 7), addi(2, 0, 8), op(5, 1, 2, 0, 0), addi(6, 0, 15)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_addi",
-       .words = wrap_with_pass_fail({addi(1, 0, 10), addi(5, 1, -3),
-                                     addi(6, 0, 7)}),
+       .words =
+           wrap_with_pass_fail({addi(1, 0, 10), addi(5, 1, -3), addi(6, 0, 7)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_beq",
-       .words = wrap_with_pass_fail(
-           {addi(1, 0, 5), addi(2, 0, 5), addi(5, 0, 1),
-            branch(0, 1, 2, 8), addi(5, 0, 9), addi(6, 0, 1)}),
+       .words = wrap_with_pass_fail({addi(1, 0, 5), addi(2, 0, 5),
+                                     addi(5, 0, 1), branch(0, 1, 2, 8),
+                                     addi(5, 0, 9), addi(6, 0, 1)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_jal",
-       .words = wrap_with_pass_fail(
-           {j_type(5, 8), addi(5, 0, 99), addi(6, 0, 4)}),
+       .words =
+           wrap_with_pass_fail({j_type(5, 8), addi(5, 0, 99), addi(6, 0, 4)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_jalr",
        .words = wrap_with_pass_fail(
-           {addi(1, 0, 13), jalr(5, 1, -1), addi(5, 0, 99),
-            addi(6, 0, 8)}),
+           {addi(1, 0, 13), jalr(5, 1, -1), addi(5, 0, 99), addi(6, 0, 8)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32ui_lw",
        .words = wrap_with_pass_fail(
            {addi(1, 0, kDataAddress), load(5, 2, 1, 0), addi(6, 0, 42)}),
        .memory = std::move(lw_memory)},
       {.name = "synthetic_rv32ui_sw",
-       .words = wrap_with_pass_fail(
-           {addi(1, 0, kDataAddress), addi(2, 0, 37), store(1, 2, 0, 2),
-            load(5, 2, 1, 0), addi(6, 0, 37)}),
+       .words = wrap_with_pass_fail({addi(1, 0, kDataAddress), addi(2, 0, 37),
+                                     store(1, 2, 0, 2), load(5, 2, 1, 0),
+                                     addi(6, 0, 37)}),
        .memory = make_return_memory()},
       {.name = "synthetic_rv32um_mul",
        .words = wrap_with_pass_fail(
-           {addi(1, 0, 7), addi(2, 0, 6), op(5, 1, 2, 0, 1),
-            addi(6, 0, 42)}),
+           {addi(1, 0, 7), addi(2, 0, 6), op(5, 1, 2, 0, 1), addi(6, 0, 42)}),
        .memory = make_return_memory()},
   };
 }
@@ -280,8 +276,7 @@ TEST_F(Rv32UpstreamArtifactTest, failPathMapsToDeterministicRuntimeFailure)
 {
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId,
-        make_artifact_image(wrap_with_pass_fail({addi(5, 0, 1),
-                                                 addi(6, 0, 2)}),
+        make_artifact_image(wrap_with_pass_fail({addi(5, 0, 1), addi(6, 0, 2)}),
                             make_return_memory())}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
@@ -298,10 +293,12 @@ TEST_F(Rv32UpstreamArtifactTest, failPathMapsToDeterministicRuntimeFailure)
   EXPECT_TRUE(handler.get_trace()->system_calls.empty());
 }
 
-INSTANTIATE_TEST_SUITE_P(SyntheticRiscvTestShapes, Rv32UpstreamArtifactTest,
-                         ::testing::ValuesIn(upstream_artifact_cases()),
-                         [](const testing::TestParamInfo<UpstreamArtifactCase>
-                                &info) { return info.param.name; });
+INSTANTIATE_TEST_SUITE_P(
+    SyntheticRiscvTestShapes, Rv32UpstreamArtifactTest,
+    ::testing::ValuesIn(upstream_artifact_cases()),
+    [](const testing::TestParamInfo<UpstreamArtifactCase> &info) {
+      return info.param.name;
+    });
 
 } // namespace
 } // namespace hogd

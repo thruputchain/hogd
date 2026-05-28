@@ -116,6 +116,23 @@ gtest_discover_tests(
 )
 
 add_executable(
+  rv32_unsupported_profile_test
+  rv32_unsupported_profile_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_unsupported_profile_test
+  rv32_vm
+  GTest::gtest
+)
+gtest_discover_tests(
+  rv32_unsupported_profile_test
+  TEST_PREFIX rv32.unsupported.
+  NO_PRETTY_VALUES
+)
+
+add_executable(
   rv32_syscall_bridge_test
   rv32_syscall_bridge_test.cc
   rv32_vm_test_main.cc

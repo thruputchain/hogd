@@ -64,24 +64,32 @@ Acceptance criteria:
 
 ## Phase 2: Unsupported Profile Rejection
 
+Status: first-pass selected-encoding corpus landed for the validation and
+artifact parse boundaries. This is not an exhaustive import of every unsupported
+upstream suite.
+
 Use upstream suites outside the supported RV32IM profile as rejection fixtures.
 These should validate that artifact/program creation fails cleanly for unsupported
 instructions instead of adding execution behavior.
 
 Candidate sources:
 
-- [ ] `rv32ua`: atomics and LR/SC.
-- [ ] `rv32uc`: compressed instructions.
-- [ ] `rv32uf`, `rv32ud`, `rv32uzfh`: floating point.
-- [ ] `rv32uzba`, `rv32uzbb`, `rv32uzbc`, `rv32uzbkb`, `rv32uzbkx`,
-      `rv32uzbs`, `rv32uzicond`: bitmanip/conditional extensions.
-- [ ] `rv32mi` selected SYSTEM/CSR/privileged encodings.
+- [x] `rv32ua`: selected atomics and LR/SC encodings.
+- [x] `rv32uc`: selected compressed instruction encoding.
+- [x] `rv32ui/fence_i.S`: selected `fence.i` rejection encoding.
+- [x] `rv32uf`, `rv32ud`, `rv32uzfh`: selected floating-point encodings.
+- [x] `rv32uzba`, `rv32uzbb`, `rv32uzbc`, `rv32uzbkb`, `rv32uzbkx`,
+      `rv32uzbs`, `rv32uzicond`: selected bitmanip/conditional encodings.
+- [x] `rv32si` selected SYSTEM/CSR/privileged encodings.
+- [x] `rv32mi` selected machine-mode SYSTEM/privileged encodings.
 
 Acceptance criteria:
 
-- [ ] Unsupported instructions are rejected at the validation boundary.
-- [ ] Rejection tests assert the expected `ProgramError` class where stable.
-- [ ] Privileged tests are used only as encoding inspiration unless the VM
+- [x] Unsupported instructions are rejected at the validation boundary.
+- [x] Rejection tests assert the expected `ProgramError` class where stable.
+- [x] Unsupported artifact parse failures map to
+      `ArtifactError::kInvalidProgram`.
+- [x] Privileged tests are used only as encoding inspiration unless the VM
       grows explicit privileged-mode semantics.
 
 ## Phase 3: Workload Benchmarks
