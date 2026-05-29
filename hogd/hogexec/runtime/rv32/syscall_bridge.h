@@ -10,18 +10,18 @@
 namespace hogd::rv32 {
 
 inline constexpr uint32_t kSyscallBridgeVersion = 0;
-inline constexpr size_t kSyscallFrameArgWords = 11;
+inline constexpr size_t kSyscallFrameArgWords = 8;
 inline constexpr size_t kSyscallFrameResultOffset =
     kSyscallFrameArgWords * sizeof(uint64_t);
 inline constexpr size_t kSyscallFrameResultBytes = 16;
 inline constexpr size_t kSyscallFrameBytes =
     kSyscallFrameResultOffset + kSyscallFrameResultBytes;
 static_assert(sizeof(TrampolineResult) == kSyscallFrameResultBytes);
-static_assert(kSyscallFrameBytes == 104);
+static_assert(kSyscallFrameBytes == 80);
 
 class SyscallBridgeHost final : public Host {
 public:
-  SyscallBridgeHost(ExternHostCallContext context, HostFn11 entry);
+  SyscallBridgeHost(ExternHostCallContext context, HostFn8 entry);
 
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override;
 
@@ -32,7 +32,7 @@ public:
 
 private:
   ExternHostCallContext context_ = nullptr;
-  HostFn11 entry_ = nullptr;
+  HostFn8 entry_ = nullptr;
   std::optional<TrampolineResult> last_result_;
 };
 

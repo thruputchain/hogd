@@ -714,8 +714,7 @@ TrampolineResult
 artifact_bench_entry(ExternHostCallContext /*context*/,
                      WasmContext wasm_context, uint64_t arg0, uint64_t arg1,
                      uint64_t arg2, uint64_t arg3, uint64_t /*arg4*/,
-                     uint64_t /*arg5*/, uint64_t /*arg6*/, uint64_t /*arg7*/,
-                     uint64_t /*arg8*/, uint64_t /*arg9*/, uint64_t /*arg10*/)
+                     uint64_t /*arg5*/, uint64_t /*arg6*/, uint64_t /*arg7*/)
 {
   if (arg0 == kSyscallReturn) {
     return TrampolineResult{.result_code = 0,
@@ -751,8 +750,7 @@ TrampolineResult
 bridge_noop_entry(ExternHostCallContext /*context*/, WasmContext wasm_context,
                   uint64_t /*arg0*/, uint64_t /*arg1*/, uint64_t /*arg2*/,
                   uint64_t /*arg3*/, uint64_t /*arg4*/, uint64_t /*arg5*/,
-                  uint64_t /*arg6*/, uint64_t /*arg7*/, uint64_t /*arg8*/,
-                  uint64_t /*arg9*/, uint64_t /*arg10*/)
+                  uint64_t /*arg6*/, uint64_t /*arg7*/)
 {
   if (wasm_context.memory.sz > kSyscallFrameBytes) {
     wasm_context.memory.mem[kSyscallFrameBytes] ^= 0x5aU;

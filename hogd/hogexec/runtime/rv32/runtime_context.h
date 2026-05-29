@@ -25,7 +25,7 @@ struct RuntimeContractImage {
   std::vector<DispatchEntry> dispatch_table = {
       DispatchEntry{.method_id = 0, .pc = 0}};
   uint32_t memory_bytes = kMaxMemoryBytes;
-  HostFn11 entry = nullptr;
+  HostFn8 entry = nullptr;
 };
 
 // Experimental test-only RuntimeContext for the RV32 VM. It deliberately uses

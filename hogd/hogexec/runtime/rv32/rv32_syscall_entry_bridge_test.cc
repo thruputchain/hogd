@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -295,33 +296,30 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
   EXPECT_EQ(memory, before);
 }
 
-TEST_F(Rv32SyscallEntryBridgeTest, InvokeArgTenFaultLeavesGuestMemoryUnchanged)
+TEST_F(Rv32SyscallEntryBridgeTest,
+       InvokeOutputsPointerFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(512, 0xBB);
   constexpr uint32_t kAddress = 128;
-  constexpr uint32_t kEntrypoint = 192;
-  constexpr uint32_t kReturnBufferLen = 256;
+  constexpr uint32_t kInputs = 256;
+  // Zero the address and CopyableInvokeInputs regions (flags == None) so the
+  // only ABI fault is the deliberately out-of-bounds outputs pointer, which is
+  // the final Invoke argument under the reduced struct-pointer ABI.
   std::ranges::fill(std::span<uint8_t>(memory).subspan(kAddress,
                                                        sizeof(ContractAddress)),
                     0);
   std::ranges::fill(std::span<uint8_t>(memory).subspan(
-                        kEntrypoint, sizeof(ContractEntrypointID)),
+                        kInputs, sizeof(CopyableInvokeInputs)),
                     0);
-  std::ranges::fill(std::span<uint8_t>(memory).subspan(kReturnBufferLen,
-                                                       sizeof(uint32_t)),
-                    0);
-  const std::array<uint64_t, 11> frame_words = {
+  const std::array<uint64_t, 8> frame_words = {
       static_cast<uint64_t>(SyscallNo::kInvoke),
-      kAddress,
-      kEntrypoint,
-      1,
-      memory.size(),
-      0,
-      std::to_underlying(InvokeFlag::None),
-      memory.size(),
-      0,
-      kReturnBufferLen,
-      memory.size() - 1,
+      kAddress,          // address pointer
+      kAddress,          // calldata pointer (zero length)
+      0,                 // calldata length
+      0,                 // owned auth token pointer
+      0,                 // owned auth token length
+      kInputs,           // CopyableInvokeInputs pointer
+      memory.size() - 1, // CopyableInvokeOutputs pointer (out of bounds)
   };
   write_frame(memory, frame_words);
   const std::vector<uint8_t> before = memory;

@@ -35,7 +35,7 @@ store_result_footer(std::span<uint8_t> memory, uint32_t frame_address,
 } // namespace
 
 SyscallBridgeHost::SyscallBridgeHost(ExternHostCallContext context,
-                                     HostFn11 entry)
+                                     HostFn8 entry)
   : context_(context), entry_(entry)
 {}
 
@@ -50,8 +50,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::deterministic_trap();
   }
 
-  // M2 bridge ABI: a0 points at 11 little-endian u64 words matching
-  // syscall_entry(arg0..arg10), followed by a TrampolineResult footer. The
+  // M2 bridge ABI: a0 points at 8 little-endian u64 words matching
+  // syscall_entry(arg0..arg7), followed by a TrampolineResult footer. The
   // scratch copy keeps MachineView narrow while still exercising the same
   // mutable WasmContext.memory shape used by the existing syscall parser.
   std::array<uint8_t, kSyscallFrameBytes> frame = {};
@@ -80,8 +80,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   TrampolineResult result = {};
   try {
     result = entry_(context_, wasm_context, words[0], words[1], words[2],
-                    words[3], words[4], words[5], words[6], words[7], words[8],
-                    words[9], words[10]);
+                    words[3], words[4], words[5], words[6], words[7]);
   } catch (...) {
     return HostResult::trap();
   }

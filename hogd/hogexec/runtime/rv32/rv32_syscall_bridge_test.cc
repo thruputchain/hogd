@@ -110,13 +110,11 @@ struct CapturedCall {
 TrampolineResult
 capture_entry(ExternHostCallContext context, WasmContext wasm_context,
               uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-              uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7,
-              uint64_t arg8, uint64_t arg9, uint64_t arg10)
+              uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {
   auto *captured = static_cast<CapturedCall *>(context);
   ++captured->calls;
-  captured->args = {arg0, arg1, arg2, arg3, arg4, arg5,
-                    arg6, arg7, arg8, arg9, arg10};
+  captured->args = {arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7};
   captured->gas_remaining = wasm_context.gas_remaining;
   captured->memory_size = wasm_context.memory.sz;
   captured->first_memory_byte = wasm_context.memory.mem[0];
@@ -132,7 +130,7 @@ struct SequencedGasCall {
 TrampolineResult
 sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
                     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+                    uint64_t, uint64_t)
 {
   auto *captured = static_cast<SequencedGasCall *>(context);
   ++captured->calls;
@@ -144,8 +142,7 @@ sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
 
 TrampolineResult
 throwing_entry(ExternHostCallContext, WasmContext, uint64_t, uint64_t, uint64_t,
-               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-               uint64_t, uint64_t)
+               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 {
   throw 1;
 }
@@ -160,8 +157,7 @@ enum class ParserProbeMode : uint64_t {
 TrampolineResult
 parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
                    uint64_t mode, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-                   uint64_t arg4, uint64_t, uint64_t, uint64_t, uint64_t,
-                   uint64_t, uint64_t)
+                   uint64_t arg4, uint64_t, uint64_t, uint64_t)
 {
   AliasGuard guard;
   std::span<std::byte> memory(reinterpret_cast<std::byte *>(
@@ -248,7 +244,7 @@ require_last_result(const SyscallBridgeHost &bridge)
   return result.value_or(TrampolineResult{});
 }
 
-TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
+TEST(Rv32SyscallBridgeTest, marshalsEightWordFrameToHostFn8)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(128);
@@ -273,7 +269,7 @@ TEST(Rv32SyscallBridgeTest, marshalsElevenWordFrameToHostFn11)
   EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
   EXPECT_EQ(captured.args[0], 0x0102030405060708ULL);
-  EXPECT_EQ(captured.args[10], 0x0102030405060712ULL);
+  EXPECT_EQ(captured.args[7], 0x010203040506070fULL);
   EXPECT_EQ(captured.gas_remaining, 77U);
   EXPECT_EQ(captured.memory_size, memory.size());
   EXPECT_EQ(captured.first_memory_byte, 0x5cU);

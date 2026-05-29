@@ -171,7 +171,7 @@ make_exit_result(uint32_t code, uint64_t gas_consumed = 4)
 extern "C" TrampolineResult
 unrecoverable_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+                    uint64_t, uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::Unrecoverable);
 }
@@ -179,8 +179,7 @@ unrecoverable_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
 extern "C" TrampolineResult
 validation_failure_entry(ExternHostCallContext /*unused*/,
                          WasmContext /*unused*/, uint64_t, uint64_t, uint64_t,
-                         uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                         uint64_t, uint64_t, uint64_t)
+                         uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::ValidationFailure);
 }
@@ -188,7 +187,7 @@ validation_failure_entry(ExternHostCallContext /*unused*/,
 extern "C" TrampolineResult
 abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-              uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+              uint64_t, uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::Abandon);
 }
@@ -196,7 +195,7 @@ abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
 extern "C" TrampolineResult
 unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+                    uint64_t, uint64_t)
 {
   return {.result_code = 0, .panic = 999, .gas_consumed = 4};
 }
@@ -204,7 +203,7 @@ unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
 extern "C" TrampolineResult
 throwing_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+               uint64_t, uint64_t)
 {
   throw 1;
 }
@@ -212,16 +211,14 @@ throwing_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
 extern "C" TrampolineResult
 host_out_of_gas_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                       uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                      uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                      uint64_t)
+                      uint64_t, uint64_t, uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
 }
 
 extern "C" TrampolineResult
 exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
-           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-           uint64_t, uint64_t, uint64_t)
+           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 {
   return make_exit_result(17);
 }
@@ -229,7 +226,7 @@ exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
 extern "C" TrampolineResult
 return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
              uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-             uint64_t, uint64_t, uint64_t, uint64_t)
+             uint64_t)
 {
   return make_host_panic_result(HostFnErrorCode::Return);
 }
@@ -319,7 +316,7 @@ make_initial_return_memory(std::span<const uint8_t> payload)
 }
 
 rv32::RuntimeContractImage
-make_single_ecall_image(HostFn11 entry)
+make_single_ecall_image(HostFn8 entry)
 {
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
@@ -1619,7 +1616,7 @@ TEST_F(Rv32RuntimeContextTest, HostErrorContractsMatchWasmOutcomes)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto expect_parity = [&](HostFn0 wasm_entry, HostFn11 rv32_entry,
+  auto expect_parity = [&](HostFn0 wasm_entry, HostFn8 rv32_entry,
                            InvokeErrorCode expected) {
     for (const WasmEngine engine : kDifferentialWasmEngines) {
       auto rv32_context = rv32::RuntimeContext(
@@ -1697,7 +1694,7 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto expect_mapping = [&](HostFn11 entry, InvokeErrorCode expected) {
+  auto expect_mapping = [&](HostFn8 entry, InvokeErrorCode expected) {
     auto rv32_context = rv32::RuntimeContext(
         {{kRv32ContractId, make_single_ecall_image(entry)}});
     auto handler =
