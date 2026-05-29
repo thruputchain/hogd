@@ -405,14 +405,17 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
             .gas_limit = 255,
             .flags = std::to_underlying(InvokeFlag::None),
         };
+        CopyableInvokeOutputs outputs2{};
         invoke_status =
             ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
                                             Calldata{0x00, 0x00, 0x00, 0xFF},
                                             std::span<uint32_t>{}, inputs2,
-                                            CopyableInvokeOutputs{});
+                                            outputs2);
+        // A child frame that traps / runs out of gas now returns
+        // kSyscallErrorCodeNone with frame_status == Fault.
         if (!invoke_status.has_value() ||
-            invoke_status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+            invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs2.frame_status != InvocationFrameStatusCode::Fault) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -780,7 +783,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   // this key will return kRPCUnrecoverable.
   snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
 
-  // Parent: TryInvoke the child, assert FrameReverted.
+  // Parent: TryInvoke the child, assert the frame aborted (manual revert).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
@@ -790,19 +793,25 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           ADD_FAILURE()
               << "TryInvoke returned system error (lock probe reached "
                  "banned key?)";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-          ADD_FAILURE() << "Expected FrameReverted, got "
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeNone, got "
                         << static_cast<int32_t>(r.value());
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "Expected frame_status Abort, got "
+                        << static_cast<int32_t>(outputs.frame_status);
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};

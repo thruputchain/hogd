@@ -377,15 +377,17 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs outputs{};
         auto r =
             ctx.syscall<SyscallNo::kInvoke>(callee_addr,
                                             std::as_bytes(std::span(calldata)),
                                             std::span<uint32_t>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            outputs);
 
         if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-          ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "Expected child frame to fault";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -437,9 +439,10 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   }
   ASSERT_NE(invoke_syscall, nullptr);
 
-  // Invoke should report kSyscallErrorCodeDeterministicWasm
+  // The Invoke syscall itself succeeds (a child frame ran); the child's fault
+  // is recorded on the child frame's trace status below, not the syscall code.
   ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+            SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Should have a child trace
   auto const &invoke_trace = invoke_syscall->body.invoke();
@@ -568,10 +571,10 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   }
   ASSERT_NE(invoke_syscall, nullptr);
 
-  // Invoke should report kSyscallErrorCodeDeterministicWasm (lock failure
-  // converted the child result to Deterministic)
+  // The Invoke syscall itself succeeds (a child frame ran); the lock failure
+  // is reflected in the frame result, not the syscall error code.
   ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+            SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Should have a child trace
   auto const &invoke_trace = invoke_syscall->body.invoke();

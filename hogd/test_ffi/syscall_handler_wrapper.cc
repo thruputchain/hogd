@@ -247,10 +247,13 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   if (handler_.is_running()) {
     auto status = [&]() -> HostFnStatus<SyscallErrorCode> {
-      if (result.to_host_fn_result().first.has_value()) {
-        return result.to_host_fn_result().first.value();
+      auto frame_status = result.to_frame_status().first;
+      // A child frame that ran (any outcome) makes the Invoke syscall return
+      // None; only a SystemError surfaces as a host-function error.
+      if (frame_status.has_value()) {
+        return SyscallErrorCode::kSyscallErrorCodeNone;
       }
-      return result.to_host_fn_result().first.error().to_host_fn_error();
+      return frame_status.error().to_host_fn_error();
     }();
     handler_.finish_syscall_trace(status, gas_remaining);
   }

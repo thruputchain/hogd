@@ -780,6 +780,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
           }
 
           {
+            CopyableInvokeOutputs status_outputs{};
             auto status = [&]() {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
@@ -788,15 +789,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
               };
               return ctx.syscall<SyscallNo::kInvoke>(
                   addr_manual_revert, std::span<const std::byte>{},
-                  std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                  std::span<uint32_t>{}, inputs, status_outputs);
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
               return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
-            if (status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+            // A child frame ran, so Invoke returns None; the manual revert is
+            // reported via frame_status == Abort.
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+
+            if (status_outputs.frame_status !=
+                InvocationFrameStatusCode::Abort) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }
 
@@ -835,6 +842,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
           }
 
           {
+            CopyableInvokeOutputs status_outputs{};
             auto status = [&]() {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
@@ -843,15 +851,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
               };
               return ctx.syscall<SyscallNo::kInvoke>(
                   addr_deterministic, std::span<const std::byte>{},
-                  std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                  std::span<uint32_t>{}, inputs, status_outputs);
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
               return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
-            if (status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+            // A child frame ran, so Invoke returns None; the trap / out-of-gas
+            // is reported via frame_status == Fault.
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+
+            if (status_outputs.frame_status !=
+                InvocationFrameStatusCode::Fault) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }
 
