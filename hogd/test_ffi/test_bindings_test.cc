@@ -10,6 +10,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -22,6 +23,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
@@ -1001,14 +1003,14 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
 
 namespace {
 
-// std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+// std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 // syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 //   WrappedGasAmount remaining_gas,
 //   const ContractAddress &input_address,
-//   uint64_t input_entrypoint_id, GasAmount input_gas_limit,
 //   std::span<const std::byte> input_calldata,
-//   InvokeFlagSet input_flags,
-//   RuntimeMemoryLength &output_return_buffer_len) noexcept
+//   std::span<const std::byte> input_owned_auth_token_ids_list,
+//   const CopyableInvokeInputs &input_inputs,
+//   CopyableInvokeOutputs &output_outputs) noexcept
 
 HostFnStatus<SyscallErrorCode>
 test_ffi_invoke(const ContractAddress &input_address,
@@ -1018,15 +1020,77 @@ test_ffi_invoke(const ContractAddress &input_address,
                 RuntimeMemoryLength &output_return_buffer_len,
                 RuntimeMemoryLength &output_returned_auth_token_len)
 {
+  CopyableInvokeInputs inputs{
+      .entrypoint_id = input_entrypoint_id,
+      .gas_limit = input_gas_limit,
+      .flags = input_flags,
+  };
+  CopyableInvokeOutputs outputs{};
+
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kInvoke),
-      reinterpret_cast<uint64_t>(input_address.data()), input_entrypoint_id,
-      input_gas_limit, reinterpret_cast<uint64_t>(input_calldata.data()),
-      input_calldata.size(), input_flags,
+      reinterpret_cast<uint64_t>(input_address.data()),
+      reinterpret_cast<uint64_t>(input_calldata.data()), input_calldata.size(),
       reinterpret_cast<uint64_t>(input_owned_auth_token_ids.data()),
-      input_owned_auth_token_ids.size(),
-      reinterpret_cast<uint64_t>(&output_return_buffer_len),
-      reinterpret_cast<uint64_t>(&output_returned_auth_token_len));
+      input_owned_auth_token_ids.size_bytes(),
+      reinterpret_cast<uint64_t>(&inputs),
+      reinterpret_cast<uint64_t>(&outputs));
+
+  output_return_buffer_len = outputs.return_buffer_len;
+  output_returned_auth_token_len = outputs.returned_auth_token_len;
+
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
+    return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
+
+  return static_cast<SyscallErrorCode>(result.result_code);
+}
+
+// std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+// syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
+//   BlockHeight input_expiry_height,
+//   std::span<const std::byte> input_serialized_auth_token,
+//   uint32_t &output_token_id) noexcept
+HostFnStatus<SyscallErrorCode>
+test_ffi_mint_auth_token(BlockHeight input_expiry_height,
+                         std::span<const std::byte> input_serialized_auth_token,
+                         uint32_t &output_token_id)
+{
+  auto result = mock_syscall_entrypoint(
+      std::to_underlying(SyscallNo::kMintAuthToken),
+      static_cast<uint64_t>(input_expiry_height),
+      reinterpret_cast<uint64_t>(input_serialized_auth_token.data()),
+      input_serialized_auth_token.size_bytes(),
+      reinterpret_cast<uint64_t>(&output_token_id), 0, 0, 0);
+
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
+    return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
+
+  return static_cast<SyscallErrorCode>(result.result_code);
+}
+
+// std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+// syscall_ConsumeAuthToken_inner(SystemCallHandler &syscall_handler,
+//   uint32_t input_token_id, std::span<std::byte> output_auth_payload,
+//   ContractAddress &output_token_minter,
+//   RuntimeMemoryLength &output_auth_payload_written_len,
+//   uint32_t &output_unwrapped_token_id_start,
+//   uint32_t &output_unwrapped_token_id_count) noexcept
+HostFnStatus<SyscallErrorCode>
+test_ffi_consume_auth_token(
+    uint32_t input_token_id, std::span<std::byte> output_auth_payload,
+    ContractAddress &output_token_minter,
+    RuntimeMemoryLength &output_auth_payload_written_len,
+    uint32_t &output_unwrapped_token_id_start,
+    uint32_t &output_unwrapped_token_id_count)
+{
+  auto result = mock_syscall_entrypoint(
+      std::to_underlying(SyscallNo::kConsumeAuthToken), input_token_id,
+      reinterpret_cast<uint64_t>(output_auth_payload.data()),
+      output_auth_payload.size_bytes(),
+      reinterpret_cast<uint64_t>(&output_token_minter),
+      reinterpret_cast<uint64_t>(&output_auth_payload_written_len),
+      reinterpret_cast<uint64_t>(&output_unwrapped_token_id_start),
+      reinterpret_cast<uint64_t>(&output_unwrapped_token_id_count));
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1040,7 +1104,7 @@ test_ffi_get_msg_sender(ContractAddress &output_sender)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetMsgSender),
                               reinterpret_cast<uint64_t>(output_sender.data()),
-                              0, 0, 0, 0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1054,7 +1118,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetCurrentAddress),
                               reinterpret_cast<uint64_t>(output_address.data()),
-                              0, 0, 0, 0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1250,6 +1314,60 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
     return ForeignInvokeResult{
         .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
+}
+
+// Mock contract that consumes an auth token forwarded by its caller.
+// The token id is passed in the calldata (4 little-endian bytes).
+// foreign_context points to a ConsumeTokenData where results are recorded.
+struct ConsumeTokenData {
+  ContractAddress expected_minter;
+  std::vector<uint8_t> expected_payload;
+  bool consume_succeeded = false;
+  bool minter_matched = false;
+  bool payload_matched = false;
+};
+
+ForeignInvokeResult
+mock_contract_consume_auth_token(void *ctx, uint64_t /*method_number*/)
+{
+  auto *data = reinterpret_cast<ConsumeTokenData *>(ctx);
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
+  }
+
+  // The caller forwarded the token id to us via calldata.
+  auto const &calldata = context->to_handler().get_calldata();
+  if (calldata.size() != sizeof(uint32_t)) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::Deterministic)};
+  }
+  uint32_t token_id = 0;
+  std::memcpy(&token_id, calldata.data(), sizeof(token_id));
+
+  std::array<std::byte, kAuthTokenMaxLen> payload_buf{};
+  ContractAddress minter{};
+  RuntimeMemoryLength payload_written_len = 0;
+  uint32_t child_start = 0, child_count = 0;
+  auto consume_res =
+      test_ffi_consume_auth_token(token_id, std::span<std::byte>{payload_buf},
+                                  minter, payload_written_len, child_start,
+                                  child_count);
+
+  data->consume_succeeded =
+      consume_res.has_value() &&
+      consume_res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+  if (data->consume_succeeded) {
+    data->minter_matched = (minter == data->expected_minter);
+    data->payload_matched =
+        payload_written_len == data->expected_payload.size() &&
+        std::memcmp(payload_buf.data(), data->expected_payload.data(),
+                    payload_written_len) == 0;
+  }
+
   return ForeignInvokeResult{.panic =
                                  std::to_underlying(InvokeErrorCode::None)};
 }
@@ -1529,6 +1647,101 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
       << "Nested contract C should see B as msg_sender";
   EXPECT_TRUE(inner_check.self_check_passed)
       << "Nested contract C should see C as current_address";
+
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(InvokeErrorCode::None));
+  EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
+}
+
+// Parent mints an auth token consumable by a child, forwards it to the child
+// via invoke()'s owned-auth-token-ids list, and the child consumes it.  This
+// exercises the non-empty forwarded-token path (and thus the byte-length
+// encoding of the forwarded id list passed through invoke()).
+TEST(TestBindingsTest, MockFrameForwardAndConsumeAuthTokenTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // The payload the parent mints into the token and the child reads back.
+  auto payload_bytes = x23::serialize(uint32_t{0x7E57});
+
+  ContractAddress parent_addr{0xAA};
+  ContractAddress child_addr{2};
+
+  // Deploy the child contract that consumes the forwarded token.
+  ConsumeTokenData consume_data{
+      .expected_minter = parent_addr,
+      .expected_payload =
+          std::vector<uint8_t>(payload_bytes.begin(), payload_bytes.end()),
+  };
+  deploy_mock_contract(db, rc, 1, mock_contract_consume_auth_token,
+                       &consume_data, child_addr);
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  // Open a mock frame for the parent contract.
+  Invocation invocation = {
+      .invoked_address = parent_addr,
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 10'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+
+  // Parent mints an auth token whose consumer is the child.
+  AuthTokenNode root_node{
+      .consumer_address = child_addr,
+      .payload = AuthTokenPayload(payload_bytes.begin(), payload_bytes.end()),
+      .child_nodes = {},
+  };
+  auto serialized_node = x23::serialize(root_node);
+  uint32_t token_id = 0;
+  auto mint_res =
+      test_ffi_mint_auth_token(BlockHeight{1'000'000},
+                               std::as_bytes(std::span(serialized_node.data(),
+                                                       serialized_node.size())),
+                               token_id);
+  ASSERT_TRUE(mint_res.has_value());
+  ASSERT_EQ(*mint_res, SyscallErrorCode::kSyscallErrorCodeNone);
+
+  // Forward the token id to the child: in calldata so it knows which id to
+  // consume, and in the owned-auth-token-ids list so invoke() transfers
+  // ownership to the child.
+  Calldata calldata;
+  calldata.resize_uninitialized(sizeof(token_id));
+  std::memcpy(calldata.data(), &token_id, sizeof(token_id));
+
+  std::array<uint32_t, 1> forwarded_ids{token_id};
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
+  auto invoke_res =
+      test_ffi_invoke(child_addr, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{},
+                      std::span<uint32_t const>{forwarded_ids},
+                      output_return_buffer_len, output_returned_auth_token_len);
+
+  ASSERT_TRUE(invoke_res.has_value());
+  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+
+  EXPECT_TRUE(consume_data.consume_succeeded)
+      << "child should have consumed the forwarded auth token";
+  EXPECT_TRUE(consume_data.minter_matched)
+      << "consumed token minter should be the parent address";
+  EXPECT_TRUE(consume_data.payload_matched)
+      << "consumed payload should match what the parent minted";
 
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
@@ -2472,7 +2685,7 @@ trace_contract_fibonacci(void * /*unused*/, uint64_t /*method_number*/)
                               reinterpret_cast<uint64_t>(sha_input),
                               sizeof(sha_input),
                               reinterpret_cast<uint64_t>(sha_output.data()),
-                              sizeof(sha_output), 0, 0, 0, 0, 0, 0);
+                              sizeof(sha_output), 0, 0, 0);
 
   // If SHA256 ran out of gas, panic propagates:
   // trace shows panic=1 (OutOfGas) here
@@ -2567,7 +2780,7 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
                             reinterpret_cast<uint64_t>(return_auth_token_buf),
                             sizeof(return_auth_token_buf),
                             reinterpret_cast<uint64_t>(&return_auth_token_len),
-                            0, 0, 0, 0);
+                            0);
   }
 
   // Step 3: kInvoke to contract 1, second call (trace lines 56-70)

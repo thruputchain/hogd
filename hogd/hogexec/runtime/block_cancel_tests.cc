@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -17,6 +18,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -129,13 +131,16 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
         [addr_writer](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0,
-                                output_returned_auth_token_len = 0;
-            return ctx.syscall<SyscallNo::kInvoke>(
-                addr_writer, 0, UINT64_MAX, ctx.handler().get_calldata(),
-                std::to_underlying(InvokeFlag::TryInvoke),
-                std::span<uint32_t>{}, output_return_buffer_len,
-                output_returned_auth_token_len);
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(addr_writer,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
 
           if (r0.has_value() || r0.error().code() != HostFnErrorCode::Abandon) {

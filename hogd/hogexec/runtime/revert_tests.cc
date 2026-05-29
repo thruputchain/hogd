@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -157,12 +158,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
        addr_3](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // try_invoke addr_1:0
         auto r1 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_1, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(addr_1,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -173,12 +177,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
         // Invoke addr_2:1 (check method) to verify "test1" is absent
         auto r2_check = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_2, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2_check.has_value() ||
             r2_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -189,12 +196,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
         // Invoke addr_3:1 (check method) to verify "test2" is absent
         auto r3_check = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_3, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(addr_3,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r3_check.has_value() ||
             r3_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -213,12 +223,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_1.emplace(
       0, [addr_2](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto r2 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_2, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -251,13 +264,14 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                   }
 
                   auto r3 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        addr_3, 0, UINT64_MAX, Calldata{},
-                        std::to_underlying(InvokeFlag::TryInvoke),
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        addr_3, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r3.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -389,12 +403,15 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
       0,
       [addr_fault](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto r0 = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_fault, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(addr_fault,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -488,12 +505,16 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
       0,
       [abort_payload,
        kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength output_return_buffer_len = 0;
-        RuntimeMemoryLength output_returned_auth_token_len = 0;
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, 0, ctx.gas_remaining(), Calldata{},
-            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = ctx.gas_remaining(),
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
+        CopyableInvokeOutputs outputs{};
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -502,10 +523,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
                         << static_cast<int32_t>(r.value());
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (output_return_buffer_len != abort_payload.size()) {
+        if (outputs.return_buffer_len != abort_payload.size()) {
           ADD_FAILURE() << "Abort payload length mismatch: expected "
                         << abort_payload.size() << ", got "
-                        << output_return_buffer_len;
+                        << outputs.return_buffer_len;
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -609,12 +630,15 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   fns_parent.emplace(
       0,
       [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength output_return_buffer_len = 0;
-        RuntimeMemoryLength output_returned_auth_token_len = 0;
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, 0, ctx.gas_remaining(), Calldata{},
-            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-            output_return_buffer_len, output_returned_auth_token_len);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = ctx.gas_remaining(),
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }

@@ -160,10 +160,13 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
             handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
       invoke_trace->inputs = SyscallInvokeInputs{
           .address = invocation.invoked_address,
-          .entrypoint_id = sdk_method_id(invocation.entrypoint),
-          .gas_limit = invocation.gas_limit,
           .calldata = invocation.calldata,
-          .flags = invoke_flags,
+          .inputs =
+              CopyableInvokeInputs{
+                  .entrypoint_id = sdk_method_id(invocation.entrypoint),
+                  .gas_limit = invocation.gas_limit,
+                  .flags = invoke_flags,
+              },
       };
     }
   }

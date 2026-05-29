@@ -106,14 +106,14 @@ public:
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0);
+                                           0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
     auto [syscall_res2, gas_consumed2] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0);
+                                           0);
     ASSERT_FALSE(syscall_res2.has_value());
     ASSERT_EQ(syscall_res2.error().code(), Code);
     ASSERT_EQ(gas_consumed2, 10);
@@ -140,7 +140,7 @@ public:
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0);
+                                           0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(gas_consumed, 1000);
@@ -148,7 +148,7 @@ public:
     auto [syscall_res2, gas_consumed2] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0);
+                                           0);
     ASSERT_FALSE(syscall_res2.has_value());
     ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
     ASSERT_EQ(gas_consumed2, 10);
@@ -220,7 +220,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoreturnFailingSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                             0, 0, 0, 0, 0);
+                                             0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
 }
@@ -265,14 +265,12 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   // Runtime ctor sets host_call_context->runtime
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10000),
-                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
-                                     0, 0);
+                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_TRUE(syscall_res.has_value());
 
   auto [syscall_res2, gas_consumed2] =
       wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10),
-                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
-                                     0, 0);
+                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res2.has_value());
   ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed2, 10);
@@ -309,14 +307,14 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                             0, 0, 0, 0, 0);
+                                             0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
 
   auto [syscall_res2, gas_consumed2] =
       wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                             0, 0, 0, 0, 0);
+                                             0, 0);
   ASSERT_FALSE(syscall_res2.has_value());
   ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed2, 10);
@@ -354,7 +352,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10000),
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                              0, 0, 0, 0, 0);
+                                              0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // Gas is not consumed by the syscall.
@@ -366,7 +364,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto [syscall_res2, gas_consumed2] =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10),
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                              0, 0, 0, 0, 0);
+                                              0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // TODO(geoff): same as above

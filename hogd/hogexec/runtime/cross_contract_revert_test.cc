@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -19,6 +20,8 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -93,12 +96,14 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
                   // Call Contract B (which will revert)
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -247,12 +252,14 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
                   // Call Contract B
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -303,12 +310,14 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
                   // Call Contract C (which will revert)
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        contract_c_addr, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        contract_c_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
@@ -463,12 +472,14 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
                   // Call Contract B (which will revert)
                   auto r1 = [&]() {
-                    RuntimeMemoryLength output_return_buffer_len = 0,
-                                        output_returned_auth_token_len = 0;
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
                     return ctx.syscall<SyscallNo::kInvoke>(
-                        contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
-                        std::span<uint32_t>{}, output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};

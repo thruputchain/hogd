@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
@@ -25,6 +26,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogexec_constants.hh"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -161,12 +163,14 @@ protected:
   // try_invoke helper for use inside A-contract lambdas.
   static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
-    RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
-    return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, method, UINT64_MAX, Calldata{},
-        std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-        output_return_buffer_len, output_returned_auth_token_len);
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = method,
+        .gas_limit = UINT64_MAX,
+        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+    };
+    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
+                                           std::span<uint32_t>{}, inputs,
+                                           CopyableInvokeOutputs{});
   }
 
   // Build a NativeContext with a single no-op contract (for structural
@@ -991,12 +995,15 @@ TEST_P(ProposeValidateRoundtripTest,
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, UINT64_MAX, make_index_calldata(i),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB, make_index_calldata(i),
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1085,11 +1092,16 @@ TEST_P(ProposeValidateRoundtripTest,
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
-          RuntimeMemoryLength out_ret = 0, out_auth = 0;
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              out_ret, out_auth);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           // Tolerant: propagate system errors but ignore user-level failures
           // (including the deterministic depth-cap failure on the last try).
           if (!r.has_value()) {
@@ -1135,11 +1147,16 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
-          RuntimeMemoryLength out_ret = 0, out_auth = 0;
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              out_ret, out_auth);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -1184,11 +1201,16 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kAttempts; i++) {
-          RuntimeMemoryLength out_ret = 0, out_auth = 0;
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              out_ret, out_auth);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           // Tolerant: propagate system errors, ignore deterministic child
           // failures (including the depth-cap rejection past the cap).
           if (!r.has_value()) {
@@ -1253,11 +1275,15 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength out_ret = 0, out_auth = 0;
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrB, 0, UINT64_MAX, Calldata{},
-            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-            out_ret, out_auth);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -1269,11 +1295,16 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   auto contract_b = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         for (uint32_t i = 0; i < kChildCap; i++) {
-          RuntimeMemoryLength out_ret = 0, out_auth = 0;
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrC, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              out_ret, out_auth);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrC,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }

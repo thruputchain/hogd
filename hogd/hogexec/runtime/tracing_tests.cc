@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -281,14 +282,16 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
     Calldata calldata{};
-    auto r = ctx.syscall<SyscallNo::kInvoke>(target_addr, 0, UINT64_MAX,
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = 0,
+        .gas_limit = UINT64_MAX,
+        .flags = 0,
+    };
+    auto r = ctx.syscall<SyscallNo::kInvoke>(target_addr,
                                              std::as_bytes(std::span(calldata)),
-                                             0, std::span<uint32_t>{},
-                                             output_return_buffer_len,
-                                             output_returned_auth_token_len);
+                                             std::span<uint32_t>{}, inputs,
+                                             CopyableInvokeOutputs{});
 
     if (!r.has_value() ||
         r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -368,15 +371,17 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        RuntimeMemoryLength output_return_buffer_len = 0,
-                            output_returned_auth_token_len = 0;
         Calldata calldata{};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
         auto r =
-            ctx.syscall<SyscallNo::kInvoke>(callee_addr, 0, UINT64_MAX,
+            ctx.syscall<SyscallNo::kInvoke>(callee_addr,
                                             std::as_bytes(std::span(calldata)),
-                                            0, std::span<uint32_t>{},
-                                            output_return_buffer_len,
-                                            output_returned_auth_token_len);
+                                            std::span<uint32_t>{}, inputs,
+                                            CopyableInvokeOutputs{});
 
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -485,12 +490,16 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
         [addr_writer](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           Calldata args = {'t', 'e', 's', 't'};
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
-              addr_writer, 0, UINT64_MAX, std::as_bytes(std::span(args)),
-              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          [[maybe_unused]] auto r =
+              ctx.syscall<SyscallNo::kInvoke>(addr_writer,
+                                              std::as_bytes(std::span(args)),
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
 
           return {};
         });
