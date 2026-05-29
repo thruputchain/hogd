@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -34,6 +35,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"

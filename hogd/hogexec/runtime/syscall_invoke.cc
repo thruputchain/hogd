@@ -17,7 +17,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
-#include "invoke_flag.hh"
+#include "invoke_args.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"

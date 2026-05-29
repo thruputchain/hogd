@@ -32,6 +32,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogexec_constants.hh"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"

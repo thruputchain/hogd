@@ -1,4 +1,5 @@
 #include "hogd/hogexec/precompiles/precompile_initial_token_claim.h"
+#include "invoke_args.hh"
 
 #include <cassert>
 #include <cstdint>
