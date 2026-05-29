@@ -108,13 +108,15 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     }
   }
 
-  // A nonzero error code means the invoke was rejected before a child frame
-  // ran; the frame outcome (Return / Abort / Fault) is carried by the frame
+  // A SyscallError means the invoke was rejected before a child frame ran; a
+  // frame that ran carries its outcome (Return / Abort / Fault) via the frame
   // output below.
-  if (res->code != SyscallErrorCode::kSyscallErrorCodeNone) {
-    info("view transaction failed with SyscallErrorCode::{}", res->code);
+  SyscallStatus<InvocationFrameStatusCode> const &frame = *res;
+  if (!frame.has_value()) {
+    info("view transaction failed with SyscallErrorCode::{}",
+         frame.error().code());
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-    result.error_code() = res->code;
+    result.error_code() = frame.error().code();
     return result;
   }
 

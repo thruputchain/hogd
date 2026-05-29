@@ -251,11 +251,12 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{gas_amount}};
   }
 
-  // The invoke was rejected before a child frame ran: a complete no-op. Leave
-  // the caller's output struct untouched (mirroring every other syscall) and
-  // report the error code.
-  if (invoke_res->code != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return {invoke_res->code, WrappedGasAmount{gas_amount}};
+  // A SyscallError means the invoke was rejected before a child frame ran: a
+  // complete no-op. Leave the caller's output struct untouched (mirroring every
+  // other syscall) and report the error code.
+  SyscallStatus<InvocationFrameStatusCode> const &frame = *invoke_res;
+  if (!frame.has_value()) {
+    return {frame.error().code(), WrappedGasAmount{gas_amount}};
   }
 
   // A child frame ran. Report its outcome (Return / Abort / Fault) via
@@ -277,7 +278,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   output_outputs.returned_auth_token_len =
       syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
-  output_outputs.frame_status = invoke_res->frame_status;
+  output_outputs.frame_status = frame.value();
   return {SyscallErrorCode::kSyscallErrorCodeNone,
           WrappedGasAmount{gas_amount}};
 }
