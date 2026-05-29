@@ -1338,11 +1338,10 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrC,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              outputs);
+          auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrC,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }

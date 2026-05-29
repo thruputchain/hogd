@@ -414,8 +414,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
         // A child frame that traps / runs out of gas now returns
         // kSyscallErrorCodeNone with frame_status == Fault.
         if (!invoke_status.has_value() ||
-            invoke_status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeNone ||
+            invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs2.frame_status != InvocationFrameStatusCode::Fault) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }

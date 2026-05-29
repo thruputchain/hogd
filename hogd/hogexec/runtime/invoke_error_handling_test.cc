@@ -514,28 +514,33 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
   constexpr std::string_view kRevertPayload = "REVERTED!";
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
-  fns_callee.emplace(
-      0, [kRevertPayload](
-             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        ReturnBuffer buffer;
-        buffer.resize_uninitialized(kRevertPayload.size());
-        std::memcpy(buffer.data(), kRevertPayload.data(),
-                    kRevertPayload.size());
-        ctx.handler().set_return_buffer(std::move(buffer), true, {});
-        return {};
-      });
-  auto callee_contract = std::make_unique<NativeContract>(std::move(fns_callee));
+  fns_callee.emplace(0,
+                     [kRevertPayload](NativeSyscallContext &ctx) noexcept
+                         -> InvokeStatus<void> {
+                       ReturnBuffer buffer;
+                       buffer.resize_uninitialized(kRevertPayload.size());
+                       std::memcpy(buffer.data(), kRevertPayload.data(),
+                                   kRevertPayload.size());
+                       ctx.handler().set_return_buffer(std::move(buffer), true,
+                                                       {});
+                       return {};
+                     });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
   fns_orch.emplace(
-      0, [kCalleeAddress, kRevertPayload](
-             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = 0, .gas_limit = UINT64_MAX, .flags = 0};
+      0,
+      [kCalleeAddress, kRevertPayload](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, outputs);
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
         EXPECT_TRUE(r.has_value());
         if (r.has_value()) {
           EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -576,13 +581,13 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address =
-                                               kOrchestratorAddress,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -601,18 +606,22 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
       0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
         return InvokeError{InvokeErrorCode::Deterministic};
       });
-  auto callee_contract = std::make_unique<NativeContract>(std::move(fns_callee));
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
   fns_orch.emplace(
-      0, [kCalleeAddress](
-             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = 0, .gas_limit = UINT64_MAX, .flags = 0};
+      0,
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, outputs);
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
         EXPECT_TRUE(r.has_value());
         if (r.has_value()) {
           EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -651,13 +660,13 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address =
-                                               kOrchestratorAddress,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -684,19 +693,23 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
         ctx.handler().set_return_buffer(std::move(buffer), false, {});
         return {};
       });
-  auto callee_contract = std::make_unique<NativeContract>(std::move(fns_callee));
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
   fns_orch.emplace(
-      0, [kCalleeAddress, kMissingAddress, kPayload](
-             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [kCalleeAddress, kMissingAddress,
+       kPayload](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // 1) A child that runs and returns normally seeds the slot.
-        CopyableInvokeInputs ok_inputs{
-            .entrypoint_id = 0, .gas_limit = UINT64_MAX, .flags = 0};
+        CopyableInvokeInputs ok_inputs{.entrypoint_id = 0,
+                                       .gas_limit = UINT64_MAX,
+                                       .flags = 0};
         CopyableInvokeOutputs ok_outputs{};
-        auto r1 = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
-            ok_inputs, ok_outputs);
+        auto r1 = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                  std::span<const std::byte>{},
+                                                  std::span<uint32_t>{},
+                                                  ok_inputs, ok_outputs);
         EXPECT_TRUE(r1.has_value());
         if (r1.has_value()) {
           EXPECT_EQ(r1.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -706,12 +719,14 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                   kPayload.size());
 
         // 2) An invoke rejected before a child frame runs (undeployed target).
-        CopyableInvokeInputs bad_inputs{
-            .entrypoint_id = 0, .gas_limit = UINT64_MAX, .flags = 0};
+        CopyableInvokeInputs bad_inputs{.entrypoint_id = 0,
+                                        .gas_limit = UINT64_MAX,
+                                        .flags = 0};
         CopyableInvokeOutputs bad_outputs{};
-        auto r2 = ctx.syscall<SyscallNo::kInvoke>(
-            kMissingAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
-            bad_inputs, bad_outputs);
+        auto r2 = ctx.syscall<SyscallNo::kInvoke>(kMissingAddress,
+                                                  std::span<const std::byte>{},
+                                                  std::span<uint32_t>{},
+                                                  bad_inputs, bad_outputs);
         EXPECT_TRUE(r2.has_value());
         if (r2.has_value()) {
           EXPECT_EQ(r2.value(),
@@ -751,13 +766,13 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address =
-                                               kOrchestratorAddress,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

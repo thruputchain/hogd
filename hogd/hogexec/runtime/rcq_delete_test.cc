@@ -1798,88 +1798,95 @@ protected:
         });
 
     // Method 40: inner_consume_revert_twice_then_consume(value)
-    builder.add<SerializationFormat::kTxs>(
-        40,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          // first reverted consume
-          CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 35,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::TryInvoke),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
-          }();
-          if (!r1.has_value()) {
-            ADD_FAILURE() << "System error on try_invoke consume (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          // The child ran (so the syscall returns None); it must have rolled
-          // back (revert or fault) rather than committed.
-          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "try_invoke was rejected before running child (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE()
-                << "try_invoke should have reported inner failure (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+    builder
+        .add<SerializationFormat::kTxs>(
+            40,
+            [](NativeSyscallContext &ctx,
+               uint32_t value) -> InvokeStatus<void> {
+              // first reverted consume
+              CopyableInvokeOutputs r1_outputs{};
+              auto r1 = [&]() {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 35,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                };
+                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       inputs, r1_outputs);
+              }();
+              if (!r1.has_value()) {
+                ADD_FAILURE() << "System error on try_invoke consume (1st)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              // The child ran (so the syscall returns None); it must have
+              // rolled back (revert or fault) rather than committed.
+              if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "try_invoke was rejected before running child (1st)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              if (r1_outputs.frame_status ==
+                  InvocationFrameStatusCode::Return) {
+                ADD_FAILURE()
+                    << "try_invoke should have reported inner failure (1st)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          // second reverted consume
-          CopyableInvokeOutputs r2_outputs{};
-          auto r2 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 35,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::TryInvoke),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r2_outputs);
-          }();
-          if (!r2.has_value()) {
-            ADD_FAILURE() << "System error on try_invoke consume (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          // The child ran (so the syscall returns None); it must have rolled
-          // back (revert or fault) rather than committed.
-          if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "try_invoke was rejected before running child (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          if (r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE()
-                << "try_invoke should have reported inner failure (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+              // second reverted consume
+              CopyableInvokeOutputs r2_outputs{};
+              auto r2 = [&]() {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 35,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                };
+                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       inputs, r2_outputs);
+              }();
+              if (!r2.has_value()) {
+                ADD_FAILURE() << "System error on try_invoke consume (2nd)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              // The child ran (so the syscall returns None); it must have
+              // rolled back (revert or fault) rather than committed.
+              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "try_invoke was rejected before running child (2nd)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              if (r2_outputs.frame_status ==
+                  InvocationFrameStatusCode::Return) {
+                ADD_FAILURE()
+                    << "try_invoke should have reported inner failure (2nd)";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          // entry should still be available
-          auto r3 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to consume after two reverted consumes";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+              // entry should still be available
+              auto r3 = [&]() {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 1,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::None),
+                };
+                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       inputs,
+                                                       CopyableInvokeOutputs{});
+              }();
+              if (!r3.has_value() ||
+                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "Failed to consume after two reverted consumes";
+                return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          return {};
-        });
+              return {};
+            });
 
     // Method 41:
     // inner_consume_insert_revert_then_consume_and_empty(consume_val,

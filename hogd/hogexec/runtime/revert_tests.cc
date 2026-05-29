@@ -172,8 +172,8 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // addr_1 manually reverted, so the invoke succeeds (kSyscallErrorCodeNone)
-        // and the child frame status is Abort.
+        // addr_1 manually reverted, so the invoke succeeds
+        // (kSyscallErrorCodeNone) and the child frame status is Abort.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -506,7 +506,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
 
   auto abort_payload = make_bytestring("manual_revert_payload");
 
-  // Parent: TryInvoke the child, then assert frame status Abort + abort payload.
+  // Parent: TryInvoke the child, then assert frame status Abort + abort
+  // payload.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,

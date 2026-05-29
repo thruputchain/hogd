@@ -247,7 +247,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 
   // A SystemError ends execution of the whole block.
   if (!invoke_res.has_value()) {
-    return {invoke_res.error().to_host_fn_error(), WrappedGasAmount{gas_amount}};
+    return {invoke_res.error().to_host_fn_error(),
+            WrappedGasAmount{gas_amount}};
   }
 
   // The invoke was rejected before a child frame ran: a complete no-op. Leave
@@ -277,7 +278,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   output_outputs.returned_auth_token_len =
       syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
   output_outputs.frame_status = invoke_res->frame_status;
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{gas_amount}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

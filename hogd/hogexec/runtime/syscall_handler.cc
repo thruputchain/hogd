@@ -311,7 +311,8 @@ SystemCallHandler::get_most_recent_frame_events() const
 }
 
 InvokeStatus<void>
-SystemCallHandler::handle_root_host_fn_status(SystemStatus<InvokeOutcome> status)
+SystemCallHandler::handle_root_host_fn_status(
+    SystemStatus<InvokeOutcome> status)
 {
   if (status.has_value()) {
     // An invoke rejected before a child frame ran (e.g. reentrance, invalid

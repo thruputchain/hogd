@@ -890,42 +890,41 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
           return {};
         });
-    fns_o.emplace(1,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    // Try invoke writer method 0 with "foo" (should fail due to
-                    // exclusive lock)
-                    Calldata args_foo = {'f', 'o', 'o'};
-                    CopyableInvokeOutputs r0_outputs{};
-                    auto r0 = [&]() {
-                      CopyableInvokeInputs inputs{
-                          .entrypoint_id = 0,
-                          .gas_limit = UINT64_MAX,
-                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                      };
-                      return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, args_foo, std::span<uint32_t>{},
-                          inputs, r0_outputs);
-                    }();
-                    if (!r0.has_value()) {
-                      ADD_FAILURE() << "should not have system error";
-                      return InvokeError{InvokeErrorCode::Unrecoverable};
-                    }
+    fns_o.emplace(
+        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Try invoke writer method 0 with "foo" (should fail due to
+          // exclusive lock)
+          Calldata args_foo = {'f', 'o', 'o'};
+          CopyableInvokeOutputs r0_outputs{};
+          auto r0 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_foo,
+                                                   std::span<uint32_t>{},
+                                                   inputs, r0_outputs);
+          }();
+          if (!r0.has_value()) {
+            ADD_FAILURE() << "should not have system error";
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-                    // The child frame ran (lock acquisition failed and was
-                    // converted to a deterministic failure), so the syscall
-                    // returns kSyscallErrorCodeNone; check that it failed (due
-                    // to the exclusive lock), reported via frame_status !=
-                    // Return.
-                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-                        r0_outputs.frame_status ==
-                            InvocationFrameStatusCode::Return) {
-                      ADD_FAILURE() << "try_invoke should have failed";
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          // The child frame ran (lock acquisition failed and was
+          // converted to a deterministic failure), so the syscall
+          // returns kSyscallErrorCodeNone; check that it failed (due
+          // to the exclusive lock), reported via frame_status !=
+          // Return.
+          if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "try_invoke should have failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    // Return a deterministic error to make the transaction fail
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  });
+          // Return a deterministic error to make the transaction fail
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
 
@@ -1068,42 +1067,41 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
           return {};
         });
-    fns_o.emplace(1,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    // Try invoke writer method 0 with "foo" (should fail due to
-                    // exclusive lock)
-                    Calldata args_foo = {'f', 'o', 'o'};
-                    CopyableInvokeOutputs r0_outputs{};
-                    auto r0 = [&]() {
-                      CopyableInvokeInputs inputs{
-                          .entrypoint_id = 0,
-                          .gas_limit = UINT64_MAX,
-                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                      };
-                      return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, args_foo, std::span<uint32_t>{},
-                          inputs, r0_outputs);
-                    }();
-                    if (!r0.has_value()) {
-                      ADD_FAILURE() << "should not have system error";
-                      return InvokeError{InvokeErrorCode::Unrecoverable};
-                    }
+    fns_o.emplace(
+        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Try invoke writer method 0 with "foo" (should fail due to
+          // exclusive lock)
+          Calldata args_foo = {'f', 'o', 'o'};
+          CopyableInvokeOutputs r0_outputs{};
+          auto r0 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_foo,
+                                                   std::span<uint32_t>{},
+                                                   inputs, r0_outputs);
+          }();
+          if (!r0.has_value()) {
+            ADD_FAILURE() << "should not have system error";
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-                    // The child frame ran (lock acquisition failed and was
-                    // converted to a deterministic failure), so the syscall
-                    // returns kSyscallErrorCodeNone; check that it failed (due
-                    // to the exclusive lock), reported via frame_status !=
-                    // Return.
-                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-                        r0_outputs.frame_status ==
-                            InvocationFrameStatusCode::Return) {
-                      ADD_FAILURE() << "try_invoke should have failed";
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          // The child frame ran (lock acquisition failed and was
+          // converted to a deterministic failure), so the syscall
+          // returns kSyscallErrorCodeNone; check that it failed (due
+          // to the exclusive lock), reported via frame_status !=
+          // Return.
+          if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "try_invoke should have failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    // Return a deterministic error to make the transaction fail
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  });
+          // Return a deterministic error to make the transaction fail
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
 
@@ -1241,40 +1239,39 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
         std::make_unique<NativeContract>(std::move(fns_w));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
-    fns_o.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    // Invoke writer method 0 in try_invoke frame with arguments
-                    // [-5]
-                    Calldata args = {static_cast<uint8_t>(-5)};
-                    CopyableInvokeOutputs r0_outputs{};
-                    auto r0 = [&]() {
-                      CopyableInvokeInputs inputs{
-                          .entrypoint_id = 0,
-                          .gas_limit = UINT64_MAX,
-                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                      };
-                      return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, args, std::span<uint32_t>{}, inputs,
-                          r0_outputs);
-                    }();
+    fns_o.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          // Invoke writer method 0 in try_invoke frame with arguments
+          // [-5]
+          Calldata args = {static_cast<uint8_t>(-5)};
+          CopyableInvokeOutputs r0_outputs{};
+          auto r0 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args,
+                                                   std::span<uint32_t>{},
+                                                   inputs, r0_outputs);
+          }();
 
-                    if (!r0.has_value()) {
-                      return InvokeError{InvokeErrorCode::Unrecoverable};
-                    }
+          if (!r0.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-                    // The child frame ran, so the syscall returns
-                    // kSyscallErrorCodeNone; check that the try_invoke failed
-                    // (should fail because -5 is negative), reported via
-                    // frame_status != Return.
-                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-                        r0_outputs.frame_status ==
-                            InvocationFrameStatusCode::Return) {
-                      return InvokeError{InvokeErrorCode::Unrecoverable};
-                    }
+          // The child frame ran, so the syscall returns
+          // kSyscallErrorCodeNone; check that the try_invoke failed
+          // (should fail because -5 is negative), reported via
+          // frame_status != Return.
+          if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
 
-                    // Return a deterministic error to make the transaction fail
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  });
+          // Return a deterministic error to make the transaction fail
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
     fns_o.emplace(1,
                   [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                     // Invoke writer method 0 with arguments [1]

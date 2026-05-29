@@ -52,9 +52,9 @@ class StorageSnapshotCache;
 //
 // `code` answers "did a child frame run?": it is kSyscallErrorCodeNone whenever
 // a child frame ran (regardless of how it ended), and a nonzero error code
-// (kSyscallErrorCodeInvalidSyscallInput / kSyscallErrorCodeReentrance) only when
-// the call was rejected before any child frame was created. A nonzero `code` is
-// a complete no-op.
+// (kSyscallErrorCodeInvalidSyscallInput / kSyscallErrorCodeReentrance) only
+// when the call was rejected before any child frame was created. A nonzero
+// `code` is a complete no-op.
 //
 // `frame_status` carries how the child frame ended (Return / Abort / Fault) and
 // is only meaningful when `code == kSyscallErrorCodeNone`.
