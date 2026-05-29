@@ -47,8 +47,14 @@ unsafe fn sha256_return_hash() -> ! {
     let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
     let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
 
-    syscall(SYSCALL_SHA256, input_ptr,
-            RV32_COMPILED_SHA256_RETURN_INPUT.len(), output_ptr, 0, 0);
+    syscall(
+        SYSCALL_SHA256,
+        input_ptr,
+        RV32_COMPILED_SHA256_RETURN_INPUT.len(),
+        output_ptr,
+        0,
+        0,
+    );
     syscall(SYSCALL_RETURN, output_ptr, HASH_BYTES, 0, 0, 0);
 
     loop {
@@ -61,8 +67,14 @@ unsafe fn sha256_return_empty() -> ! {
     let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
     let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
 
-    syscall(SYSCALL_SHA256, input_ptr,
-            RV32_COMPILED_SHA256_RETURN_INPUT.len(), output_ptr, 0, 0);
+    syscall(
+        SYSCALL_SHA256,
+        input_ptr,
+        RV32_COMPILED_SHA256_RETURN_INPUT.len(),
+        output_ptr,
+        0,
+        0,
+    );
     syscall(SYSCALL_RETURN, 0, 0, 0, 0, 0);
 
     loop {
@@ -75,8 +87,14 @@ unsafe fn sha256_return_empty() -> ! {
 // delivered in a0; output buffers are written through the guest pointers passed
 // in registers, so there is no result frame to read back.
 #[inline(always)]
-unsafe fn syscall(num: usize, a1: usize, a2: usize, a3: usize, a4: usize,
-                  a5: usize) -> usize {
+unsafe fn syscall(
+    num: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+) -> usize {
     let result: usize;
     asm!(
         "ecall",

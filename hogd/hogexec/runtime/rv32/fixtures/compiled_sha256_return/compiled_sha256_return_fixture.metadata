@@ -32,6 +32,6 @@
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: x86_64-unknown-linux-gnu;release: 1.95.0;LLVM version: 22.1.2;",
   "sha256_pc": 0,
   "sha256_repeated_pc": 72,
-  "source_sha256": "85ff2f64bab33d1c309a4b6c47a5a01bdadd0689685bb260878404ada961b4c2",
+  "source_sha256": "262bc123cbe673f0b2580d36eaa8a5f28bc2ba46ccb88c19971df41cfc10c11a",
   "target_triple": "riscv32im-unknown-none-elf"
 }
