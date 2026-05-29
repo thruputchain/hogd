@@ -8,7 +8,9 @@
 #include <span>
 #include <vector>
 
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
@@ -21,6 +23,9 @@ inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
+// Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
+// into the header at kArtifactGasVersionOffset and validated at load.
+inline constexpr uint32_t kGasTableVersion = 1;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -45,6 +50,66 @@ inline constexpr size_t kArtifactDispatchDigestOffset =
 
 static_assert(kArtifactDispatchDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
+
+// FNV-1a digest over the full RV32 gas schedule: the instruction-cost table
+// (from program.h) folded with the host-syscall cost schedule (from
+// gas_cost_table.h). It is stamped into the artifact at
+// kArtifactGasDigestOffset and re-derived here at load time, so an artifact
+// built against a different schedule is rejected. This is an artifact/consensus
+// concern, not an ISA-execution one, so it lives here rather than in the
+// portable program.h core (which only needs the instruction costs themselves).
+constexpr uint64_t
+gas_schedule_digest_byte(uint64_t digest, uint8_t value)
+{
+  return fnv_digest_byte(digest, value);
+}
+
+constexpr uint64_t
+gas_schedule_digest_u64(uint64_t digest, uint64_t value)
+{
+  return fnv_digest_u64(digest, value);
+}
+
+constexpr uint64_t
+gas_schedule_digest_name(uint64_t digest, const char *name)
+{
+  for (const char *cursor = name; *cursor != '\0'; ++cursor) {
+    digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(*cursor));
+  }
+  return gas_schedule_digest_byte(digest, 0);
+}
+
+constexpr uint64_t
+gas_schedule_digest()
+{
+  uint64_t digest = kFnvOffsetBasis;
+  digest = gas_schedule_digest_u64(digest, kGasTableVersion);
+  digest = gas_schedule_digest_name(digest, "rv32-instructions");
+  digest = gas_schedule_digest_u64(digest, kOpCount);
+  for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
+    const auto &entry = kInstructionGasSchedule[i];
+    digest = gas_schedule_digest_u64(digest, i);
+    digest = gas_schedule_digest_u64(digest, static_cast<size_t>(entry.op));
+    digest = gas_schedule_digest_u64(digest, entry.cost);
+    digest = gas_schedule_digest_name(digest, entry.name);
+  }
+  digest = gas_schedule_digest_name(digest, "host-syscalls");
+  digest =
+      gas_schedule_digest_u64(digest, hogd::kSyscallGasCostSchedule.size());
+  for (size_t i = 0; i < hogd::kSyscallGasCostSchedule.size(); ++i) {
+    const auto &entry = hogd::kSyscallGasCostSchedule[i];
+    digest = gas_schedule_digest_u64(digest, i);
+    digest = gas_schedule_digest_u64(digest, entry.cost);
+    digest = gas_schedule_digest_name(digest, entry.name);
+  }
+  return digest;
+}
+
+inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
+
+// Relocating this computation from program.h must not change its value (it is
+// validated against every artifact). Pin it.
+static_assert(kGasScheduleDigest == 0xec026096ed9849f7ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 

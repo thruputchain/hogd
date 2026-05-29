@@ -7,16 +7,12 @@
 #include <span>
 #include <vector>
 
-#include "hogd/hogexec/runtime/gas_cost_table.h"
-#include "hogd/hogexec/runtime/rv32/encoding.h"
-
 namespace hogd::rv32 {
 
 constexpr uint32_t kInstructionBytes = 4;
 constexpr uint32_t kRegisterCount = 32;
 constexpr uint32_t kMaxMemoryBytes = 64 * 1024;
 constexpr uint32_t kMaxCodeBytes = 64 * 1024;
-constexpr uint32_t kGasTableVersion = 1;
 constexpr uint64_t kBaseInstructionGas = 1;
 constexpr uint64_t kMulInstructionGas = 3;
 constexpr uint64_t kDivInstructionGas = 8;
@@ -179,55 +175,6 @@ make_instruction_gas_costs()
 
 constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
     make_instruction_gas_costs();
-
-constexpr uint64_t
-gas_schedule_digest_byte(uint64_t digest, uint8_t value)
-{
-  return fnv_digest_byte(digest, value);
-}
-
-constexpr uint64_t
-gas_schedule_digest_u64(uint64_t digest, uint64_t value)
-{
-  return fnv_digest_u64(digest, value);
-}
-
-constexpr uint64_t
-gas_schedule_digest_name(uint64_t digest, const char *name)
-{
-  for (const char *cursor = name; *cursor != '\0'; ++cursor) {
-    digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(*cursor));
-  }
-  return gas_schedule_digest_byte(digest, 0);
-}
-
-constexpr uint64_t
-gas_schedule_digest()
-{
-  uint64_t digest = kFnvOffsetBasis;
-  digest = gas_schedule_digest_u64(digest, kGasTableVersion);
-  digest = gas_schedule_digest_name(digest, "rv32-instructions");
-  digest = gas_schedule_digest_u64(digest, kOpCount);
-  for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
-    const auto &entry = kInstructionGasSchedule[i];
-    digest = gas_schedule_digest_u64(digest, i);
-    digest = gas_schedule_digest_u64(digest, static_cast<size_t>(entry.op));
-    digest = gas_schedule_digest_u64(digest, entry.cost);
-    digest = gas_schedule_digest_name(digest, entry.name);
-  }
-  digest = gas_schedule_digest_name(digest, "host-syscalls");
-  digest =
-      gas_schedule_digest_u64(digest, hogd::kSyscallGasCostSchedule.size());
-  for (size_t i = 0; i < hogd::kSyscallGasCostSchedule.size(); ++i) {
-    const auto &entry = hogd::kSyscallGasCostSchedule[i];
-    digest = gas_schedule_digest_u64(digest, i);
-    digest = gas_schedule_digest_u64(digest, entry.cost);
-    digest = gas_schedule_digest_name(digest, entry.name);
-  }
-  return digest;
-}
-
-constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 constexpr uint64_t
 gas_cost_for_op(Op op)

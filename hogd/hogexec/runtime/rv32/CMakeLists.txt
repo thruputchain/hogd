@@ -1,11 +1,30 @@
 find_package(OpenSSL REQUIRED)
 
+# Portable RV32IM ISA core: instruction decode + execute, the register/memory
+# model, and the Host boundary. This target intentionally has NO hogd link
+# dependencies (no OpenSSL, no artifact/consensus layer, no runtime symbols) so
+# it can be driven standalone by an external differential oracle (Sail/Spike).
+# Keep it that way: anything needing OpenSSL, the artifact format, or hogd
+# runtime symbols belongs in rv32_vm below, not here. rv32_isa_core_test
+# mechanically enforces the boundary by linking only this target.
+add_library(
+  rv32_isa_core
+  machine.cc
+  program.cc
+)
+
+target_include_directories(
+  rv32_isa_core
+  PUBLIC
+  ${CMAKE_SOURCE_DIR}
+)
+
+# Artifact container, consensus digest/validation, and method dispatch layered
+# on top of the portable core.
 add_library(
   rv32_vm
   artifact.cc
   dispatch.cc
-  machine.cc
-  program.cc
 )
 
 target_include_directories(
@@ -16,6 +35,8 @@ target_include_directories(
 
 target_link_libraries(
   rv32_vm
+  PUBLIC
+  rv32_isa_core
   PRIVATE
   OpenSSL::Crypto
 )
@@ -50,6 +71,23 @@ add_dependencies(
   rv32_syscall_bridge
   rv32_syscall_xdr_hh
 )
+
+# Links ONLY the portable core (no rv32_vm, no OpenSSL, no hogd runtime). Doubles
+# as a smoke test for standalone decode/execute and as the mechanical guardrail
+# for the core's hogd-free boundary: if the ISA core starts referencing a hogd
+# symbol, this executable fails to link.
+add_executable(
+  rv32_isa_core_test
+  rv32_isa_core_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_isa_core_test
+  rv32_isa_core
+  GTest::gtest
+)
+gtest_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
 
 add_executable(
   rv32_vm_test
