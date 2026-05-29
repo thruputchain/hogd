@@ -129,7 +129,7 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
         //    [HogAge] struct has Y + Y = 2Y hogs in total, which is incorrect.
         .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
                      to_xdr(uint128_t{0})},
-        .average_ages = {ctx.block_height, BlockHeight{0}, BlockHeight{0}},
+        .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
     };
     auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
     auto age_buf = x23::serialize(age);

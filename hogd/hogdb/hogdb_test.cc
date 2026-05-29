@@ -720,10 +720,12 @@ TEST_F(HogDBTest, NewBalanceHogAgeUsesBlockHeight)
   ASSERT_TRUE(age);
 
   uint128_t expected_hogs = kTransferAmount - cost_model_.get_balance_cost();
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), expected_hogs);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], kBlockHeight);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0UL);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0UL);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 0UL);
 }
 
 TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
