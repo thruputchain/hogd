@@ -230,7 +230,17 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  [[nodiscard]] std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
+  //
+  // The result layers the two failure channels:
+  //  - outer SystemError: a block-ending error (Unrecoverable / Abandon /
+  //    ValidationFailure).
+  //  - inner SyscallError: the invoke was rejected before any child frame ran
+  //    (kSyscallErrorCodeInvalidSyscallInput / kSyscallErrorCodeReentrance).
+  //    This is a complete no-op.
+  //  - value (InvocationFrameStatusCode): a child frame ran; the value is how
+  //    it ended (Return / Abort / Fault).
+  [[nodiscard]]
+  std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);
@@ -418,8 +428,8 @@ private:
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
-  static InvokeStatus<void>
-  handle_root_host_fn_status(SystemStatus<SyscallErrorCode> status);
+  static InvokeStatus<void> handle_root_host_fn_status(
+      SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

@@ -8,12 +8,12 @@ extern "C" {
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
@@ -131,10 +131,19 @@ LogletAllocator::create(size_t len, size_t reserved_count,
                         std::function<void()> low_mem_observer)
 {
   len = align_up(len, kLogletRegionSize);
-  void *addr = map_segment(len);
-  auto log = std::make_unique<LogletAllocator>(addr, len, reserved_count,
+  void *raw = map_segment(len);
+  // Start the lifetime of a std::byte[len] array over the raw mmap region.
+  // This anchors every later start_+offset / base_addr_+offset operation as
+  // well-defined byte-pointer arithmetic within one C++ array object instead
+  // of implementation-defined pointer-integer manipulation over a raw POSIX
+  // mapping. (P0593R6's std::start_lifetime_as_array is the C++23 primitive
+  // for this but isn't shipped in our libstdc++/libc++ yet; placement array-
+  // new of a trivial implicit-lifetime type is the portable equivalent and
+  // emits no array cookie.)
+  auto *base = new (raw) std::byte[len];
+  auto log = std::make_unique<LogletAllocator>(base, len, reserved_count,
                                                std::move(low_mem_observer));
-  auto *pos = reinterpret_cast<char *>(addr);
+  std::byte *pos = base;
   for (Loglet &l : log->loglets_) {
     l.attach(pos, kLogletRegionSize);
     pos += kLogletRegionSize;
@@ -252,25 +261,28 @@ LogletAllocator::print_stats()
 void
 LogletAllocator::reclaim_idle_memory()
 {
-  std::vector<Loglet *> tmp;
+  // Hold lock_ across the per-loglet madvise too. Dropping it mid-sweep (as we
+  // used to) let alloc() hand out a sampled loglet and a writer publish a live
+  // item into it before the now-stale MADV_FREE ran, discarding live data
+  // (#2023). It's a cheap, low-frequency background pass.
+  std::lock_guard guard(lock_);
 
-  // determine idle loglets.
-  {
-    std::lock_guard guard(lock_);
-    for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
-      tmp.push_back(free_loglets_[i]);
-    }
-    assert(min_free_loglets_ <= free_loglets_.size());
-    not_needed_loglets_ = min_free_loglets_;
-    min_free_loglets_ = free_loglets_.size();
-  }
+  // not_needed_loglets_ may exceed the free-list size after alloc() drained it
+  // below the watermark; the i < min_free_loglets_ guard makes that a no-op.
+  assert(min_free_loglets_ <= free_loglets_.size());
 
-  // give idle loglets back to the OS.
-  if (!tmp.empty())
-    debug("giving back {} loglets to the OS", tmp.size());
-  for (Loglet *ll : tmp) {
+  if (min_free_loglets_ > not_needed_loglets_)
+    debug("giving back {} loglets to the OS",
+          min_free_loglets_ - not_needed_loglets_);
+
+  for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
+    Loglet *ll = free_loglets_[i];
+    CHECK(ll->get_usage_mode() == LogletMode::kFree);
     ll->dont_need();
   }
+
+  not_needed_loglets_ = min_free_loglets_;
+  min_free_loglets_ = free_loglets_.size();
 }
 
 } // namespace hogd

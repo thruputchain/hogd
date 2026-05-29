@@ -199,9 +199,12 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
     if (src->live_size() == bytes_moved)
       break;
 
-    // optimization: skip dead items that can be detected without locking.
-    auto storage = std::atomic_ref<ItemStorage>(src_item->storage);
-    if (storage.load(std::memory_order_acquire) == ItemStorage::kTombstone)
+    // optimization: skip dead items that can be detected without locking. The
+    // atomic_ref must not outlive this check — Loglet::clone(src_item) below
+    // performs a plain copy of src_item->storage, and [atomics.ref.generic]/3
+    // forbids ordinary access to an object while an atomic_ref to it exists.
+    if (std::atomic_ref<ItemStorage>(src_item->storage)
+            .load(std::memory_order_acquire) == ItemStorage::kTombstone)
       continue;
 
     // try to move the item to the new loglet.

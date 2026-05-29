@@ -108,12 +108,15 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     }
   }
 
-  if (*res != SyscallErrorCode::kSyscallErrorCodeNone &&
-      *res != SyscallErrorCode::kSyscallErrorCodeFrameReverted &&
-      *res != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-    info("view transaction failed with SystemErrorCode::{}", *res);
+  // A SyscallError means the invoke was rejected before a child frame ran; a
+  // frame that ran carries its outcome (Return / Abort / Fault) via the frame
+  // output below.
+  SyscallStatus<InvocationFrameStatusCode> const &frame = *res;
+  if (!frame.has_value()) {
+    info("view transaction failed with SyscallErrorCode::{}",
+         frame.error().code());
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-    result.error_code() = *res;
+    result.error_code() = frame.error().code();
     return result;
   }
 

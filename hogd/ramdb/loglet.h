@@ -133,7 +133,11 @@ class Loglet {
 public:
   friend LogletAllocator;
 
-  // Iterator walks through each ItemHeader in the loglet.
+  // Iterator walks through each ItemHeader in the loglet. The cursor is a
+  // byte pointer so end() can name a past-the-end position without forming an
+  // ItemHeader* at a slot where no ItemHeader object exists. operator* and
+  // operator-> only ever land on positions where alloc()/clone() has already
+  // placement-constructed a real ItemHeader.
   class Iterator {
   public:
     using difference_type = ptrdiff_t;
@@ -142,10 +146,13 @@ public:
     using reference = ItemHeader &;
 
     Iterator() = default;
-    Iterator(pointer ptr) : pos_(ptr) {}
+    Iterator(std::byte *pos) : pos_(pos) {}
 
-    reference operator*() const { return *pos_; }
-    pointer operator->() const { return pos_; }
+    reference operator*() const
+    {
+      return *reinterpret_cast<ItemHeader *>(pos_);
+    }
+    pointer operator->() const { return reinterpret_cast<ItemHeader *>(pos_); }
 
     Iterator &operator++()
     {
@@ -165,13 +172,12 @@ public:
     }
 
   private:
-    ItemHeader *pos_;
+    std::byte *pos_;
 
-    ItemHeader *next_item() const
+    std::byte *next_item() const
     {
-      auto *addr = reinterpret_cast<char *>(pos_);
-      addr += align_up(sizeof(*pos_) + pos_->kv_bytes(), alignof(ItemHeader));
-      return reinterpret_cast<ItemHeader *>(addr);
+      auto *h = reinterpret_cast<ItemHeader *>(pos_);
+      return pos_ + align_up(sizeof(*h) + h->kv_bytes(), alignof(ItemHeader));
     }
   };
   static_assert(std::forward_iterator<Iterator>);
@@ -186,20 +192,11 @@ public:
   Loglet &operator=(const Loglet &ll) = delete;
 
   // iterator support.
-  Iterator begin() const
-  {
-    return Iterator(reinterpret_cast<ItemHeader *>(start_));
-  }
-  Iterator end() const
-  {
-    return Iterator(reinterpret_cast<ItemHeader *>(start_ + pos_));
-  }
+  Iterator begin() const { return Iterator(start_); }
+  Iterator end() const { return Iterator(start_ + pos_); }
 
   // get_bytes returns a span of all bytes stored in the loglet.
-  std::span<const std::byte> get_bytes() const
-  {
-    return writable_byte_view(start_, pos_);
-  }
+  std::span<const std::byte> get_bytes() const { return {start_, pos_}; }
 
   // is_attached returns true if the loglet is ready for use. It is undefined
   // behavor to use the loglet (e.g., allocate, reallocate, or deallocate)
@@ -207,10 +204,11 @@ public:
   bool is_attached() const { return start_ != nullptr; }
 
   // attach sets the loget's segment location. It must be called before using
-  // the loglet.
-  void attach(void *start, size_t len)
+  // the loglet. start must point into a region whose std::byte[] lifetime has
+  // already been started (see LogletAllocator::create).
+  void attach(std::byte *start, size_t len)
   {
-    start_ = reinterpret_cast<char *>(start);
+    start_ = start;
     len_ = len;
   }
 
@@ -278,8 +276,10 @@ public:
   }
 
 private:
-  // the start of the loglet's memory segment
-  char *start_{nullptr};
+  // the start of the loglet's memory segment. Points into a std::byte[] array
+  // whose lifetime was started by LogletAllocator::create, so pointer
+  // arithmetic across start_..start_+len_ is well-defined byte-pointer math.
+  std::byte *start_{nullptr};
   // the length of the loglet's memory segment
   size_t len_{0};
   // the number of bytes that are unused (fragmented) below pos_
@@ -293,7 +293,7 @@ private:
   // segment.
   bool item_is_within(ItemHeader *item) const
   {
-    auto *pos = reinterpret_cast<char *>(item);
+    auto *pos = reinterpret_cast<std::byte *>(item);
     return pos >= start_ &&
            pos + sizeof(*item) + item->kv_bytes() <= start_ + len_;
   }
@@ -313,8 +313,10 @@ Loglet::free(ItemHeader *item)
   //
   // This only is safe if the loglet is not yet given to the compactor.
   if constexpr (Rewind) {
-    size_t pos =
-        reinterpret_cast<uintptr_t>(item) - reinterpret_cast<uintptr_t>(start_);
+    // Byte-pointer subtraction within start_'s std::byte[] array — well-defined
+    // and replaces the prior implementation-defined uintptr_t arithmetic.
+    auto pos =
+        static_cast<size_t>(reinterpret_cast<std::byte *>(item) - start_);
     if (pos + align_up(item->total_bytes(), alignof(ItemHeader)) == pos_) {
       pos_ = pos;
       return;
@@ -336,7 +338,7 @@ public:
   create(size_t len, size_t reserved_count,
          std::function<void()> low_mem_observer);
 
-  LogletAllocator(void *base, size_t len, size_t reserved_count,
+  LogletAllocator(std::byte *base, size_t len, size_t reserved_count,
                   std::function<void()> low_mem_observer)
     : base_addr_(base), len_(len), reserved_count_(reserved_count),
       loglets_(len / kLogletRegionSize),
@@ -372,9 +374,10 @@ public:
   Loglet &get_loglet(ItemHeader *item)
   {
     assert(item_is_within(item));
-    off_t offset = reinterpret_cast<uintptr_t>(item) -
-                   reinterpret_cast<uintptr_t>(base_addr_);
-    return loglets_[offset / kLogletRegionSize];
+    // Byte-pointer subtraction within base_addr_'s std::byte[] array.
+    auto *byte_ptr = reinterpret_cast<std::byte *>(item);
+    ptrdiff_t offset = byte_ptr - base_addr_;
+    return loglets_[static_cast<size_t>(offset) / kLogletRegionSize];
   }
 
   // size returns the size in bytes of all loglets together.
@@ -387,8 +390,11 @@ public:
   size_t loglet_count() const noexcept { return loglets_.size(); }
 
 private:
-  // the start of the region where loglets can be mapped.
-  void *const base_addr_;
+  // the start of the region where loglets can be mapped. Points into a
+  // std::byte[] array whose lifetime is started by LogletAllocator::create,
+  // so all start_+offset / base_addr_+offset arithmetic across the mapped
+  // region is well-defined byte-pointer math.
+  std::byte *const base_addr_;
   // the length of the region where loglets can be mapped.
   const size_t len_;
   // the number of loglets that must be reserved so compaction always succeeds.
@@ -419,10 +425,9 @@ private:
   // region.
   bool item_is_within(ItemHeader *item) const
   {
-    auto start = reinterpret_cast<uintptr_t>(base_addr_);
-    uintptr_t end = start + len_;
-    auto pos = reinterpret_cast<uintptr_t>(item);
-    return pos >= start && pos + sizeof(*item) + item->kv_bytes() <= end;
+    auto *pos = reinterpret_cast<std::byte *>(item);
+    return pos >= base_addr_ &&
+           pos + sizeof(*item) + item->kv_bytes() <= base_addr_ + len_;
   }
 
   // mem_is_low returns true if memory is low (and should be reclaimed).
