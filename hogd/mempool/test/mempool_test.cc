@@ -457,7 +457,7 @@ TEST(Mempool, NominateCommit)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-TEST(Mempool, NominateCommitDeployAndTransferContract)
+TEST(Mempool, NewlyDeployedContractHogCount)
 {
   constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
   constexpr uint128_t kTransferAmount = 100'000'000;
@@ -530,8 +530,7 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
   EXPECT_GT(*deployed_balance, 0);
 
   server.mempool_coord_rpc().wait_for_transfer_data(
-      /*expected_height=*/res_nominate.nominated_block()
-          .nomination.block_height)();
+      res_nominate.nominated_block().nomination.block_height)();
   auto [deployed_hog_age, deployed_hog_age_lock] =
       server.mempool_coord_rpc().scheduler()->get_cached_hog_age(
           deployed_address);
@@ -546,6 +545,8 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
   EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
   EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
             kTransferAmount);
+  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+            server.read_address_balance(deployed_address));
 }
 
 TEST(Mempool, CommitBlockNotFound)
