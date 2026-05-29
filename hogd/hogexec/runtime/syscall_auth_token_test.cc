@@ -875,14 +875,16 @@ TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res =
             ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
                                             std::span<const std::byte>{},
                                             std::span<uint32_t const>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Fault);
         return {};
       });
   auto caller_contract =
@@ -1057,14 +1059,16 @@ TEST_F(SyscallAuthTokenTest, ReturnUnownedAuthTokensCausesExit)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res =
             ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
                                             std::span<const std::byte>{},
                                             std::span<uint32_t const>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Fault);
         return {};
       });
   auto caller_contract =
@@ -1164,14 +1168,16 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res =
             ctx.syscall<SyscallNo::kInvoke>(kMinterAddress,
                                             std::span<const std::byte>{},
                                             std::span<uint32_t const>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeFrameReverted);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Abort);
 
         // Read the token ID the minter wrote into its return buffer.
         std::array<std::byte, 256> return_buf{};
@@ -2250,13 +2256,14 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
             .flags = std::to_underlying(InvokeFlag::TryInvoke) |
                      std::to_underlying(InvokeFlag::ReadOnly),
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
             kChildAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{forwarded}, inputs,
-            CopyableInvokeOutputs{});
+            std::span<uint32_t const>{forwarded}, inputs, invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Fault);
 
         // Token was restored after the fault — caller still owns it.
         CopyableInvokeInputs inputs2{
@@ -2363,13 +2370,14 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::ReadOnly),
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
             kChildAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{forwarded}, inputs,
-            CopyableInvokeOutputs{});
+            std::span<uint32_t const>{forwarded}, inputs, invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeFrameReverted);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Abort);
 
         // Token was restored after the manual revert — caller still owns it.
         CopyableInvokeInputs inputs2{
@@ -2480,12 +2488,14 @@ TEST_F(SyscallAuthTokenTest, ReturnRevertWithMintedAuthTokenCausesExit)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
             kChildAddress, calldata, std::span<uint32_t const>{forwarded},
-            inputs, CopyableInvokeOutputs{});
+            inputs, invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Fault);
         return {};
       });
   auto caller_contract =
@@ -2574,14 +2584,16 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs invoke_outputs{};
         auto invoke_res =
             ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
                                             std::span<const std::byte>{},
                                             std::span<uint32_t const>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            invoke_outputs);
         EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(),
-                  SyscallErrorCode::kSyscallErrorCodeFrameReverted);
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(invoke_outputs.frame_status,
+                  InvocationFrameStatusCode::Abort);
 
         EXPECT_NE(child_minted_token_id, UINT32_MAX);
 

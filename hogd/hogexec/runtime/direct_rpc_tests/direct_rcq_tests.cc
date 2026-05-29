@@ -4945,5 +4945,104 @@ TEST_F(DirectRCQTests,
   EXPECT_EQ(from_xdr(bal->nnint()), exact_cost);
 }
 
+// Conservative per-block insertion limit: same-block consumes are not
+// credited back.  See https://github.com/groundhogchain/hogd/issues/1931.
+//
+// RetrocausalQueueLock::reserved_entry_count_ bounds the size of the single
+// RCQ block generated this block.  It tracks inserts but never subtracts
+// entries consumed within the same block, so it is a *sound but not tight*
+// upper bound on the generated block's occupancy: reserved >= true_block_size,
+// where the gap is exactly the entries that stage_committed_changes() filters
+// out as consumed.
+//
+// Consequence: a key churning insert+consume traffic can hit the cap below its
+// true capacity.  Below, tx1 fills the reservation with kMaxLen inserts, tx2
+// consumes every one of those current-block entries (so the generated block
+// would be empty), yet a later one-entry insert is still rejected because the
+// reservation is never released.
+//
+// This is tolerated, not a bug fixed here.  A conservative bound can only
+// over-reject -- a spurious kConflict, which is soft-rejected at proposal time
+// and retried in the next block -- never under-reject.  It therefore can never
+// admit an oversized block or cause a proposed block to fail validation:
+// validation replays only the included txs, whose reservation is <= kMaxLen by
+// construction.  This is a deterministic accounting choice, NOT a concurrency
+// anomaly -- it reproduces single-threaded, in canonical order.  The rejection
+// is also per-block: a fresh block admits the same insert.
+TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_consume_reservation");
+
+  constexpr size_t kMaxLen = kRetrocausalQueueBlockEntriesMaxLen;
+
+  // kMaxLen distinct entries to fill a block, plus one extra survivor entry.
+  std::vector<QueueEntry> full_block;
+  x23::Vec<QueueEntry, 0xffffffff> consume_all;
+  full_block.reserve(kMaxLen);
+  for (size_t i = 0; i < kMaxLen; ++i) {
+    auto entry = make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
+                                 static_cast<uint8_t>((i >> 8) & 0xFF)});
+    full_block.push_back(entry);
+    consume_all.push_back(entry);
+  }
+  auto extra_entry =
+      make_rcq_entry({static_cast<uint8_t>(kMaxLen & 0xFF),
+                      static_cast<uint8_t>((kMaxLen >> 8) & 0xFF)});
+
+  // tx1: insert exactly kMaxLen entries.  reservation -> kMaxLen.
+  {
+    auto tx1 = make_new_per_tx_db_proxy();
+    tx1.add_delta(key, make_rcq_insert_delta(full_block),
+                  std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx1.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value()) << "tx1 must fill the block";
+    ASSERT_TRUE(tx1.commit_transaction().has_value());
+  }
+
+  // tx2: consume all kMaxLen of tx1's current-block entries.  The generated
+  // block would now be empty, but the reservation is NOT released.
+  {
+    auto tx2 = make_new_per_tx_db_proxy();
+    tx2.add_delta(key, make_rcq_consume_delta(0, 0, consume_all),
+                  std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx2.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value())
+        << "tx2 must consume every current-block entry";
+    ASSERT_TRUE(tx2.commit_transaction().has_value());
+  }
+
+  // tx3: insert one distinct entry.  True occupancy of the generated block
+  // would be 1 (<= kMaxLen), but the stale reservation (kMaxLen) makes
+  // kMaxLen + 1 > kMaxLen, so the insert is rejected with kConflict.  This is
+  // the documented, tolerated conservative behavior (issue #1931).
+  {
+    auto tx3 = make_new_per_tx_db_proxy();
+    tx3.add_delta(key, make_rcq_insert_delta({extra_entry}),
+                  std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx3.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && !r.value())
+        << "known conservative limit: consumed current-block entries are not "
+           "credited against the per-block insertion cap (issue #1931)";
+    ASSERT_TRUE(tx3.commit_transaction().has_value());
+  }
+
+  // The rejection is purely a per-block accounting artifact.  The prior block
+  // staged empty (every entry was consumed), so advancing to a fresh block
+  // admits the same insert that tx3 was denied.
+  advance_block();
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key, make_rcq_insert_delta({extra_entry}),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value())
+        << "the limit resets per block; a fresh block admits the insert";
+    ASSERT_TRUE(tx.commit_transaction().has_value());
+  }
+  advance_block();
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd

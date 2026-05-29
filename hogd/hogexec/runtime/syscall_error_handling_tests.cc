@@ -380,8 +380,8 @@ static_assert(!std::is_convertible_v<uint64_t, WrappedGasAmount>);
 static_assert(!std::is_convertible_v<GasAmount, WrappedGasAmount>);
 
 // Regression test for the bug in syscall_Return_inner where
-// the gas amount field was accidentally set to a cast of
-// SyscallErrorCode::kSyscallErrorCodeDeterministicWasm instead of 0.
+// the gas amount field was accidentally set to a cast of a (negative)
+// SyscallErrorCode instead of 0.
 TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
 {
   auto context = make_hogexec_context();
