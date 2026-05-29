@@ -278,7 +278,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   output_outputs.returned_auth_token_len =
       syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
-  output_outputs.frame_status = frame.value();
+  // operator* (not value()) so this stays noexcept: has_value() is checked
+  // above, so the dereference is safe.
+  output_outputs.frame_status = *frame;
   return {SyscallErrorCode::kSyscallErrorCodeNone,
           WrappedGasAmount{gas_amount}};
 }
