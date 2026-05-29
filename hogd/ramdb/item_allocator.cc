@@ -132,7 +132,10 @@ ItemAllocator::compact(float utilization_thresh)
     // to LogletAllocator::loglet_count() — the maximum possible occupancy.
     for (std::future<CompactionStats> &f : completions) {
       try {
-        f.get();
+        // We call get() only to drain the worker and let its std::move(*l)
+        // settle before we inspect in_flight; the [[nodiscard]] stats are
+        // intentionally unused here.
+        [[maybe_unused]] auto stats = f.get();
       } catch (...) { // NOLINT(bugprone-empty-catch)
         // Drain only — a worker exception here is suppressed because we are
         // already unwinding compact() on bad_alloc and have no useful path
