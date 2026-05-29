@@ -1034,8 +1034,8 @@ test_ffi_invoke(const ContractAddress &input_address,
       input_calldata.size(),
       reinterpret_cast<uint64_t>(input_owned_auth_token_ids.data()),
       input_owned_auth_token_ids.size_bytes(),
-      reinterpret_cast<uint64_t>(&inputs), reinterpret_cast<uint64_t>(&outputs),
-      0, 0, 0);
+      reinterpret_cast<uint64_t>(&inputs),
+      reinterpret_cast<uint64_t>(&outputs));
 
   output_return_buffer_len = outputs.return_buffer_len;
   output_returned_auth_token_len = outputs.returned_auth_token_len;
@@ -1061,7 +1061,7 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
       static_cast<uint64_t>(input_expiry_height),
       reinterpret_cast<uint64_t>(input_serialized_auth_token.data()),
       input_serialized_auth_token.size_bytes(),
-      reinterpret_cast<uint64_t>(&output_token_id), 0, 0, 0, 0, 0, 0);
+      reinterpret_cast<uint64_t>(&output_token_id), 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1091,7 +1091,7 @@ test_ffi_consume_auth_token(uint32_t input_token_id,
       reinterpret_cast<uint64_t>(&output_token_minter),
       reinterpret_cast<uint64_t>(&output_auth_payload_written_len),
       reinterpret_cast<uint64_t>(&output_unwrapped_token_id_start),
-      reinterpret_cast<uint64_t>(&output_unwrapped_token_id_count), 0, 0, 0);
+      reinterpret_cast<uint64_t>(&output_unwrapped_token_id_count));
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1105,7 +1105,7 @@ test_ffi_get_msg_sender(ContractAddress &output_sender)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetMsgSender),
                               reinterpret_cast<uint64_t>(output_sender.data()),
-                              0, 0, 0, 0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1119,7 +1119,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetCurrentAddress),
                               reinterpret_cast<uint64_t>(output_address.data()),
-                              0, 0, 0, 0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -2684,7 +2684,7 @@ trace_contract_fibonacci(void * /*unused*/, uint64_t /*method_number*/)
                               reinterpret_cast<uint64_t>(sha_input),
                               sizeof(sha_input),
                               reinterpret_cast<uint64_t>(sha_output.data()),
-                              sizeof(sha_output), 0, 0, 0, 0, 0, 0);
+                              sizeof(sha_output), 0, 0, 0);
 
   // If SHA256 ran out of gas, panic propagates:
   // trace shows panic=1 (OutOfGas) here
@@ -2779,7 +2779,7 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
                             reinterpret_cast<uint64_t>(return_auth_token_buf),
                             sizeof(return_auth_token_buf),
                             reinterpret_cast<uint64_t>(&return_auth_token_len),
-                            0, 0, 0, 0);
+                            0);
   }
 
   // Step 3: kInvoke to contract 1, second call (trace lines 56-70)

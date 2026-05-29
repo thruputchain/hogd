@@ -1151,18 +1151,15 @@ abort_transaction(void *syscall_handler)
 struct ForeignHostFnResult
 mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg3, uint64_t arg4, uint64_t arg5,
-                        uint64_t arg6, uint64_t arg7, uint64_t arg8,
-                        uint64_t arg9, uint64_t arg10)
+                        uint64_t arg6, uint64_t arg7)
 {
   hogd::do_ffi_trace(
       "FFI (start): mock_syscall_entrypoint(syscall={}, arg1={}, arg2={}, "
-      "arg3={}, arg4={}, arg5={}, arg6={}, arg7={}, arg8={}, arg9={}, "
-      "arg10={})",
-      syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+      "arg3={}, arg4={}, arg5={}, arg6={}, arg7={})",
+      syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
   hogd::lazy_init();
-  auto result =
-      hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5, arg6,
-                                    arg7, arg8, arg9, arg10);
+  auto result = hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4,
+                                              arg5, arg6, arg7);
   hogd::do_ffi_trace("FFI (end): mock_syscall_entrypoint(syscall={}) -> {}",
                      syscall, result);
   return result;
