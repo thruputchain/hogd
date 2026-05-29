@@ -683,7 +683,7 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
             *recipient_balance);
 }
 
-TEST_F(HogDBTest, NewBalanceHogAgeUsesBlockHeight)
+TEST_F(HogDBTest, NewBalanceHogAgeIsAllZeroes)
 {
   Address sender_addr = make_address(kAddress);
   Address recipient_addr = make_address(kAddress + 1);
@@ -719,11 +719,12 @@ TEST_F(HogDBTest, NewBalanceHogAgeUsesBlockHeight)
   auto age = db_.read_address_average_hog_age(recipient_addr);
   ASSERT_TRUE(age);
 
-  uint128_t expected_hogs = kTransferAmount - cost_model_.get_balance_cost();
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), expected_hogs);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], kBlockHeight);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0UL);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0UL);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 0UL);
 }
 
 TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)

@@ -92,7 +92,13 @@ public:
 
   ItemAllocator(LogletAllocator &allocator, WorkerPool &pool, ScalableMap *map)
     : allocator_(allocator), pool_(pool), map_(map)
-  {}
+  {
+    // Pre-reserve to the maximum possible occupancy (every loglet in the
+    // region queued at once is the upper bound). With this, give_to_compactor()
+    // and compact()'s defer-on-bad_alloc recovery can both emplace_back
+    // without ever growing the vector — so neither path can throw bad_alloc.
+    compactable_loglets_.reserve(allocator_.loglet_count());
+  }
   ~ItemAllocator() = default;
 
   // Disable move and copy.

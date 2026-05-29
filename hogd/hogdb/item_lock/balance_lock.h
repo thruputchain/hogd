@@ -81,6 +81,12 @@ public:
 
   int128_t build_result(LockContext const &ctx) const;
 
+  // The net change to the committed balance value — i.e. the value forwarded to
+  // the scheduler. Equals build_result (the value written to the DB) minus the
+  // snapshot value, so it accounts for the storage cost charged when a balance
+  // is created for the first time. The raw delta (get_delta) does not.
+  int128_t get_committed_delta(LockContext const &ctx) const;
+
   int128_t get_delta() const { return delta_bounds_.get_delta(); }
 
   // For testing only

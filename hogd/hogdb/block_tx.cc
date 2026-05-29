@@ -299,7 +299,7 @@ BlockTX::commit(WorkerPool &pool)
   PerThread<std::vector<Delta>> balance_deltas;
 
   addr_balance_locks_.for_each_parallel_destructive_among_workers(
-      [&balance_deltas](std::pair<const Address &, const ItemLock &> v) {
+      [&balance_deltas, this](std::pair<const Address &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
         }
@@ -307,7 +307,13 @@ BlockTX::commit(WorkerPool &pool)
         auto const *inner = v.second.get_inner<BalanceLock>();
         CHECK(inner != nullptr);
 
-        auto value = inner->get_delta();
+        // Forward the committed delta (which accounts for the storage cost
+        // charged when a balance is created for the first time), not the raw
+        // delta — otherwise the scheduler would observe a value larger than the
+        // balance actually committed to the DB by the balance creation cost.
+        auto value = inner->get_committed_delta(
+            LockContext(&db_, block_height_,
+                        make_address_balance_item_key(v.first), &cost_model_));
 
         if (value == 0) {
           return;

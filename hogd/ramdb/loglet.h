@@ -380,6 +380,12 @@ public:
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
 
+  // loglet_count returns the total number of loglets in the region. This is
+  // the maximum number of loglets that can ever be live across all pools
+  // (free, in-use, compactable). Used by ItemAllocator to pre-reserve its
+  // compactable_loglets_ vector so give_to_compactor() can never grow it.
+  size_t loglet_count() const noexcept { return loglets_.size(); }
+
 private:
   // the start of the region where loglets can be mapped.
   void *const base_addr_;

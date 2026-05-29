@@ -925,6 +925,95 @@ TEST_F(BalanceCostTrackingTest,
   EXPECT_EQ(committed_balance, 0);
 }
 
+// Regression test: the balance deltas forwarded to the scheduler on block
+// commit must account for the storage cost charged when a balance is created
+// for the first time. Previously the commit path (block_tx.cc) forwarded the
+// raw delta via BalanceLock::get_delta(), which omitted the balance creation
+// cost, so the scheduler's recorded delta for a fresh receiver was higher than
+// the value actually committed to the DB by balance_cost.
+TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
+{
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  constexpr static ContractAddress kSenderAddr = make_contract_address(220);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(221);
+
+  constexpr int128_t kInitialBalance = 1'000'000;
+  constexpr int128_t kTransferAmount = 500'000;
+  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+        ctx, kReceiverAddr,
+        make_amount(static_cast<uint128_t>(kTransferAmount)));
+
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 1;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto test_runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *test_runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  // The block in which the transfer was committed is the current block; capture
+  // it before advancing so we can query the deltas forwarded to the scheduler.
+  auto committed_height = static_cast<BlockHeight>(get_block_number());
+
+  advance_block();
+
+  auto hogs_transferred = get_hogs_transferred(committed_height);
+
+  // The receiver is a brand-new balance, so the delta forwarded to the
+  // scheduler must be discounted by the balance creation cost to match the
+  // value actually committed to the DB.
+  ASSERT_TRUE(hogs_transferred.contains(kReceiverAddr));
+  EXPECT_EQ(hogs_transferred.at(kReceiverAddr), kTransferAmount - balance_cost);
+
+  // The sender is a pre-existing balance, so its delta is unaffected by the
+  // balance creation cost.
+  ASSERT_TRUE(hogs_transferred.contains(kSenderAddr));
+  EXPECT_EQ(hogs_transferred.at(kSenderAddr), -kTransferAmount);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)

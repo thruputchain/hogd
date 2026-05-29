@@ -206,6 +206,7 @@ add_wasm_builds(
     cxs_roundtrip
     txs_roundtrip
     dev_wallet
+    deploy_and_transfer
     read_only_test
     manual_revert_test
     manual_revert_caller
@@ -269,6 +270,7 @@ add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
 add_contract_header(dev_wallet)
+add_contract_header(deploy_and_transfer)
 add_contract_header(read_only_test)
 add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)
