@@ -87,11 +87,15 @@ public:
     if (!return_buffer.has_value()) {
       return return_buffer.error().to_host_fn_error();
     }
-    assert(*return_buffer);
+    assert(return_buffer);
+    // A Fault frame_status leaves no return buffer available (the syscall
+    // succeeded but the child frame produced no buffer), so this must be
+    // handled, not asserted: surface it as the syscall error.
     if (!(*return_buffer).has_value()) {
       trace("No return buffer available: {}", return_buffer.value().error());
       return (*return_buffer).error();
     }
+    assert(*return_buffer);
     assert(**return_buffer);
     auto const *unwrapped_return_buffer = **return_buffer;
     assert(unwrapped_return_buffer);
