@@ -271,19 +271,15 @@ LogletAllocator::reclaim_idle_memory()
   // below the watermark; the i < min_free_loglets_ guard makes that a no-op.
   assert(min_free_loglets_ <= free_loglets_.size());
 
-  size_t reclaimed = 0;
+  if (min_free_loglets_ > not_needed_loglets_)
+    debug("giving back {} loglets to the OS",
+          min_free_loglets_ - not_needed_loglets_);
+
   for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
     Loglet *ll = free_loglets_[i];
-    // free_loglets_ only holds loglets reset to kFree, and lock_ pins free-list
-    // membership, so kFree here is a true "still idle" signal rather than an
-    // alloc-in-flight loglet.
-    if (ll->get_usage_mode() == LogletMode::kFree) {
-      ll->dont_need();
-      ++reclaimed;
-    }
+    CHECK(ll->get_usage_mode() == LogletMode::kFree);
+    ll->dont_need();
   }
-  if (reclaimed > 0)
-    debug("gave back {} loglets to the OS", reclaimed);
 
   not_needed_loglets_ = min_free_loglets_;
   min_free_loglets_ = free_loglets_.size();
