@@ -166,9 +166,9 @@ protected:
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
-        CopyableInvokeOutputs{});
+    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
+                                           std::span<uint32_t>{}, inputs,
+                                           CopyableInvokeOutputs{});
   }
 
   // Build a NativeContext with a single no-op contract (for structural
@@ -998,9 +998,10 @@ TEST_P(ProposeValidateRoundtripTest,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, make_index_calldata(i), std::span<uint32_t>{}, inputs,
-              CopyableInvokeOutputs{});
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB, make_index_calldata(i),
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1094,9 +1095,11 @@ TEST_P(ProposeValidateRoundtripTest,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           // Tolerant: propagate system errors but ignore user-level failures
           // (including the deterministic depth-cap failure on the last try).
           if (!r.has_value()) {
@@ -1147,9 +1150,11 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -1199,9 +1204,11 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           // Tolerant: propagate system errors, ignore deterministic child
           // failures (including the depth-cap rejection past the cap).
           if (!r.has_value()) {
@@ -1271,9 +1278,10 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
-            CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -1290,9 +1298,11 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrC, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kAddrC,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }

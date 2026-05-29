@@ -275,9 +275,10 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressLeaf, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressLeaf,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -297,9 +298,10 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressMiddle, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

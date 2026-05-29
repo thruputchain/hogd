@@ -189,12 +189,11 @@ make_native_initial_token_claim_contract()
             .gas_limit = static_cast<GasAmount>(UINT64_MAX),
             .flags = std::to_underlying(InvokeFlag::None),
         };
-                CopyableInvokeOutputs outputs{};
+        CopyableInvokeOutputs outputs{};
 
         auto invoke_result = ctx.syscall<SyscallNo::kInvoke>(
-            deployed_addr,
-            std::as_bytes(std::span(calldata)),
-            /*auth tokens*/std::span<uint32_t>{}, inputs, outputs);
+            deployed_addr, std::as_bytes(std::span(calldata)),
+            /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
 
         if (!invoke_result.has_value()) {
           return NativeContractBuilder::host_fn_error_conversion(

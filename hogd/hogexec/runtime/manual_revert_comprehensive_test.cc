@@ -184,9 +184,10 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressChild, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -532,88 +533,88 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 
   // Contract A -- calls B:0, expects frame reverted, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
-  fns_a.emplace(0,
-                [data1, return1](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("level1");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(data1)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE()
-                        << "MultipleNestedManualReverts: Failed to set "
+  fns_a.emplace(
+      0,
+      [data1,
+       return1](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("level1");
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span(data1)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                            "bytestring on contract A";
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  auto r2 = [&]() {
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = 0,
-                        .gas_limit = UINT64_MAX,
-                        .flags = 0,
-                    };
-                    return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressB, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-                  }();
-                  if (!r2.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r2.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+        auto r2 = [&]() {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = 0,
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressB,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
+        }();
+        if (!r2.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(return1.size());
-                  std::memcpy(buffer.data(), return1.data(), return1.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  return {};
-                });
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(return1.size());
+        std::memcpy(buffer.data(), return1.data(), return1.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true);
+        return {};
+      });
   auto native_contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
   // Contract B -- calls C:0, expects frame reverted, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
-  fns_b.emplace(0,
-                [data2, return2](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("level2");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(data2)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE()
-                        << "MultipleNestedManualReverts: Failed to set "
+  fns_b.emplace(
+      0,
+      [data2,
+       return2](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("level2");
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span(data2)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                            "bytestring on contract B";
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  auto r3 = [&]() {
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = 0,
-                        .gas_limit = UINT64_MAX,
-                        .flags = 0,
-                    };
-                    return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressC, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-                  }();
-                  if (!r3.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r3.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+        auto r3 = [&]() {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = 0,
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressC,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
+        }();
+        if (!r3.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r3.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(return2.size());
-                  std::memcpy(buffer.data(), return2.data(), return2.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  return {};
-                });
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(return2.size());
+        std::memcpy(buffer.data(), return2.data(), return2.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true);
+        return {};
+      });
   auto native_contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 
   // Contract C -- deepest level; write then manual revert.
@@ -927,9 +928,10 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressChild, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           ADD_FAILURE() << "try_invoke on child failed unexpectedly";
@@ -979,9 +981,10 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kAddressGrandchild, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressGrandchild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           ADD_FAILURE() << "try_invoke on grandchild failed unexpectedly";

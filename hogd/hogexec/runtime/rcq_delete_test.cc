@@ -171,9 +171,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r1 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(consume_a),
-              std::span<uint32_t>{}, inputs1, CopyableInvokeOutputs{});
+          auto r1 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(consume_a),
+                                              std::span<uint32_t>{}, inputs1,
+                                              CopyableInvokeOutputs{});
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -193,9 +195,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r3 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(consume_b),
-              std::span<uint32_t>{}, inputs3, CopyableInvokeOutputs{});
+          auto r3 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(consume_b),
+                                              std::span<uint32_t>{}, inputs3,
+                                              CopyableInvokeOutputs{});
 
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -218,9 +222,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r1 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs1, CopyableInvokeOutputs{});
+          auto r1 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs1,
+                                              CopyableInvokeOutputs{});
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(expect none)";
@@ -248,9 +254,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r3 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(consume_b),
-              std::span<uint32_t>{}, inputs3, CopyableInvokeOutputs{});
+          auto r3 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(consume_b),
+                                              std::span<uint32_t>{}, inputs3,
+                                              CopyableInvokeOutputs{});
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -271,9 +279,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r1 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(insert_a),
-              std::span<uint32_t>{}, inputs1, CopyableInvokeOutputs{});
+          auto r1 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(insert_a),
+                                              std::span<uint32_t>{}, inputs1,
+                                              CopyableInvokeOutputs{});
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
@@ -293,9 +303,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r3 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(consume_b),
-              std::span<uint32_t>{}, inputs3, CopyableInvokeOutputs{});
+          auto r3 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(consume_b),
+                                              std::span<uint32_t>{}, inputs3,
+                                              CopyableInvokeOutputs{});
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -323,9 +335,11 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r2 = ctx.syscall<SyscallNo::kInvoke>(
-              kContractAddress, x23::serialize(insert_1),
-              std::span<uint32_t>{}, inputs2, CopyableInvokeOutputs{});
+          auto r2 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(insert_1),
+                                              std::span<uint32_t>{}, inputs2,
+                                              CopyableInvokeOutputs{});
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
@@ -347,9 +361,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -371,9 +387,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -387,9 +405,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_c),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_c),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -413,9 +433,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -430,9 +452,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -456,9 +480,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -473,9 +499,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -503,9 +531,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -526,9 +556,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -550,9 +582,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -575,9 +609,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -599,9 +635,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -623,9 +661,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_c),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_c),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -658,9 +698,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -684,9 +726,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -701,9 +745,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -718,9 +764,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_c),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_c),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -769,9 +817,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(expected),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(expected),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -797,9 +847,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(past_value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(past_value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -823,9 +875,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -840,9 +894,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -951,9 +1007,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r7.has_value() ||
               r7.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1011,9 +1069,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -1055,9 +1115,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(peek_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(peek_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1071,9 +1133,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(peek_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(peek_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1087,9 +1151,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1103,9 +1169,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1129,9 +1197,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(self_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(self_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1146,9 +1216,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -1166,9 +1238,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(self_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(self_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1215,9 +1289,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(val_a),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(val_a),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1231,9 +1307,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(val_b),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(val_b),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1269,9 +1347,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -1314,9 +1394,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(old_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(old_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1338,9 +1420,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(peek_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(peek_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1362,9 +1446,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(old_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(old_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1386,9 +1472,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(new_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(new_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1402,9 +1490,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(new_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(new_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1426,9 +1516,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1449,9 +1541,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1471,9 +1565,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1491,9 +1587,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1515,9 +1613,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(revert_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(revert_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1531,9 +1631,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(real_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(real_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1548,9 +1650,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(real_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(real_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1571,9 +1675,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
@@ -1591,9 +1697,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1614,9 +1722,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
@@ -1634,9 +1744,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1658,9 +1770,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (1st)";
@@ -1679,9 +1793,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (2nd)";
@@ -1700,9 +1816,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(value),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1747,9 +1865,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1764,9 +1884,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1789,9 +1911,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(consume_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(consume_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1805,9 +1929,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(insert_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(insert_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1829,9 +1955,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, x23::serialize(revert_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(revert_val),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1949,9 +2077,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2026,9 +2156,11 @@ protected:
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kContractAddress, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

@@ -134,9 +134,10 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kChildAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

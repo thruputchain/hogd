@@ -656,8 +656,7 @@ wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
 
-  auto input_args =
-      std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
+  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
 
   std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
                                                 wasm_context.memory.mem),

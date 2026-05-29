@@ -135,9 +135,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, ctx.handler().get_calldata(),
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   ctx.handler().get_calldata(),
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -151,9 +152,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -167,9 +169,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r2.has_value()) {
@@ -312,9 +315,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, ctx.handler().get_calldata(),
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   ctx.handler().get_calldata(),
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -328,9 +332,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -344,9 +349,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r2.has_value()) {
@@ -489,9 +495,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, ctx.handler().get_calldata(),
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   ctx.handler().get_calldata(),
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r0.has_value()) {
@@ -505,9 +512,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r1.has_value()) {
@@ -521,9 +529,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(
-                kAddressStorage, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
+            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           }();
 
           if (!r2.has_value()) {

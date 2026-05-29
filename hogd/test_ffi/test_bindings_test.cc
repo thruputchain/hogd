@@ -15,7 +15,6 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
-#include "invoke_args.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
@@ -24,6 +23,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
@@ -1030,8 +1030,7 @@ test_ffi_invoke(const ContractAddress &input_address,
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kInvoke),
       reinterpret_cast<uint64_t>(input_address.data()),
-      reinterpret_cast<uint64_t>(input_calldata.data()),
-      input_calldata.size(),
+      reinterpret_cast<uint64_t>(input_calldata.data()), input_calldata.size(),
       reinterpret_cast<uint64_t>(input_owned_auth_token_ids.data()),
       input_owned_auth_token_ids.size_bytes(),
       reinterpret_cast<uint64_t>(&inputs),
@@ -1077,12 +1076,12 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
 //   uint32_t &output_unwrapped_token_id_start,
 //   uint32_t &output_unwrapped_token_id_count) noexcept
 HostFnStatus<SyscallErrorCode>
-test_ffi_consume_auth_token(uint32_t input_token_id,
-                            std::span<std::byte> output_auth_payload,
-                            ContractAddress &output_token_minter,
-                            RuntimeMemoryLength &output_auth_payload_written_len,
-                            uint32_t &output_unwrapped_token_id_start,
-                            uint32_t &output_unwrapped_token_id_count)
+test_ffi_consume_auth_token(
+    uint32_t input_token_id, std::span<std::byte> output_auth_payload,
+    ContractAddress &output_token_minter,
+    RuntimeMemoryLength &output_auth_payload_written_len,
+    uint32_t &output_unwrapped_token_id_start,
+    uint32_t &output_unwrapped_token_id_count)
 {
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kConsumeAuthToken), input_token_id,
@@ -1353,9 +1352,10 @@ mock_contract_consume_auth_token(void *ctx, uint64_t /*method_number*/)
   ContractAddress minter{};
   RuntimeMemoryLength payload_written_len = 0;
   uint32_t child_start = 0, child_count = 0;
-  auto consume_res = test_ffi_consume_auth_token(
-      token_id, std::span<std::byte>{payload_buf}, minter, payload_written_len,
-      child_start, child_count);
+  auto consume_res =
+      test_ffi_consume_auth_token(token_id, std::span<std::byte>{payload_buf},
+                                  minter, payload_written_len, child_start,
+                                  child_count);
 
   data->consume_succeeded =
       consume_res.has_value() &&
@@ -1710,10 +1710,11 @@ TEST(TestBindingsTest, MockFrameForwardAndConsumeAuthTokenTest)
   };
   auto serialized_node = x23::serialize(root_node);
   uint32_t token_id = 0;
-  auto mint_res = test_ffi_mint_auth_token(
-      BlockHeight{1'000'000},
-      std::as_bytes(std::span(serialized_node.data(), serialized_node.size())),
-      token_id);
+  auto mint_res =
+      test_ffi_mint_auth_token(BlockHeight{1'000'000},
+                               std::as_bytes(std::span(serialized_node.data(),
+                                                       serialized_node.size())),
+                               token_id);
   ASSERT_TRUE(mint_res.has_value());
   ASSERT_EQ(*mint_res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -1727,10 +1728,10 @@ TEST(TestBindingsTest, MockFrameForwardAndConsumeAuthTokenTest)
   std::array<uint32_t, 1> forwarded_ids{token_id};
   RuntimeMemoryLength output_return_buffer_len = 0,
                       output_returned_auth_token_len = 0;
-  auto invoke_res = test_ffi_invoke(
-      child_addr, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{},
-      std::span<uint32_t const>{forwarded_ids}, output_return_buffer_len,
-      output_returned_auth_token_len);
+  auto invoke_res =
+      test_ffi_invoke(child_addr, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{},
+                      std::span<uint32_t const>{forwarded_ids},
+                      output_return_buffer_len, output_returned_auth_token_len);
 
   ASSERT_TRUE(invoke_res.has_value());
   EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);

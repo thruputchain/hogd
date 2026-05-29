@@ -134,9 +134,11 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                addr_writer, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(addr_writer,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
 
           if (r0.has_value() || r0.error().code() != HostFnErrorCode::Abandon) {

@@ -121,9 +121,10 @@ TEST_F(EventTest, EventSuccess)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_emitter, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_emitter,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto gas = GasAmount{0};
         if (!status.has_value()) {
@@ -140,9 +141,10 @@ TEST_F(EventTest, EventSuccess)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_emitter, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_emitter,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto gas2 = GasAmount{0};
         if (!status2.has_value()) {
@@ -558,9 +560,10 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_child, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_child,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -674,13 +677,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
           auto status = [&]() {
             CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                addr_emitter, calldata,
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           [[maybe_unused]] auto gas = GasAmount{0};
           if (!status.has_value()) {
@@ -712,14 +716,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
           auto status = [&]() {
             CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
-                addr_emitter, calldata,
-                std::span<uint32_t>{},
-                inputs, CopyableInvokeOutputs{});
+            return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
           }();
           [[maybe_unused]] auto gas = GasAmount{0};
           if (!status.has_value()) {
@@ -751,13 +755,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
             auto status = [&]() {
               CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::None),
+                  .entrypoint_id = 0,
+                  .gas_limit = UINT64_MAX,
+                  .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(
-                  addr_emitter, calldata,
-                  std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
+                                                     std::span<uint32_t>{},
+                                                     inputs,
+                                                     CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
@@ -776,9 +781,9 @@ TEST_F(EventTest, EventWithRevertingFrames)
           {
             auto status = [&]() {
               CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::None),
+                  .entrypoint_id = 0,
+                  .gas_limit = UINT64_MAX,
+                  .flags = std::to_underlying(InvokeFlag::None),
               };
               return ctx.syscall<SyscallNo::kInvoke>(
                   addr_manual_revert, std::span<const std::byte>{},
@@ -805,13 +810,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
             auto status = [&]() {
               CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::None),
+                  .entrypoint_id = 0,
+                  .gas_limit = UINT64_MAX,
+                  .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(
-                  addr_emitter, calldata,
-                  std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
+                                                     std::span<uint32_t>{},
+                                                     inputs,
+                                                     CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
@@ -830,10 +836,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
           {
             auto status = [&]() {
               CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::None),
-              };       
+                  .entrypoint_id = 0,
+                  .gas_limit = UINT64_MAX,
+                  .flags = std::to_underlying(InvokeFlag::None),
+              };
               return ctx.syscall<SyscallNo::kInvoke>(
                   addr_deterministic, std::span<const std::byte>{},
                   std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
@@ -859,13 +865,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
             auto status = [&]() {
               CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::None),
+                  .entrypoint_id = 0,
+                  .gas_limit = UINT64_MAX,
+                  .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(
-                  addr_emitter, calldata,
-                  std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
+                                                     std::span<uint32_t>{},
+                                                     inputs,
+                                                     CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {

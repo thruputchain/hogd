@@ -439,9 +439,10 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenDefaulted)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -489,9 +490,10 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenSuppliedTrue)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -544,9 +546,10 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -602,9 +605,10 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -933,9 +937,10 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
@@ -1000,9 +1005,10 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kLeafAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kLeafAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
@@ -1021,9 +1027,10 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kMiddleAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kMiddleAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
@@ -1100,9 +1107,10 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
@@ -1618,9 +1626,11 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::ReadOnly),
     };
-    auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-        kChildAddr, std::span<const std::byte>{},
-        std::span<uint32_t const>{forwarded}, inputs, CopyableInvokeOutputs{});
+    auto invoke_res =
+        ctx.syscall<SyscallNo::kInvoke>(kChildAddr,
+                                        std::span<const std::byte>{},
+                                        std::span<uint32_t const>{forwarded},
+                                        inputs, CopyableInvokeOutputs{});
     if (!invoke_res.has_value()) {
       ADD_FAILURE() << "read-only invoke syscall failed";
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -1632,9 +1642,11 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
         .gas_limit = UINT64_MAX,
         .flags = 0,
     };
-    auto reuse_res = ctx.syscall<SyscallNo::kInvoke>(
-        kConsumerAddr, std::span<const std::byte>{},
-        std::span<uint32_t const>{forwarded}, inputs2, CopyableInvokeOutputs{});
+    auto reuse_res =
+        ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr,
+                                        std::span<const std::byte>{},
+                                        std::span<uint32_t const>{forwarded},
+                                        inputs2, CopyableInvokeOutputs{});
     if (!reuse_res.has_value()) {
       ADD_FAILURE() << "reuse invoke syscall failed";
       return InvokeError{InvokeErrorCode::Deterministic};

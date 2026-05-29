@@ -162,9 +162,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_1, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_1,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -180,9 +181,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_2, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2_check.has_value() ||
             r2_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -198,9 +200,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_3, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_3,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r3_check.has_value() ||
             r3_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -224,9 +227,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_2, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -403,9 +407,10 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              addr_fault, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(addr_fault,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -505,9 +510,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, outputs);
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -628,9 +634,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }

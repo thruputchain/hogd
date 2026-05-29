@@ -287,9 +287,10 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
         .gas_limit = UINT64_MAX,
         .flags = 0,
     };
-    auto r = ctx.syscall<SyscallNo::kInvoke>(
-        target_addr, std::as_bytes(std::span(calldata)), std::span<uint32_t>{},
-        inputs, CopyableInvokeOutputs{});
+    auto r = ctx.syscall<SyscallNo::kInvoke>(target_addr,
+                                             std::as_bytes(std::span(calldata)),
+                                             std::span<uint32_t>{}, inputs,
+                                             CopyableInvokeOutputs{});
 
     if (!r.has_value() ||
         r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -375,9 +376,11 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            callee_addr, std::as_bytes(std::span(calldata)),
-            std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+        auto r =
+            ctx.syscall<SyscallNo::kInvoke>(callee_addr,
+                                            std::as_bytes(std::span(calldata)),
+                                            std::span<uint32_t>{}, inputs,
+                                            CopyableInvokeOutputs{});
 
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -491,9 +494,11 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
-              addr_writer, std::as_bytes(std::span(args)),
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          [[maybe_unused]] auto r =
+              ctx.syscall<SyscallNo::kInvoke>(addr_writer,
+                                              std::as_bytes(std::span(args)),
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
 
           return {};
         });

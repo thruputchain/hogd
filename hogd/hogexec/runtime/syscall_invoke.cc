@@ -179,13 +179,13 @@ syscall_GetCalldata_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_Invoke_inner(
-    SystemCallHandler &syscall_handler, WrappedGasAmount remaining_gas,
-    const ContractAddress &input_address,
-    std::span<const std::byte> input_calldata,
-    std::span<const std::byte> input_owned_auth_token_ids,
-    const CopyableInvokeInputs &input_inputs,
-    CopyableInvokeOutputs &output_outputs) noexcept
+syscall_Invoke_inner(SystemCallHandler &syscall_handler,
+                     WrappedGasAmount remaining_gas,
+                     const ContractAddress &input_address,
+                     std::span<const std::byte> input_calldata,
+                     std::span<const std::byte> input_owned_auth_token_ids,
+                     const CopyableInvokeInputs &input_inputs,
+                     CopyableInvokeOutputs &output_outputs) noexcept
 {
   if (!SystemCallHandler::validate_invoke_flags(input_inputs.flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,

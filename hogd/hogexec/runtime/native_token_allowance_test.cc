@@ -647,9 +647,11 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
             .gas_limit = static_cast<GasAmount>(UINT64_MAX),
             .flags = InvokeFlagSet{0},
         };
-        auto inv = ctx.syscall<SyscallNo::kInvoke>(
-            kOwnerAddr, std::span<const std::byte>{},
-            std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
+        auto inv =
+            ctx.syscall<SyscallNo::kInvoke>(kOwnerAddr,
+                                            std::span<const std::byte>{},
+                                            std::span<const std::byte>{},
+                                            inputs, CopyableInvokeOutputs{});
         if (!inv.has_value() ||
             *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "invoke owner for adjust_allowance failed";
@@ -786,9 +788,11 @@ TEST_F(NativeTokenAllowanceTest,
             .gas_limit = static_cast<GasAmount>(UINT64_MAX),
             .flags = InvokeFlagSet{0},
         };
-        auto inv = ctx.syscall<SyscallNo::kInvoke>(
-            kOwnerAddr, std::span<const std::byte>{},
-            std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
+        auto inv =
+            ctx.syscall<SyscallNo::kInvoke>(kOwnerAddr,
+                                            std::span<const std::byte>{},
+                                            std::span<const std::byte>{},
+                                            inputs, CopyableInvokeOutputs{});
         if (!inv.has_value() ||
             *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "invoke owner for adjust_allowance failed";

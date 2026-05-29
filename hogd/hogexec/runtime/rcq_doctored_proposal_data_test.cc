@@ -88,9 +88,9 @@ protected:
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
-        CopyableInvokeOutputs{});
+    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
+                                           std::span<uint32_t>{}, inputs,
+                                           CopyableInvokeOutputs{});
   }
 
   static std::unique_ptr<RuntimeContext> make_rcq_insert_context()

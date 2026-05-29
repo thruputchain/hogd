@@ -110,9 +110,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -126,9 +127,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2.has_value() ||
             r2.value() !=
@@ -145,9 +147,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = 12345,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r3.has_value() ||
             r3.value() !=
@@ -162,9 +165,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (r4.has_value() ||
             r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
@@ -178,9 +182,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (r5.has_value() ||
             r5.error() != HostFnError{HostFnErrorCode::ValidationFailure}) {
@@ -194,9 +199,10 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              kCalleeAddress, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (r6.has_value() ||
             r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
@@ -271,9 +277,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -287,9 +294,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -305,9 +313,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .flags = std::to_underlying(InvokeFlag::TryInvoke) |
                        std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -323,9 +332,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .gas_limit = UINT64_MAX,
               .flags = 0x4,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r4.has_value() ||
             r4.value() !=
@@ -341,9 +351,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .gas_limit = UINT64_MAX,
               .flags = 0xFF,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r5.has_value() ||
             r5.value() !=
@@ -359,9 +370,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
               .gas_limit = UINT64_MAX,
               .flags = 0x7FFF'FFFF,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
-              target_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          return ctx.syscall<SyscallNo::kInvoke>(target_address,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         }();
         if (!r6.has_value() ||
             r6.value() !=
@@ -429,9 +441,10 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Invoke with an empty auth-token span failed";

@@ -128,9 +128,11 @@ TEST_F(NativeContractTest, BasicInstantiate)
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-              invoked_addr, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          auto invoke_res =
+              ctx.syscall<SyscallNo::kInvoke>(invoked_addr,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
 
           if (invoke_res) {
             return (invoke_res.value() ==
@@ -300,9 +302,11 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressMiddle, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          auto invoke_status =
+              ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              CopyableInvokeOutputs{});
           return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
         }();
         auto const &[invoke_status, g] = r;
@@ -385,9 +389,11 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
             .gas_limit = 256,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
-            std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+        auto invoke_status =
+            ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
+                                            Calldata{0x00, 0x00, 0x00, 0xFF},
+                                            std::span<uint32_t>{}, inputs,
+                                            CopyableInvokeOutputs{});
         if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -397,9 +403,11 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
             .gas_limit = 255,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
-            std::span<uint32_t>{}, inputs2, CopyableInvokeOutputs{});
+        invoke_status =
+            ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
+                                            Calldata{0x00, 0x00, 0x00, 0xFF},
+                                            std::span<uint32_t>{}, inputs2,
+                                            CopyableInvokeOutputs{});
         if (!invoke_status.has_value() ||
             invoke_status.value() !=
                 SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -780,9 +788,10 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
-            inputs, CopyableInvokeOutputs{});
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE()
               << "TryInvoke returned system error (lock probe reached "

@@ -58,7 +58,8 @@ public:
 
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{
-        .entrypoint_id = sdk_method_id(trait_meta_t::template entrypoint<Name>()),
+        .entrypoint_id =
+            sdk_method_id(trait_meta_t::template entrypoint<Name>()),
         .gas_limit = static_cast<GasAmount>(UINT64_MAX),
         .flags = Flags,
     };
@@ -93,7 +94,8 @@ public:
     auto const *unwrapped_return_buffer = **return_buffer;
     assert(unwrapped_return_buffer);
     if (outputs.return_buffer_len != unwrapped_return_buffer->size()) {
-      trace("Unrecoverable: Return buffer size mismatch: {} != {}", outputs.return_buffer_len, unwrapped_return_buffer->size());
+      trace("Unrecoverable: Return buffer size mismatch: {} != {}",
+            outputs.return_buffer_len, unwrapped_return_buffer->size());
       return HostFnError{HostFnErrorCode::Unrecoverable};
     }
     std::span<const std::byte> return_span =
