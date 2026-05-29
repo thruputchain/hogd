@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -12,6 +11,7 @@
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
