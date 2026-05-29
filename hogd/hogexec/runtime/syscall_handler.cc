@@ -384,6 +384,14 @@ SystemCallHandler::try_commit_transaction()
       }
       auto push_res = db_proxy_.try_push_current_subtransaction();
       if (!push_res.has_value()) {
+        // A system error (e.g. a stale block) leaves the HogDB InvokeTX open;
+        // abort it before returning, mirroring the normal root-success
+        // lock-push failure path below.
+        two_phase_commit_failed_ = true;
+        auto abort_status = abort_transaction();
+        if (!abort_status.has_value()) {
+          return to_exec_result(abort_status.error().code());
+        }
         return to_exec_result(push_res.error().code());
       }
       if (!push_res.value()) {
