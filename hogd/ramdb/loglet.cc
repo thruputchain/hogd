@@ -14,7 +14,6 @@ extern "C" {
 #include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
@@ -262,25 +261,32 @@ LogletAllocator::print_stats()
 void
 LogletAllocator::reclaim_idle_memory()
 {
-  std::vector<Loglet *> tmp;
+  // Hold lock_ across the per-loglet madvise too. Dropping it mid-sweep (as we
+  // used to) let alloc() hand out a sampled loglet and a writer publish a live
+  // item into it before the now-stale MADV_FREE ran, discarding live data
+  // (#2023). It's a cheap, low-frequency background pass.
+  std::lock_guard guard(lock_);
 
-  // determine idle loglets.
-  {
-    std::lock_guard guard(lock_);
-    for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
-      tmp.push_back(free_loglets_[i]);
+  // not_needed_loglets_ may exceed the free-list size after alloc() drained it
+  // below the watermark; the i < min_free_loglets_ guard makes that a no-op.
+  assert(min_free_loglets_ <= free_loglets_.size());
+
+  size_t reclaimed = 0;
+  for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
+    Loglet *ll = free_loglets_[i];
+    // free_loglets_ only holds loglets reset to kFree, and lock_ pins free-list
+    // membership, so kFree here is a true "still idle" signal rather than an
+    // alloc-in-flight loglet.
+    if (ll->get_usage_mode() == LogletMode::kFree) {
+      ll->dont_need();
+      ++reclaimed;
     }
-    assert(min_free_loglets_ <= free_loglets_.size());
-    not_needed_loglets_ = min_free_loglets_;
-    min_free_loglets_ = free_loglets_.size();
   }
+  if (reclaimed > 0)
+    debug("gave back {} loglets to the OS", reclaimed);
 
-  // give idle loglets back to the OS.
-  if (!tmp.empty())
-    debug("giving back {} loglets to the OS", tmp.size());
-  for (Loglet *ll : tmp) {
-    ll->dont_need();
-  }
+  not_needed_loglets_ = min_free_loglets_;
+  min_free_loglets_ = free_loglets_.size();
 }
 
 } // namespace hogd
