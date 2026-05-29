@@ -1108,14 +1108,18 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
+        CopyableInvokeOutputs r_outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r_outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return emit_event(ctx, "after");

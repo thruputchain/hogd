@@ -48,6 +48,21 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
+// Result of SystemCallHandler::invoke().
+//
+// `code` answers "did a child frame run?": it is kSyscallErrorCodeNone whenever
+// a child frame ran (regardless of how it ended), and a nonzero error code
+// (kSyscallErrorCodeInvalidSyscallInput / kSyscallErrorCodeReentrance) only when
+// the call was rejected before any child frame was created. A nonzero `code` is
+// a complete no-op.
+//
+// `frame_status` carries how the child frame ended (Return / Abort / Fault) and
+// is only meaningful when `code == kSyscallErrorCodeNone`.
+struct InvokeOutcome {
+  SyscallErrorCode code;
+  InvocationFrameStatusCode frame_status;
+};
+
 // TODO(geoff): root_invoke() validates any incoming wasm blobs.
 // We may later do that validation preemptively in the coordinator.
 // We may also wish to add checks to make sure that a wasm that's created
@@ -230,7 +245,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  [[nodiscard]] std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
+  [[nodiscard]] std::pair<SystemStatus<InvokeOutcome>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);
@@ -419,7 +434,7 @@ private:
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
   static InvokeStatus<void>
-  handle_root_host_fn_status(SystemStatus<SyscallErrorCode> status);
+  handle_root_host_fn_status(SystemStatus<InvokeOutcome> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

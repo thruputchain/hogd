@@ -245,41 +245,39 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                              std::move(calldata), input_inputs.flags,
                              owned_auth_token_ids_vec);
 
-  // invocation returned successfully
-  if (invoke_res.has_value() &&
-      ((*invoke_res) == SyscallErrorCode::kSyscallErrorCodeNone ||
-       (*invoke_res) == SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
-    auto return_buffer_host = syscall_handler.get_return_buffer();
-    if (!return_buffer_host.has_value()) {
-      // Handle the SystemError case
-      return {return_buffer_host.error().to_host_fn_error(),
-              WrappedGasAmount{gas_amount}};
-    }
-
-    SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
-
-    if (return_buffer.has_value()) {
-      output_outputs.return_buffer_len = (*return_buffer)->size();
-    }
-    else {
-      output_outputs.return_buffer_len = 0;
-    }
-    output_outputs.returned_auth_token_len =
-        syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
-    return {*invoke_res, WrappedGasAmount{gas_amount}};
+  // A SystemError ends execution of the whole block.
+  if (!invoke_res.has_value()) {
+    return {invoke_res.error().to_host_fn_error(), WrappedGasAmount{gas_amount}};
   }
-  // Invocation encountered some error
-  output_outputs.return_buffer_len = 0;
-  output_outputs.returned_auth_token_len = 0;
 
-  auto host_fn_res = [&]() -> HostFnStatus<SyscallErrorCode> {
-    if (invoke_res.has_value()) {
-      return *invoke_res;
-    }
-    return invoke_res.error().to_host_fn_error();
-  }();
+  // The invoke was rejected before a child frame ran: a complete no-op. Leave
+  // the caller's output struct untouched (mirroring every other syscall) and
+  // report the error code.
+  if (invoke_res->code != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return {invoke_res->code, WrappedGasAmount{gas_amount}};
+  }
 
-  return {host_fn_res, WrappedGasAmount{gas_amount}};
+  // A child frame ran. Report its outcome (Return / Abort / Fault) via
+  // frame_status; the syscall error code stays None. The return buffer is
+  // readable on Return / Abort and absent on Fault.
+  auto return_buffer_host = syscall_handler.get_return_buffer();
+  if (!return_buffer_host.has_value()) {
+    // Handle the SystemError case
+    return {return_buffer_host.error().to_host_fn_error(),
+            WrappedGasAmount{gas_amount}};
+  }
+
+  SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
+  if (return_buffer.has_value()) {
+    output_outputs.return_buffer_len = (*return_buffer)->size();
+  }
+  else {
+    output_outputs.return_buffer_len = 0;
+  }
+  output_outputs.returned_auth_token_len =
+      syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
+  output_outputs.frame_status = invoke_res->frame_status;
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

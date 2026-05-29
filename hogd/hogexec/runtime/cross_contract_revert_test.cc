@@ -95,6 +95,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                   }
 
                   // Call Contract B (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
                   auto r1 = [&]() {
                     CopyableInvokeInputs inputs{
                         .entrypoint_id = 0,
@@ -103,13 +104,20 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                     };
                     return ctx.syscall<SyscallNo::kInvoke>(
                         contract_b_addr, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                        std::span<uint32_t>{}, inputs, r1_outputs);
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  if (r1.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+                  // A child frame ran, so Invoke returns None; the manual
+                  // revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
@@ -251,6 +259,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                   }
 
                   // Call Contract B
+                  CopyableInvokeOutputs r1_outputs{};
                   auto r1 = [&]() {
                     CopyableInvokeInputs inputs{
                         .entrypoint_id = 0,
@@ -259,13 +268,20 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                     };
                     return ctx.syscall<SyscallNo::kInvoke>(
                         contract_b_addr, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                        std::span<uint32_t>{}, inputs, r1_outputs);
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  if (r1.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+                  // A child frame ran, so Invoke returns None; Contract B's
+                  // manual revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
@@ -309,6 +325,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                   }
 
                   // Call Contract C (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
                   auto r1 = [&]() {
                     CopyableInvokeInputs inputs{
                         .entrypoint_id = 0,
@@ -317,13 +334,20 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                     };
                     return ctx.syscall<SyscallNo::kInvoke>(
                         contract_c_addr, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                        std::span<uint32_t>{}, inputs, r1_outputs);
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  if (r1.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+                  // A child frame ran, so Invoke returns None; Contract C's
+                  // manual revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract C to manually revert (Abort)";
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
@@ -471,6 +495,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                   }
 
                   // Call Contract B (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
                   auto r1 = [&]() {
                     CopyableInvokeInputs inputs{
                         .entrypoint_id = 0,
@@ -479,13 +504,20 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                     };
                     return ctx.syscall<SyscallNo::kInvoke>(
                         contract_b_addr, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                        std::span<uint32_t>{}, inputs, r1_outputs);
                   }();
                   if (!r1.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  if (r1.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+                  // A child frame ran, so Invoke returns None; the manual
+                  // revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
 

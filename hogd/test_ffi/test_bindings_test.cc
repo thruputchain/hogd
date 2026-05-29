@@ -1874,8 +1874,9 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
   free_ffi_data_buffer(finish_res.serialized_events);
 }
 
-// Invoke a mock contract that reverts, and verify the parent frame sees
-// kSyscallErrorCodeFrameReverted.
+// Invoke a mock contract that manually reverts. The Invoke syscall itself now
+// succeeds (a child frame ran), and the child's abort buffer is readable via
+// GetReturnedBuffer.
 TEST(TestBindingsTest, MockFrameRevertedChildTest)
 {
   auto *db = make_db();
@@ -1912,7 +1913,7 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
                              InvokeFlagSet{}, {}, output_return_buffer_len,
                              output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
-  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeFrameReverted);
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   // The abort buffer should be accessible as a return buffer
   auto return_buf_status =

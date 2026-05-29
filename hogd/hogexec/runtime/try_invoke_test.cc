@@ -720,6 +720,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           // Invoke callee method 0 in try_invoke frame with arguments [-5]
           Calldata args = {static_cast<uint8_t>(-5)};
+          CopyableInvokeOutputs r0_outputs{};
           auto r0 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
@@ -728,8 +729,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
             };
             return ctx.syscall<SyscallNo::kInvoke>(kAddressCallee, args,
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r0_outputs);
           }();
 
           if (!r0.has_value()) {
@@ -737,9 +737,11 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          // Check that the try_invoke failed (should fail because 5+ -10
-          // is negative)
-          if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child frame ran, so the syscall returns
+          // kSyscallErrorCodeNone; check that it failed (should fail because
+          // 5 + -10 is negative), reported via frame_status != Return.
+          if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -893,6 +895,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                     // Try invoke writer method 0 with "foo" (should fail due to
                     // exclusive lock)
                     Calldata args_foo = {'f', 'o', 'o'};
+                    CopyableInvokeOutputs r0_outputs{};
                     auto r0 = [&]() {
                       CopyableInvokeInputs inputs{
                           .entrypoint_id = 0,
@@ -901,15 +904,21 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                       };
                       return ctx.syscall<SyscallNo::kInvoke>(
                           kAddressWriter, args_foo, std::span<uint32_t>{},
-                          inputs, CopyableInvokeOutputs{});
+                          inputs, r0_outputs);
                     }();
                     if (!r0.has_value()) {
                       ADD_FAILURE() << "should not have system error";
                       return InvokeError{InvokeErrorCode::Unrecoverable};
                     }
 
-                    // Check that the try_invoke failed (due to exclusive lock)
-                    if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                    // The child frame ran (lock acquisition failed and was
+                    // converted to a deterministic failure), so the syscall
+                    // returns kSyscallErrorCodeNone; check that it failed (due
+                    // to the exclusive lock), reported via frame_status !=
+                    // Return.
+                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                        r0_outputs.frame_status ==
+                            InvocationFrameStatusCode::Return) {
                       ADD_FAILURE() << "try_invoke should have failed";
                       return InvokeError{InvokeErrorCode::Deterministic};
                     }
@@ -1064,6 +1073,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                     // Try invoke writer method 0 with "foo" (should fail due to
                     // exclusive lock)
                     Calldata args_foo = {'f', 'o', 'o'};
+                    CopyableInvokeOutputs r0_outputs{};
                     auto r0 = [&]() {
                       CopyableInvokeInputs inputs{
                           .entrypoint_id = 0,
@@ -1072,15 +1082,21 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                       };
                       return ctx.syscall<SyscallNo::kInvoke>(
                           kAddressWriter, args_foo, std::span<uint32_t>{},
-                          inputs, CopyableInvokeOutputs{});
+                          inputs, r0_outputs);
                     }();
                     if (!r0.has_value()) {
                       ADD_FAILURE() << "should not have system error";
                       return InvokeError{InvokeErrorCode::Unrecoverable};
                     }
 
-                    // Check that the try_invoke failed (due to exclusive lock)
-                    if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                    // The child frame ran (lock acquisition failed and was
+                    // converted to a deterministic failure), so the syscall
+                    // returns kSyscallErrorCodeNone; check that it failed (due
+                    // to the exclusive lock), reported via frame_status !=
+                    // Return.
+                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                        r0_outputs.frame_status ==
+                            InvocationFrameStatusCode::Return) {
                       ADD_FAILURE() << "try_invoke should have failed";
                       return InvokeError{InvokeErrorCode::Deterministic};
                     }
@@ -1230,6 +1246,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                     // Invoke writer method 0 in try_invoke frame with arguments
                     // [-5]
                     Calldata args = {static_cast<uint8_t>(-5)};
+                    CopyableInvokeOutputs r0_outputs{};
                     auto r0 = [&]() {
                       CopyableInvokeInputs inputs{
                           .entrypoint_id = 0,
@@ -1238,16 +1255,20 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                       };
                       return ctx.syscall<SyscallNo::kInvoke>(
                           kAddressWriter, args, std::span<uint32_t>{}, inputs,
-                          CopyableInvokeOutputs{});
+                          r0_outputs);
                     }();
 
                     if (!r0.has_value()) {
                       return InvokeError{InvokeErrorCode::Unrecoverable};
                     }
 
-                    // Check that the try_invoke failed (should fail because -5
-                    // is negative)
-                    if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                    // The child frame ran, so the syscall returns
+                    // kSyscallErrorCodeNone; check that the try_invoke failed
+                    // (should fail because -5 is negative), reported via
+                    // frame_status != Return.
+                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                        r0_outputs.frame_status ==
+                            InvocationFrameStatusCode::Return) {
                       return InvokeError{InvokeErrorCode::Unrecoverable};
                     }
 
@@ -1394,6 +1415,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
           bool expect_second_succeeds = static_cast<bool>(calldata[1]);
 
           Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
+          CopyableInvokeOutputs r0_outputs{};
           auto r0 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
@@ -1403,20 +1425,23 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
             return ctx.syscall<SyscallNo::kInvoke>(writer_addr,
                                                    args_first_invoke,
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r0_outputs);
           }();
 
           if (!r0.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
+          // The child ran whenever the syscall returns kSyscallErrorCodeNone;
+          // it committed iff frame_status == Return.
           bool first_succeeded =
-              (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+              (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+               r0_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (first_succeeded != expect_first_succeeds) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           Calldata args_second_invoke = {5, 10};
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
@@ -1426,15 +1451,17 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
             return ctx.syscall<SyscallNo::kInvoke>(writer_addr,
                                                    args_second_invoke,
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
 
           if (!r1.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
+          // The child ran whenever the syscall returns kSyscallErrorCodeNone;
+          // it committed iff frame_status == Return.
           bool second_succeeded =
-              (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+              (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+               r1_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (second_succeeded != expect_second_succeeds) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1452,6 +1479,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
           bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
 
           Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
+          CopyableInvokeOutputs r0_outputs{};
           auto r0 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
@@ -1460,16 +1488,18 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
             };
             return ctx.syscall<SyscallNo::kInvoke>(writer_addr, args_invoke,
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r0_outputs);
           }();
 
           if (!r0.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
+          // The child ran whenever the syscall returns kSyscallErrorCodeNone;
+          // it committed iff frame_status == Return.
           bool invoke_succeeded =
-              (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+              (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+               r0_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (invoke_succeeded != expect_invoke_succeeds) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1744,6 +1774,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   fns_o.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // First, try_invoke writer method 1 (should fail)
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
@@ -1753,16 +1784,20 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Should fail (not enough tokens for two writes)
-        if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // The child ran, so the syscall returns kSyscallErrorCodeNone; it
+        // should have rolled back (not enough tokens for two writes), reported
+        // via frame_status != Return.
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Then, try_invoke writer method 0 (should succeed)
+        CopyableInvokeOutputs r0_outputs{};
         auto r0 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -1772,10 +1807,13 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r0_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r0.has_value() ||
-            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -1917,6 +1955,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   fns_o.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 0
+        CopyableInvokeOutputs r0_outputs{};
         auto r0 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -1926,13 +1965,17 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r0_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r0.has_value() ||
-            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 1
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
@@ -1942,13 +1985,17 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r1.has_value() ||
-            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 2 (should fail)
+        CopyableInvokeOutputs r2_outputs{};
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
@@ -1958,13 +2005,16 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r2_outputs);
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Should fail (not enough tokens for third write)
-        if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // The child ran, so the syscall returns kSyscallErrorCodeNone; it
+        // should have rolled back (not enough tokens for third write),
+        // reported via frame_status != Return.
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -2119,6 +2169,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   fns_o.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 0 (short)
+        CopyableInvokeOutputs r0_outputs{};
         auto r0 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -2128,13 +2179,17 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r0_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r0.has_value() ||
-            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 1 (medium)
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
@@ -2144,13 +2199,17 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r1.has_value() ||
-            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 2 (long) -- should fail
+        CopyableInvokeOutputs r2_outputs{};
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
@@ -2160,13 +2219,16 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r2_outputs);
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // expects an error
-        if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // The child ran, so the syscall returns kSyscallErrorCodeNone; it
+        // should have rolled back (expects an error), reported via
+        // frame_status != Return.
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -2448,6 +2510,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   fns_tie.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 1 (short write)
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
@@ -2457,10 +2520,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r1.has_value() ||
-            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Now, return an error. This will cause this frame's
@@ -2473,6 +2539,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   fns_o.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke writer method 0 (long write)
+        CopyableInvokeOutputs r0_outputs{};
         auto r0 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -2482,14 +2549,18 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r0_outputs);
         }();
+        // The child should have run and committed, reported via
+        // frame_status == Return.
         if (!r0.has_value() ||
-            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Regular invoke on intermediate contract (old method 2)
+        CopyableInvokeOutputs r2_outputs{};
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -2499,13 +2570,16 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressTryInvokeThenError,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r2_outputs);
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // We expect the intermediate to fail.
-        if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // The child ran, so the syscall returns kSyscallErrorCodeNone; we
+        // expect the intermediate to have failed (it returns a deterministic
+        // error), reported via frame_status != Return.
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -3111,12 +3185,15 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .gas_limit = 1000,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
+          CopyableInvokeOutputs outputs{};
           auto res = ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              std::span<uint32_t>{}, inputs, outputs);
+          // The child frame ran and faulted (missing method), so the syscall
+          // returns kSyscallErrorCodeNone with frame_status Fault.
           if (!res.has_value() ||
-              res.value() !=
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Fault) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
@@ -3129,15 +3206,17 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .gas_limit = 50,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
+          CopyableInvokeOutputs outputs{};
           auto res = ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              std::span<uint32_t>{}, inputs, outputs);
           auto gas_used = ctx.total_gas_consumed() - gas_before;
-          // This should return as a deterministic error (handleable), with
-          // 50 gas consumed
+          // The child frame ran out of gas (handleable fault), with 50 gas
+          // consumed: the syscall returns kSyscallErrorCodeNone with
+          // frame_status Fault.
           if (!res.has_value() ||
-              res.value() !=
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Fault) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (gas_used != 50) {
@@ -3152,12 +3231,15 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .gas_limit = 1000,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
+          CopyableInvokeOutputs outputs{};
           auto res = ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
-              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              std::span<uint32_t>{}, inputs, outputs);
+          // The child frame ran and faulted (deterministic error), so the
+          // syscall returns kSyscallErrorCodeNone with frame_status Fault.
           if (!res.has_value() ||
-              res.value() !=
-                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Fault) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
@@ -3306,6 +3388,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   fns_e.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Try invoke middle method 0
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -3315,13 +3398,15 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Middle should report frame reverted because of the manual revert
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        // The middle frame ran, so the syscall returns kSyscallErrorCodeNone;
+        // its manual revert is reported via frame_status Abort.
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -3656,15 +3741,21 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
+            CopyableInvokeOutputs outputs{};
             auto r =
                 ctx.syscall<SyscallNo::kInvoke>(kAddressNoop,
                                                 std::span<const std::byte>{},
                                                 std::span<uint32_t>{}, inputs,
-                                                CopyableInvokeOutputs{});
+                                                outputs);
             if (!r.has_value()) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }
-            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            // Every child runs (the depth-cap overflow is converted to a
+            // deterministic failure, so the syscall still returns
+            // kSyscallErrorCodeNone); a child committed only when its
+            // frame_status is Return.
+            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+                outputs.frame_status == InvocationFrameStatusCode::Return) {
               successes++;
             }
           }
@@ -3737,15 +3828,21 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
+            CopyableInvokeOutputs outputs{};
             auto r =
                 ctx.syscall<SyscallNo::kInvoke>(kAddressNoop,
                                                 std::span<const std::byte>{},
                                                 std::span<uint32_t>{}, inputs,
-                                                CopyableInvokeOutputs{});
+                                                outputs);
             if (!r.has_value()) {
               return InvokeError{InvokeErrorCode::Deterministic};
             }
-            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            // Every child runs (the depth-cap overflow is converted to a
+            // deterministic failure, so the syscall still returns
+            // kSyscallErrorCodeNone); a child committed only when its
+            // frame_status is Return.
+            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+                outputs.frame_status == InvocationFrameStatusCode::Return) {
               successes++;
             }
           }

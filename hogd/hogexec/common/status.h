@@ -11,6 +11,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "syscall_error.hh"
+#include "transaction.hh" // for InvocationFrameStatusCode
 
 namespace hogd {
 
@@ -168,7 +169,13 @@ struct InvokeResult {
            result_.error().code() == InvokeErrorCode::Deterministic;
   }
 
-  std::pair<SystemStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
+  // Map the frame's deterministic result to a frame outcome: Return on a
+  // successful frame, Fault on a wasm trap / out-of-gas. A SystemError
+  // (Unrecoverable / Abandon / ValidationFailure) is returned on the error
+  // channel. Callers that distinguish a manual revert override Return -> Abort
+  // separately (that information is not carried in result_).
+  std::pair<SystemStatus<InvocationFrameStatusCode>, uint64_t>
+  to_frame_status() const;
 };
 
 } // namespace hogd

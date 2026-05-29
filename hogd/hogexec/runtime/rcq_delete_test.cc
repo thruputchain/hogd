@@ -1065,6 +1065,7 @@ protected:
         26,
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 25,
@@ -1074,14 +1075,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    std::span<const std::byte>{},
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1212,6 +1218,7 @@ protected:
           }
 
           // try_invoke delete (reverted via inner error)
+          CopyableInvokeOutputs r2_outputs{};
           auto r2 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 25,
@@ -1221,14 +1228,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    std::span<const std::byte>{},
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r2_outputs);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1343,6 +1355,7 @@ protected:
         32,
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 31,
@@ -1352,15 +1365,20 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    std::span<const std::byte>{},
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
+          // The child ran (so the syscall returns None); expect it to have
+          // rolled back (lock conflict) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
           // Expect conflict when concurrent insert exists
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke delete should have conflicted";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1561,6 +1579,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         36,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
@@ -1570,14 +1589,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(value),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1671,6 +1695,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         38,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
@@ -1680,14 +1705,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(value),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1718,6 +1748,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         39,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
@@ -1727,14 +1758,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(value),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1766,6 +1802,7 @@ protected:
         40,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           // first reverted consume
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
@@ -1775,20 +1812,26 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(value),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (1st)";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child (1st)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE()
                 << "try_invoke should have reported inner failure (1st)";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // second reverted consume
+          CopyableInvokeOutputs r2_outputs{};
           auto r2 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
@@ -1798,14 +1841,19 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(value),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r2_outputs);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (2nd)";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child (2nd)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE()
                 << "try_invoke should have reported inner failure (2nd)";
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -1841,6 +1889,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
           // try_invoke: consume + insert, both reverted
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 42,
@@ -1849,13 +1898,19 @@ protected:
             };
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(consume_val, insert_val),
-                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+                std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume+insert";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // The child ran (so the syscall returns None); it must have rolled
+          // back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
             return InvokeError{InvokeErrorCode::Deterministic};
           }

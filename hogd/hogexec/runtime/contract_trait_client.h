@@ -74,9 +74,11 @@ public:
       return invoke_result.error();
     }
 
-    if (invoke_result.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
-        invoke_result.value() !=
-            SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+    // A nonzero error code means the invoke was rejected before a child frame
+    // ran. When a frame ran (code == None), the outcome (Return / Abort /
+    // Fault) is reported via outputs.frame_status; a Fault carries no return
+    // buffer and is surfaced below via get_return_buffer().
+    if (invoke_result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       trace("Invoke SyscallStatus error: {}", invoke_result.value());
       return SyscallError{invoke_result.value()};
     }
@@ -104,8 +106,8 @@ public:
 
     trace("Received return buffer: {}", x23::show(*unwrapped_return_buffer));
 
-    bool manually_reverted = invoke_result.value() ==
-                             SyscallErrorCode::kSyscallErrorCodeFrameReverted;
+    bool manually_reverted =
+        outputs.frame_status == InvocationFrameStatusCode::Abort;
 
     auto return_value =
         trait_meta_t::template decode_return<Name>(return_span,
