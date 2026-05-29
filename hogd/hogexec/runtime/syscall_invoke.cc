@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
@@ -141,26 +142,13 @@ syscall_GetCalldata_inner(
   }
 
   auto const &calldata = syscall_handler.get_calldata();
-  output_written_len =
-      std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
-  if (output_written_len > 0) {
-    assert(output_buffer.data() != nullptr);
-    assert(calldata.data() != nullptr);
-    std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
-                calldata.data(), output_written_len);
-  }
+  output_written_len = copy_to_guest_buffer(
+      output_buffer,
+      std::as_bytes(std::span(calldata.data(), calldata.size())));
 
   auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
-  auto reinterpreted_span = std::as_bytes(span_auth_token_list);
-  output_auth_token_written_len =
-      std::min<RuntimeMemoryLength>(reinterpreted_span.size(),
-                                    output_auth_token_list.size());
-  if (output_auth_token_written_len > 0) {
-    assert(output_auth_token_list.data() != nullptr);
-    assert(reinterpreted_span.data() != nullptr);
-    std::memcpy(reinterpret_cast<uint8_t *>(output_auth_token_list.data()),
-                reinterpreted_span.data(), output_auth_token_written_len);
-  }
+  output_auth_token_written_len = copy_to_guest_buffer(
+      output_auth_token_list, std::as_bytes(span_auth_token_list));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
@@ -367,28 +355,17 @@ syscall_GetReturnedBuffer_inner(
             WrappedGasAmount{0}};
   }
 
-  bool written = false;
-  size_t write_len = std::min(output_buffer.size(), (**status)->size());
-  if (write_len > 0) {
-    assert(output_buffer.data() != nullptr);
-    assert((**status)->data() != nullptr);
-    std::memcpy(output_buffer.data(), (**status)->data(), write_len);
-    written = true;
-  }
-  output_written_len = write_len;
+  auto const &return_buffer = ***status;
+  output_written_len = copy_to_guest_buffer(
+      output_buffer,
+      std::as_bytes(std::span(return_buffer.data(), return_buffer.size())));
+  // Trace records the actual buffer only when bytes were copied; keep this
+  // keyed on bytes copied, not on the (possibly larger) reported length.
+  bool written = output_buffer.size() > 0 && return_buffer.size() > 0;
 
   auto returned_ids = syscall_handler.get_returned_auth_token_ids();
-  auto returned_ids_bytes = std::as_bytes(returned_ids);
-  output_restored_auth_token_ids_written_len =
-      std::min(output_restored_auth_token_ids.size(),
-               returned_ids_bytes.size());
-  if (output_restored_auth_token_ids_written_len > 0) {
-    assert(output_restored_auth_token_ids.data() != nullptr);
-    assert(returned_ids_bytes.data() != nullptr);
-    std::memcpy(output_restored_auth_token_ids.data(),
-                returned_ids_bytes.data(),
-                output_restored_auth_token_ids_written_len);
-  }
+  output_restored_auth_token_ids_written_len = copy_to_guest_buffer(
+      output_restored_auth_token_ids, std::as_bytes(returned_ids));
 
   if (auto *trace_data =
           syscall_handler

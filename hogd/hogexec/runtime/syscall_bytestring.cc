@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "storage_item.hh"
@@ -37,15 +38,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
   auto const *bs = (*(*status));
 
-  output_written_len =
-      std::min<RuntimeMemoryLength>(output_bytestring.size(), bs->size());
-
-  if (output_written_len > 0) {
-    assert(output_bytestring.data() != nullptr);
-    assert(bs->data() != nullptr);
-    std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
-                bs->data(), output_written_len);
-  }
+  output_written_len = copy_to_guest_buffer(
+      output_bytestring, std::as_bytes(std::span(bs->data(), bs->size())));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {

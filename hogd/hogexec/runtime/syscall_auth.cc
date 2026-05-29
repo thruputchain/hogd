@@ -20,6 +20,7 @@
 #include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/ffi_helpers.h"
 #include "hogd/hogexec/components/ffi_types.h"
+#include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
@@ -218,12 +219,8 @@ syscall_ConsumeAuthToken_inner(
 
   auto payload_bytes = std::as_bytes(
       std::span<const uint8_t>{result.payload->data(), result.payload->size()});
-  auto copy_len =
-      std::min<size_t>(payload_bytes.size(), output_auth_payload.size());
-  if (copy_len > 0) {
-    std::memcpy(output_auth_payload.data(), payload_bytes.data(), copy_len);
-  }
-  output_auth_payload_written_len = copy_len;
+  output_auth_payload_written_len =
+      copy_to_guest_buffer(output_auth_payload, payload_bytes);
 
   output_unwrapped_token_id_start = result.new_token_id_start;
   output_unwrapped_token_id_count = result.new_token_id_count;
