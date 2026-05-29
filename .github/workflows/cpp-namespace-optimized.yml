@@ -99,7 +99,7 @@ jobs:
       actions: read
     steps:
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
@@ -229,7 +229,7 @@ jobs:
       actions: read
     steps:
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
@@ -340,7 +340,7 @@ jobs:
       actions: read
     steps:
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
