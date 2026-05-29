@@ -142,13 +142,15 @@ syscall_GetCalldata_inner(
   }
 
   auto const &calldata = syscall_handler.get_calldata();
-  output_written_len = copy_to_guest_buffer(
-      output_buffer,
-      std::as_bytes(std::span(calldata.data(), calldata.size())));
+  output_written_len =
+      copy_to_guest_buffer(output_buffer,
+                           std::as_bytes(
+                               std::span(calldata.data(), calldata.size())));
 
   auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
-  output_auth_token_written_len = copy_to_guest_buffer(
-      output_auth_token_list, std::as_bytes(span_auth_token_list));
+  output_auth_token_written_len =
+      copy_to_guest_buffer(output_auth_token_list,
+                           std::as_bytes(span_auth_token_list));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
@@ -356,16 +358,18 @@ syscall_GetReturnedBuffer_inner(
   }
 
   auto const &return_buffer = ***status;
-  output_written_len = copy_to_guest_buffer(
-      output_buffer,
-      std::as_bytes(std::span(return_buffer.data(), return_buffer.size())));
+  output_written_len =
+      copy_to_guest_buffer(output_buffer,
+                           std::as_bytes(std::span(return_buffer.data(),
+                                                   return_buffer.size())));
   // Trace records the actual buffer only when bytes were copied; keep this
   // keyed on bytes copied, not on the (possibly larger) reported length.
   bool written = output_buffer.size() > 0 && return_buffer.size() > 0;
 
   auto returned_ids = syscall_handler.get_returned_auth_token_ids();
-  output_restored_auth_token_ids_written_len = copy_to_guest_buffer(
-      output_restored_auth_token_ids, std::as_bytes(returned_ids));
+  output_restored_auth_token_ids_written_len =
+      copy_to_guest_buffer(output_restored_auth_token_ids,
+                           std::as_bytes(returned_ids));
 
   if (auto *trace_data =
           syscall_handler

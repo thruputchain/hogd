@@ -967,8 +967,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
         std::span<std::byte> short_buf =
             std::as_writable_bytes(std::span(backing).first(4));
         RuntimeMemoryLength written_len = 0;
-        auto get_res =
-            ctx.syscall<SyscallNo::kBytestringGet>(kKey, short_buf, written_len);
+        auto get_res = ctx.syscall<SyscallNo::kBytestringGet>(kKey, short_buf,
+                                                              written_len);
         if (!get_res.has_value() ||
             get_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringGet failed";

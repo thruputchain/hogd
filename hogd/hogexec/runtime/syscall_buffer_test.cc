@@ -60,8 +60,8 @@ TEST(CopyToGuestBuffer, ReportsFullLengthWhenTruncated)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, bytes_of(src));
 
-  EXPECT_EQ(written, 4u);              // full source length, not the buffer size
-  EXPECT_GT(written, dst.size());     // signals truncation to the contract
+  EXPECT_EQ(written, 4u);         // full source length, not the buffer size
+  EXPECT_GT(written, dst.size()); // signals truncation to the contract
   EXPECT_EQ(backing[0], std::byte{0x11});
   EXPECT_EQ(backing[1], std::byte{0x22});
   EXPECT_EQ(backing[2], std::byte{0xEE}); // one past dst — untouched

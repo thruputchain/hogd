@@ -56,9 +56,10 @@ syscall_RetrocausalQueueConsume_inner(
   }
 
   auto const &queue_entry = *rcq_syscall_status;
-  output_written_len = copy_to_guest_buffer(
-      output_queue_entry,
-      std::as_bytes(std::span(queue_entry.data(), queue_entry.size())));
+  output_written_len =
+      copy_to_guest_buffer(output_queue_entry,
+                           std::as_bytes(std::span(queue_entry.data(),
+                                                   queue_entry.size())));
 
   if (auto *trace_data =
           syscall_handler

@@ -38,8 +38,9 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
   auto const *bs = (*(*status));
 
-  output_written_len = copy_to_guest_buffer(
-      output_bytestring, std::as_bytes(std::span(bs->data(), bs->size())));
+  output_written_len =
+      copy_to_guest_buffer(output_bytestring,
+                           std::as_bytes(std::span(bs->data(), bs->size())));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
