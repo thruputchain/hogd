@@ -19,7 +19,8 @@ inline constexpr uint32_t kArtifactFormatVersion = 3;
 inline constexpr uint32_t kArtifactHeaderBytes = 172;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
-inline constexpr uint32_t kArtifactSyscallAbiVersion = 0;
+// v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
+inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;

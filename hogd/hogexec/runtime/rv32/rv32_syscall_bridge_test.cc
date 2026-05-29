@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -52,16 +51,6 @@ store_le64(std::vector<uint8_t> &memory, uint32_t address, uint64_t value)
   }
 }
 
-int32_t
-load_le32(const std::vector<uint8_t> &memory, uint32_t address)
-{
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < sizeof(uint32_t); ++i) {
-    value |= uint32_t{memory[address + i]} << (i * 8);
-  }
-  return static_cast<int32_t>(value);
-}
-
 std::shared_ptr<const Program>
 make_program(std::initializer_list<uint32_t> words)
 {
@@ -98,8 +87,26 @@ ecall()
   return 0x00000073U;
 }
 
+// Build EcallArgs (a0..a7) from up to eight register values. The bridge
+// sign-extends each, so callers pass the raw 32-bit register contents.
+EcallArgs
+make_ecall_args(std::initializer_list<uint64_t> regs)
+{
+  EcallArgs args = {};
+  uint32_t *slots[] = {&args.a0, &args.a1, &args.a2, &args.a3,
+                       &args.a4, &args.a5, &args.a6, &args.a7};
+  size_t index = 0;
+  for (const uint64_t reg : regs) {
+    if (index < 8) {
+      *slots[index] = static_cast<uint32_t>(reg);
+    }
+    ++index;
+  }
+  return args;
+}
+
 struct CapturedCall {
-  std::array<uint64_t, kSyscallFrameArgWords> args = {};
+  std::array<uint64_t, 8> args = {};
   uint64_t gas_remaining = 0;
   uint64_t memory_size = 0;
   uint8_t first_memory_byte = 0;
@@ -214,26 +221,17 @@ parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
   return {.result_code = -1, .panic = 0, .gas_consumed = 0};
 }
 
-void
-write_bridge_frame(std::vector<uint8_t> &memory, uint32_t frame_address,
-                   std::initializer_list<uint64_t> words)
-{
-  size_t index = 0;
-  for (const uint64_t word : words) {
-    store_le64(memory, frame_address + static_cast<uint32_t>(index * 8), word);
-    ++index;
-  }
-}
-
+// Drive parser_probe_entry through the bridge: mode in a0, probe args in
+// a1..a4. The probe's return code is delivered in a0 (HostResult continue
+// value); there is no result footer under the register-native ABI.
 HostResult
-call_parser_probe(std::vector<uint8_t> &memory, uint32_t frame_address,
-                  std::initializer_list<uint64_t> words)
+call_parser_probe(std::vector<uint8_t> &memory,
+                  std::initializer_list<uint64_t> args)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  write_bridge_frame(memory, frame_address, words);
   SyscallBridgeHost bridge(nullptr, parser_probe_entry);
   MachineView view(0, 10, registers, memory);
-  return bridge.ecall(view, EcallArgs{.a0 = frame_address, .a7 = 0});
+  return bridge.ecall(view, make_ecall_args(args));
 }
 
 TrampolineResult
@@ -244,63 +242,59 @@ require_last_result(const SyscallBridgeHost &bridge)
   return result.value_or(TrampolineResult{});
 }
 
-TEST(Rv32SyscallBridgeTest, marshalsEightWordFrameToHostFn8)
+constexpr uint64_t kSpansMode = static_cast<uint64_t>(ParserProbeMode::kSpans);
+constexpr uint64_t kBoolMode = static_cast<uint64_t>(ParserProbeMode::kBool);
+constexpr uint64_t kSignedI32Mode =
+    static_cast<uint64_t>(ParserProbeMode::kSignedI32);
+constexpr uint64_t kOptionalU32Mode =
+    static_cast<uint64_t>(ParserProbeMode::kOptionalU32);
+
+TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(128);
   memory[0] = 0x5c;
-  constexpr uint32_t kFrameAddress = 16;
-  for (size_t i = 0; i < kSyscallFrameArgWords; ++i) {
-    store_le64(memory,
-               kFrameAddress + static_cast<uint32_t>(i * sizeof(uint64_t)),
-               0x0102030405060708ULL + i);
-  }
 
   MachineView view(0, 77, registers, memory);
   CapturedCall captured;
   captured.result = {.result_code = -7, .panic = 0, .gas_consumed = 12};
   SyscallBridgeHost bridge(&captured, capture_entry);
 
+  // a0..a7 carry the syscall number plus seven argument words; the final
+  // register has bit 31 set to exercise the bridge's sign-extension.
   const HostResult result =
-      bridge.ecall(view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
+      bridge.ecall(view, make_ecall_args({1, 2, 3, 4, 5, 6, 7, 0xFFFFFFFFU}));
 
   ASSERT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xfffffff9U);
   EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
-  EXPECT_EQ(captured.args[0], 0x0102030405060708ULL);
-  EXPECT_EQ(captured.args[7], 0x010203040506070fULL);
+  EXPECT_EQ(captured.args[0], 1ULL);
+  EXPECT_EQ(captured.args[6], 7ULL);
+  EXPECT_EQ(captured.args[7], 0xFFFFFFFFFFFFFFFFULL);
   EXPECT_EQ(captured.gas_remaining, 77U);
   EXPECT_EQ(captured.memory_size, memory.size());
   EXPECT_EQ(captured.first_memory_byte, 0x5cU);
   EXPECT_EQ(memory[7], 0xa5U);
   const TrampolineResult last_result = require_last_result(bridge);
   EXPECT_EQ(last_result.gas_consumed, 12U);
-  EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset], 0xf9U);
-  EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 4], 0U);
-  EXPECT_EQ(memory[kFrameAddress + kSyscallFrameResultOffset + 8], 12U);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
 {
   std::vector<uint8_t> memory(160);
-  constexpr uint32_t kFrameAddress = 0;
   constexpr uint32_t kInput = 120;
   constexpr uint32_t kOutput = 128;
   memory[kInput] = 0x44;
 
   HostResult result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSpans), kInput,
-                         1, kOutput, 1});
+      call_parser_probe(memory, {kSpansMode, kInput, 1, kOutput, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0U);
   EXPECT_EQ(memory[kOutput], 0x44U);
-  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), 0);
 
-  result = call_parser_probe(memory, kFrameAddress,
-                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
-                              memory.size(), 0, memory.size(), 0});
+  result = call_parser_probe(memory,
+                             {kSpansMode, memory.size(), 0, memory.size(), 0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0U);
 }
@@ -308,123 +302,74 @@ TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
 TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
 {
   std::vector<uint8_t> memory(160);
-  constexpr uint32_t kFrameAddress = 0;
 
-  HostResult result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSpans), 159, 2,
-                         128, 1});
+  HostResult result = call_parser_probe(memory, {kSpansMode, 159, 2, 128, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
-  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 
-  result = call_parser_probe(memory, kFrameAddress,
-                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
-                              120, 1, 159, 2});
+  result = call_parser_probe(memory, {kSpansMode, 120, 1, 159, 2});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
-  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 
-  result = call_parser_probe(memory, kFrameAddress,
-                             {static_cast<uint64_t>(ParserProbeMode::kSpans),
-                              120, 8, 124, 4});
+  result = call_parser_probe(memory, {kSpansMode, 120, 8, 124, 4});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
-  EXPECT_EQ(load_le32(memory, kFrameAddress + kSyscallFrameResultOffset), -1);
 }
 
-TEST(Rv32SyscallBridgeTest, parserProbeEnforcesCanonicalScalars)
+TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
 {
   std::vector<uint8_t> memory(160);
-  constexpr uint32_t kFrameAddress = 0;
 
-  HostResult result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kBool), 1});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0U);
+  // bool accepts only 0/1; 2 is not a canonical bool encoding.
+  EXPECT_EQ(call_parser_probe(memory, {kBoolMode, 1}).continue_value(), 0U);
+  EXPECT_EQ(call_parser_probe(memory, {kBoolMode, 0}).continue_value(), 0U);
+  EXPECT_EQ(call_parser_probe(memory, {kBoolMode, 2}).continue_value(),
+            0xffffFFFFU);
 
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kBool), 0});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0U);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kBool), 2});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
-                         0});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0U);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
-                         std::numeric_limits<int32_t>::max()});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0U);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
-                         std::numeric_limits<uint64_t>::max()});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0U);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
-                         0xffffFFFFU});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
-
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kSignedI32),
-                         0x0000000080000000ULL});
-  EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
+  // The bridge sign-extends every register, so any 32-bit pattern is a
+  // canonical signed encoding. Unlike the WASM i64 ABI (which can present
+  // non-canonical words), 0xFFFFFFFF and 0x80000000 are accepted here as -1
+  // and INT_MIN respectively.
+  EXPECT_EQ(call_parser_probe(memory, {kSignedI32Mode, 0}).continue_value(),
+            0U);
+  EXPECT_EQ(
+      call_parser_probe(memory, {kSignedI32Mode, 0x7FFFFFFFU}).continue_value(),
+      0U);
+  EXPECT_EQ(
+      call_parser_probe(memory, {kSignedI32Mode, 0xFFFFFFFFU}).continue_value(),
+      0U);
+  EXPECT_EQ(
+      call_parser_probe(memory, {kSignedI32Mode, 0x80000000U}).continue_value(),
+      0U);
 }
 
-TEST(Rv32SyscallBridgeTest, parserProbeUsesUint64MaxOptionalPointerSentinel)
+TEST(Rv32SyscallBridgeTest, parserProbeOptionalPointerSentinelFromAllOnesReg)
 {
   std::vector<uint8_t> memory(180);
-  constexpr uint32_t kFrameAddress = 0;
   constexpr uint32_t kValueAddress = 120;
   store_le64(memory, kValueAddress, 37);
+  store_le64(memory, 0, 5);
 
+  // 0xFFFFFFFF sign-extends to UINT64_MAX, the parser's optional-pointer null
+  // sentinel, so the optional argument resolves to None (probe returns 1).
   HostResult result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
-                         std::numeric_limits<uint64_t>::max()});
+      call_parser_probe(memory, {kOptionalU32Mode,
+                                 std::numeric_limits<uint64_t>::max()});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 1U);
 
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
-                         0});
+  // Offset 0 is a valid (non-sentinel) pointer reading memory[0..3] == 5.
+  result = call_parser_probe(memory, {kOptionalU32Mode, 0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
-  EXPECT_EQ(result.continue_value(),
-            static_cast<uint32_t>(ParserProbeMode::kOptionalU32));
+  EXPECT_EQ(result.continue_value(), 5U);
 
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
-                         179});
+  // Out-of-bounds optional pointer fails validation.
+  result = call_parser_probe(memory, {kOptionalU32Mode, 179});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 
-  result =
-      call_parser_probe(memory, kFrameAddress,
-                        {static_cast<uint64_t>(ParserProbeMode::kOptionalU32),
-                         kValueAddress});
+  // In-bounds optional pointer dereferences the stored value.
+  result = call_parser_probe(memory, {kOptionalU32Mode, kValueAddress});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 37U);
 }
@@ -432,11 +377,11 @@ TEST(Rv32SyscallBridgeTest, parserProbeUsesUint64MaxOptionalPointerSentinel)
 TEST(Rv32SyscallBridgeTest, trapsWithoutCallingNullEntry)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  std::vector<uint8_t> memory(64);
   SyscallBridgeHost bridge(nullptr, nullptr);
   MachineView view(0, 10, registers, memory);
 
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  const HostResult result = bridge.ecall(view, EcallArgs{});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
@@ -446,69 +391,21 @@ TEST(Rv32SyscallBridgeTest, trapsWithoutCallingNullEntry)
 TEST(Rv32SyscallBridgeTest, trapsIfHostEntryThrows)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  std::vector<uint8_t> memory(64);
   SyscallBridgeHost bridge(nullptr, throwing_entry);
   MachineView view(0, 10, registers, memory);
 
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  const HostResult result = bridge.ecall(view, EcallArgs{});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
   EXPECT_FALSE(bridge.last_result().has_value());
 }
 
-TEST(Rv32SyscallBridgeTest, trapsBeforeCallingHostForInvalidFrame)
-{
-  std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes - 1);
-  CapturedCall captured;
-  SyscallBridgeHost bridge(&captured, capture_entry);
-  MachineView view(0, 10, registers, memory);
-
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
-
-  EXPECT_EQ(result.status, HostStatus::kTrap);
-  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
-  EXPECT_EQ(captured.calls, 0);
-  EXPECT_FALSE(bridge.last_result().has_value());
-}
-
-TEST(Rv32SyscallBridgeTest, trapsBeforeCallingHostForMisalignedFrame)
-{
-  std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes + 1);
-  CapturedCall captured;
-  SyscallBridgeHost bridge(&captured, capture_entry);
-  MachineView view(0, 10, registers, memory);
-
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 1, .a7 = 0});
-
-  EXPECT_EQ(result.status, HostStatus::kTrap);
-  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
-  EXPECT_EQ(captured.calls, 0);
-  EXPECT_FALSE(bridge.last_result().has_value());
-}
-
-TEST(Rv32SyscallBridgeTest, trapsOnUnsupportedBridgeVersion)
-{
-  std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
-  CapturedCall captured;
-  SyscallBridgeHost bridge(&captured, capture_entry);
-  MachineView view(0, 10, registers, memory);
-
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 1});
-
-  EXPECT_EQ(result.status, HostStatus::kTrap);
-  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
-  EXPECT_EQ(captured.calls, 0);
-  EXPECT_FALSE(bridge.last_result().has_value());
-}
-
 TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  std::vector<uint8_t> memory(64);
   memory[7] = 0x11;
   CapturedCall captured;
   captured.result = {.result_code = 3,
@@ -517,7 +414,7 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  const HostResult result = bridge.ecall(view, EcallArgs{});
 
   EXPECT_EQ(result.status, HostStatus::kOutOfGas);
   EXPECT_EQ(result.gas_consumed, 4U);
@@ -525,13 +422,12 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   const TrampolineResult last_result = require_last_result(bridge);
   EXPECT_EQ(last_result.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
   EXPECT_EQ(memory[7], 0x11U);
-  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
 }
 
 TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  std::vector<uint8_t> memory(64);
   memory[7] = 0x11;
   CapturedCall captured;
   captured.result = {.result_code = 3,
@@ -541,7 +437,7 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  const HostResult result = bridge.ecall(view, EcallArgs{});
 
   EXPECT_EQ(result.status, HostStatus::kTrap);
   EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kFatal);
@@ -553,13 +449,12 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
   EXPECT_EQ(last_result.panic,
             std::to_underlying(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(memory[7], 0x11U);
-  EXPECT_EQ(memory[kSyscallFrameResultOffset + 4], 0U);
 }
 
 TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes, 0x55);
+  std::vector<uint8_t> memory(64, 0x55);
   CapturedCall captured;
   captured.result = {.result_code = std::to_underlying(
                          SyscallErrorCode::kSyscallErrorCodeFault),
@@ -570,7 +465,7 @@ TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
   MachineView view(0, 10, registers, memory);
   const std::vector<uint8_t> before = memory;
 
-  const HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  const HostResult result = bridge.ecall(view, EcallArgs{});
 
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(),
@@ -583,7 +478,7 @@ TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
 TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  std::vector<uint8_t> memory(kSyscallFrameBytes);
+  std::vector<uint8_t> memory(64);
   CapturedCall captured;
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
@@ -591,7 +486,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   captured.result = {.result_code = 3,
                      .panic = std::to_underlying(HostFnErrorCode::Return),
                      .gas_consumed = 4};
-  HostResult result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  HostResult result = bridge.ecall(view, EcallArgs{});
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.halt_code(), 0U);
   EXPECT_EQ(result.gas_consumed, 4U);
@@ -599,7 +494,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   captured.result = {.result_code = 9,
                      .panic = std::to_underlying(HostFnErrorCode::Exit),
                      .gas_consumed = 4};
-  result = bridge.ecall(view, EcallArgs{.a0 = 0, .a7 = 0});
+  result = bridge.ecall(view, EcallArgs{});
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.halt_code(), 9U);
   EXPECT_EQ(result.gas_consumed, 4U);
@@ -608,16 +503,11 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
 TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
 {
   const auto program = make_program({
-      addi(10, 0, 32),
-      addi(17, 0, kSyscallBridgeVersion),
+      addi(10, 0, 1), // a0 = syscall number 1
+      addi(11, 0, 2), // a1 = argument 2
       ecall(),
   });
   Machine machine(program, 160, 20);
-  std::vector<uint8_t> frame(kSyscallFrameBytes);
-  for (size_t i = 0; i < kSyscallFrameArgWords; ++i) {
-    store_le64(frame, static_cast<uint32_t>(i * sizeof(uint64_t)), i + 1);
-  }
-  ASSERT_TRUE(machine.view().write_memory(32, frame));
 
   CapturedCall captured;
   captured.result = {.result_code = 1234, .panic = 0, .gas_consumed = 5};
@@ -634,6 +524,7 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
   EXPECT_EQ(machine.reg(10), 1234U);
   EXPECT_EQ(captured.calls, 1);
   EXPECT_EQ(captured.args[0], 1U);
+  EXPECT_EQ(captured.args[1], 2U);
   EXPECT_EQ(machine.memory()[7], 0xa5U);
   EXPECT_EQ(machine.gas_remaining(), 12U);
 }
@@ -641,17 +532,8 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
 TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
-  constexpr uint32_t kFrameAddress = 16;
   std::vector<uint8_t> first_memory(128, 0x33);
   std::vector<uint8_t> second_memory = first_memory;
-  for (size_t i = 0; i < kSyscallFrameArgWords; ++i) {
-    store_le64(first_memory,
-               kFrameAddress + static_cast<uint32_t>(i * sizeof(uint64_t)),
-               0x1000U + i);
-    store_le64(second_memory,
-               kFrameAddress + static_cast<uint32_t>(i * sizeof(uint64_t)),
-               0x1000U + i);
-  }
 
   CapturedCall first_captured;
   first_captured.result = {.result_code = 17,
@@ -664,10 +546,10 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
   MachineView first_view(0, 44, registers, first_memory);
   MachineView second_view(0, 44, registers, second_memory);
 
-  const HostResult first_result =
-      first_bridge.ecall(first_view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
-  const HostResult second_result =
-      second_bridge.ecall(second_view, EcallArgs{.a0 = kFrameAddress, .a7 = 0});
+  const EcallArgs args = make_ecall_args(
+      {0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1006, 0x1007});
+  const HostResult first_result = first_bridge.ecall(first_view, args);
+  const HostResult second_result = second_bridge.ecall(second_view, args);
 
   EXPECT_EQ(first_result.status, second_result.status);
   EXPECT_EQ(first_result.continue_value(), second_result.continue_value());
@@ -689,7 +571,7 @@ TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
       addi(10, 0, 0),
       ecall(),
   });
-  Machine machine(program, kSyscallFrameBytes, 9);
+  Machine machine(program, 64, 9);
   SequencedGasCall captured{.gas_consumed = 3};
   SyscallBridgeHost bridge(&captured, sequenced_gas_entry);
 

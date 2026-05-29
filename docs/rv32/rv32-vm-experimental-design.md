@@ -67,22 +67,36 @@ host memory effects.
 
 ## Host Boundary
 
-The bridge ABI is memory-frame based:
+The bridge ABI is register-native:
 
-- `a0`: guest address of the syscall frame.
-- `a7`: RV32 syscall bridge version.
-- Frame: syscall number plus ten little-endian `uint64_t` argument words.
-- Footer: `TrampolineResult` result code, panic code, and gas consumed.
+- `a0`: syscall number.
+- `a1`–`a7`: up to seven syscall argument words.
+- Each RV32 register is **sign-extended** to the `uint64_t` that `syscall_entry`
+  consumes. This is exact because every syscall argument is a 32-bit guest
+  pointer/length or a `<=32`-bit scalar (64-bit values travel through guest
+  memory by pointer). Sign-extension also lets a guest express signed scalars
+  and the parser's `UINT64_MAX` optional-pointer null sentinel (`0xFFFFFFFF`
+  sign-extends to all-ones), which a zero-extended register could not.
+- Result: the syscall return code is delivered in `a0`; output buffers and
+  lengths are written into guest memory through the pointers the guest supplied.
+  There is no result frame or footer.
+- There is no per-call version register: the syscall ABI version is validated at
+  artifact load time (all eight registers are needed for the widest syscalls, so
+  no spare register remains).
 
-The bridge reuses the shared `syscall_entry` path, so parser, aliasing, tracing,
-gas, and output behavior remain aligned with WASM.
+The reduced argument count (the invoke syscall packs `entrypoint_id`,
+`gas_limit`, and `flags` into `CopyableInvokeInputs`, and its output lengths into
+`CopyableInvokeOutputs`, both passed by pointer) is what lets every syscall fit
+RISC-V's argument registers natively. The bridge reuses the shared
+`syscall_entry` path, so parser, aliasing, tracing, gas, and output behavior
+remain aligned with WASM.
 
 Atomicity policy:
 
 - success, `Return`, and `Exit` write back scratch memory;
 - parser/output fault returns the fault code in `a0` without writeback;
-- OOG, bridge ABI faults, host throws, and fatal/unknown host panics do not
-  write back scratch memory;
+- OOG, host throws, and fatal/unknown host panics do not write back scratch
+  memory;
 - host OOG and over-budget host gas roll guest memory back to the pre-host
   ECALL snapshot.
 
@@ -99,7 +113,7 @@ The current artifact format is v3:
 - header bytes: `172`
 - VM profile digest
 - entry ABI version: `1`
-- syscall ABI version: `0`
+- syscall ABI version: `1` (register-native: args in `a0`–`a7`, no frame/footer)
 - gas schedule version and digest
 - memory size, code size, initial memory size
 - offsets for code, dispatch table, and initial memory
@@ -144,7 +158,7 @@ The VM is Harvard-style:
 The fixture layout makes link-time virtual addresses match PC-space:
 
 - `.text` starts at virtual address `0`.
-- `.rodata`, `.data`, `.bss`, frames, buffers, and stack live above `.text`
+- `.rodata`, `.data`, `.bss`, buffers, and stack live above `.text`
   inside the 64 KiB memory limit.
 - Low guest-memory bytes corresponding to `.text` are dead space.
 - Initial memory is a full 64 KiB image, not sparse sections.
@@ -160,10 +174,10 @@ The fixture lowerer must fail loudly on unsupported compiler output:
 - dispatch entry symbols resolve to valid `.text` PCs;
 - build metadata records relevant source/config hashes.
 
-The Rust fixture uses the normal RV32 bridge ABI: guest writes a syscall frame,
-puts its address in `a0`, puts the bridge version in `a7`, executes `ecall`, and
-reads the footer after return. Normal completion is the Return syscall; `_start`
-must not return.
+The Rust fixture uses the register-native RV32 bridge ABI: the guest loads the
+syscall number into `a0` and arguments into `a1`–`a7`, executes `ecall`, and
+reads the return code from `a0` (outputs are written through the guest pointers
+it passed). Normal completion is the Return syscall; `_start` must not return.
 
 ## Milestone Status
 

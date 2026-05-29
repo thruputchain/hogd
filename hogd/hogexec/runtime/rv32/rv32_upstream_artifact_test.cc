@@ -43,19 +43,10 @@ using rv32::test_program::store;
 constexpr int32_t kRv32ContractId = 7;
 constexpr ContractAddress kRv32ContractAddress =
     NativeContractTestFramework::make_contract_address(7);
-constexpr uint32_t kFrameAddress = 64;
 constexpr uint32_t kReturnBufferAddress = 192;
 constexpr uint32_t kDataAddress = 256;
 constexpr uint32_t kMemoryBytes = 384;
 constexpr GasAmount kEnoughGas = 10'000;
-
-void
-store_le64(std::span<uint8_t> bytes, uint32_t offset, uint64_t value)
-{
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
-  }
-}
 
 void
 store_le32(std::span<uint8_t> bytes, uint32_t offset, uint32_t value)
@@ -70,29 +61,21 @@ make_return_memory()
 {
   std::vector<uint8_t> memory(kMemoryBytes);
   memory[kReturnBufferAddress] = 0xffU;
-  const std::array<uint64_t, 6> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kReturn),
-      kReturnBufferAddress,
-      1,
-      0,
-      0,
-      0,
-  };
-  for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), frame_words[i]);
-  }
   return memory;
 }
 
 std::vector<uint32_t>
 return_with_code(uint8_t code)
 {
+  // Register-native Return of a single byte from kReturnBufferAddress: store
+  // the code, then a0=kReturn, a1=buffer, a2=length, ecall.
   return {
       addi(7, 0, code),
       addi(8, 0, kReturnBufferAddress),
       store(8, 7, 0, 0),
-      addi(10, 0, kFrameAddress),
-      addi(17, 0, rv32::kSyscallBridgeVersion),
+      addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+      addi(11, 0, kReturnBufferAddress),
+      addi(12, 0, 1),
       0x00000073U,
   };
 }
@@ -111,7 +94,7 @@ std::vector<uint32_t>
 wrap_with_pass_fail(std::vector<uint32_t> setup)
 {
   std::vector<uint32_t> words = std::move(setup);
-  constexpr size_t kReturnWords = 6;
+  constexpr size_t kReturnWords = 7;
   constexpr auto kBranchOverPassReturn =
       static_cast<int32_t>((1 + kReturnWords) * rv32::kInstructionBytes);
   words.push_back(branch(1, 5, 6, kBranchOverPassReturn));

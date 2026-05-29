@@ -70,14 +70,10 @@ constexpr ContractAddress kWasmContractAddress =
     NativeContractTestFramework::make_contract_address(6);
 constexpr ContractAddress kRv32ContractAddress =
     NativeContractTestFramework::make_contract_address(7);
-constexpr uint32_t kFrameAddress = 64;
 constexpr uint32_t kReturnBufferAddress = 192;
 constexpr uint32_t kShaInputAddress = 224;
 constexpr uint32_t kShaOutputAddress = 320;
 constexpr uint32_t kShaMemoryBytes = 512;
-constexpr uint32_t kEffectBytestringFrameAddress = 64;
-constexpr uint32_t kEffectLogEventFrameAddress = 192;
-constexpr uint32_t kEffectReturnFrameAddress = 320;
 constexpr uint32_t kEffectStorageKeyAddress = 448;
 constexpr uint32_t kEffectStorageValueAddress = 480;
 constexpr uint32_t kEffectTopicAddress = 512;
@@ -152,6 +148,39 @@ uint32_t
 ecall()
 {
   return 0x00000073U;
+}
+
+std::shared_ptr<const rv32::Program>
+make_program(const std::vector<uint32_t> &words)
+{
+  std::vector<uint8_t> code;
+  code.reserve(words.size() * rv32::kInstructionBytes);
+  for (const uint32_t word : words) {
+    append_u32(code, word);
+  }
+  auto result =
+      rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
+  if (!result.has_value()) {
+    ADD_FAILURE() << "failed to create RV32 test program";
+    return {};
+  }
+  return std::make_shared<rv32::Program>(std::move(*result));
+}
+
+// Append the register-native syscall sequence: "addi a(0+i), 0, arg_i" for each
+// argument (a0 carries the syscall number) followed by ecall. Immediates must
+// fit addi's signed 12-bit field; -1 yields 0xFFFFFFFF, the optional-pointer
+// None sentinel after the bridge sign-extends it.
+void
+append_syscall(std::vector<uint32_t> &program,
+               std::initializer_list<int32_t> arg_regs)
+{
+  uint8_t reg = 10; // a0
+  for (const int32_t imm : arg_regs) {
+    program.push_back(addi(reg, 0, imm));
+    ++reg;
+  }
+  program.push_back(ecall());
 }
 
 TrampolineResult
@@ -269,41 +298,14 @@ wasm_consume_too_much_gas_entry(ExternHostCallContext /*unused*/,
                               wasm_context.gas_remaining);
 }
 
+// Stage the Return payload at kReturnBufferAddress. Under the register-native
+// ABI the Return syscall arguments (buffer pointer/length) are loaded into
+// registers by the program, not written to a memory frame.
 void
-store_le64(std::span<uint8_t> bytes, uint32_t offset, uint64_t value)
+write_return_payload(std::span<uint8_t> memory,
+                     std::span<const uint8_t> payload)
 {
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
-  }
-}
-
-void
-write_return_frame(std::span<uint8_t> memory, std::span<const uint8_t> payload)
-{
-  const std::array<uint64_t, 6> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kReturn),
-      kReturnBufferAddress,
-      payload.size(),
-      0,
-      0,
-      0,
-  };
-  for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), frame_words[i]);
-  }
   std::ranges::copy(payload, memory.begin() + kReturnBufferAddress);
-}
-
-void
-write_syscall_frame(std::span<uint8_t> memory, uint32_t frame_address,
-                    std::initializer_list<uint64_t> words)
-{
-  ASSERT_LE(words.size(), rv32::kSyscallFrameArgWords);
-  size_t i = 0;
-  for (const uint64_t word : words) {
-    store_le64(memory, frame_address + (i * sizeof(uint64_t)), word);
-    ++i;
-  }
 }
 
 std::vector<uint8_t>
@@ -311,8 +313,20 @@ make_initial_return_memory(std::span<const uint8_t> payload)
 {
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
-  write_return_frame(initial_memory, payload);
+  write_return_payload(initial_memory, payload);
   return initial_memory;
+}
+
+// Emit the register-native Return syscall returning `length` bytes from
+// kReturnBufferAddress. Only a0..a2 are loaded; the remaining Return arguments
+// (revert flag, owned-auth-token span) default to zero in freshly-zeroed
+// machine registers.
+void
+append_return(std::vector<uint32_t> &program, uint32_t length)
+{
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
+                           static_cast<int32_t>(kReturnBufferAddress),
+                           static_cast<int32_t>(length)});
 }
 
 rv32::RuntimeContractImage
@@ -321,9 +335,11 @@ make_single_ecall_image(HostFn8 entry)
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
   return rv32::RuntimeContractImage{
+      // Mock host entries ignore their arguments, so any three-instruction
+      // ecall body suffices (the gas accounting depends on this length).
       .program = make_program({
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
+          addi(10, 0, 0),
+          addi(11, 0, 0),
           ecall(),
       }),
       .initial_memory = std::move(initial_memory),
@@ -333,33 +349,14 @@ make_single_ecall_image(HostFn8 entry)
 }
 
 rv32::RuntimeContractImage
-make_bridge_abi_fault_image(uint32_t frame_address, uint32_t bridge_version)
-{
-  constexpr uint32_t kMemoryBytes = 256;
-  std::vector<uint8_t> initial_memory(kMemoryBytes);
-  return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(10, 0, frame_address),
-          addi(17, 0, bridge_version),
-          ecall(),
-      }),
-      .initial_memory = std::move(initial_memory),
-      .memory_bytes = kMemoryBytes,
-      .entry = &unrecoverable_entry,
-  };
-}
-
-rv32::RuntimeContractImage
 make_return_image(std::span<const uint8_t> payload)
 {
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory = make_initial_return_memory(payload);
+  std::vector<uint32_t> program;
+  append_return(program, payload.size());
   return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          ecall(),
-      }),
+      .program = make_program(program),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kMemoryBytes,
   };
@@ -370,33 +367,29 @@ make_two_method_return_image(std::span<const uint8_t> zero_payload,
                              std::span<const uint8_t> one_payload)
 {
   constexpr uint32_t kMemoryBytes = 256;
-  constexpr uint32_t kSecondFrameAddress = 128;
   constexpr uint32_t kZeroReturnBufferAddress = 192;
   constexpr uint32_t kOneReturnBufferAddress = 224;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
-  write_syscall_frame(initial_memory, kFrameAddress,
-                      {static_cast<uint64_t>(SyscallNo::kReturn),
-                       kZeroReturnBufferAddress, zero_payload.size(), 0, 0, 0});
-  write_syscall_frame(initial_memory, kSecondFrameAddress,
-                      {static_cast<uint64_t>(SyscallNo::kReturn),
-                       kOneReturnBufferAddress, one_payload.size(), 0, 0, 0});
   std::ranges::copy(zero_payload,
                     initial_memory.begin() + kZeroReturnBufferAddress);
   std::ranges::copy(one_payload,
                     initial_memory.begin() + kOneReturnBufferAddress);
 
+  std::vector<uint32_t> program;
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
+                           static_cast<int32_t>(kZeroReturnBufferAddress),
+                           static_cast<int32_t>(zero_payload.size()), 0, 0, 0});
+  const uint32_t method_one_pc =
+      static_cast<uint32_t>(program.size()) * rv32::kInstructionBytes;
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
+                           static_cast<int32_t>(kOneReturnBufferAddress),
+                           static_cast<int32_t>(one_payload.size()), 0, 0, 0});
+
   return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          ecall(),
-          addi(10, 0, kSecondFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          ecall(),
-      }),
+      .program = make_program(program),
       .initial_memory = std::move(initial_memory),
       .dispatch_table = {{.method_id = 0, .pc = 0},
-                         {.method_id = 1, .pc = 3 * rv32::kInstructionBytes}},
+                         {.method_id = 1, .pc = method_one_pc}},
       .memory_bytes = kMemoryBytes,
   };
 }
@@ -405,34 +398,19 @@ rv32::RuntimeContractImage
 make_sha256_then_return_image(std::span<const uint8_t> input)
 {
   std::vector<uint8_t> initial_memory(kShaMemoryBytes);
-  const std::array<uint64_t, 4> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kSHA256),
-      kShaInputAddress,
-      input.size(),
-      kShaOutputAddress,
-  };
-  for (size_t i = 0; i < frame_words.size(); ++i) {
-    store_le64(initial_memory, kFrameAddress + (i * sizeof(uint64_t)),
-               frame_words[i]);
-  }
   std::ranges::copy(input, initial_memory.begin() + kShaInputAddress);
 
+  std::vector<uint32_t> program;
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kSHA256),
+                           static_cast<int32_t>(kShaInputAddress),
+                           static_cast<int32_t>(input.size()),
+                           static_cast<int32_t>(kShaOutputAddress)});
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
+                           static_cast<int32_t>(kShaOutputAddress),
+                           static_cast<int32_t>(SHA256Hash{}.size()), 0, 0, 0});
+
   return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(10, 0, kFrameAddress),
-          addi(8, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          ecall(),
-          addi(5, 0, std::to_underlying(SyscallNo::kReturn)),
-          sw(5, 8, 0),
-          addi(5, 0, kShaOutputAddress),
-          sw(5, 8, 8),
-          addi(5, 0, SHA256Hash{}.size()),
-          sw(5, 8, 16),
-          sw(0, 8, 24),
-          addi(10, 8, 0),
-          ecall(),
-      }),
+      .program = make_program(program),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kShaMemoryBytes,
   };
@@ -492,8 +470,10 @@ make_artifact_arithmetic_control_flow_image()
           rv32::test_program::branch(1, 5, 0, -8),
           addi(8, 0, kReturnBufferAddress),
           sw(6, 8, 0),
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
+          // Return the computed word: a0=kReturn, a1=buffer, a2=length.
+          addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+          addi(11, 0, kReturnBufferAddress),
+          addi(12, 0, static_cast<int32_t>(return_placeholder.size())),
           ecall(),
       },
       std::move(initial_memory));
@@ -523,8 +503,10 @@ make_artifact_memory_transform_image()
           addi(2, 2, 1),
           addi(3, 3, -1),
           rv32::test_program::branch(1, 3, 0, -24),
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
+          // Return the copied region: a0=kReturn, a1=buffer, a2=length.
+          addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+          addi(11, 0, kReturnBufferAddress),
+          addi(12, 0, kCopyBytes),
           ecall(),
       },
       std::move(initial_memory));
@@ -544,31 +526,25 @@ make_storage_event_return_image()
   std::ranges::copy(kEffectEventData,
                     initial_memory.begin() + kEffectEventDataAddress);
 
-  write_syscall_frame(initial_memory, kEffectBytestringFrameAddress,
-                      {static_cast<uint64_t>(SyscallNo::kBytestringSet),
-                       kEffectStorageKeyAddress, kEffectStorageValueAddress,
-                       kEffectStorageValue.size(),
-                       std::to_underlying(StorageDeltaFlags::None)});
-  write_syscall_frame(initial_memory, kEffectLogEventFrameAddress,
-                      {static_cast<uint64_t>(SyscallNo::kLogEvent),
-                       kEffectTopicAddress,
-                       std::numeric_limits<uint64_t>::max(),
-                       std::numeric_limits<uint64_t>::max(),
-                       kEffectEventDataAddress, kEffectEventData.size()});
-  write_syscall_frame(initial_memory, kEffectReturnFrameAddress,
-                      {static_cast<uint64_t>(SyscallNo::kReturn), 0, 0, 0, 0,
-                       0});
+  std::vector<uint32_t> program;
+  // BytestringSet(key, value, value_len, flags).
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kBytestringSet),
+                           static_cast<int32_t>(kEffectStorageKeyAddress),
+                           static_cast<int32_t>(kEffectStorageValueAddress),
+                           static_cast<int32_t>(kEffectStorageValue.size()),
+                           static_cast<int32_t>(StorageDeltaFlags::None)});
+  // LogEvent(topic0, topic1=None, topic2=None, data, data_len). The -1 register
+  // values sign-extend to the UINT64_MAX optional-pointer None sentinel.
+  append_syscall(program, {static_cast<int32_t>(SyscallNo::kLogEvent),
+                           static_cast<int32_t>(kEffectTopicAddress), -1, -1,
+                           static_cast<int32_t>(kEffectEventDataAddress),
+                           static_cast<int32_t>(kEffectEventData.size())});
+  // Return with an empty buffer.
+  append_syscall(program,
+                 {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
 
   return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          addi(10, 0, kEffectBytestringFrameAddress),
-          ecall(),
-          addi(10, 0, kEffectLogEventFrameAddress),
-          ecall(),
-          addi(10, 0, kEffectReturnFrameAddress),
-          ecall(),
-      }),
+      .program = make_program(program),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kEffectMemoryBytes,
   };
@@ -614,19 +590,14 @@ make_invalid_syscall_then_return_image()
 {
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
-  store_le64(initial_memory, kFrameAddress,
-             static_cast<uint64_t>(kSyscallCount));
+  std::vector<uint32_t> program;
+  // An out-of-range syscall number falls back to NoSyscall (continue); the
+  // contract then terminates with an empty Return.
+  append_syscall(program, {static_cast<int32_t>(kSyscallCount)});
+  append_syscall(program,
+                 {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
   return rv32::RuntimeContractImage{
-      .program = make_program({
-          addi(10, 0, kFrameAddress),
-          addi(8, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
-          ecall(),
-          addi(5, 0, std::to_underlying(SyscallNo::kReturn)),
-          sw(5, 8, 0),
-          addi(10, 8, 0),
-          ecall(),
-      }),
+      .program = make_program(program),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = kMemoryBytes,
   };
@@ -1481,8 +1452,10 @@ TEST_F(Rv32RuntimeContextTest, ArtifactMissingDispatchMethodIsDeterministic)
   const std::array<uint8_t, 1> payload = {0};
   auto image = make_artifact_runtime_image(
       {
-          addi(10, 0, kFrameAddress),
-          addi(17, 0, rv32::kSyscallBridgeVersion),
+          // Body is never reached: dispatch lacks method 0 and traps first.
+          addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+          addi(11, 0, kReturnBufferAddress),
+          addi(12, 0, static_cast<int32_t>(payload.size())),
           ecall(),
       },
       make_initial_return_memory(payload), {{.method_id = 1, .pc = 0}});
@@ -1587,7 +1560,8 @@ TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
   auto result = handler.root_invoke();
 
   ASSERT_TRUE(result.is_root_success());
-  EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas);
+  // Three argument loads (a0..a2) plus the ecall instruction.
+  EXPECT_EQ(result.gas_consumed_, 4U * rv32::kBaseInstructionGas);
   auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   ASSERT_EQ(output.return_buffer().size(), payload.size());
@@ -1711,34 +1685,6 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   expect_mapping(&validation_failure_entry, InvokeErrorCode::ValidationFailure);
   expect_mapping(&abandon_entry, InvokeErrorCode::Abandon);
   expect_mapping(&unknown_panic_entry, InvokeErrorCode::Unrecoverable);
-}
-
-TEST_F(Rv32RuntimeContextTest, BridgeAbiFaultsMapToDeterministic)
-{
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-
-  auto expect_deterministic = [&](rv32::RuntimeContractImage image) {
-    auto rv32_context =
-        rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
-    auto handler =
-        make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                     rv32_context);
-    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
-
-    ASSERT_FALSE(result.is_root_success());
-    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
-    EXPECT_EQ(result.gas_consumed_, 3U * rv32::kBaseInstructionGas);
-  };
-
-  expect_deterministic(
-      make_bridge_abi_fault_image(kFrameAddress,
-                                  rv32::kSyscallBridgeVersion + 1));
-  expect_deterministic(
-      make_bridge_abi_fault_image(kFrameAddress + 1,
-                                  rv32::kSyscallBridgeVersion));
-  expect_deterministic(
-      make_bridge_abi_fault_image(200, rv32::kSyscallBridgeVersion));
 }
 
 TEST_F(Rv32RuntimeContextTest, FatalCodeZeroHostTrapMapsToUnrecoverable)

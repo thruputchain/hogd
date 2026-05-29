@@ -40,46 +40,25 @@
 
 namespace {
 
-constexpr uint32_t kFrameAddress = 0;
 constexpr uint32_t kInputAddress = 128;
 constexpr uint32_t kOutputAddress = 192;
 constexpr uint64_t kPlentyOfGas = 1'000'000;
 
-void
-store_le64(std::span<uint8_t> bytes, uint32_t offset, uint64_t value)
+// Register-native ABI: the syscall number and up to seven argument words are
+// placed in a0..a7. Build the EcallArgs the bridge consumes; the bridge
+// sign-extends each register, so callers pass the raw register contents.
+hogd::rv32::EcallArgs
+make_ecall_args(std::span<const uint64_t> words)
 {
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  hogd::rv32::EcallArgs args = {};
+  uint32_t *slots[] = {&args.a0, &args.a1, &args.a2, &args.a3,
+                       &args.a4, &args.a5, &args.a6, &args.a7};
+  constexpr size_t kMaxArgs = 8;
+  EXPECT_LE(words.size(), kMaxArgs);
+  for (size_t i = 0; i < words.size() && i < kMaxArgs; ++i) {
+    *slots[i] = static_cast<uint32_t>(words[i]);
   }
-}
-
-int32_t
-load_le32(std::span<const uint8_t> bytes, uint32_t offset)
-{
-  uint32_t value = 0;
-  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-    value |= uint32_t{bytes[offset + i]} << (i * 8);
-  }
-  return static_cast<int32_t>(value);
-}
-
-uint64_t
-load_le64(std::span<const uint8_t> bytes, uint32_t offset)
-{
-  uint64_t value = 0;
-  for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-    value |= uint64_t{bytes[offset + i]} << (i * 8);
-  }
-  return value;
-}
-
-void
-write_frame(std::span<uint8_t> memory, std::span<const uint64_t> words)
-{
-  ASSERT_LE(words.size(), hogd::rv32::kSyscallFrameArgWords);
-  for (size_t i = 0; i < words.size(); ++i) {
-    store_le64(memory, kFrameAddress + (i * sizeof(uint64_t)), words[i]);
-  }
+  return args;
 }
 
 } // namespace
@@ -94,23 +73,6 @@ append_u32(std::vector<uint8_t> &code, uint32_t word)
   code.push_back(static_cast<uint8_t>(word >> 8));
   code.push_back(static_cast<uint8_t>(word >> 16));
   code.push_back(static_cast<uint8_t>(word >> 24));
-}
-
-std::shared_ptr<const rv32::Program>
-make_program(std::initializer_list<uint32_t> words)
-{
-  std::vector<uint8_t> code;
-  code.reserve(words.size() * rv32::kInstructionBytes);
-  for (const uint32_t word : words) {
-    append_u32(code, word);
-  }
-  auto result =
-      rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
-  if (!result.has_value()) {
-    ADD_FAILURE() << "failed to create test program";
-    return {};
-  }
-  return std::make_shared<rv32::Program>(std::move(*result));
 }
 
 uint32_t
@@ -130,6 +92,27 @@ uint32_t
 ecall()
 {
   return 0x00000073U;
+}
+
+// Build a program that loads the syscall number and arguments into a0.. via
+// addi (immediates must fit a signed 12-bit field) and then executes ecall.
+std::shared_ptr<const rv32::Program>
+make_syscall_program(std::initializer_list<int32_t> arg_regs)
+{
+  std::vector<uint8_t> code;
+  uint8_t reg = 10; // a0
+  for (const int32_t imm : arg_regs) {
+    append_u32(code, addi(reg, 0, imm));
+    ++reg;
+  }
+  append_u32(code, ecall());
+  auto result =
+      rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
+  if (!result.has_value()) {
+    ADD_FAILURE() << "failed to create test program";
+    return {};
+  }
+  return std::make_shared<rv32::Program>(std::move(*result));
 }
 
 // NOLINTNEXTLINE(misc-multiple-inheritance)
@@ -175,16 +158,14 @@ protected:
 
   static rv32::HostResult call_bridge(std::span<uint8_t> memory,
                                       SystemCallHandler &handler,
-                                      uint64_t gas_remaining)
+                                      uint64_t gas_remaining,
+                                      const rv32::EcallArgs &args)
   {
     auto host_context = make_new_host_call_context(&handler);
     rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
     std::array<uint32_t, rv32::kRegisterCount> registers{};
     rv32::MachineView view(0, gas_remaining, registers, memory);
-    return bridge.ecall(view, rv32::EcallArgs{
-                                  .a0 = kFrameAddress,
-                                  .a7 = rv32::kSyscallBridgeVersion,
-                              });
+    return bridge.ecall(view, args);
   }
 
   std::unique_ptr<RuntimeContext> runtime_context_;
@@ -195,17 +176,17 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
   std::vector<uint8_t> memory(256);
   constexpr std::string_view input = "rv32 syscall bridge";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  constexpr std::array<uint64_t, 4> frame_words = {
+  const std::array<uint64_t, 4> arg_words = {
       static_cast<uint64_t>(SyscallNo::kSHA256),
       kInputAddress,
       input.size(),
       kOutputAddress,
   };
-  write_frame(memory, frame_words);
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result = call_bridge(memory, handler, kPlentyOfGas);
+  rv32::HostResult result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
@@ -216,35 +197,24 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
   EXPECT_TRUE(
       std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
                                        kOutputAddress, expected.size())));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
-            static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),
-            static_cast<int32_t>(HostFnErrorCode::NoneOrRecoverable));
-  EXPECT_EQ(load_le64(memory, rv32::kSyscallFrameResultOffset + 8),
-            result.gas_consumed);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
 {
-  constexpr uint32_t kLocalFrameAddress = 0;
-  const auto program = make_program({
-      addi(10, 0, kLocalFrameAddress),
-      addi(17, 0, rv32::kSyscallBridgeVersion),
-      ecall(),
+  constexpr std::string_view input = "rv32 syscall bridge gas";
+  const auto program = make_syscall_program({
+      static_cast<int32_t>(SyscallNo::kSHA256),
+      static_cast<int32_t>(kInputAddress),
+      static_cast<int32_t>(input.size()),
+      static_cast<int32_t>(kOutputAddress),
   });
   ASSERT_NE(program, nullptr);
+  // Four argument loads plus the ecall instruction.
+  constexpr uint64_t kSyscallInstructions = 5;
 
   rv32::Machine machine(program, 256, kPlentyOfGas);
   std::vector<uint8_t> memory(256);
-  constexpr std::string_view input = "rv32 syscall bridge gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  constexpr std::array<uint64_t, 4> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kSHA256),
-      kInputAddress,
-      input.size(),
-      kOutputAddress,
-  };
-  write_frame(memory, frame_words);
   ASSERT_TRUE(machine.view().write_memory(0, memory));
 
   auto handler = make_handler();
@@ -252,8 +222,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
   rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
   auto stashed_trace = start_frame(handler);
 
-  EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
-  EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
+  for (uint64_t i = 0; i + 1 < kSyscallInstructions; ++i) {
+    EXPECT_EQ(machine.step(), rv32::StepResult::kContinue);
+  }
   EXPECT_EQ(machine.step(), rv32::StepResult::kEcall);
   const auto pending_ecall = machine.pending_ecall();
   ASSERT_TRUE(pending_ecall.has_value());
@@ -266,9 +237,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
   finish_frame(handler, std::move(stashed_trace));
 
   EXPECT_EQ(machine.gas_remaining(), before_host - host_result.gas_consumed);
-  EXPECT_EQ(machine.gas_remaining(), kPlentyOfGas -
-                                         (3 * rv32::kBaseInstructionGas) -
-                                         host_result.gas_consumed);
+  EXPECT_EQ(machine.gas_remaining(),
+            kPlentyOfGas - (kSyscallInstructions * rv32::kBaseInstructionGas) -
+                host_result.gas_consumed);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
@@ -276,18 +247,18 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
   std::vector<uint8_t> memory(256, 0xAA);
   constexpr std::string_view input = "fault";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::array<uint64_t, 4> frame_words = {
+  const std::array<uint64_t, 4> arg_words = {
       static_cast<uint64_t>(SyscallNo::kSHA256),
       kInputAddress,
       input.size(),
       memory.size() - 1,
   };
-  write_frame(memory, frame_words);
   const std::vector<uint8_t> before = memory;
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result = call_bridge(memory, handler, kPlentyOfGas);
+  rv32::HostResult result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
@@ -308,10 +279,10 @@ TEST_F(Rv32SyscallEntryBridgeTest,
   std::ranges::fill(std::span<uint8_t>(memory).subspan(kAddress,
                                                        sizeof(ContractAddress)),
                     0);
-  std::ranges::fill(std::span<uint8_t>(memory).subspan(
-                        kInputs, sizeof(CopyableInvokeInputs)),
-                    0);
-  const std::array<uint64_t, 8> frame_words = {
+  std::ranges::fill(
+      std::span<uint8_t>(memory).subspan(kInputs, sizeof(CopyableInvokeInputs)),
+      0);
+  const std::array<uint64_t, 8> arg_words = {
       static_cast<uint64_t>(SyscallNo::kInvoke),
       kAddress,          // address pointer
       kAddress,          // calldata pointer (zero length)
@@ -321,12 +292,12 @@ TEST_F(Rv32SyscallEntryBridgeTest,
       kInputs,           // CopyableInvokeInputs pointer
       memory.size() - 1, // CopyableInvokeOutputs pointer (out of bounds)
   };
-  write_frame(memory, frame_words);
   const std::vector<uint8_t> before = memory;
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result = call_bridge(memory, handler, kPlentyOfGas);
+  rv32::HostResult result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
@@ -338,25 +309,21 @@ TEST_F(Rv32SyscallEntryBridgeTest,
 TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
 {
   std::vector<uint8_t> memory(256);
-  constexpr std::array<uint64_t, 1> frame_words = {
+  const std::array<uint64_t, 1> arg_words = {
       static_cast<uint64_t>(kSyscallCount),
   };
-  write_frame(memory, frame_words);
 
   auto handler = make_handler();
   handler.enable_transaction_stats();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result = call_bridge(memory, handler, kPlentyOfGas);
+  rv32::HostResult result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(
                 SyscallErrorCode::kSyscallErrorCodeNoSyscall));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset),
-            static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
-  EXPECT_EQ(load_le32(memory, rv32::kSyscallFrameResultOffset + 4),
-            static_cast<int32_t>(HostFnErrorCode::NoneOrRecoverable));
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
 }
@@ -366,18 +333,18 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
   std::vector<uint8_t> memory(256, 0xCC);
   constexpr std::string_view input = "out of gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  constexpr std::array<uint64_t, 4> frame_words = {
+  const std::array<uint64_t, 4> arg_words = {
       static_cast<uint64_t>(SyscallNo::kSHA256),
       kInputAddress,
       input.size(),
       kOutputAddress,
   };
-  write_frame(memory, frame_words);
   const std::vector<uint8_t> before = memory;
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result = call_bridge(memory, handler, 0);
+  rv32::HostResult result =
+      call_bridge(memory, handler, 0, make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace),
                std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
 
@@ -387,21 +354,13 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
 {
-  constexpr uint32_t kLocalFrameAddress = 64;
-  const auto program = make_program({
-      addi(10, 0, kLocalFrameAddress),
-      addi(17, 0, rv32::kSyscallBridgeVersion),
-      ecall(),
-  });
+  // Return with an empty buffer and no owned auth tokens: a0 = kReturn and the
+  // remaining argument registers default to zero (empty spans, revert false).
+  const auto program =
+      make_syscall_program({static_cast<int32_t>(SyscallNo::kReturn)});
   ASSERT_NE(program, nullptr);
 
   rv32::Machine machine(program, 256, kPlentyOfGas);
-  std::vector<uint8_t> frame(rv32::kSyscallFrameBytes);
-  constexpr std::array<uint64_t, 6> frame_words = {
-      static_cast<uint64_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0,
-  };
-  write_frame(frame, frame_words);
-  ASSERT_TRUE(machine.view().write_memory(kLocalFrameAddress, frame));
 
   auto handler = make_handler();
   auto host_context = make_new_host_call_context(&handler);
@@ -413,13 +372,6 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
   EXPECT_EQ(result, rv32::StepResult::kHalted);
   EXPECT_TRUE(machine.halted());
   EXPECT_EQ(machine.halt_code(), 0U);
-  const auto memory = machine.memory();
-  EXPECT_EQ(load_le32(memory,
-                      kLocalFrameAddress + rv32::kSyscallFrameResultOffset),
-            0);
-  EXPECT_EQ(load_le32(memory,
-                      kLocalFrameAddress + rv32::kSyscallFrameResultOffset + 4),
-            static_cast<int32_t>(HostFnErrorCode::Return));
 }
 
 } // namespace

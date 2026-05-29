@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -9,27 +8,22 @@
 
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/runtime_exports.h"
-#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "syscall_error.hh"
 
 namespace hogd::rv32 {
 namespace {
 
-bool
-store_result_footer(std::span<uint8_t> memory, uint32_t frame_address,
-                    const TrampolineResult &result)
+// Sign-extend a 32-bit RV32 register to the uint64_t syscall_entry consumes.
+// Sign- (not zero-) extension is required for correctness: the shared argument
+// parser demands sign-extended encodings for signed scalars and uses UINT64_MAX
+// as the optional-pointer null sentinel. A guest supplies 0xFFFFFFFF for those
+// cases, which sign-extends to all-ones; valid guest addresses and lengths keep
+// bit 31 clear, so for them sign- and zero-extension coincide.
+constexpr uint64_t
+sign_extend_arg(uint32_t reg)
 {
-  if (!memory_range_in_bounds(memory.size(), frame_address,
-                              kSyscallFrameBytes)) {
-    return false;
-  }
-  const size_t offset = size_t{frame_address} + kSyscallFrameResultOffset;
-  store_u32_le(memory, offset, static_cast<uint32_t>(result.result_code));
-  store_u32_le(memory, offset + sizeof(uint32_t),
-               static_cast<uint32_t>(result.panic));
-  store_u64_le(memory, offset + (2 * sizeof(uint32_t)), result.gas_consumed);
-  return true;
+  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(reg)));
 }
 
 } // namespace
@@ -46,24 +40,18 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   if (entry_ == nullptr) {
     return HostResult::trap();
   }
-  if (args.a7 != kSyscallBridgeVersion || args.a0 % alignof(uint64_t) != 0) {
-    return HostResult::deterministic_trap();
-  }
 
-  // M2 bridge ABI: a0 points at 8 little-endian u64 words matching
-  // syscall_entry(arg0..arg7), followed by a TrampolineResult footer. The
-  // scratch copy keeps MachineView narrow while still exercising the same
-  // mutable WasmContext.memory shape used by the existing syscall parser.
-  std::array<uint8_t, kSyscallFrameBytes> frame = {};
-  if (!view.read_memory(args.a0, frame)) {
-    return HostResult::deterministic_trap();
-  }
-
-  std::array<uint64_t, kSyscallFrameArgWords> words = {};
-  for (size_t i = 0; i < words.size(); ++i) {
-    words[i] = load_u64_le(frame, i * sizeof(uint64_t));
-  }
-
+  // Register-native bridge ABI: syscall_entry(arg0..arg7) is fed directly from
+  // a0..a7 (a0 is the syscall number). Each RV32 register is zero-extended to
+  // the uint64_t syscall_entry expects, which is exact because every syscall
+  // argument is a 32-bit guest pointer/length or a <=32-bit scalar; 64-bit
+  // values travel through guest memory by pointer. The syscall ABI version is
+  // checked at artifact load time, so no per-call version register is needed.
+  //
+  // syscall_entry mutates WasmContext.memory in place, so run it against a
+  // scratch copy of guest data memory. A parser/output fault can then be
+  // rejected without committing partial writes, matching the WASM path's
+  // atomicity, and the scratch is committed back only on success.
   const std::span<const uint8_t> view_memory = view.memory();
   std::vector<uint8_t> scratch;
   try {
@@ -79,8 +67,11 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
 
   TrampolineResult result = {};
   try {
-    result = entry_(context_, wasm_context, words[0], words[1], words[2],
-                    words[3], words[4], words[5], words[6], words[7]);
+    result = entry_(context_, wasm_context, sign_extend_arg(args.a0),
+                    sign_extend_arg(args.a1), sign_extend_arg(args.a2),
+                    sign_extend_arg(args.a3), sign_extend_arg(args.a4),
+                    sign_extend_arg(args.a5), sign_extend_arg(args.a6),
+                    sign_extend_arg(args.a7));
   } catch (...) {
     return HostResult::trap();
   }
@@ -88,16 +79,13 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
 
   switch (result.panic) {
   case std::to_underlying(HostFnErrorCode::NoneOrRecoverable):
-    // Fault means the parser/output layer rejected guest memory. Preserve the
-    // return code through a0, but do not commit scratch memory or the footer.
+    // Fault means the parser/output layer rejected guest memory. Surface the
+    // return code through a0 without committing scratch memory.
     if (result.result_code ==
         std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault)) {
       return HostResult::continue_with(static_cast<uint32_t>(
                                            result.result_code),
                                        result.gas_consumed);
-    }
-    if (!store_result_footer(memory, args.a0, result)) {
-      return HostResult::deterministic_trap(result.gas_consumed);
     }
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
@@ -106,18 +94,12 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
                                      result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Return):
     // Return and Exit terminate the VM invocation cleanly after committing the
-    // same scratch/footer writes the WASM path would expose.
-    if (!store_result_footer(memory, args.a0, result)) {
-      return HostResult::deterministic_trap(result.gas_consumed);
-    }
+    // same guest-memory output writes the WASM path would expose.
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
     return HostResult::halt(0, result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Exit):
-    if (!store_result_footer(memory, args.a0, result)) {
-      return HostResult::deterministic_trap(result.gas_consumed);
-    }
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
