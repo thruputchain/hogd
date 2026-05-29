@@ -539,6 +539,10 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
   EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
   EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             0UL);
+  // The fibonacci contract needs to pay for storage, so the storage cost is
+  // deducted from the live hogs used for scheduling. Thus, the number of hogs
+  // in the [kHogAgeGroupReceived] scheduling group will be less than
+  // [kTransferAmount].
   EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
   EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
             kTransferAmount);
