@@ -19,7 +19,10 @@ namespace {
 // parser demands sign-extended encodings for signed scalars and uses UINT64_MAX
 // as the optional-pointer null sentinel. A guest supplies 0xFFFFFFFF for those
 // cases, which sign-extends to all-ones; valid guest addresses and lengths keep
-// bit 31 clear, so for them sign- and zero-extension coincide.
+// bit 31 clear, so for them sign- and zero-extension coincide. Consequence: an
+// unsigned scalar argument with bit 31 set (>= 2^31) sign-extends out of the
+// uint32 range and is rejected by the parser, so register-passed unsigned
+// scalars are limited to < 2^31 (see the ABI constraint in syscall_bridge.h).
 constexpr uint64_t
 sign_extend_arg(uint32_t reg)
 {
@@ -42,10 +45,9 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   }
 
   // Register-native bridge ABI: syscall_entry(arg0..arg7) is fed directly from
-  // a0..a7 (a0 is the syscall number). Each RV32 register is zero-extended to
-  // the uint64_t syscall_entry expects, which is exact because every syscall
-  // argument is a 32-bit guest pointer/length or a <=32-bit scalar; 64-bit
-  // values travel through guest memory by pointer. The syscall ABI version is
+  // a0..a7 (a0 is the syscall number). Each RV32 register is sign-extended (see
+  // sign_extend_arg) so signed scalars and the parser's UINT64_MAX
+  // optional-pointer null sentinel are expressible. The syscall ABI version is
   // checked at artifact load time, so no per-call version register is needed.
   //
   // syscall_entry mutates WasmContext.memory in place, so run it against a

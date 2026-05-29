@@ -187,6 +187,13 @@ struct SyscallTypeParams {
   constexpr static auto kArgOffsetIndices = make_offset_seqs<0, Args...>();
   constexpr static size_t kNumArgs = std::tuple_size<args_t>();
 
+  // Total number of register argument words this syscall consumes (each arg
+  // type contributes SyscallArgParams<Arg>::kNumInputs: scalars 1, spans 2,
+  // etc.). syscall_entry passes arg0=syscall number plus arg1..arg7, so this
+  // must not exceed 7; see the static_assert in wrap_outer.
+  constexpr static size_t kTotalInputs =
+      (size_t{0} + ... + SyscallArgParams<Args>::kNumInputs);
+
   template<size_t I> requires (I < sizeof...(Args))
   using arg_i = TypeNum<I, std::tuple<Args...>>::type;
 
@@ -655,6 +662,13 @@ wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
+
+  // syscall_entry carries arg0 (syscall number) plus seven argument words
+  // (arg1..arg7) for both the WASM trampoline and the RV32 register-native
+  // bridge. A syscall that needs more register words than that cannot be
+  // dispatched; pack extra scalars into a struct passed by guest pointer.
+  static_assert(syscall_t::kTotalInputs <= 7,
+                "syscall consumes more than 7 register argument words");
 
   auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
 

@@ -159,6 +159,7 @@ enum class ParserProbeMode : uint64_t {
   kBool = 2,
   kSignedI32 = 3,
   kOptionalU32 = 4,
+  kUnsignedU32 = 5,
 };
 
 TrampolineResult
@@ -205,6 +206,14 @@ parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
             .panic = 0,
             .gas_consumed = 0};
   }
+  case ParserProbeMode::kUnsignedU32:
+  {
+    auto parsed = SyscallArgParams<uint32_t>::parse(guard, memory, arg1);
+    return {.result_code =
+                SyscallArgParams<uint32_t>::validate(parsed) ? 0 : -1,
+            .panic = 0,
+            .gas_consumed = 0};
+  }
   case ParserProbeMode::kOptionalU32:
   {
     auto parsed =
@@ -248,6 +257,8 @@ constexpr uint64_t kSignedI32Mode =
     static_cast<uint64_t>(ParserProbeMode::kSignedI32);
 constexpr uint64_t kOptionalU32Mode =
     static_cast<uint64_t>(ParserProbeMode::kOptionalU32);
+constexpr uint64_t kUnsignedU32Mode =
+    static_cast<uint64_t>(ParserProbeMode::kUnsignedU32);
 
 TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
 {
@@ -260,17 +271,25 @@ TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
   captured.result = {.result_code = -7, .panic = 0, .gas_consumed = 12};
   SyscallBridgeHost bridge(&captured, capture_entry);
 
-  // a0..a7 carry the syscall number plus seven argument words; the final
-  // register has bit 31 set to exercise the bridge's sign-extension.
+  // a0..a7 carry the syscall number plus seven argument words. Distinct,
+  // non-sequential per-register values pin the exact register->arg mapping (a
+  // swap or off-by-one in the sign_extend_arg call list would be caught); the
+  // final register has bit 31 set to exercise the bridge's sign-extension.
   const HostResult result =
-      bridge.ecall(view, make_ecall_args({1, 2, 3, 4, 5, 6, 7, 0xFFFFFFFFU}));
+      bridge.ecall(view, make_ecall_args({0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+                                          0x77, 0xFFFFFFFFU}));
 
   ASSERT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xfffffff9U);
   EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
-  EXPECT_EQ(captured.args[0], 1ULL);
-  EXPECT_EQ(captured.args[6], 7ULL);
+  EXPECT_EQ(captured.args[0], 0x11ULL);
+  EXPECT_EQ(captured.args[1], 0x22ULL);
+  EXPECT_EQ(captured.args[2], 0x33ULL);
+  EXPECT_EQ(captured.args[3], 0x44ULL);
+  EXPECT_EQ(captured.args[4], 0x55ULL);
+  EXPECT_EQ(captured.args[5], 0x66ULL);
+  EXPECT_EQ(captured.args[6], 0x77ULL);
   EXPECT_EQ(captured.args[7], 0xFFFFFFFFFFFFFFFFULL);
   EXPECT_EQ(captured.gas_remaining, 77U);
   EXPECT_EQ(captured.memory_size, memory.size());
@@ -314,6 +333,49 @@ TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
   result = call_parser_probe(memory, {kSpansMode, 120, 8, 124, 4});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
+}
+
+// The ABI's safety argument rests on valid guest pointers/lengths having bit 31
+// clear. A pointer or length WITH bit 31 set sign-extends to a huge 64-bit
+// value, which the parser must reject (out of bounds) rather than silently wrap
+// to a small in-range offset.
+TEST(Rv32SyscallBridgeTest, parserProbeRejectsBit31PointerOrLength)
+{
+  std::vector<uint8_t> memory(160);
+
+  // Input pointer with bit 31 set -> sign-extends to ~0xFFFFFFFF80000000 ->
+  // OOB.
+  HostResult result =
+      call_parser_probe(memory, {kSpansMode, 0x80000000U, 1, 120, 1});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
+
+  // Length with bit 31 set -> sign-extends huge -> OOB.
+  result = call_parser_probe(memory, {kSpansMode, 120, 0x80000000U, 124, 1});
+  EXPECT_EQ(result.status, HostStatus::kContinue);
+  EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
+}
+
+// Documents the register-native ABI limit (finding #2): because the bridge
+// sign-extends, an unsigned 32-bit scalar with bit 31 set (>= 2^31) exceeds the
+// uint32 range and is rejected. Register-passed unsigned scalars are therefore
+// limited to < 2^31; wider unsigned values must travel by pointer.
+TEST(Rv32SyscallBridgeTest, parserProbeUnsignedScalarBit31IsUnreachable)
+{
+  std::vector<uint8_t> memory(160);
+
+  EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0}).continue_value(),
+            0U);
+  EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x7FFFFFFFU})
+                .continue_value(),
+            0U);
+  // bit 31 set: sign-extended past UINT32_MAX -> parser fault.
+  EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x80000000U})
+                .continue_value(),
+            0xffffFFFFU);
+  EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0xFFFFFFFFU})
+                .continue_value(),
+            0xffffFFFFU);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
@@ -483,6 +545,9 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
+  // capture_entry writes 0xa5 to scratch byte 7; both halt paths must commit
+  // that scratch back to guest memory (the guest-visible Return output buffer
+  // is delivered the same way).
   captured.result = {.result_code = 3,
                      .panic = std::to_underlying(HostFnErrorCode::Return),
                      .gas_consumed = 4};
@@ -490,7 +555,9 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.halt_code(), 0U);
   EXPECT_EQ(result.gas_consumed, 4U);
+  EXPECT_EQ(memory[7], 0xa5U);
 
+  memory[7] = 0;
   captured.result = {.result_code = 9,
                      .panic = std::to_underlying(HostFnErrorCode::Exit),
                      .gas_consumed = 4};
@@ -498,6 +565,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.halt_code(), 9U);
   EXPECT_EQ(result.gas_consumed, 4U);
+  EXPECT_EQ(memory[7], 0xa5U);
 }
 
 TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)

@@ -72,11 +72,21 @@ The bridge ABI is register-native:
 - `a0`: syscall number.
 - `a1`–`a7`: up to seven syscall argument words.
 - Each RV32 register is **sign-extended** to the `uint64_t` that `syscall_entry`
-  consumes. This is exact because every syscall argument is a 32-bit guest
-  pointer/length or a `<=32`-bit scalar (64-bit values travel through guest
-  memory by pointer). Sign-extension also lets a guest express signed scalars
-  and the parser's `UINT64_MAX` optional-pointer null sentinel (`0xFFFFFFFF`
-  sign-extends to all-ones), which a zero-extended register could not.
+  consumes. Sign- (not zero-) extension is required so a guest can express
+  signed scalars and the parser's `UINT64_MAX` optional-pointer null sentinel
+  (`0xFFFFFFFF` sign-extends to all-ones), which a zero-extended register could
+  not. Valid guest pointers and lengths keep bit 31 clear, so for them sign- and
+  zero-extension coincide.
+- **ABI constraint on syscall signatures:** every register-passed argument must
+  be representable as a sign-extended 32-bit value — a guest pointer/length, a
+  signed 32-bit scalar, or an *unsigned* scalar `< 2^31`. A scalar that needs the
+  full 64-bit range (or the full unsigned-32 range) must travel through guest
+  memory by pointer. The `<= 7` argument-word count is enforced by a
+  `static_assert` in `wrap_outer`; the `<= 32`-bit-scalar half is a documented
+  convention, not yet machine-enforced. **Known gap:** `MintAuthToken` takes a
+  64-bit `BlockHeight` expiry by value, so an RV32 guest cannot express expiry
+  heights `>= 2^31` (silently confined, no fault) — to be resolved before this
+  VM leaves the `kMockTest` gate, e.g. by passing the height by pointer.
 - Result: the syscall return code is delivered in `a0`; output buffers and
   lengths are written into guest memory through the pointers the guest supplied.
   There is no result frame or footer.
