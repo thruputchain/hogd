@@ -85,6 +85,20 @@ BalanceLock::build_result(LockContext const &ctx) const
   return value;
 }
 
+int128_t
+BalanceLock::get_committed_delta(LockContext const &ctx) const
+{
+  auto snapshot_value_opt = snapshot_balance_.snapshot_value();
+  int128_t snapshot_value =
+      snapshot_value_opt.has_value() ? *snapshot_value_opt : 0;
+
+  // build_result is the value committed to the DB; subtracting the snapshot
+  // value yields the net change. For a newly created balance this is the raw
+  // delta less the storage cost charged in build_result, which is exactly what
+  // the scheduler must observe.
+  return build_result(ctx) - snapshot_value;
+}
+
 HogDBStatus<void>
 BalanceLock::stage_committed_changes(const LockContext &ctx,
                                      ChangeSet &changes) const
