@@ -524,6 +524,20 @@ TEST(Mempool, NominateCommitDeployAndTransferContract)
       server.read_address_balance(deployed_address);
   ASSERT_TRUE(deployed_balance.has_value());
   EXPECT_GT(*deployed_balance, 0);
+
+  server.mempool_coord_rpc().wait_for_transfer_data(
+      /*expected_height=*/res_nominate.nominated_block()
+          .nomination.block_height)();
+  auto [deployed_hog_age, deployed_hog_age_lock] =
+      server.mempool_coord_rpc().scheduler()->get_cached_hog_age(
+          deployed_address);
+  ASSERT_EQ(deployed_hog_age->address, deployed_address);
+  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
+  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            0UL);
+  EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
+  EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+            kTransferAmount);
 }
 
 TEST(Mempool, CommitBlockNotFound)
