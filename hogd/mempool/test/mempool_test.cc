@@ -549,7 +549,7 @@ TEST(Mempool, NewlyDeployedContractHogCount)
       server.read_address_balance(deployed_address);
   ASSERT_TRUE(deployed_address_balance.has_value());
   EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
-            *deployed_address_balance);
+            static_cast<uint128_t>(*deployed_address_balance));
 }
 
 TEST(Mempool, CommitBlockNotFound)
