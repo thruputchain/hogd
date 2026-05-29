@@ -537,11 +537,12 @@ private:
 // contention since all threads must acquire the reader lock on it before they
 // can look at any other nodes. This leads to performance degradation.
 //
-// [MerkleTriePrefix] removes this contention. It creates a root "node", where
-// each of the children point to a different [MerkleTrie]. This root "node" is
-// never modified, so there is no need to acquire a reader lock to access it.
-// Each [MerkleTrie] represents a prefix of one hex digit. For example, the
-// [MerkleTrie] that is child [0xa] holds all keys that start with [0xa].
+// [MerkleTriePrefix] removes this contention. It creates a fake root "node",
+// where each of the children of the fake root "node" point to a different
+// [MerkleTrie]. This root "node" is never modified, so there is no need to
+// acquire a reader lock to access it. Each [MerkleTrie] represents a prefix of
+// one hex digit. For example, the [MerkleTrie] that is child [0xa] of the fake
+// root "node" holds all keys that start with [0xa].
 //
 // Example: (This is exactly the same as the example for [MerkleTrie] above.)
 // MerkleTriePrefix trie;
