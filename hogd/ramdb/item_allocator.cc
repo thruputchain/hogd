@@ -8,6 +8,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -93,28 +94,62 @@ ItemAllocator::compact(float utilization_thresh)
   ElapsedTimer timer;
 
   // take all the compactable loglets.
-  std::vector<UniqueLoglet> loglets;
+  std::vector<UniqueLoglet> claimed;
   {
     std::scoped_lock guard(lock_);
-    loglets = move_if(compactable_loglets_, [utilization_thresh](
+    claimed = move_if(compactable_loglets_, [utilization_thresh](
                                                 const UniqueLoglet &ll) {
       return !ll->fully_compacted() && ll->utilization() <= utilization_thresh;
     });
   }
 
-  // compact all of them in parallel.
+  // Hand each claimed loglet to a worker. We hold our own shared_ptr in
+  // `in_flight` so that if pool_.submit() throws bad_alloc (inside
+  // WorkerPool's promise / UniqueFunction / std::queue allocations) after
+  // its inner lambda is constructed, the loglet survives the lambda's
+  // destruction and we can put it back into compactable_loglets_.
+  std::vector<std::shared_ptr<UniqueLoglet>> in_flight;
   std::vector<std::future<CompactionStats>> completions;
-  completions.reserve(loglets.size());
-  for (auto &ll : loglets) {
-    completions.emplace_back(pool_.submit([this, ll = std::move(ll)] mutable {
-      return compact_one(std::move(ll));
-    }));
-  }
-
-  // wait for the compactions to finish.
   CompactionStats stats{};
-  for (std::future<CompactionStats> &f : completions)
-    stats += f.get();
+
+  try {
+    in_flight.reserve(claimed.size());
+    completions.reserve(claimed.size());
+
+    for (auto &ll : claimed) {
+      in_flight.push_back(std::make_shared<UniqueLoglet>(std::move(ll)));
+      completions.emplace_back(pool_.submit(
+          [this, l = in_flight.back()] { return compact_one(std::move(*l)); }));
+    }
+
+    // wait for the compactions to finish.
+    for (std::future<CompactionStats> &f : completions)
+      stats += f.get();
+  } catch (const std::bad_alloc &) {
+    // Drain any submitted workers so their std::move(*l) settles before
+    // we inspect in_flight. compactable_loglets_'s emplace_back below
+    // cannot throw because the ItemAllocator constructor reserved capacity
+    // to LogletAllocator::loglet_count() — the maximum possible occupancy.
+    for (std::future<CompactionStats> &f : completions) {
+      try {
+        f.get();
+      } catch (...) { // NOLINT(bugprone-empty-catch)
+        // Drain only — a worker exception here is suppressed because we are
+        // already unwinding compact() on bad_alloc and have no useful path
+        // to surface it. compact_one is allocation-free post the ctor's
+        // reserve, so this catch is not expected to fire in practice.
+      }
+    }
+    std::scoped_lock guard(lock_);
+    for (std::shared_ptr<UniqueLoglet> &l : in_flight)
+      if (l && *l)
+        compactable_loglets_.emplace_back(std::move(*l));
+    for (UniqueLoglet &ll : claimed)
+      if (ll)
+        compactable_loglets_.emplace_back(std::move(ll));
+    warn("compact: deferred {} loglets after bad_alloc", claimed.size());
+    return 0;
+  }
 
   // print the compaction rate.
   auto seconds = timer.elapsed();
