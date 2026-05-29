@@ -545,8 +545,11 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
   EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
             kTransferAmount);
+  HogDBStatus<int128_t> deployed_address_balance =
+      server.read_address_balance(deployed_address);
+  ASSERT_TRUE(deployed_address_balance.has_value());
   EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
-            server.read_address_balance(deployed_address));
+            *deployed_address_balance);
 }
 
 TEST(Mempool, CommitBlockNotFound)
