@@ -3,7 +3,6 @@
 #include "auth_token.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <exception>

@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -9,7 +8,6 @@
 #include <utility>
 
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
