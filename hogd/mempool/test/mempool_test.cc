@@ -401,6 +401,7 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
+  ValidatorID validator_id{};
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
@@ -408,7 +409,7 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
     // forced to reject duplicate uniquifiers rather than the mempool scheduler
     // identifying duplicate txs.
     server.mempool_coord_rpc().schedulercoord_submit_vetted(
-        t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+        validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
     EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
     SchedulerGetTipResult get_tip =
