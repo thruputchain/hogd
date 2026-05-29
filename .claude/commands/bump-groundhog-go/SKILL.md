@@ -1,6 +1,6 @@
 ---
 name: bump-groundhog-go
-description: Use when a protocol change has landed on protocol `main` and the groundhog-go submodule needs to be re-synced to pick it up (e.g. after pushing a protocol PR). Propagates protocol main through the nested groundhog-go → protocol-go → protocol submodules, regenerates protocol-go Go bindings, commits at each level, and pushes.
+description: Use when a protocol change has landed on protocol `main` and the groundhog-go submodule needs to be re-synced to pick it up (e.g. after pushing a protocol PR). Propagates protocol main through the nested groundhog-go → protocol-go → protocol submodules, regenerates protocol-go Go bindings, and commits at each level. Does NOT push — the user pushes.
 allowed-tools: Bash
 ---
 
@@ -63,7 +63,11 @@ from inside `protocol-go`:
 - `commit.sh` records a message like `protocol=… chuckd=… protocol-go=… lib-go=…`
   (commit only).
 
-### 4. Push everything, innermost first (so pointers resolve on the remote)
+### 4. Stop — do NOT push
+
+This skill never pushes. A hook blocks automated pushes to these repos, so
+pushing is left to the user. Report the new commits and hand off the push
+commands (innermost first, so pointers resolve on the remote):
 
 ```bash
 git -C groundhog-go/protocol-go push
@@ -74,7 +78,8 @@ git -C groundhog-go push
 
 ## Gotchas
 
-- **Neither `commit.sh` pushes** — pushing is step 4.
+- **Never push from this skill** — neither `commit.sh` pushes, and the skill
+  itself must not run `git push`. Surface the push commands for the user to run.
 - **Stops at groundhog-go.** This does NOT bump hogd's own `groundhog-go`
   submodule pointer — those are staged deliberately, separately.
 - If a `commit.sh` reports "nothing to commit", that level had no pointer change
