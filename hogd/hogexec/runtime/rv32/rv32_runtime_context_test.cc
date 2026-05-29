@@ -36,7 +36,6 @@
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
-#include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
