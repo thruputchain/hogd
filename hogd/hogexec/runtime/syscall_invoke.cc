@@ -365,10 +365,6 @@ syscall_GetReturnedBuffer_inner(
       copy_to_guest_buffer(output_buffer,
                            std::as_bytes(std::span(return_buffer.data(),
                                                    return_buffer.size())));
-  // Trace records the actual buffer only when bytes were copied; keep this
-  // keyed on bytes copied, not on the (possibly larger) reported length.
-  bool written = output_buffer.size() > 0 && return_buffer.size() > 0;
-
   auto returned_ids = syscall_handler.get_returned_auth_token_ids();
   output_restored_auth_token_ids_written_len =
       copy_to_guest_buffer(output_restored_auth_token_ids,
@@ -378,14 +374,11 @@ syscall_GetReturnedBuffer_inner(
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetReturnedBuffer>()) {
     try {
-      if (written) {
-        trace_data->outputs.emplace(
-            SyscallGetReturnedBufferOutputs{.buffer = ***status});
-      }
-      else {
-        trace_data->outputs.emplace(
-            SyscallGetReturnedBufferOutputs{.buffer = ReturnBuffer()});
-      }
+      // Trace the full return buffer (pre-truncation), regardless of how much
+      // fit in the contract's buffer — consistent with the other
+      // buffer-writing syscalls, which trace their full output.
+      trace_data->outputs.emplace(
+          SyscallGetReturnedBufferOutputs{.buffer = return_buffer});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetReturnedBuffer,
             e.what());

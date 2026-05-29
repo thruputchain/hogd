@@ -27,7 +27,7 @@ TEST(CopyToGuestBuffer, BufferLargerThanSource)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, bytes_of(src));
 
-  EXPECT_EQ(written, 4u);
+  EXPECT_EQ(written, 4U);
   EXPECT_EQ(dst[0], std::byte{0x11});
   EXPECT_EQ(dst[3], std::byte{0x44});
   EXPECT_EQ(dst[4], std::byte{0xEE}); // untouched
@@ -43,7 +43,7 @@ TEST(CopyToGuestBuffer, BufferExactlyFitsSource)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, bytes_of(src));
 
-  EXPECT_EQ(written, 4u);
+  EXPECT_EQ(written, 4U);
   EXPECT_EQ(dst[0], std::byte{0x11});
   EXPECT_EQ(dst[3], std::byte{0x44});
 }
@@ -60,7 +60,7 @@ TEST(CopyToGuestBuffer, ReportsFullLengthWhenTruncated)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, bytes_of(src));
 
-  EXPECT_EQ(written, 4u);         // full source length, not the buffer size
+  EXPECT_EQ(written, 4U);         // full source length, not the buffer size
   EXPECT_GT(written, dst.size()); // signals truncation to the contract
   EXPECT_EQ(backing[0], std::byte{0x11});
   EXPECT_EQ(backing[1], std::byte{0x22});
@@ -75,7 +75,7 @@ TEST(CopyToGuestBuffer, EmptyBufferReportsFullLength)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, bytes_of(src));
 
-  EXPECT_EQ(written, 4u);
+  EXPECT_EQ(written, 4U);
 }
 
 // empty src: returns 0.
@@ -87,7 +87,7 @@ TEST(CopyToGuestBuffer, EmptySourceReportsZero)
 
   RuntimeMemoryLength written = copy_to_guest_buffer(dst, src);
 
-  EXPECT_EQ(written, 0u);
+  EXPECT_EQ(written, 0U);
   EXPECT_EQ(dst[0], std::byte{0xEE}); // untouched
 }
 
