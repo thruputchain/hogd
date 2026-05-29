@@ -2,6 +2,7 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <latch>
+#include <limits>
 #include <memory>
 #include <set>
 #include <thread>
@@ -14,6 +15,7 @@
 #include "block.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "genesis.hh"
@@ -25,6 +27,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogdb/status.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
