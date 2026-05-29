@@ -395,7 +395,7 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByMempool)
 // This submits duplicate txs each at a *different* block height, which tests
 // that hogdb can detect and discard duplicate txs. This does *not* test that
 // the mempool scheduler detects duplicate txs.
-TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
+TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
