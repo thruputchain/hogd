@@ -1639,10 +1639,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_return result;
 }
 
-// TODO(jhumphri): We need to update the scheduler hog ages for the txs in the
-// validation block if the validation block is committed.
-// TODO(jhumphri): We need to undo the changes to the scheduler hog ages for the
-// txs in the nomination block if the nomination block is not committed.
+// TODO(jhumphri): We could livelock in this method if we continue to receive
+// blocks to validate. We do not pause validations once
+// [schedulercoord_commit_block()] starts. If this becomes an issue (such as due
+// to a malicious node that keeps sending blocks to validate), we will need to
+// stop validations once a commit starts.
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
