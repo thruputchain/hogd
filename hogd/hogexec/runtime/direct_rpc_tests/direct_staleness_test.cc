@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -20,6 +21,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -382,23 +384,20 @@ TEST_F(DirectStalenessTest,
   constexpr ContractAddress kContractAddr = make_contract_address(0);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto observed = ctx.handler().retrocausal_queue_consume(
-            NativeContractTestFramework::make_storage_key("rcq0"), true);
-        if (!observed.has_value()) {
-          return observed.error().to_invoke_error();
-        }
-        if (!observed.value().has_value() ||
-            observed.value().value().size() != 1 ||
-            observed.value().value()[0] != kForgedEntry) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto observed = ctx.handler().retrocausal_queue_consume(
+        NativeContractTestFramework::make_storage_key("rcq0"), true);
+    if (!observed.has_value()) {
+      return observed.error().to_invoke_error();
+    }
+    if (!observed.value().has_value() || observed.value().value().size() != 1 ||
+        observed.value().value()[0] != kForgedEntry) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-        return {};
-      });
+    ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+    return {};
+  });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -423,8 +422,9 @@ TEST_F(DirectStalenessTest,
   forged.nondeterministic_bits = {uint8_t{1}};
   forged.observed_queue_entry_sequence = {QueueEntry{kForgedEntry}};
 
-  Transaction tx{.invocation = Invocation{
-                     .invoked_address = kContractAddr,
+  Transaction tx{
+      .invocation =
+          Invocation{.invoked_address = kContractAddr,
                      .entrypoint = entrypoint_from_method_id(0),
                      .gas_limit = std::numeric_limits<GasAmount>::max(),
                      .calldata = {}}};
