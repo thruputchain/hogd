@@ -164,7 +164,7 @@ public:
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
-  size_t size() const { return size_.load(std::memory_order_relaxed); }
+  ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
 
   // Debug.
