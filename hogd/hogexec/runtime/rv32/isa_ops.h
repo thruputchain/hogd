@@ -85,7 +85,8 @@ imm_i(uint32_t word)
 constexpr int32_t
 imm_s(uint32_t word)
 {
-  return i32_from_bits(sign_extend((bits(word, 25, 7) << 5) | bits(word, 7, 5), 12));
+  return i32_from_bits(
+      sign_extend((bits(word, 25, 7) << 5) | bits(word, 7, 5), 12));
 }
 
 constexpr int32_t

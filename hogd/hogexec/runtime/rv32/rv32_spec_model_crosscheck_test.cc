@@ -81,12 +81,12 @@ spec(uint32_t word, Op op_value, uint8_t rd = 0, uint8_t rs1 = 0,
      uint8_t rs2 = 0, int32_t imm = 0)
 {
   return spec::SpecInstruction{.word = word,
-                         .op = op_value,
-                         .rd = rd,
-                         .rs1 = rs1,
-                         .rs2 = rs2,
-                         .imm = imm,
-                         .gas = gas_cost_for_op(op_value)};
+                               .op = op_value,
+                               .rd = rd,
+                               .rs1 = rs1,
+                               .rs2 = rs2,
+                               .imm = imm,
+                               .gas = gas_cost_for_op(op_value)};
 }
 
 spec::SpecInstruction
@@ -407,7 +407,8 @@ compare_to_machine(const CrosscheckCase &test_case)
   expected.regs[0] = 0;
   expected.memory = test_case.initial_memory;
   expected.gas_remaining = test_case.gas_limit;
-  const StepResult expected_result = spec::run_spec(expected, test_case.instructions);
+  const StepResult expected_result =
+      spec::run_spec(expected, test_case.instructions);
 
   Machine machine(program,
                   static_cast<uint32_t>(test_case.initial_memory.size()),

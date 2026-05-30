@@ -161,9 +161,9 @@ public:
     state.pc = program.initial_pc;
     state.gas_remaining = program.gas_limit;
 
-    return spec::trace_spec(state,
-                      std::span<const spec::SpecInstruction>(instructions.data(),
-                                                       instructions.size()));
+    return spec::trace_spec(
+        state, std::span<const spec::SpecInstruction>(instructions.data(),
+                                                      instructions.size()));
   }
 };
 

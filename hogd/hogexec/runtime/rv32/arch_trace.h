@@ -187,8 +187,8 @@ struct ExecTrace {
 // and, after each retired instruction, calls on_retire. Instantiated with
 // NullObserver the calls compile to nothing (kEnabled == false guards them via
 // `if constexpr`), so the production path pays zero cost; instantiated with
-// TraceObserver it accumulates the same ExecTrace that trace_execution produces,
-// so describe_trace_divergence compares any machine uniformly.
+// TraceObserver it accumulates the same ExecTrace that trace_execution
+// produces, so describe_trace_divergence compares any machine uniformly.
 struct NullObserver {
   static constexpr bool kEnabled = false;
   void on_initial(const ArchState & /*state*/) {}
@@ -222,7 +222,8 @@ public:
 
 private:
   ArchState pending_before_;
-  ExecTrace trace_; // final_result defaults to kTrap (truncation), as in ExecTrace.
+  ExecTrace
+      trace_; // final_result defaults to kTrap (truncation), as in ExecTrace.
 };
 
 // Run `machine` one instruction at a time -- dispatching any ecall through

@@ -198,8 +198,9 @@ TEST(Rv32ArchTrace, traceObserverChainsStatesIntoExecTrace)
   EXPECT_EQ(trace.final_result, StepResult::kHalted);
 }
 
-// Test-only adapter: drives the canonical Machine through the observer protocol,
-// mimicking how a run-to-completion experimental machine would emit a trace.
+// Test-only adapter: drives the canonical Machine through the observer
+// protocol, mimicking how a run-to-completion experimental machine would emit a
+// trace.
 inline ExecTrace
 traced_run(Machine &machine, Host &host, size_t max_steps = 4096)
 {
@@ -224,10 +225,11 @@ traced_run(Machine &machine, Host &host, size_t max_steps = 4096)
 
 TEST(Rv32ArchTrace, observerTraceMatchesStepTracerOverCorpus)
 {
-  // Register-only corpus programs exercise the full arithmetic/logical/shift/mul/
-  // div data path, forward branches, and the ecall terminator -- enough to prove
-  // the observer path produces the canonical trace. Memory load/store coverage is
-  // out of scope here (a generate_memory_program variant exists for later).
+  // Register-only corpus programs exercise the full
+  // arithmetic/logical/shift/mul/ div data path, forward branches, and the
+  // ecall terminator -- enough to prove the observer path produces the
+  // canonical trace. Memory load/store coverage is out of scope here (a
+  // generate_memory_program variant exists for later).
   for (uint64_t seed = 0; seed < 32; ++seed) {
     const std::vector<uint32_t> code =
         test_corpus::generate_register_only_program(seed, /*body_len=*/64);
@@ -247,12 +249,15 @@ TEST(Rv32ArchTrace, observerTraceMatchesStepTracerOverCorpus)
         << "seed " << seed;
 
     // describe_trace_divergence intentionally compares state/result but NOT
-    // state_before, so assert state_before parity explicitly here -- this is the
-    // end-to-end check that the observer's chaining is correct over real runs
-    // (the synthetic traceObserverChainsStatesIntoExecTrace covers the protocol).
-    ASSERT_EQ(obs_trace.steps.size(), step_trace.steps.size()) << "seed " << seed;
+    // state_before, so assert state_before parity explicitly here -- this is
+    // the end-to-end check that the observer's chaining is correct over real
+    // runs (the synthetic traceObserverChainsStatesIntoExecTrace covers the
+    // protocol).
+    ASSERT_EQ(obs_trace.steps.size(), step_trace.steps.size())
+        << "seed " << seed;
     for (size_t i = 0; i < step_trace.steps.size(); ++i) {
-      EXPECT_EQ(obs_trace.steps[i].state_before, step_trace.steps[i].state_before)
+      EXPECT_EQ(obs_trace.steps[i].state_before,
+                step_trace.steps[i].state_before)
           << "seed " << seed << " step " << i;
     }
   }
