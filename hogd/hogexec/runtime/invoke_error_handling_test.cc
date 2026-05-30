@@ -592,15 +592,19 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
   write_contract(orchestrator_xdr);
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
+  // The orchestrator is the root invoked address; committing its transaction
+  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
+
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchestratorAddress,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = kOrchestratorAddress,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -671,15 +675,19 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
   write_contract(orchestrator_xdr);
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
+  // The orchestrator is the root invoked address; committing its transaction
+  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
+
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchestratorAddress,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = kOrchestratorAddress,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -777,15 +785,19 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   write_contract(orchestrator_xdr);
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
+  // The orchestrator is the root invoked address; committing its transaction
+  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
+
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchestratorAddress,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = kOrchestratorAddress,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

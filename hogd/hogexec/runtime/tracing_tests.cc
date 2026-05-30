@@ -720,12 +720,17 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   write_contract(child_xdr);
   write_deployment(kChildAddress, child_xdr);
 
+  // The caller is the root invoked address; committing its transaction consumes
+  // one replay-cache entry charged to it.
+  setup_grant_storage_token(kCallerAddress, replay_cache_cost_charged(1));
+
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       Invocation{.invoked_address = kCallerAddress,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
   auto res = handler.root_invoke();
