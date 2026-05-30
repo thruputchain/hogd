@@ -27,7 +27,7 @@
 // acceptable precisely because decode independence is what the external oracle
 // adds on top.
 
-namespace hogd::rv32 {
+namespace hogd::rv32::spec {
 
 struct SpecInstruction {
   uint32_t word = 0;
@@ -567,4 +567,4 @@ trace_spec(SpecState &state, std::span<const SpecInstruction> instructions,
   return trace;
 }
 
-} // namespace hogd::rv32
+} // namespace hogd::rv32::spec
