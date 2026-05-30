@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,27 +72,28 @@ std::vector<NamedProgram>
 register_only_corpus()
 {
   return {
-      {"arithmetic",
-       {addi(1, 0, 10), addi(2, 0, 3), op(3, 1, 2, 0, kF7Base),
-        op(4, 1, 2, 0, kF7Alt), kEcall}},
-      {"logical_shift",
-       {addi(1, 0, 0xF0), addi(2, 0, 4), op(3, 1, 1, 4, kF7Base),
-        op(4, 1, 2, 6, kF7Base), op(5, 1, 2, 1, kF7Base),
-        op(6, 1, 2, 5, kF7Base), kEcall}},
-      {"muldiv",
-       {addi(1, 0, 20), addi(2, 0, 6), op(3, 1, 2, 0, kF7MulDiv),
-        op(4, 1, 2, 4, kF7MulDiv), op(5, 1, 2, 6, kF7MulDiv), kEcall}},
-      {"signed_div_and_sra",
-       {addi(1, 0, -8), addi(2, 0, 2), op(3, 1, 2, 5, kF7Alt),
-        op(4, 1, 2, 4, kF7MulDiv), kEcall}},
-      {"branch_taken",
-       {addi(1, 0, 5), addi(2, 0, 5), branch(0, 1, 2, 8), addi(3, 0, 99),
-        addi(4, 0, 77), kEcall}},
-      {"branch_not_taken",
-       {addi(1, 0, 5), addi(2, 0, 6), branch(0, 1, 2, 8), addi(3, 0, 99),
-        addi(4, 0, 77), kEcall}},
-      {"jal_forward",
-       {addi(1, 0, 1), j_type(0, 8), addi(2, 0, 99), addi(3, 0, 7), kEcall}},
+      {.name = "arithmetic",
+       .words = {addi(1, 0, 10), addi(2, 0, 3), op(3, 1, 2, 0, kF7Base),
+                 op(4, 1, 2, 0, kF7Alt), kEcall}},
+      {.name = "logical_shift",
+       .words = {addi(1, 0, 0xF0), addi(2, 0, 4), op(3, 1, 1, 4, kF7Base),
+                 op(4, 1, 2, 6, kF7Base), op(5, 1, 2, 1, kF7Base),
+                 op(6, 1, 2, 5, kF7Base), kEcall}},
+      {.name = "muldiv",
+       .words = {addi(1, 0, 20), addi(2, 0, 6), op(3, 1, 2, 0, kF7MulDiv),
+                 op(4, 1, 2, 4, kF7MulDiv), op(5, 1, 2, 6, kF7MulDiv), kEcall}},
+      {.name = "signed_div_and_sra",
+       .words = {addi(1, 0, -8), addi(2, 0, 2), op(3, 1, 2, 5, kF7Alt),
+                 op(4, 1, 2, 4, kF7MulDiv), kEcall}},
+      {.name = "branch_taken",
+       .words = {addi(1, 0, 5), addi(2, 0, 5), branch(0, 1, 2, 8),
+                 addi(3, 0, 99), addi(4, 0, 77), kEcall}},
+      {.name = "branch_not_taken",
+       .words = {addi(1, 0, 5), addi(2, 0, 6), branch(0, 1, 2, 8),
+                 addi(3, 0, 99), addi(4, 0, 77), kEcall}},
+      {.name = "jal_forward",
+       .words = {addi(1, 0, 1), j_type(0, 8), addi(2, 0, 99), addi(3, 0, 7),
+                 kEcall}},
   };
 }
 
@@ -102,9 +102,7 @@ TEST(Rv32SpikeOracle, handCorpusMatchesSpike)
   if (!spike_oracle_available()) {
     GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
   }
-  const std::optional<std::string> binary = spike_oracle_binary();
-  ASSERT_TRUE(binary.has_value());
-  SpikeOracle spike(binary.value());
+  SpikeOracle spike(spike_oracle_binary());
   MachineOracle machine;
   SpecModelOracle spec;
 
@@ -120,9 +118,7 @@ TEST(Rv32SpikeOracle, randomCorpusMatchesSpike)
   if (!spike_oracle_available()) {
     GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
   }
-  const std::optional<std::string> binary = spike_oracle_binary();
-  ASSERT_TRUE(binary.has_value());
-  SpikeOracle spike(binary.value());
+  SpikeOracle spike(spike_oracle_binary());
   MachineOracle machine;
   SpecModelOracle spec;
 
@@ -138,6 +134,33 @@ TEST(Rv32SpikeOracle, randomCorpusMatchesSpike)
     program.initial_memory.assign(256, 0);
     expect_oracles_agree_with_spike(spike, machine, spec, program);
   }
+}
+
+// Non-gated: the adapter rejects programs outside its supported subset before
+// touching Spike, returning an empty trap trace rather than silently
+// reconstructing from zero state. No Spike binary is invoked (the dummy path is
+// never run), so this validates the contract in default CI.
+TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
+{
+  SpikeOracle spike("/nonexistent-spike");
+
+  DifferentialProgram nonzero_reg = reg_program({addi(1, 0, 5), kEcall});
+  nonzero_reg.initial_regs[1] = 7;
+  EXPECT_TRUE(spike.run(nonzero_reg).steps.empty());
+
+  DifferentialProgram nonzero_mem = reg_program({addi(1, 0, 5), kEcall});
+  nonzero_mem.initial_memory[0] = 0xAB;
+  EXPECT_TRUE(spike.run(nonzero_mem).steps.empty());
+
+  // Contains a load -> outside the register-only subset.
+  EXPECT_TRUE(spike.run(reg_program({test_program::load(2, 2, 1, 0), kEcall}))
+                  .steps.empty());
+
+  // No terminal ecall.
+  EXPECT_TRUE(spike.run(reg_program({addi(1, 0, 5)})).steps.empty());
+
+  // Empty code (would underflow ecall_pc if not rejected).
+  EXPECT_TRUE(spike.run(reg_program({})).steps.empty());
 }
 
 } // namespace

@@ -46,12 +46,12 @@ inline constexpr uint32_t kSpikeTextBase = 0x80000000U;
 // optimization could stream and kill on the first ecall-exception marker.
 inline constexpr const char *kSpikeTimeoutSeconds = "0.5";
 
-inline std::optional<std::string>
+inline std::string
 spike_oracle_binary()
 {
   const char *path = std::getenv("RV32_ORACLE_BIN");
   if (path == nullptr || path[0] == '\0') {
-    return std::nullopt;
+    return {};
   }
   return std::string(path);
 }
@@ -59,8 +59,8 @@ spike_oracle_binary()
 inline bool
 spike_oracle_available()
 {
-  const std::optional<std::string> bin = spike_oracle_binary();
-  return bin.has_value() && access(bin->c_str(), X_OK) == 0;
+  const std::string bin = spike_oracle_binary();
+  return !bin.empty() && access(bin.c_str(), X_OK) == 0;
 }
 
 inline void
@@ -157,7 +157,7 @@ parse_hex_u32(const std::string &token, uint32_t &out)
 {
   const char *begin = token.c_str();
   char *end = nullptr;
-  const unsigned long value = std::strtoul(begin, &end, 16);
+  const uint64_t value = std::strtoul(begin, &end, 16);
   if (end == begin) {
     return false;
   }
@@ -174,7 +174,7 @@ inline std::optional<SpikeCommit>
 parse_spike_commit(const std::string &line, uint32_t text_base,
                    uint32_t code_bytes)
 {
-  if (line.rfind("core", 0) != 0) {
+  if (!line.starts_with("core")) {
     return std::nullopt;
   }
   std::istringstream stream(line);
@@ -199,8 +199,11 @@ parse_spike_commit(const std::string &line, uint32_t text_base,
   if (tokens.size() >= 7 && tokens[5].size() >= 2 && tokens[5][0] == 'x') {
     uint32_t value = 0;
     if (parse_hex_u32(tokens[6], value)) {
+      char *reg_end = nullptr;
+      const uint64_t reg_index =
+          std::strtoul(tokens[5].c_str() + 1, &reg_end, 10);
       commit.has_reg_write = true;
-      commit.rd = static_cast<uint8_t>(std::atoi(tokens[5].c_str() + 1));
+      commit.rd = static_cast<uint8_t>(reg_index);
       commit.value = value;
     }
   }
@@ -232,6 +235,9 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
       << "' --isa=rv32im --log-commits --pc=0x" << std::hex << text_base << " '"
       << tmpl << "' 2>&1";
 
+  // Intentional subprocess: this test-only harness runs the external Spike
+  // binary, with the command built from the developer-set RV32_ORACLE_BIN.
+  // NOLINTNEXTLINE(bugprone-command-processor)
   std::FILE *pipe = popen(cmd.str().c_str(), "r");
   if (pipe != nullptr) {
     std::array<char, 512> buf{};
@@ -249,13 +255,74 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
   return commits;
 }
 
+// The static subset this adapter supports under the constant-offset pc mapping:
+// non-empty code terminated by ecall; an aligned, in-range initial pc; zero
+// initial registers and memory (Spike runs from reset); and register-only code
+// -- no loads/stores, no jalr, no auipc or linking jal. Those excluded ops
+// either address a data region this increment does not map, or write/consume a
+// pc value that differs by Spike's base offset. Out-of-subset programs are
+// rejected up front rather than silently mis-reconstructed from zero state.
+inline bool
+spike_register_only_supported(const DifferentialProgram &program)
+{
+  if (program.code.empty() || program.code.back() != 0x00000073U) {
+    return false;
+  }
+  const auto code_bytes =
+      static_cast<uint32_t>(program.code.size() * kInstructionBytes);
+  if (program.initial_pc % kInstructionBytes != 0 ||
+      program.initial_pc >= code_bytes) {
+    return false;
+  }
+  for (const uint32_t reg : program.initial_regs) {
+    if (reg != 0) {
+      return false;
+    }
+  }
+  for (const uint8_t byte : program.initial_memory) {
+    if (byte != 0) {
+      return false;
+    }
+  }
+  // Reject the pc/memory-dependent ops the constant-offset mapping cannot model
+  // (the terminal ecall at the back is excluded from this scan).
+  for (size_t i = 0; i + 1 < program.code.size(); ++i) {
+    const DecodeResult decoded = decode_instruction(program.code[i]);
+    if (!decoded.ok) {
+      return false;
+    }
+    switch (decoded.instruction.op) {
+    case Op::kLb:
+    case Op::kLh:
+    case Op::kLw:
+    case Op::kLbu:
+    case Op::kLhu:
+    case Op::kSb:
+    case Op::kSh:
+    case Op::kSw:
+    case Op::kJalr:
+    case Op::kAuipc:
+      return false;
+    case Op::kJal:
+      if (decoded.instruction.rd != 0) {
+        return false; // linking jal writes a pc-relative value
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  return true;
+}
+
 class SpikeOracle final : public Oracle {
 public:
   explicit SpikeOracle(std::string binary) : binary_(std::move(binary)) {}
 
   [[nodiscard]] ExecTrace run(const DifferentialProgram &program) override
   {
-    if (!valid_differential_program(program)) {
+    if (!valid_differential_program(program) ||
+        !spike_register_only_supported(program)) {
       return invalid_differential_program_trace();
     }
     const uint32_t entry = kSpikeTextBase + program.initial_pc;
@@ -267,6 +334,13 @@ public:
         static_cast<uint32_t>(program.code.size() * kInstructionBytes);
     const std::vector<SpikeCommit> commits =
         run_spike_commits(binary_, elf, kSpikeTextBase, code_bytes);
+
+    // A program with computation before the terminal ecall must retire commits;
+    // none means Spike never ran it (e.g. the subprocess failed or was not
+    // found), so surface a trap rather than synthesizing a successful halt.
+    if (commits.empty() && program.code.size() > 1) {
+      return invalid_differential_program_trace();
+    }
 
     // Reconstruct the architectural trace by accumulating register writes from
     // the zero reset state. The terminal ecall does not retire (it traps), so

@@ -39,24 +39,24 @@ struct RTypeOp {
 // add, sub, sll, slt, sltu, xor, srl, sra, or, and, then mul, mulh, mulhsu,
 // mulhu, div, divu, rem, remu.
 inline constexpr std::array<RTypeOp, 18> kRegisterOps = {{
-    {0, 0x00},
-    {0, 0x20},
-    {1, 0x00},
-    {2, 0x00},
-    {3, 0x00},
-    {4, 0x00},
-    {5, 0x00},
-    {5, 0x20},
-    {6, 0x00},
-    {7, 0x00},
-    {0, 0x01},
-    {1, 0x01},
-    {2, 0x01},
-    {3, 0x01},
-    {4, 0x01},
-    {5, 0x01},
-    {6, 0x01},
-    {7, 0x01},
+    {.funct3 = 0, .funct7 = 0x00}, // add
+    {.funct3 = 0, .funct7 = 0x20}, // sub
+    {.funct3 = 1, .funct7 = 0x00}, // sll
+    {.funct3 = 2, .funct7 = 0x00}, // slt
+    {.funct3 = 3, .funct7 = 0x00}, // sltu
+    {.funct3 = 4, .funct7 = 0x00}, // xor
+    {.funct3 = 5, .funct7 = 0x00}, // srl
+    {.funct3 = 5, .funct7 = 0x20}, // sra
+    {.funct3 = 6, .funct7 = 0x00}, // or
+    {.funct3 = 7, .funct7 = 0x00}, // and
+    {.funct3 = 0, .funct7 = 0x01}, // mul
+    {.funct3 = 1, .funct7 = 0x01}, // mulh
+    {.funct3 = 2, .funct7 = 0x01}, // mulhsu
+    {.funct3 = 3, .funct7 = 0x01}, // mulhu
+    {.funct3 = 4, .funct7 = 0x01}, // div
+    {.funct3 = 5, .funct7 = 0x01}, // divu
+    {.funct3 = 6, .funct7 = 0x01}, // rem
+    {.funct3 = 7, .funct7 = 0x01}, // remu
 }};
 
 // addi, slti, sltiu, xori, ori, andi (the non-shift OP-IMM funct3 values).
