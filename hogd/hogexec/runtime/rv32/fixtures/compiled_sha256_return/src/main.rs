@@ -83,9 +83,9 @@ unsafe fn sha256_return_empty() -> ! {
 }
 
 // Register-native syscall ABI: the syscall number is passed in a0 and arguments
-// in a1..a5 (the bridge sign-extends each register). The syscall return code is
-// delivered in a0; output buffers are written through the guest pointers passed
-// in registers, so there is no result frame to read back.
+// in a1..a5. The syscall return code is delivered in a0; output buffers are
+// written through the guest pointers passed in registers, so there is no result
+// frame to read back.
 #[inline(always)]
 unsafe fn syscall(
     num: usize,

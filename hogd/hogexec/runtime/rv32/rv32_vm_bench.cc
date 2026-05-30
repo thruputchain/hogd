@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
-#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -210,8 +209,8 @@ validate_artifact_memory(std::span<const uint8_t> memory,
   switch (validation) {
   case ArtifactValidation::kArithmeticControlFlow:
   {
-    constexpr std::array<uint8_t, 4> expected = {15, 0, 0, 0};
-    return memory_matches(memory, kArtifactReturnBufferAddress, expected);
+    constexpr std::array<uint8_t, 4> kExpected = {15, 0, 0, 0};
+    return memory_matches(memory, kArtifactReturnBufferAddress, kExpected);
   }
   case ArtifactValidation::kMemoryTransform:
   {
@@ -663,9 +662,9 @@ make_memory_transform_artifact()
 
 TrampolineResult
 artifact_bench_entry(ExternHostCallContext /*context*/,
-                     WasmContext wasm_context, uint64_t arg0, uint64_t arg1,
-                     uint64_t arg2, uint64_t arg3, uint64_t /*arg4*/,
-                     uint64_t /*arg5*/, uint64_t /*arg6*/, uint64_t /*arg7*/)
+                     WasmContext wasm_context, uint32_t arg0, uint32_t arg1,
+                     uint32_t arg2, uint32_t arg3, uint32_t /*arg4*/,
+                     uint32_t /*arg5*/, uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (arg0 == kSyscallReturn) {
     return TrampolineResult{.result_code = 0,
@@ -699,9 +698,9 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
 
 TrampolineResult
 bridge_noop_entry(ExternHostCallContext /*context*/, WasmContext wasm_context,
-                  uint64_t /*arg0*/, uint64_t /*arg1*/, uint64_t /*arg2*/,
-                  uint64_t /*arg3*/, uint64_t /*arg4*/, uint64_t /*arg5*/,
-                  uint64_t /*arg6*/, uint64_t /*arg7*/)
+                  uint32_t /*arg0*/, uint32_t /*arg1*/, uint32_t /*arg2*/,
+                  uint32_t /*arg3*/, uint32_t /*arg4*/, uint32_t /*arg5*/,
+                  uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (wasm_context.memory.sz > 0) {
     wasm_context.memory.mem[0] ^= 0x5aU;

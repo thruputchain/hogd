@@ -71,20 +71,18 @@ The bridge ABI is register-native:
 
 - `a0`: syscall number.
 - `a1`–`a7`: up to seven syscall argument words.
-- Each RV32 register is **sign-extended** to the `uint64_t` that `syscall_entry`
-  consumes. Sign- (not zero-) extension is required so a guest can express
-  signed scalars and the parser's `UINT64_MAX` optional-pointer null sentinel
-  (`0xFFFFFFFF` sign-extends to all-ones), which a zero-extended register could
-  not. Valid guest pointers and lengths keep bit 31 clear, so for them sign- and
-  zero-extension coincide.
+- Each RV32 register is forwarded as one `uint32_t` syscall argument slot,
+  matching the shared wasm32 syscall ABI. The shared parser interprets signed
+  values from their two's complement bit pattern, uses `UINT32_MAX` as the
+  optional-pointer null sentinel, and bounds-checks guest pointers and lengths
+  against guest memory.
 - **ABI constraint on syscall signatures:** every register-passed argument must
-  be representable as a sign-extended 32-bit value — a guest pointer/length, a
-  signed 32-bit scalar, or an *unsigned* scalar `< 2^31`. A scalar that needs the
-  full 64-bit range (or the full unsigned-32 range) must travel through guest
-  memory by pointer. The `<= 7` argument-word count is enforced by a
-  `static_assert` in `wrap_outer`; the `<= 32`-bit-scalar half is a documented
-  convention, not yet machine-enforced. Wider values such as `BlockHeight`
-  travel through guest memory by pointer.
+  be representable in one 32-bit slot — a guest pointer/length, a signed or
+  unsigned 32-bit scalar, or an enum. A scalar that needs the full 64-bit range
+  must travel through guest memory by pointer. The `<= 7` argument-word count
+  and `<= 32`-bit by-value scalar shape are enforced by `static_assert`s in
+  `wrap_outer`. Wider values such as `BlockHeight` travel through guest memory
+  by pointer.
 - Result: the syscall return code is delivered in `a0`; output buffers and
   lengths are written into guest memory through the pointers the guest supplied.
   There is no result frame or footer.

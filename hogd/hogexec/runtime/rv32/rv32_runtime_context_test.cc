@@ -168,7 +168,7 @@ make_program(const std::vector<uint32_t> &words)
 // Append the register-native syscall sequence: "addi a(0+i), 0, arg_i" for each
 // argument (a0 carries the syscall number) followed by ecall. Immediates must
 // fit addi's signed 12-bit field; -1 yields 0xFFFFFFFF, the optional-pointer
-// None sentinel after the bridge sign-extends it.
+// None sentinel in the shared i32 syscall ABI.
 void
 append_syscall(std::vector<uint32_t> &program,
                std::initializer_list<int32_t> arg_regs)
@@ -197,63 +197,63 @@ make_exit_result(uint32_t code, uint64_t gas_consumed = 4)
 
 extern "C" TrampolineResult
 unrecoverable_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t)
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Unrecoverable);
 }
 
 extern "C" TrampolineResult
 validation_failure_entry(ExternHostCallContext /*unused*/,
-                         WasmContext /*unused*/, uint64_t, uint64_t, uint64_t,
-                         uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+                         WasmContext /*unused*/, uint32_t, uint32_t, uint32_t,
+                         uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::ValidationFailure);
 }
 
 extern "C" TrampolineResult
 abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-              uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-              uint64_t, uint64_t)
+              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+              uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Abandon);
 }
 
 extern "C" TrampolineResult
 unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t)
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t)
 {
   return {.result_code = 0, .panic = 999, .gas_consumed = 4};
 }
 
 extern "C" TrampolineResult
 throwing_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-               uint64_t, uint64_t)
+               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+               uint32_t, uint32_t)
 {
   throw 1;
 }
 
 extern "C" TrampolineResult
 host_out_of_gas_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-                      uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                      uint64_t, uint64_t, uint64_t)
+                      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                      uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
 }
 
 extern "C" TrampolineResult
-exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
-           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
+           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   return make_exit_result(17);
 }
 
 extern "C" TrampolineResult
-return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t,
-             uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-             uint64_t)
+return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
+             uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+             uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Return);
 }
@@ -532,7 +532,7 @@ make_storage_event_return_image()
                            static_cast<int32_t>(kEffectStorageValue.size()),
                            static_cast<int32_t>(StorageDeltaFlags::None)});
   // LogEvent(topic0, topic1=None, topic2=None, data, data_len). The -1 register
-  // values sign-extend to the UINT64_MAX optional-pointer None sentinel.
+  // values produce the UINT32_MAX optional-pointer None sentinel.
   append_syscall(program, {static_cast<int32_t>(SyscallNo::kLogEvent),
                            static_cast<int32_t>(kEffectTopicAddress), -1, -1,
                            static_cast<int32_t>(kEffectEventDataAddress),

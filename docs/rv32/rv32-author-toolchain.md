@@ -153,10 +153,10 @@ it lands on `$PATH` the way wasm-opt does.
    parts). Needed before guest-side dispatch can land.
 2. **Artifact v4?** Whether method_id-passing ships together with dropping the
    dispatch section, or v3 keeps a trivial table in the interim.
-3. **Typed syscall wrappers + the known ABI gap.** The register-native ABI can't
-   express a full 64-bit scalar by value (`MintAuthToken`'s `BlockHeight` expiry
-   `>= 2^31`); resolve by passing such values by pointer. The SDK's typed syscall
-   wrappers are where that convention gets enforced for authors.
+3. **Typed syscall wrappers.** The register-native ABI cannot express a full
+   64-bit scalar by value (`MintAuthToken`'s `BlockHeight`, for example), so
+   wrappers should pass such values by pointer. The SDK's typed syscall wrappers
+   are where that convention gets enforced for authors.
 
 ## Sequencing
 

@@ -87,18 +87,17 @@ ecall()
   return 0x00000073U;
 }
 
-// Build EcallArgs (a0..a7) from up to eight register values. The bridge
-// sign-extends each, so callers pass the raw 32-bit register contents.
+// Build EcallArgs (a0..a7) from up to eight raw register values.
 EcallArgs
-make_ecall_args(std::initializer_list<uint64_t> regs)
+make_ecall_args(std::initializer_list<uint32_t> regs)
 {
   EcallArgs args = {};
   uint32_t *slots[] = {&args.a0, &args.a1, &args.a2, &args.a3,
                        &args.a4, &args.a5, &args.a6, &args.a7};
   size_t index = 0;
-  for (const uint64_t reg : regs) {
+  for (const uint32_t reg : regs) {
     if (index < 8) {
-      *slots[index] = static_cast<uint32_t>(reg);
+      *slots[index] = reg;
     }
     ++index;
   }
@@ -106,7 +105,7 @@ make_ecall_args(std::initializer_list<uint64_t> regs)
 }
 
 struct CapturedCall {
-  std::array<uint64_t, 8> args = {};
+  std::array<uint32_t, 8> args = {};
   uint64_t gas_remaining = 0;
   uint64_t memory_size = 0;
   uint8_t first_memory_byte = 0;
@@ -116,8 +115,8 @@ struct CapturedCall {
 
 TrampolineResult
 capture_entry(ExternHostCallContext context, WasmContext wasm_context,
-              uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-              uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7)
+              uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+              uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)
 {
   auto *captured = static_cast<CapturedCall *>(context);
   ++captured->calls;
@@ -136,8 +135,8 @@ struct SequencedGasCall {
 
 TrampolineResult
 sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t)
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t)
 {
   auto *captured = static_cast<SequencedGasCall *>(context);
   ++captured->calls;
@@ -148,13 +147,13 @@ sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
 }
 
 TrampolineResult
-throwing_entry(ExternHostCallContext, WasmContext, uint64_t, uint64_t, uint64_t,
-               uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
+throwing_entry(ExternHostCallContext, WasmContext, uint32_t, uint32_t, uint32_t,
+               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   throw 1;
 }
 
-enum class ParserProbeMode : uint64_t {
+enum class ParserProbeMode : uint32_t {
   kSpans = 1,
   kBool = 2,
   kSignedI32 = 3,
@@ -164,8 +163,8 @@ enum class ParserProbeMode : uint64_t {
 
 TrampolineResult
 parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
-                   uint64_t mode, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-                   uint64_t arg4, uint64_t, uint64_t, uint64_t)
+                   uint32_t mode, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+                   uint32_t arg4, uint32_t, uint32_t, uint32_t)
 {
   AliasGuard guard;
   std::span<std::byte> memory(reinterpret_cast<std::byte *>(
@@ -235,7 +234,7 @@ parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
 // value); there is no result footer under the register-native ABI.
 HostResult
 call_parser_probe(std::vector<uint8_t> &memory,
-                  std::initializer_list<uint64_t> args)
+                  std::initializer_list<uint32_t> args)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   SyscallBridgeHost bridge(nullptr, parser_probe_entry);
@@ -251,14 +250,14 @@ require_last_result(const SyscallBridgeHost &bridge)
   return result.value_or(TrampolineResult{});
 }
 
-constexpr uint64_t kSpansMode = static_cast<uint64_t>(ParserProbeMode::kSpans);
-constexpr uint64_t kBoolMode = static_cast<uint64_t>(ParserProbeMode::kBool);
-constexpr uint64_t kSignedI32Mode =
-    static_cast<uint64_t>(ParserProbeMode::kSignedI32);
-constexpr uint64_t kOptionalU32Mode =
-    static_cast<uint64_t>(ParserProbeMode::kOptionalU32);
-constexpr uint64_t kUnsignedU32Mode =
-    static_cast<uint64_t>(ParserProbeMode::kUnsignedU32);
+constexpr uint32_t kSpansMode = static_cast<uint32_t>(ParserProbeMode::kSpans);
+constexpr uint32_t kBoolMode = static_cast<uint32_t>(ParserProbeMode::kBool);
+constexpr uint32_t kSignedI32Mode =
+    static_cast<uint32_t>(ParserProbeMode::kSignedI32);
+constexpr uint32_t kOptionalU32Mode =
+    static_cast<uint32_t>(ParserProbeMode::kOptionalU32);
+constexpr uint32_t kUnsignedU32Mode =
+    static_cast<uint32_t>(ParserProbeMode::kUnsignedU32);
 
 TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
 {
@@ -273,8 +272,8 @@ TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
 
   // a0..a7 carry the syscall number plus seven argument words. Distinct,
   // non-sequential per-register values pin the exact register->arg mapping (a
-  // swap or off-by-one in the sign_extend_arg call list would be caught); the
-  // final register has bit 31 set to exercise the bridge's sign-extension.
+  // swap or off-by-one in the forwarding call list would be caught); the final
+  // register has all bits set to prove no widening shim rewrites the word.
   const HostResult result =
       bridge.ecall(view, make_ecall_args({0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
                                           0x77, 0xFFFFFFFFU}));
@@ -283,14 +282,14 @@ TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
   EXPECT_EQ(result.continue_value(), 0xfffffff9U);
   EXPECT_EQ(result.gas_consumed, 12U);
   EXPECT_EQ(captured.calls, 1);
-  EXPECT_EQ(captured.args[0], 0x11ULL);
-  EXPECT_EQ(captured.args[1], 0x22ULL);
-  EXPECT_EQ(captured.args[2], 0x33ULL);
-  EXPECT_EQ(captured.args[3], 0x44ULL);
-  EXPECT_EQ(captured.args[4], 0x55ULL);
-  EXPECT_EQ(captured.args[5], 0x66ULL);
-  EXPECT_EQ(captured.args[6], 0x77ULL);
-  EXPECT_EQ(captured.args[7], 0xFFFFFFFFFFFFFFFFULL);
+  EXPECT_EQ(captured.args[0], 0x11U);
+  EXPECT_EQ(captured.args[1], 0x22U);
+  EXPECT_EQ(captured.args[2], 0x33U);
+  EXPECT_EQ(captured.args[3], 0x44U);
+  EXPECT_EQ(captured.args[4], 0x55U);
+  EXPECT_EQ(captured.args[5], 0x66U);
+  EXPECT_EQ(captured.args[6], 0x77U);
+  EXPECT_EQ(captured.args[7], 0xFFFFFFFFU);
   EXPECT_EQ(captured.gas_remaining, 77U);
   EXPECT_EQ(captured.memory_size, memory.size());
   EXPECT_EQ(captured.first_memory_byte, 0x5cU);
@@ -312,8 +311,8 @@ TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
   EXPECT_EQ(result.continue_value(), 0U);
   EXPECT_EQ(memory[kOutput], 0x44U);
 
-  result = call_parser_probe(memory,
-                             {kSpansMode, memory.size(), 0, memory.size(), 0});
+  const auto end = static_cast<uint32_t>(memory.size());
+  result = call_parser_probe(memory, {kSpansMode, end, 0, end, 0});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0U);
 }
@@ -335,32 +334,26 @@ TEST(Rv32SyscallBridgeTest, parserProbeRejectsOobAndAliasedSpans)
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 }
 
-// The ABI's safety argument rests on valid guest pointers/lengths having bit 31
-// clear. A pointer or length WITH bit 31 set sign-extends to a huge 64-bit
-// value, which the parser must reject (out of bounds) rather than silently wrap
-// to a small in-range offset.
+// The parser treats pointer/length slots as raw 32-bit values and rejects any
+// range that falls outside guest memory rather than silently wrapping it to a
+// small in-range offset.
 TEST(Rv32SyscallBridgeTest, parserProbeRejectsBit31PointerOrLength)
 {
   std::vector<uint8_t> memory(160);
 
-  // Input pointer with bit 31 set -> sign-extends to ~0xFFFFFFFF80000000 ->
-  // OOB.
+  // Input pointer with bit 31 set -> OOB.
   HostResult result =
       call_parser_probe(memory, {kSpansMode, 0x80000000U, 1, 120, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 
-  // Length with bit 31 set -> sign-extends huge -> OOB.
+  // Length with bit 31 set -> OOB.
   result = call_parser_probe(memory, {kSpansMode, 120, 0x80000000U, 124, 1});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 0xffffFFFFU);
 }
 
-// Documents the register-native ABI limit (finding #2): because the bridge
-// sign-extends, an unsigned 32-bit scalar with bit 31 set (>= 2^31) exceeds the
-// uint32 range and is rejected. Register-passed unsigned scalars are therefore
-// limited to < 2^31; wider unsigned values must travel by pointer.
-TEST(Rv32SyscallBridgeTest, parserProbeUnsignedScalarBit31IsUnreachable)
+TEST(Rv32SyscallBridgeTest, parserProbeUnsignedScalarAcceptsFullU32Range)
 {
   std::vector<uint8_t> memory(160);
 
@@ -369,13 +362,12 @@ TEST(Rv32SyscallBridgeTest, parserProbeUnsignedScalarBit31IsUnreachable)
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x7FFFFFFFU})
                 .continue_value(),
             0U);
-  // bit 31 set: sign-extended past UINT32_MAX -> parser fault.
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x80000000U})
                 .continue_value(),
-            0xffffFFFFU);
+            0U);
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0xFFFFFFFFU})
                 .continue_value(),
-            0xffffFFFFU);
+            0U);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
@@ -388,10 +380,8 @@ TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
   EXPECT_EQ(call_parser_probe(memory, {kBoolMode, 2}).continue_value(),
             0xffffFFFFU);
 
-  // The bridge sign-extends every register, so any 32-bit pattern is a
-  // canonical signed encoding. Unlike the WASM i64 ABI (which can present
-  // non-canonical words), 0xFFFFFFFF and 0x80000000 are accepted here as -1
-  // and INT_MIN respectively.
+  // Every 32-bit pattern is a canonical int32_t encoding under the shared i32
+  // syscall ABI. 0xFFFFFFFF and 0x80000000 are accepted as -1 and INT_MIN.
   EXPECT_EQ(call_parser_probe(memory, {kSignedI32Mode, 0}).continue_value(),
             0U);
   EXPECT_EQ(
@@ -412,11 +402,11 @@ TEST(Rv32SyscallBridgeTest, parserProbeOptionalPointerSentinelFromAllOnesReg)
   store_le64(memory, kValueAddress, 37);
   store_le64(memory, 0, 5);
 
-  // 0xFFFFFFFF sign-extends to UINT64_MAX, the parser's optional-pointer null
-  // sentinel, so the optional argument resolves to None (probe returns 1).
+  // UINT32_MAX is the parser's optional-pointer null sentinel, so the optional
+  // argument resolves to None (probe returns 1).
   HostResult result =
       call_parser_probe(memory, {kOptionalU32Mode,
-                                 std::numeric_limits<uint64_t>::max()});
+                                 std::numeric_limits<uint32_t>::max()});
   EXPECT_EQ(result.status, HostStatus::kContinue);
   EXPECT_EQ(result.continue_value(), 1U);
 

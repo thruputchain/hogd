@@ -45,10 +45,10 @@ constexpr uint32_t kOutputAddress = 192;
 constexpr uint64_t kPlentyOfGas = 1'000'000;
 
 // Register-native ABI: the syscall number and up to seven argument words are
-// placed in a0..a7. Build the EcallArgs the bridge consumes; the bridge
-// sign-extends each register, so callers pass the raw register contents.
+// placed in a0..a7. Build the EcallArgs the bridge consumes from raw register
+// contents.
 hogd::rv32::EcallArgs
-make_ecall_args(std::span<const uint64_t> words)
+make_ecall_args(std::span<const uint32_t> words)
 {
   hogd::rv32::EcallArgs args = {};
   uint32_t *slots[] = {&args.a0, &args.a1, &args.a2, &args.a3,
@@ -56,7 +56,7 @@ make_ecall_args(std::span<const uint64_t> words)
   constexpr size_t kMaxArgs = 8;
   EXPECT_LE(words.size(), kMaxArgs);
   for (size_t i = 0; i < words.size() && i < kMaxArgs; ++i) {
-    *slots[i] = static_cast<uint32_t>(words[i]);
+    *slots[i] = words[i];
   }
   return args;
 }
@@ -176,10 +176,10 @@ TEST_F(Rv32SyscallEntryBridgeTest, Sha256UsesRealSyscallEntry)
   std::vector<uint8_t> memory(256);
   constexpr std::string_view input = "rv32 syscall bridge";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::array<uint64_t, 4> arg_words = {
-      static_cast<uint64_t>(SyscallNo::kSHA256),
+  const std::array<uint32_t, 4> arg_words = {
+      static_cast<uint32_t>(SyscallNo::kSHA256),
       kInputAddress,
-      input.size(),
+      static_cast<uint32_t>(input.size()),
       kOutputAddress,
   };
 
@@ -247,11 +247,11 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
   std::vector<uint8_t> memory(256, 0xAA);
   constexpr std::string_view input = "fault";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::array<uint64_t, 4> arg_words = {
-      static_cast<uint64_t>(SyscallNo::kSHA256),
+  const std::array<uint32_t, 4> arg_words = {
+      static_cast<uint32_t>(SyscallNo::kSHA256),
       kInputAddress,
-      input.size(),
-      memory.size() - 1,
+      static_cast<uint32_t>(input.size()),
+      static_cast<uint32_t>(memory.size() - 1),
   };
   const std::vector<uint8_t> before = memory;
 
@@ -282,15 +282,16 @@ TEST_F(Rv32SyscallEntryBridgeTest,
   std::ranges::fill(
       std::span<uint8_t>(memory).subspan(kInputs, sizeof(CopyableInvokeInputs)),
       0);
-  const std::array<uint64_t, 8> arg_words = {
-      static_cast<uint64_t>(SyscallNo::kInvoke),
-      kAddress,          // address pointer
-      kAddress,          // calldata pointer (zero length)
-      0,                 // calldata length
-      0,                 // owned auth token pointer
-      0,                 // owned auth token length
-      kInputs,           // CopyableInvokeInputs pointer
-      memory.size() - 1, // CopyableInvokeOutputs pointer (out of bounds)
+  const auto bad_outputs = static_cast<uint32_t>(memory.size() - 1);
+  const std::array<uint32_t, 8> arg_words = {
+      static_cast<uint32_t>(SyscallNo::kInvoke),
+      kAddress,    // address pointer
+      kAddress,    // calldata pointer (zero length)
+      0,           // calldata length
+      0,           // owned auth token pointer
+      0,           // owned auth token length
+      kInputs,     // CopyableInvokeInputs pointer
+      bad_outputs, // CopyableInvokeOutputs pointer
   };
   const std::vector<uint8_t> before = memory;
 
@@ -309,8 +310,8 @@ TEST_F(Rv32SyscallEntryBridgeTest,
 TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
 {
   std::vector<uint8_t> memory(256);
-  const std::array<uint64_t, 1> arg_words = {
-      static_cast<uint64_t>(kSyscallCount),
+  const std::array<uint32_t, 1> arg_words = {
+      static_cast<uint32_t>(kSyscallCount),
   };
 
   auto handler = make_handler();
@@ -333,10 +334,10 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
   std::vector<uint8_t> memory(256, 0xCC);
   constexpr std::string_view input = "out of gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::array<uint64_t, 4> arg_words = {
-      static_cast<uint64_t>(SyscallNo::kSHA256),
+  const std::array<uint32_t, 4> arg_words = {
+      static_cast<uint32_t>(SyscallNo::kSHA256),
       kInputAddress,
-      input.size(),
+      static_cast<uint32_t>(input.size()),
       kOutputAddress,
   };
   const std::vector<uint8_t> before = memory;

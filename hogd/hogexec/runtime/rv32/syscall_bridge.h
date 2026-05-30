@@ -9,18 +9,17 @@ namespace hogd::rv32 {
 
 // Register-native bridge ABI: the guest places the syscall number in a0 and up
 // to seven argument words in a1..a7, then executes ecall. Each RV32 register is
-// sign-extended to the uint64_t that syscall_entry consumes. Sign- (not zero-)
-// extension is required so a guest can express signed scalars and the shared
-// parser's UINT64_MAX optional-pointer null sentinel (0xFFFFFFFF -> all-ones);
-// valid guest pointers and lengths keep bit 31 clear, so for them sign- and
-// zero-extension coincide.
+// forwarded as one uint32_t syscall argument slot, matching the shared wasm32
+// syscall ABI. The shared parser interprets signed values from their two's
+// complement bit pattern, uses UINT32_MAX as the optional-pointer null
+// sentinel, and bounds-checks guest pointers and lengths against guest memory.
 //
 // ABI constraint on syscall signatures: every register-passed argument must be
-// representable as a sign-extended 32-bit value -- a guest pointer/length, a
-// signed 32-bit scalar, or an unsigned scalar < 2^31. A scalar needing the full
-// 64-bit range (or the full unsigned-32 range) must travel through guest memory
-// by pointer instead. wrap_outer's static_assert enforces the <=7-word count;
-// the <=32-bit-scalar half is currently a documented convention, not enforced.
+// representable in one 32-bit slot -- a guest pointer/length, a signed or
+// unsigned 32-bit scalar, or an enum. A scalar needing the full 64-bit range
+// must travel through guest memory by pointer instead. wrap_outer's
+// static_assert enforces both the <=7-word count and <=32-bit by-value scalar
+// shape.
 //
 // The syscall ABI version is validated at artifact load time, so no per-call
 // version register is needed. Results: the syscall return code is delivered in
