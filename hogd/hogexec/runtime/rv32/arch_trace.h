@@ -171,7 +171,8 @@ private:
 
 struct TraceStep {
   StepResult result = StepResult::kContinue;
-  ArchState state; // Architectural state AFTER this instruction retired.
+  ArchState state_before; // Architectural state BEFORE this instruction.
+  ArchState state;        // Architectural state AFTER this instruction retired.
 };
 
 struct ExecTrace {
@@ -189,6 +190,7 @@ trace_execution(Machine &machine, Host &host, size_t max_steps = 4096)
 {
   ExecTrace trace;
   for (size_t i = 0; i < max_steps; ++i) {
+    const ArchState state_before = capture_arch_state(machine);
     StepResult result = machine.step();
     if (result == StepResult::kEcall) {
       const auto pending = machine.pending_ecall();
@@ -200,8 +202,9 @@ trace_execution(Machine &machine, Host &host, size_t max_steps = 4096)
             machine.complete_ecall(host.ecall(machine.view(), pending.value()));
       }
     }
-    trace.steps.push_back(
-        TraceStep{.result = result, .state = capture_arch_state(machine)});
+    trace.steps.push_back(TraceStep{.result = result,
+                                    .state_before = state_before,
+                                    .state = capture_arch_state(machine)});
     if (result != StepResult::kContinue) {
       trace.final_result = result;
       return trace;

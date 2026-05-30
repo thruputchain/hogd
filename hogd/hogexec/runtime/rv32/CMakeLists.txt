@@ -104,6 +104,22 @@ target_link_libraries(
 )
 gtest_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
 
+# External-oracle differential harness (oracle.h + spec_model.h). Core-only for
+# the same reason: the Oracle interface must stay linkable against an external
+# reference model (Spike/sail-riscv) with no hogd dependencies.
+add_executable(
+  rv32_oracle_test
+  rv32_oracle_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_oracle_test
+  rv32_isa_core
+  GTest::gtest
+)
+gtest_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
+
 add_executable(
   rv32_vm_test
   rv32_vm_test.cc
