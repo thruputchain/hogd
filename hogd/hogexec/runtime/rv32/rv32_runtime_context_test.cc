@@ -1911,7 +1911,8 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   const auto frame_status = frame_output.status_code();
   std::cerr << "[smoke] frame status_code=" << static_cast<int>(frame_status);
   switch (frame_status) {
-  case InvocationFrameStatusCode::Return: {
+  case InvocationFrameStatusCode::Return:
+  {
     const auto &return_buffer = frame_output.return_buffer();
     static constexpr char kHex[] = "0123456789abcdef";
     std::cerr << " (Return) return_bytes=" << return_buffer.size() << " hex=";
