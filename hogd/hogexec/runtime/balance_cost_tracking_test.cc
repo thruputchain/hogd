@@ -1130,8 +1130,7 @@ TEST_F(BalanceCostTrackingTest,
   // The zero address is a fresh balance row, credited the transferred amount
   // minus the one-time balance-creation cost --- exactly like any other new
   // receiver.
-  auto zero_balance_addrkey =
-      make_free_native_token_balance_addrkey(kZeroAddr);
+  auto zero_balance_addrkey = make_free_native_token_balance_addrkey(kZeroAddr);
   auto zero_balance_opt = lookup_storage_item_from_db(zero_balance_addrkey);
   ASSERT_TRUE(zero_balance_opt.has_value());
   int128_t zero_balance = from_xdr(zero_balance_opt.value().nnint());
@@ -1155,8 +1154,7 @@ TEST_F(BalanceCostTrackingTest,
   });
   ASSERT_EQ(event.serialized_event.size(), expected_event.size());
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
-                         event.serialized_event.end(),
-                         expected_event.begin()));
+                         event.serialized_event.end(), expected_event.begin()));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

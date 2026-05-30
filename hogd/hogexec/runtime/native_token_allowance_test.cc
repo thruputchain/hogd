@@ -1035,8 +1035,9 @@ TEST_F(NativeTokenAllowanceTest,
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r = client.invoke_opt<"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kTransferAmount));
+        auto delta = make_difference(kTransferAmount);
+        auto r =
+            client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr, delta);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -1090,7 +1091,8 @@ TEST_F(NativeTokenAllowanceTest,
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
-          ADD_FAILURE() << "transfer_from(owner, zero, amount) did not return Ok";
+          ADD_FAILURE()
+              << "transfer_from(owner, zero, amount) did not return Ok";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -1185,8 +1187,7 @@ TEST_F(NativeTokenAllowanceTest,
   });
   ASSERT_EQ(event.serialized_event.size(), expected_event.size());
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
-                         event.serialized_event.end(),
-                         expected_event.begin()));
+                         event.serialized_event.end(), expected_event.begin()));
 
   // Tx 3: confirm via the precompile views that the allowance is consumed and
   // native total_supply() is unchanged.
