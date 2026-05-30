@@ -200,6 +200,29 @@ gtest_discover_tests(
   NO_PRETTY_VALUES
 )
 
+# Direct-threaded experimental interpreter (header-only threaded_*.h, clang-only
+# via musttail). Core-only: links rv32_isa_core ONLY because the differential
+# test constructs the canonical Machine to diff against. Gated on musttail
+# support so non-musttail toolchains skip it instead of hitting the #error.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+   OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15))
+  add_executable(
+    rv32_threaded_test
+    rv32_threaded_test.cc
+    rv32_vm_test_main.cc
+  )
+
+  target_link_libraries(
+    rv32_threaded_test
+    rv32_isa_core
+    GTest::gtest
+  )
+  gtest_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
+else()
+  message(STATUS "rv32_threaded_test skipped: compiler lacks musttail attribute")
+endif()
+
 add_executable(
   rv32_unsupported_profile_test
   rv32_unsupported_profile_test.cc
