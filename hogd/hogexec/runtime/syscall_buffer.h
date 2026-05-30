@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <span>
 
 #include "types.hh" // RuntimeMemoryLength
@@ -23,6 +24,10 @@ copy_to_guest_buffer(std::span<std::byte> dst, std::span<const std::byte> src)
     assert(src.data() != nullptr);
     std::memcpy(dst.data(), src.data(), copy_len);
   }
+  // Every syscall payload routed through here is bounded well below
+  // UINT32_MAX by protocol max-lengths; assert the invariant so a future
+  // caller with a larger payload can't silently wrap the reported length.
+  assert(src.size() <= std::numeric_limits<RuntimeMemoryLength>::max());
   return static_cast<RuntimeMemoryLength>(src.size());
 }
 
