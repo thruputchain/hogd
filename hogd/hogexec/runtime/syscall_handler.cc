@@ -481,11 +481,11 @@ SystemCallHandler::add_replay_nonce_delta()
     return;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  db_proxy_.add_delta(
-      AddressAndKey{.address = root_invoked_address_.value(),
-                    .key = StorageKey(StorageKeyType::ReplayCache)},
-      ReplayCacheItem{tx_uniquifier_.value()}.get_delta(),
-      std::to_underlying(StorageDeltaFlags::None));
+  db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
+                                    .key = StorageKey(
+                                        StorageKeyType::ReplayCache)},
+                      ReplayCacheItem{tx_uniquifier_.value()}.get_delta(),
+                      std::to_underlying(StorageDeltaFlags::None));
 }
 
 ExecResult

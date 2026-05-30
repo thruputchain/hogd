@@ -1,5 +1,6 @@
 // Integration tests for replay-cache uniquifier consumption on the normal
-// hogexec transaction execution path (SystemCallHandler::try_commit_transaction).
+// hogexec transaction execution path
+// (SystemCallHandler::try_commit_transaction).
 //
 // Every transaction included in a block consumes its Uniquifier into the
 // replay cache, keyed by the root invoked address. This holds for the success,
@@ -55,18 +56,19 @@ public:
     setup_grant_storage_token(kAddr, 1'000'000'000);
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, [](NativeSyscallContext & /*ctx*/) noexcept
-                       -> InvokeStatus<void> { return {}; });
+    fns.emplace(0,
+                [](NativeSyscallContext & /*ctx*/) noexcept
+                    -> InvokeStatus<void> { return {}; });
     fns.emplace(1,
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   ctx.handler().set_return_buffer(ReturnBuffer{},
                                                   /*revert_frame=*/true);
                   return {};
                 });
-    fns.emplace(2, [](NativeSyscallContext & /*ctx*/) noexcept
-                       -> InvokeStatus<void> {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    });
+    fns.emplace(
+        2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -80,14 +82,14 @@ public:
   make_tx(uint32_t method, uint64_t nonce,
           BlockHeight expiry = std::numeric_limits<BlockHeight>::max())
   {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = kAddr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = {}},
-        .uniquifier =
-            Uniquifier{.block_expiry_height = expiry, .nonce = nonce}};
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kAddr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {}},
+                       .uniquifier = Uniquifier{.block_expiry_height = expiry,
+                                                .nonce = nonce}};
   }
 
   ExecResult run_and_commit(Transaction const &tx)

@@ -4,8 +4,9 @@
 // matching can reject a forged observation.
 //
 // This closes a gap in the fault path. It previously called abort_transaction()
-// on a deterministic fault, so a faulting transaction's observation deltas never
-// reached HogDB and a forged observation on a faulting tx could not be rejected.
+// on a deterministic fault, so a faulting transaction's observation deltas
+// never reached HogDB and a forged observation on a faulting tx could not be
+// rejected.
 //
 // The two tests below pin both directions:
 //   - an honest observation on a faulting tx reconciles and the block closes;
@@ -82,8 +83,9 @@ public:
                 [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto key = make_storage_key("rcq0");
                   // Peek records an observation of a concurrent entry...
-                  auto peek = ctx.handler().retrocausal_queue_consume(
-                      key, /*peek=*/true);
+                  auto peek =
+                      ctx.handler().retrocausal_queue_consume(key,
+                                                              /*peek=*/true);
                   if (!peek.has_value()) {
                     return peek.error().to_invoke_error();
                   }
@@ -105,8 +107,8 @@ public:
                        .entrypoint = entrypoint_from_method_id(method),
                        .gas_limit = UINT64_MAX,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
-        .uniquifier = Uniquifier{.block_expiry_height = INT64_MAX,
-                                 .nonce = nonce}};
+        .uniquifier =
+            Uniquifier{.block_expiry_height = INT64_MAX, .nonce = nonce}};
   }
 };
 
@@ -141,8 +143,8 @@ TEST_F(RcqObservationOnFaultTest, HonestObservationOnFaultClosesBlock)
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
   {
-    auto h_ins = make_new_system_call_handler_validation(tx_insert, *ctx,
-                                                         insert_p);
+    auto h_ins =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
     ASSERT_TRUE(h_ins.root_invoke().is_root_success());
     ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
 
@@ -192,8 +194,8 @@ TEST_F(RcqObservationOnFaultTest, ForgedObservationOnFaultRejectedAtBlockClose)
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
   {
-    auto h_ins = make_new_system_call_handler_validation(tx_insert, *ctx,
-                                                         insert_p);
+    auto h_ins =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
     ASSERT_TRUE(h_ins.root_invoke().is_root_success());
     ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
 
