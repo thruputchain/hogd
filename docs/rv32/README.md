@@ -8,6 +8,10 @@
 - [rv32-cpp-ownership-review.md](rv32-cpp-ownership-review.md)
   - "Do we like owning this C++ forever?" review.
   - Tracks closed and remaining M5 readiness gates.
+- [rv32-author-toolchain.md](rv32-author-toolchain.md)
+  - Author-side tooling design: standalone lowerer (wasm-opt model), the
+    3-repo split, and the guest-side dispatch decision.
+  - Answers the "Production SDK lowerer design" gate from the ownership review.
 - [rv32-rust-vm-lessons.md](rv32-rust-vm-lessons.md)
   - Prior-art notes from CKB-VM and PolkaVM.
   - Explains why the artifact/runtime boundary looks the way it does.
