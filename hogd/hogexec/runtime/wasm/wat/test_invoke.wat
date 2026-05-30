@@ -1,9 +1,9 @@
 (module
-  (type (;0;) (func (param i64) (result i32)))
+  (type (;0;) (func (param i32) (result i32)))
   (import "test" "redir_call" (func $foo (type 0)))
 
   (func (export "calltest")
-    i64.const 12
+    i32.const 12
     call $foo
     drop
   )

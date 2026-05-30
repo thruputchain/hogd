@@ -120,7 +120,7 @@ macro_rules! link_function_nargs {
         ) -> Result<(), Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| -> Result<i32, wasmi::Error> {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u32),*| -> Result<i32, wasmi::Error> {
 
                     let gas_remaining = match caller.get_fuel() {
                         Ok(fuel) => fuel,

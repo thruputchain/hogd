@@ -29,58 +29,61 @@ struct WasmContext {
 
 typedef void *ExternHostCallContext;
 
+// wasm32 syscall ABI: each argument slot is a 32-bit value (i32). Note that
+// WasmContext.gas_remaining and LinearMemorySlice.sz remain uint64_t; they are
+// not argument slots.
 typedef struct TrampolineResult (*HostFn0)(ExternHostCallContext,
                                            struct WasmContext);
 typedef struct TrampolineResult (*HostFn1)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t);
+                                           struct WasmContext, uint32_t);
 typedef struct TrampolineResult (*HostFn2)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t);
 typedef struct TrampolineResult (*HostFn3)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn4)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn5)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t);
 typedef struct TrampolineResult (*HostFn6)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t, uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn7)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t, uint64_t, uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn8)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t);
 typedef struct TrampolineResult (*HostFn9)(ExternHostCallContext,
-                                           struct WasmContext, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t, uint64_t, uint64_t,
-                                           uint64_t, uint64_t);
+                                           struct WasmContext, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn10)(ExternHostCallContext,
-                                            struct WasmContext, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t);
+                                            struct WasmContext, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t);
 typedef struct TrampolineResult (*HostFn11)(ExternHostCallContext,
-                                            struct WasmContext, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t);
+                                            struct WasmContext, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t);
 typedef struct TrampolineResult (*HostFn12)(ExternHostCallContext,
-                                            struct WasmContext, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t, uint64_t,
-                                            uint64_t, uint64_t);
+                                            struct WasmContext, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t);
 
 // NOLINTEND(modernize-use-using)
 
