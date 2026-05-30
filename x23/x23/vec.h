@@ -775,8 +775,17 @@ protected:
     // yet; placement array-new of the trivial, implicit-lifetime scalar is the
     // portable, cookie-free equivalent (same idiom as ramdb/loglet.cc and
     // container/merkle/allocator.h).
-    else
+    else {
+      // Cookie-freedom (so the returned pointer == p) needs trivial
+      // destructibility; absence of side-effecting init needs trivial default
+      // construction.  Both hold for the scalar value_type this branch is
+      // reached with; a future non-trivial rebind must use the primitive above.
+      static_assert(std::is_trivially_default_constructible_v<value_type> &&
+                        std::is_trivially_destructible_v<value_type>,
+                    "placement new[] is cookie-free and side-effect-free only "
+                    "for trivial types; use std::start_lifetime_as_array");
       return ::new (static_cast<void *>(p)) value_type[n];
+    }
 #endif
   }
 
