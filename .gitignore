@@ -1,4 +1,5 @@
 **/.DS_STORE
+AGENTS.md
 *.a
 *.codex
 *.combined
@@ -28,6 +29,7 @@ Testing/**
 [._]*.sw[a-p]
 bcheck/**
 build/**
+build-*/**
 build-pkg/**
 hogx-agent
 metrics_history
