@@ -1284,37 +1284,16 @@ TEST(Mempool, GetTip)
 
 TEST(Mempool, CommitValidatedBlockSkipsInvalidHogAgeUpdate)
 {
-  // DISABLED pending a production decision (see report below).
-  //
-  // This test deliberately zeroes the local scheduler's cached hog-age buckets
-  // for [account] (via [set_cached_hog_age_to_zero]) to exercise the path where
-  // a validating node cannot locally pay for a block's transaction, then
-  // commits the validated block and expects the buckets to stay at zero.
-  //
-  // The replay-cache feature breaks this: every committed transaction now
-  // charges its root invoked address the replay-cache storage cost, which hogdb
-  // folds into a per-address hog delta (the default cost model charges 7 native
-  // tokens per entry; see [StorageCostModel::default_cost_model]). At commit,
-  // that negative delta is forwarded to the scheduler via
-  // [Scheduler::process_transfers] -> [process_transfers_helper], which asserts
-  //
-  //   CHECK_LE(num_received_abs,
-  //            to_schedule_hogs + already_scheduled_hogs + received_hogs);
-  //   (hogd/mempool/scheduler.cc:664-665)
-  //
-  // Because this test zeroed all three buckets, the deduction of 7 hogs trips
-  // the invariant: "7 < 0". This is a PRODUCTION invariant, not a test
-  // expectation. The delta-driven transfer path has no "skip when the account
-  // cannot pay" branch (unlike the tx-driven [apply_committed_block_hog_ages]),
-  // so the replay-cost delta is applied unconditionally. A validating node that
-  // lacks the proposer's cached hog state for an account could hit this in
-  // production. Resolving it requires a production change (e.g. clamping or
-  // skipping the deduction when the cached buckets are insufficient), which is
-  // out of scope for this test fix.
-  GTEST_SKIP() << "Replay-cache cost delta violates the scheduler "
-                  "hog-conservation CHECK at scheduler.cc:665 when the local "
-                  "scheduler's hog buckets are zeroed; needs a production fix.";
-
+  // A validating node may lack an account's cached hog-age state. This test
+  // zeroes the local scheduler's hog-age buckets for [account] (via
+  // [set_cached_hog_age_to_zero]) to simulate that, then commits a validated
+  // block. Every committed transaction now charges its root invoked address the
+  // replay-cache storage cost, which is forwarded to the scheduler as a
+  // negative per-address hog delta. The scheduler's delta path
+  // ([process_transfers_helper]) skips the deduction when the cached buckets
+  // cannot absorb it -- mirroring the tx-driven
+  // [apply_committed_block_hog_ages] skip -- so the commit succeeds and the
+  // buckets stay at zero rather than tripping the hog-conservation CHECK.
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   MempoolTestInfra server;
 
