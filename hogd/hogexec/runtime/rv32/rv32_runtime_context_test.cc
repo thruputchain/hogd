@@ -1835,12 +1835,12 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
 
 // SPIKE smoke test for SDK-lowered RV32 artifacts.
 //
-// Set RV32_SMOKE_ARTIFACT to a `.rv32a` path produced by
-// scripts/rv32_lower.py against an sdk_rs counter-rv32 ELF. The test
-// parses, validates, and invokes the first dispatch entry, and prints
-// the observed outcome. It's intentionally informational — EXPECT, not
-// ASSERT — so a failure here surfaces the actual VM/SDK gap rather
-// than just printing a green/red ctest line.
+// Set RV32_SMOKE_ARTIFACT to a `.rv32a` path produced from an sdk_rs
+// counter-rv32 ELF by scripts/rv32_make_smoke_artifact.sh, which wraps the
+// published rv32-lower binary. The test parses, validates, and invokes the
+// selected dispatch entry, and prints the observed outcome. It's intentionally
+// informational — EXPECT, not ASSERT — so a failure here surfaces the actual
+// VM/SDK gap rather than just printing a green/red ctest line.
 //
 // Until cross-repo CI builds the SDK contract automatically, the env
 // var is the cleanest way to plumb the artifact in without committing

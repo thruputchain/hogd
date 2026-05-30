@@ -18,7 +18,7 @@ The spike proved minimal viability end to end:
   builds for `riscv32im-unknown-none-elf`.
 - The `#[contract]` macro emits each entrypoint as `#[export_name = "<16-HEX>"]`
   + `#[link_section = ".text.gh_<16-HEX>"]` on rv32.
-- The existing `scripts/rv32_lower.py` lowers that ELF to a valid v3 artifact
+- The original `scripts/rv32_lower.py` lowered that ELF to a valid v3 artifact
   with all four dispatch entries resolved to PCs.
 - hogd's `LoweredSdkArtifactSmoke` test
   (`rv32_runtime_context_test.cc`) parses such a lowered artifact and invokes its
@@ -30,9 +30,9 @@ It also surfaced two staleness/ergonomics problems that motivate this design:
 
 1. The release build strips `.symtab` by default, so the symbol-scanning lowerer
    finds zero entrypoints unless the contract is built `strip = false`.
-2. `rv32_lower.py` is a second, drifting implementation of the artifact format.
-   It was stamping `syscall_abi = 0` against a VM that now validates `= 1` — the
-   exact failure mode you get from maintaining two copies of one contract.
+2. `rv32_lower.py` was a second, drifting implementation of the artifact format.
+   It stamped `syscall_abi = 0` against a VM that validated `= 1` — the exact
+   failure mode you get from maintaining two copies of one contract.
 
 ## Goals and constraints
 
@@ -129,9 +129,35 @@ through any bump.
 Standalone (scriptable, no CLI config required):
 
 ```
-cargo build --release --target riscv32im-unknown-none-elf -p <contract>-rv32
+CARGO_PROFILE_RELEASE_STRIP=false \
+  cargo build --release --target riscv32im-unknown-none-elf -p <contract>-rv32
 rv32-lower --elf target/.../release/<contract>-rv32 --out <contract>.rv32a
 ```
+
+Hogd's manual smoke-test helper wraps the same published binary and pins the
+expected producer version:
+
+```
+CARGO_PROFILE_RELEASE_STRIP=false \
+  cargo build --release -p counter-rv32
+scripts/rv32_make_smoke_artifact.sh \
+  --elf target/.../release/<contract>-rv32 \
+  --out /tmp/<contract>.rv32a \
+  --metadata /tmp/<contract>.json \
+  --rustc-version "$(rustc --version)" \
+  --target-triple riscv32im-unknown-none-elf \
+  --build-flags "CARGO_PROFILE_RELEASE_STRIP=false cargo build --release -p counter-rv32" \
+  --json
+RV32_SMOKE_ARTIFACT=/tmp/<contract>.rv32a \
+RV32_SMOKE_METHOD_ID=0x39281451083172C6 \
+  build/gcc-rv32-ci/hogd/hogexec/runtime/rv32_runtime_context_test \
+  --gtest_filter='*LoweredSdkArtifactSmoke'
+```
+
+`CARGO_PROFILE_RELEASE_STRIP=false` is required while v3 lowering discovers
+`_start` and dispatch PCs from the ELF symbol table. The method id above is
+counter's no-arg `get` entrypoint; calldata-taking methods are still useful
+failure-path smoke checks, but they abort on empty calldata.
 
 Convenience:
 
@@ -178,9 +204,11 @@ it lands on `$PATH` the way wasm-opt does.
   criterion): splitting the `artifact` module out to a standalone
   `groundhog-rv32-artifact` crate (protocol-rs) and wiring the build-time digest
   cross-check against hogd's `artifact.h`.
-- **Phase 2:** point hogd's `rv32_runtime_context_test` smoke test at the
-  `rv32-lower` binary; delete `scripts/rv32_lower.py`. One implementation from
-  here on.
+- **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
+  producer now uses `scripts/rv32_make_smoke_artifact.sh`, which requires
+  exactly `rv32-lower 0.4.2` on `$PATH`; `scripts/rv32_lower.py` was deleted.
+  One supported implementation from here on. Still open: making this a CI-built
+  artifact instead of an env-var-plumbed manual smoke.
 - **Phase 3 (needs Geoff):** method_id-passing + guest-side dispatcher in the
   SDK macro; thin the lowerer to validate+package+hash; optionally cut artifact
   v4. The strip-symbols requirement disappears here.
