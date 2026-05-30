@@ -264,5 +264,24 @@ TEST(Rv32Oracle, machineMatchesSpecOnRandomRegisterCorpus)
   }
 }
 
+// Same as above for the memory corpus (loads/stores) -- validates the memory
+// generator and the load/store data path Machine-vs-spec in default CI.
+TEST(Rv32Oracle, machineMatchesSpecOnRandomMemoryCorpus)
+{
+  MachineOracle machine_oracle;
+  SpecModelOracle spec_oracle;
+  for (uint64_t seed = 0; seed < 256; ++seed) {
+    SCOPED_TRACE(seed);
+    DifferentialProgram program;
+    program.code = test_corpus::generate_memory_program(0xBEEFULL + seed, 64);
+    program.memory_bytes = test_corpus::kCorpusMemoryBytes;
+    program.initial_memory.assign(test_corpus::kCorpusMemoryBytes, 0);
+    const ExecTrace expected = spec_oracle.run(program);
+    const ExecTrace actual = machine_oracle.run(program);
+    EXPECT_EQ(actual.final_result, StepResult::kHalted);
+    EXPECT_EQ(describe_arch_trace_divergence(expected, actual), "");
+  }
+}
+
 } // namespace
 } // namespace hogd::rv32

@@ -18,10 +18,12 @@
 // and CI are unaffected (opt-in / out-of-default-CI posture). Linked against
 // rv32_isa_core ONLY.
 //
-// First increment: register-only, ecall-terminated, zero-initial-register
-// programs (no loads/stores, no jalr, no auipc / linking jal), so our 0-based
-// pc-space maps to Spike's DRAM by a constant offset with no address-space
-// mismatch. Memory programs and computed jumps are the next increments.
+// Supported subset: ecall-terminated, zero-initial-register/memory programs
+// with register AND memory ops (loads/stores), but no jalr, auipc, or linking
+// jal -- those write/consume the absolute pc, which Spike cannot place at 0
+// ([0, 0x1000) is reserved for devices), so they stay on the in-tree
+// crosscheck. Code maps to Spike at a constant pc offset; data lives at its
+// true address in a region above the device window.
 
 namespace hogd::rv32 {
 namespace {
@@ -29,7 +31,10 @@ namespace {
 using test_program::addi;
 using test_program::branch;
 using test_program::j_type;
+using test_program::load;
 using test_program::op;
+using test_program::store;
+using test_program::u_type;
 
 constexpr uint32_t kEcall = 0x00000073U;
 constexpr uint8_t kF7Base = 0x00;   // add, sll, xor, srl, or, and
@@ -43,6 +48,16 @@ reg_program(std::vector<uint32_t> words)
   program.code = std::move(words);
   program.memory_bytes = 256;
   program.initial_memory.assign(256, 0);
+  return program;
+}
+
+DifferentialProgram
+mem_program(std::vector<uint32_t> words)
+{
+  DifferentialProgram program;
+  program.code = std::move(words);
+  program.memory_bytes = test_corpus::kCorpusMemoryBytes;
+  program.initial_memory.assign(test_corpus::kCorpusMemoryBytes, 0);
   return program;
 }
 
@@ -152,8 +167,8 @@ TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
   nonzero_mem.initial_memory[0] = 0xAB;
   EXPECT_TRUE(spike.run(nonzero_mem).steps.empty());
 
-  // Contains a load -> outside the register-only subset.
-  EXPECT_TRUE(spike.run(reg_program({test_program::load(2, 2, 1, 0), kEcall}))
+  // Contains a jalr -> computed jump, outside the supported subset.
+  EXPECT_TRUE(spike.run(reg_program({test_program::jalr(2, 1, 0), kEcall}))
                   .steps.empty());
 
   // No terminal ecall.
@@ -161,6 +176,64 @@ TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
 
   // Empty code (would underflow ecall_pc if not rejected).
   EXPECT_TRUE(spike.run(reg_program({})).steps.empty());
+}
+
+std::vector<NamedProgram>
+memory_corpus()
+{
+  // Base register x1 = kCorpusDataBase (0x1000) via lui; aligned stores/loads.
+  // test_program::store is store(rs1, rs2, imm, funct3); load is
+  // load(rd, funct3, rs1, imm).
+  return {
+      {.name = "sw_lw",
+       .words = {u_type(0x37, 1, 0x1000), addi(2, 0, 0x123), store(1, 2, 0, 2),
+                 load(3, 2, 1, 0), kEcall}},
+      {.name = "sb_lb_signed",
+       .words = {u_type(0x37, 1, 0x1000), addi(2, 0, 0xAB), store(1, 2, 0, 0),
+                 load(3, 0, 1, 0), kEcall}},
+      {.name = "sh_lhu",
+       .words = {u_type(0x37, 1, 0x1000), addi(2, 0, 0x345), store(1, 2, 2, 1),
+                 load(3, 5, 1, 2), kEcall}},
+      {.name = "byte_lanes_then_word_load",
+       .words = {u_type(0x37, 1, 0x1000), addi(2, 0, 0x11), addi(3, 0, 0x22),
+                 store(1, 2, 0, 0), store(1, 3, 1, 0), load(4, 2, 1, 0),
+                 kEcall}},
+  };
+}
+
+TEST(Rv32SpikeOracle, handMemoryCorpusMatchesSpike)
+{
+  if (!spike_oracle_available()) {
+    GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
+  }
+  SpikeOracle spike(spike_oracle_binary());
+  MachineOracle machine;
+  SpecModelOracle spec;
+
+  for (const NamedProgram &prog : memory_corpus()) {
+    SCOPED_TRACE(prog.name);
+    expect_oracles_agree_with_spike(spike, machine, spec,
+                                    mem_program(prog.words));
+  }
+}
+
+TEST(Rv32SpikeOracle, randomMemoryCorpusMatchesSpike)
+{
+  if (!spike_oracle_available()) {
+    GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
+  }
+  SpikeOracle spike(spike_oracle_binary());
+  MachineOracle machine;
+  SpecModelOracle spec;
+
+  for (uint64_t seed = 0; seed < 24; ++seed) {
+    SCOPED_TRACE(seed);
+    DifferentialProgram program;
+    program.code = test_corpus::generate_memory_program(0xBEEFULL + seed, 48);
+    program.memory_bytes = test_corpus::kCorpusMemoryBytes;
+    program.initial_memory.assign(test_corpus::kCorpusMemoryBytes, 0);
+    expect_oracles_agree_with_spike(spike, machine, spec, program);
+  }
 }
 
 } // namespace

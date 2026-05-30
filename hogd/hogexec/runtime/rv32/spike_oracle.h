@@ -26,18 +26,26 @@
 // so nothing about Spike enters the build graph or default CI;
 // spike_oracle_available() lets the test skip cleanly when it is absent.
 //
-// First-increment scope: register-only, ecall-terminated, zero-initial-register
-// programs (no loads/stores, no jalr). Code is loaded at kSpikeTextBase
-// (0x80000000, Spike's default DRAM base) and every control transfer is
-// pc-relative, so our 0-based pc-space maps to Spike by a constant offset with
-// no address-space mismatch. Loads/stores (which need the data region mapped
-// without colliding with code or Spike's bootrom) and computed jumps are a
-// later increment. There is no production code here; it is harness
-// infrastructure.
+// Supported subset: ecall-terminated, zero-initial-register/memory programs
+// with register AND memory ops (loads/stores), but no jalr, auipc, or linking
+// jal. Code loads at kSpikeTextBase (0x80000000) so pc maps to our 0-based
+// pc-space by a constant offset; data lives at its true address in a region
+// above Spike's reserved device window, so data addresses (immediate-derived,
+// not pc-derived) match with no offset. The excluded ops write or consume the
+// absolute pc, which differs by Spike's base offset and cannot be reconciled
+// (Spike cannot map code at 0 -- [0, 0x1000) is reserved for devices); they
+// stay covered by the in-tree spec crosscheck. There is no production code
+// here; it is harness infrastructure.
 
 namespace hogd::rv32 {
 
 inline constexpr uint32_t kSpikeTextBase = 0x80000000U;
+
+// Data lives at its true (0-based) address inside a region mapped above Spike's
+// reserved device window [0, 0x1000). Data addresses are immediate-derived, not
+// pc-derived, so they need no base offset: a load from 0x1000 hits the same
+// numeric address on Machine and Spike.
+inline constexpr uint32_t kSpikeDataBase = 0x1000U;
 
 // The terminal ecall traps in M-mode and Spike then spins in its default trap
 // handler (below kSpikeTextBase, so it emits no in-range commits). We wait that
@@ -150,6 +158,10 @@ struct SpikeCommit {
   bool has_reg_write = false;
   uint8_t rd = 0;
   uint32_t value = 0;
+  bool has_mem_write = false;
+  uint32_t mem_addr = 0;
+  uint32_t mem_value = 0;
+  uint8_t mem_width = 0;
 };
 
 inline bool
@@ -183,7 +195,9 @@ parse_spike_commit(const std::string &line, uint32_t text_base,
   while (stream >> token) {
     tokens.push_back(token);
   }
-  // tokens: [core, <n>:, <priv>, 0x<pc>, (0x<insn>), x<rd>, 0x<value>]
+  // tokens: core <n>: <priv> 0x<pc> (0x<insn>) [x<rd> 0x<val>] [mem 0x<addr>
+  // [0x<val>]]. A store writes "mem <addr> <value>"; a load reads "mem <addr>"
+  // with no value (no architectural state change).
   if (tokens.size() < 5) {
     return std::nullopt;
   }
@@ -196,15 +210,35 @@ parse_spike_commit(const std::string &line, uint32_t text_base,
   }
   SpikeCommit commit;
   commit.pc = pc;
-  if (tokens.size() >= 7 && tokens[5].size() >= 2 && tokens[5][0] == 'x') {
-    uint32_t value = 0;
-    if (parse_hex_u32(tokens[6], value)) {
-      char *reg_end = nullptr;
-      const uint64_t reg_index =
-          std::strtoul(tokens[5].c_str() + 1, &reg_end, 10);
-      commit.has_reg_write = true;
-      commit.rd = static_cast<uint8_t>(reg_index);
-      commit.value = value;
+  for (size_t i = 5; i < tokens.size(); ++i) {
+    if (tokens[i] == "mem") {
+      uint32_t addr = 0;
+      uint32_t value = 0;
+      if (i + 2 < tokens.size() && parse_hex_u32(tokens[i + 1], addr) &&
+          parse_hex_u32(tokens[i + 2], value)) {
+        // Store: the value is padded to the access width, so its hex digit
+        // count gives the byte width (sb=2, sh=4, sw=8 digits).
+        commit.has_mem_write = true;
+        commit.mem_addr = addr;
+        commit.mem_value = value;
+        commit.mem_width = static_cast<uint8_t>((tokens[i + 2].size() - 2) / 2);
+        i += 2;
+      }
+      else {
+        i += 1; // Load read: address only.
+      }
+    }
+    else if (tokens[i].size() >= 2 && tokens[i][0] == 'x') {
+      uint32_t value = 0;
+      if (i + 1 < tokens.size() && parse_hex_u32(tokens[i + 1], value)) {
+        char *reg_end = nullptr;
+        const uint64_t reg_index =
+            std::strtoul(tokens[i].c_str() + 1, &reg_end, 10);
+        commit.has_reg_write = true;
+        commit.rd = static_cast<uint8_t>(reg_index);
+        commit.value = value;
+        i += 1;
+      }
     }
   }
   return commit;
@@ -212,7 +246,8 @@ parse_spike_commit(const std::string &line, uint32_t text_base,
 
 inline std::vector<SpikeCommit>
 run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
-                  uint32_t text_base, uint32_t code_bytes)
+                  uint32_t text_base, uint32_t code_bytes,
+                  uint32_t memory_bytes)
 {
   std::vector<SpikeCommit> commits;
 
@@ -230,10 +265,18 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
   std::fwrite(elf.data(), 1, elf.size(), elf_file);
   std::fclose(elf_file);
 
+  // One RAM region for code at text_base, plus a data region above Spike's
+  // device window when the program uses data memory (Spike zero-fills it).
+  // --disable-dtb stops Spike writing a device tree into that data region.
+  const uint32_t code_region = (code_bytes + 0xFFFU) & ~0xFFFU;
   std::ostringstream cmd;
   cmd << "timeout " << kSpikeTimeoutSeconds << " '" << binary
-      << "' --isa=rv32im --log-commits --pc=0x" << std::hex << text_base << " '"
-      << tmpl << "' 2>&1";
+      << "' --isa=rv32im --log-commits --disable-dtb -m0x" << std::hex
+      << text_base << ":0x" << code_region;
+  if (memory_bytes > kSpikeDataBase) {
+    cmd << ",0x" << kSpikeDataBase << ":0x" << (memory_bytes - kSpikeDataBase);
+  }
+  cmd << " --pc=0x" << text_base << " '" << tmpl << "' 2>&1";
 
   // Intentional subprocess: this test-only harness runs the external Spike
   // binary, with the command built from the developer-set RV32_ORACLE_BIN.
@@ -255,15 +298,15 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
   return commits;
 }
 
-// The static subset this adapter supports under the constant-offset pc mapping:
-// non-empty code terminated by ecall; an aligned, in-range initial pc; zero
-// initial registers and memory (Spike runs from reset); and register-only code
-// -- no loads/stores, no jalr, no auipc or linking jal. Those excluded ops
-// either address a data region this increment does not map, or write/consume a
-// pc value that differs by Spike's base offset. Out-of-subset programs are
+// The static subset this adapter supports: non-empty code terminated by ecall;
+// an aligned, in-range initial pc; zero initial registers and memory (Spike
+// runs from reset and zero-fills data RAM); register and memory ops, but no
+// jalr, auipc, or linking jal -- those write/consume the absolute pc, which
+// differs by Spike's base offset. Load/store target addresses must land in the
+// mapped data region; the corpus guarantees that. Out-of-subset programs are
 // rejected up front rather than silently mis-reconstructed from zero state.
 inline bool
-spike_register_only_supported(const DifferentialProgram &program)
+spike_supported(const DifferentialProgram &program)
 {
   if (program.code.empty() || program.code.back() != 0x00000073U) {
     return false;
@@ -292,14 +335,6 @@ spike_register_only_supported(const DifferentialProgram &program)
       return false;
     }
     switch (decoded.instruction.op) {
-    case Op::kLb:
-    case Op::kLh:
-    case Op::kLw:
-    case Op::kLbu:
-    case Op::kLhu:
-    case Op::kSb:
-    case Op::kSh:
-    case Op::kSw:
     case Op::kJalr:
     case Op::kAuipc:
       return false;
@@ -321,8 +356,7 @@ public:
 
   [[nodiscard]] ExecTrace run(const DifferentialProgram &program) override
   {
-    if (!valid_differential_program(program) ||
-        !spike_register_only_supported(program)) {
+    if (!valid_differential_program(program) || !spike_supported(program)) {
       return invalid_differential_program_trace();
     }
     const uint32_t entry = kSpikeTextBase + program.initial_pc;
@@ -333,7 +367,8 @@ public:
     const auto code_bytes =
         static_cast<uint32_t>(program.code.size() * kInstructionBytes);
     const std::vector<SpikeCommit> commits =
-        run_spike_commits(binary_, elf, kSpikeTextBase, code_bytes);
+        run_spike_commits(binary_, elf, kSpikeTextBase, code_bytes,
+                          program.memory_bytes);
 
     // A program with computation before the terminal ecall must retire commits;
     // none means Spike never ran it (e.g. the subprocess failed or was not
@@ -350,7 +385,7 @@ public:
     // computation comes entirely from Spike's commits.
     ExecTrace trace;
     std::array<uint32_t, kRegisterCount> regs = {};
-    const std::vector<uint8_t> memory(program.memory_bytes, 0);
+    std::vector<uint8_t> memory(program.memory_bytes, 0);
     const uint32_t ecall_pc = code_bytes - kInstructionBytes;
 
     for (size_t i = 0; i < commits.size(); ++i) {
@@ -362,6 +397,14 @@ public:
       if (commit.has_reg_write && commit.rd != 0 &&
           commit.rd < kRegisterCount) {
         regs[commit.rd] = commit.value;
+      }
+      if (commit.has_mem_write) {
+        for (uint8_t byte = 0; byte < commit.mem_width; ++byte) {
+          const uint32_t addr = commit.mem_addr + byte;
+          if (addr < memory.size()) {
+            memory[addr] = static_cast<uint8_t>(commit.mem_value >> (8 * byte));
+          }
+        }
       }
       ArchState after;
       after.pc = (i + 1 < commits.size()) ? (commits[i + 1].pc - kSpikeTextBase)

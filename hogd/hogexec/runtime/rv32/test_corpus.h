@@ -8,26 +8,24 @@
 
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
-// Deterministic constrained-random RV32IM program generator for differential
-// testing. The generated programs are register-only and forward-only by design,
-// so the SAME corpus is valid on our Machine, the in-tree spec model, AND an
-// external oracle that loads code at a nonzero base with a constant pc offset
-// (SpikeOracle). There is no production code here; it is harness
-// infrastructure.
+// Deterministic constrained-random RV32IM program generators for differential
+// testing. Both produce programs valid on our Machine, the in-tree spec model,
+// AND the SpikeOracle (which loads code at a nonzero base with a constant pc
+// offset). There is no production code here; it is harness infrastructure.
 //
-// Deliberate exclusions (so the constant-offset pc mapping holds and execution
-// always terminates):
-//   - no loads/stores  -- avoids the separate data-region mapping;
-//   - no jalr          -- computed (absolute) jump target;
+// generate_register_only_program: register/control-flow ops, forward-only.
+// generate_memory_program: register ops plus width-aligned loads/stores.
+//
+// Both deliberately exclude the ops the constant-offset pc mapping cannot
+// model:
+//   - no jalr -- computed (absolute) jump target;
 //   - no auipc, no linking jal (rd != 0) -- these write a pc-relative value
 //   into
-//     a register, which differs by the oracle's base offset;
-//   - control flow is forward-only (branch/jal skip exactly one instruction),
-//     so pc advances monotonically toward the terminal ecall.
-// This still exercises the full arithmetic/logical/shift/mul/div data path plus
-// forward branches -- the bulk of the ISA and where most interpreter
-// optimizations and subtle bugs live. auipc/jalr/memory join once the oracle
-// uses a 0-based unified memory map.
+//     a register, which differs by the oracle's base offset (Spike cannot put
+//     code at 0; [0, 0x1000) is reserved for devices).
+// Together they exercise the full arithmetic/logical/shift/mul/div data path,
+// forward branches, and aligned memory access -- the bulk of the ISA and where
+// most interpreter optimizations and subtle bugs live.
 
 namespace hogd::rv32::test_corpus {
 
@@ -131,6 +129,74 @@ generate_register_only_program(uint64_t seed, size_t body_len)
     else {
       code.push_back(test_program::addi(random_reg(rng), random_reg(rng),
                                         random_imm12(rng)));
+    }
+  }
+
+  code.push_back(0x00000073U); // ecall terminator
+  return code;
+}
+
+// Data layout for memory programs: a region based at kCorpusDataBase (which
+// must match SpikeOracle's kSpikeDataBase, above Spike's [0, 0x1000) device
+// window). Accesses stay in [kCorpusDataBase, kCorpusDataBase +
+// kCorpusDataSpan); a DifferentialProgram running these must set memory_bytes
+// to at least kCorpusMemoryBytes.
+inline constexpr uint32_t kCorpusDataBase = 0x1000;
+inline constexpr uint32_t kCorpusDataSpan = 0x800;
+inline constexpr uint32_t kCorpusMemoryBytes = 0x2000;
+
+// Generate a straight-line program (no branches/jal, so pc advances
+// monotonically to the terminal ecall) that mixes register ops with
+// width-aligned loads/stores to the data region. Accesses are aligned because
+// our Machine traps on misalignment while Spike silently handles it -- a
+// misaligned access would diverge. Each memory op re-establishes its base via
+// lui, so register writes never strand the base.
+inline std::vector<uint32_t>
+generate_memory_program(uint64_t seed, size_t body_len)
+{
+  std::mt19937_64 rng(seed);
+  std::vector<uint32_t> code;
+
+  for (size_t i = 0; i < body_len; ++i) {
+    if (rng() % 2 == 0) {
+      // Register-only op (no control flow, no pc-relative addressing).
+      const uint32_t kind = rng() % 100;
+      if (kind < 60) {
+        const RTypeOp r = kRegisterOps[rng() % kRegisterOps.size()];
+        code.push_back(test_program::op(random_reg(rng), random_reg(rng),
+                                        random_reg(rng), r.funct3, r.funct7));
+      }
+      else {
+        const uint8_t funct3 = kImmFunct3[rng() % kImmFunct3.size()];
+        code.push_back(test_program::i_type(0x13U, random_reg(rng), funct3,
+                                            random_reg(rng),
+                                            random_imm12(rng)));
+      }
+    }
+    else {
+      // Memory op: establish the base, then an aligned load or store.
+      const auto base = static_cast<uint8_t>(1 + (rng() % 31)); // x1..x31
+      code.push_back(test_program::u_type(0x37U, base, kCorpusDataBase));
+      const uint32_t wsel = rng() % 3; // 0=byte, 1=half, 2=word
+      const uint32_t width = 1U << wsel;
+      const auto offset =
+          static_cast<int32_t>((rng() % (kCorpusDataSpan / width)) * width);
+      if (rng() % 2 == 0) {
+        // test_program::store is store(rs1, rs2, imm, funct3).
+        code.push_back(test_program::store(base, random_reg(rng), offset,
+                                           static_cast<uint8_t>(wsel)));
+      }
+      else {
+        uint8_t funct3 = 2; // lw
+        if (wsel == 0) {
+          funct3 = (rng() % 2 == 0) ? 0 : 4; // lb / lbu
+        }
+        else if (wsel == 1) {
+          funct3 = (rng() % 2 == 0) ? 1 : 5; // lh / lhu
+        }
+        code.push_back(
+            test_program::load(random_reg(rng), funct3, base, offset));
+      }
     }
   }
 
