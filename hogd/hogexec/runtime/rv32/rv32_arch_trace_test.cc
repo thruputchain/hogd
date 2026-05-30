@@ -170,5 +170,30 @@ TEST(Rv32ArchTrace, traceDivergenceComparesFinalResult)
   EXPECT_NE(diff.find("final result"), std::string::npos) << diff;
 }
 
+TEST(Rv32ArchTrace, traceObserverChainsStatesIntoExecTrace)
+{
+  ArchState s0;
+  s0.pc = 0;
+  ArchState s1;
+  s1.pc = 4;
+  ArchState s2;
+  s2.pc = 8;
+
+  TraceObserver obs;
+  obs.on_initial(s0);
+  obs.on_retire(s1, StepResult::kContinue);
+  obs.on_retire(s2, StepResult::kHalted);
+
+  const ExecTrace &trace = obs.trace();
+  ASSERT_EQ(trace.steps.size(), 2U);
+  EXPECT_EQ(trace.steps[0].state_before.pc, 0U);
+  EXPECT_EQ(trace.steps[0].state.pc, 4U);
+  EXPECT_EQ(trace.steps[0].result, StepResult::kContinue);
+  EXPECT_EQ(trace.steps[1].state_before.pc, 4U);
+  EXPECT_EQ(trace.steps[1].state.pc, 8U);
+  EXPECT_EQ(trace.steps[1].result, StepResult::kHalted);
+  EXPECT_EQ(trace.final_result, StepResult::kHalted);
+}
+
 } // namespace
 } // namespace hogd::rv32
