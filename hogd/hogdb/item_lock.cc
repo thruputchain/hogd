@@ -175,9 +175,17 @@ try {
   // noexcept specifier guarantees that even an exception outside this family
   // terminates here instead of being downgraded to a recoverable SYSTEM_ERR by
   // the SRPC dispatcher.
-  error(
-      "ItemLock::commit_change: unrecoverable allocation/internal failure: {}",
-      e.what());
+  //
+  // The log emission itself formats via std::format and can allocate, so under
+  // the same OOM it may throw again.  Swallow that so a logging failure cannot
+  // escalate a clean unrecoverable halt into a bare std::terminate: the
+  // kInternal return below still routes the node to a coordinated shutdown.
+  try {
+    error("ItemLock::commit_change: unrecoverable allocation/internal failure: "
+          "{}",
+          e.what());
+  } catch (...) { // NOLINT(bugprone-empty-catch)
+  }
   return HogDBError{HogDBCode::kInternal};
 }
 
