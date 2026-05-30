@@ -177,14 +177,17 @@ try {
   // the SRPC dispatcher.
   //
   // The log emission itself formats via std::format and can allocate, so under
-  // the same OOM it may throw again.  Swallow that so a logging failure cannot
-  // escalate a clean unrecoverable halt into a bare std::terminate: the
-  // kInternal return below still routes the node to a coordinated shutdown.
+  // the same OOM it may throw again.  Fall back to a static, unformatted
+  // message (far less likely to allocate) so the failure is never silent.  If
+  // even that throws, the noexcept boundary terminates -- an acceptable last
+  // resort.
   try {
     error("ItemLock::commit_change: unrecoverable allocation/internal failure: "
           "{}",
           e.what());
-  } catch (...) { // NOLINT(bugprone-empty-catch)
+  } catch (...) {
+    error("ItemLock::commit_change: unrecoverable allocation/internal failure "
+          "(detail unavailable under memory pressure)");
   }
   return HogDBError{HogDBCode::kInternal};
 }
