@@ -174,6 +174,24 @@ protected:
                                            CopyableInvokeOutputs{});
   }
 
+  // Same as try_invoke_b, but writes the child frame outcome into `outputs`
+  // so callers can distinguish a committed try_invoke (frame_status == Return)
+  // from one that ran but rolled back (frame_status != Return). Under the
+  // current Invoke ABI both cases return kSyscallErrorCodeNone, so the
+  // frame_status channel is the only way to tell them apart.
+  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method,
+                           CopyableInvokeOutputs &outputs)
+  {
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = method,
+        .gas_limit = UINT64_MAX,
+        .flags = std::to_underlying(InvokeFlag::TryInvoke),
+    };
+    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
+                                           std::span<uint32_t>{}, inputs,
+                                           outputs);
+  }
+
   // Build a NativeContext with a single no-op contract (for structural
   // validation tests that don't need real execution).
   static std::unique_ptr<NativeContext> make_noop_context()
@@ -377,11 +395,18 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   // skip the second try_invoke → 1 of 2 bits consumed → failure.
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r0 = try_invoke_b(ctx, kWriteHello);
+        CopyableInvokeOutputs r0_outputs{};
+        auto r0 = try_invoke_b(ctx, kWriteHello, r0_outputs);
         if (!r0.has_value())
           return InvokeError{InvokeErrorCode::Deterministic};
 
-        if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // Only do the second try_invoke if the first one actually committed.
+        // A child frame that ran but rolled back also returns
+        // kSyscallErrorCodeNone, so success is frame_status == Return. In
+        // validation, flipping bit 0 forces this first try_invoke to be
+        // replayed as a rollback, so this branch is correctly skipped.
+        if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+            r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
           if (auto r1 = try_invoke_b(ctx, kWriteWorld); !r1.has_value())
             return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -1002,14 +1027,20 @@ TEST_P(ProposeValidateRoundtripTest,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
+          CopyableInvokeOutputs outputs{};
           auto r =
               ctx.syscall<SyscallNo::kInvoke>(kAddrB, make_index_calldata(i),
                                               std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+                                              outputs);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          // Count only try_invokes that actually committed. A child frame
+          // that ran but rolled back (e.g. the depth-cap rejection on the
+          // final attempt) also returns kSyscallErrorCodeNone, so commit is
+          // identified by frame_status == Return.
+          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+              outputs.frame_status == InvocationFrameStatusCode::Return) {
             successes++;
           }
         }
@@ -1282,14 +1313,20 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrB,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+        // B's frame hits the depth cap and rolls back. The child frame still
+        // ran, so the Invoke syscall returns kSyscallErrorCodeNone; the
+        // rollback shows up as frame_status != Return. Propagate it as a
+        // deterministic failure.
+        if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+            outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -1302,15 +1339,19 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrC,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          CopyableInvokeOutputs outputs{};
+          auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrC,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          // These C invocations are expected to commit. A child frame that
+          // ran but rolled back also returns kSyscallErrorCodeNone, so a
+          // non-commit is detected via frame_status != Return.
+          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
         }

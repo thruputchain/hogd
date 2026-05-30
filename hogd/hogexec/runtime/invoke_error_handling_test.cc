@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -123,6 +125,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeOutputs r2_outputs{};
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
@@ -132,17 +135,21 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
           return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r2_outputs);
         }();
+        // A child that traps: the syscall succeeds (a frame ran) and reports
+        // the fault via frame_status.
         if (!r2.has_value() ||
-            r2.value() !=
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-          ADD_FAILURE() << "Invoke 1 did not return kDeterministicWasm";
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "Invoke 1 (child trap) should report frame_status "
+                           "Fault with code None";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        // Out of gas in child becomes deterministic (handleable) error in
-        // caller
+        // Out of gas in the child is also a Fault frame_status (the syscall
+        // itself still succeeds in the caller).
+        CopyableInvokeOutputs r3_outputs{};
         auto r3 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
@@ -152,12 +159,13 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
           return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r3_outputs);
         }();
         if (!r3.has_value() ||
-            r3.value() !=
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-          ADD_FAILURE() << "Invoke 2 did not return out of gas";
+            r3.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r3_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "Invoke 2 (out of gas) should report frame_status "
+                           "Fault with code None";
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
@@ -500,6 +508,288 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+}
+
+// === Post-redesign Invoke frame-status semantics ===
+//
+// The frame outcome (Return/Abort/Fault) is reported through
+// CopyableInvokeOutputs.frame_status, NOT the SyscallErrorCode. Any child frame
+// that actually RAN makes Invoke return kSyscallErrorCodeNone; the success vs.
+// revert vs. fault distinction lives in frame_status. A nonzero error code now
+// means only "the call was rejected before a child frame ran" and is a no-op.
+
+// A child that manually reverts: Invoke returns None, frame_status == Abort,
+// and the abort buffer remains readable via GetReturnedBuffer.
+TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
+{
+  constexpr ContractAddress kCalleeAddress = make_contract_address(0);
+  constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
+  constexpr std::string_view kRevertPayload = "REVERTED!";
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
+  fns_callee.emplace(0,
+                     [kRevertPayload](NativeSyscallContext &ctx) noexcept
+                         -> InvokeStatus<void> {
+                       ReturnBuffer buffer;
+                       buffer.resize_uninitialized(kRevertPayload.size());
+                       std::memcpy(buffer.data(), kRevertPayload.data(),
+                                   kRevertPayload.size());
+                       ctx.handler().set_return_buffer(std::move(buffer), true,
+                                                       {});
+                       return {};
+                     });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
+  fns_orch.emplace(
+      0,
+      [kCalleeAddress, kRevertPayload](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
+        CopyableInvokeOutputs outputs{};
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
+        EXPECT_TRUE(r.has_value());
+        if (r.has_value()) {
+          EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        }
+        EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Abort);
+        EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len),
+                  kRevertPayload.size());
+        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+
+        auto status = ctx.handler().get_return_buffer();
+        EXPECT_TRUE(status.has_value());
+        if (status.has_value() && (*status).has_value()) {
+          EXPECT_EQ((**status)->size(), kRevertPayload.size());
+          EXPECT_EQ(std::memcmp((**status)->data(), kRevertPayload.data(),
+                                kRevertPayload.size()),
+                    0);
+        }
+        else {
+          ADD_FAILURE() << "abort buffer should be readable after revert";
+        }
+        return {};
+      });
+  auto orchestrator_contract =
+      std::make_unique<NativeContract>(std::move(fns_orch));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(callee_contract));
+  contract_map.emplace(1, std::move(orchestrator_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto callee_xdr = make_native_contract(0);
+  write_contract(callee_xdr);
+  write_deployment(kCalleeAddress, callee_xdr);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(orchestrator_xdr);
+  write_deployment(kOrchestratorAddress, orchestrator_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// A child that traps/faults: Invoke returns None, frame_status == Fault, and
+// GetReturnedBuffer reports no buffer available.
+TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
+{
+  constexpr ContractAddress kCalleeAddress = make_contract_address(0);
+  constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
+  fns_callee.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
+  fns_orch.emplace(
+      0,
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
+        CopyableInvokeOutputs outputs{};
+        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
+        EXPECT_TRUE(r.has_value());
+        if (r.has_value()) {
+          EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        }
+        EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Fault);
+        EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len), 0U);
+        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+
+        auto status = ctx.handler().get_return_buffer();
+        EXPECT_TRUE(status.has_value());
+        if (status.has_value()) {
+          EXPECT_FALSE((*status).has_value());
+          if (!(*status).has_value()) {
+            EXPECT_EQ(
+                (*status).error().code(),
+                SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable);
+          }
+        }
+        return {};
+      });
+  auto orchestrator_contract =
+      std::make_unique<NativeContract>(std::move(fns_orch));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(callee_contract));
+  contract_map.emplace(1, std::move(orchestrator_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto callee_xdr = make_native_contract(0);
+  write_contract(callee_xdr);
+  write_deployment(kCalleeAddress, callee_xdr);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(orchestrator_xdr);
+  write_deployment(kOrchestratorAddress, orchestrator_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Issue #1909, locked in as working-as-intended: an Invoke rejected before a
+// child frame runs (here, an undeployed target) returns a nonzero error code
+// and is a no-op on the parent's most-recent-child return slot, so
+// GetReturnedBuffer still returns the buffer from the prior child that ran.
+TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
+{
+  constexpr ContractAddress kCalleeAddress = make_contract_address(0);
+  constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
+  constexpr ContractAddress kMissingAddress = make_contract_address(2);
+  constexpr std::string_view kPayload = "OK!!";
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
+  fns_callee.emplace(
+      0, [kPayload](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(kPayload.size());
+        std::memcpy(buffer.data(), kPayload.data(), kPayload.size());
+        ctx.handler().set_return_buffer(std::move(buffer), false, {});
+        return {};
+      });
+  auto callee_contract =
+      std::make_unique<NativeContract>(std::move(fns_callee));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
+  fns_orch.emplace(
+      0,
+      [kCalleeAddress, kMissingAddress,
+       kPayload](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // 1) A child that runs and returns normally seeds the slot.
+        CopyableInvokeInputs ok_inputs{.entrypoint_id = 0,
+                                       .gas_limit = UINT64_MAX,
+                                       .flags = 0};
+        CopyableInvokeOutputs ok_outputs{};
+        auto r1 = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
+                                                  std::span<const std::byte>{},
+                                                  std::span<uint32_t>{},
+                                                  ok_inputs, ok_outputs);
+        EXPECT_TRUE(r1.has_value());
+        if (r1.has_value()) {
+          EXPECT_EQ(r1.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        }
+        EXPECT_EQ(ok_outputs.frame_status, InvocationFrameStatusCode::Return);
+        EXPECT_EQ(static_cast<size_t>(ok_outputs.return_buffer_len),
+                  kPayload.size());
+
+        // 2) An invoke rejected before a child frame runs (undeployed target).
+        CopyableInvokeInputs bad_inputs{.entrypoint_id = 0,
+                                        .gas_limit = UINT64_MAX,
+                                        .flags = 0};
+        CopyableInvokeOutputs bad_outputs{};
+        auto r2 = ctx.syscall<SyscallNo::kInvoke>(kMissingAddress,
+                                                  std::span<const std::byte>{},
+                                                  std::span<uint32_t>{},
+                                                  bad_inputs, bad_outputs);
+        EXPECT_TRUE(r2.has_value());
+        if (r2.has_value()) {
+          EXPECT_EQ(r2.value(),
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        }
+
+        // 3) The prior child's return buffer is still readable (no-op on slot).
+        auto status = ctx.handler().get_return_buffer();
+        EXPECT_TRUE(status.has_value());
+        if (status.has_value() && (*status).has_value()) {
+          EXPECT_EQ((**status)->size(), kPayload.size());
+          EXPECT_EQ(std::memcmp((**status)->data(), kPayload.data(),
+                                kPayload.size()),
+                    0);
+        }
+        else {
+          ADD_FAILURE()
+              << "prior child return buffer should survive a rejected invoke";
+        }
+        return {};
+      });
+  auto orchestrator_contract =
+      std::make_unique<NativeContract>(std::move(fns_orch));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(callee_contract));
+  contract_map.emplace(1, std::move(orchestrator_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto callee_xdr = make_native_contract(0);
+  write_contract(callee_xdr);
+  write_deployment(kCalleeAddress, callee_xdr);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(orchestrator_xdr);
+  write_deployment(kOrchestratorAddress, orchestrator_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kOrchestratorAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,

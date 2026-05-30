@@ -150,7 +150,8 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
 //
 // Two deployed contracts at separate addresses. Parent invokes child (regular
 // invoke, not try_invoke). Child writes state then performs manual revert with
-// custom return data. Parent receives FrameReverted, reads the return buffer,
+// custom return data. Parent observes the invoke succeed with an Abort
+// frame_status, reads the return buffer,
 // and finishes successfully. Verifies parent's storage persists and child's
 // storage key is absent after commit.
 //
@@ -180,6 +181,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -189,12 +191,15 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressChild,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -519,7 +524,8 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
 //
 // Deploys three native contracts at three addresses (A, B, C). Call chain:
 // Contract A:0 → Contract B:0 → Contract C:0. Contract C performs a manual
-// revert after writing; B and A each observe FrameReverted from the callee,
+// revert after writing; B and A each observe a successful invoke with an Abort
+// frame_status from the callee,
 // then manually revert with their own return buffers. Verifies that storage
 // keys level1 / level2 / level3 on the respective contracts are all absent
 // after the root frame reverts the transaction.
@@ -537,7 +543,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   auto return2 = make_bytestring("return2");
   auto return3 = make_bytestring("return3");
 
-  // Contract A -- calls B:0, expects frame reverted, then manual revert.
+  // Contract A -- calls B:0, expects an Abort frame_status, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
   fns_a.emplace(
       0,
@@ -554,6 +560,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeOutputs r2_outputs{};
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -563,12 +570,15 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressB,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r2_outputs);
         }();
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r2_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -580,7 +590,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
       });
   auto native_contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
-  // Contract B -- calls C:0, expects frame reverted, then manual revert.
+  // Contract B -- calls C:0, expects an Abort frame_status, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
   fns_b.emplace(
       0,
@@ -597,6 +607,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeOutputs r3_outputs{};
         auto r3 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -606,12 +617,15 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressC,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r3_outputs);
         }();
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r3.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r3_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -931,6 +945,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -940,14 +955,18 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
           return ctx.syscall<SyscallNo::kInvoke>(kAddressChild,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
         if (!r1.has_value()) {
           ADD_FAILURE() << "try_invoke on child failed unexpectedly";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-          ADD_FAILURE() << "Expected kSyscallErrorCodeFrameReverted from child";
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeNone from child";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "Expected Abort frame_status from child";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 

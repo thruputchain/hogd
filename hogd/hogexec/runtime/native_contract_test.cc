@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -405,14 +406,17 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
             .gas_limit = 255,
             .flags = std::to_underlying(InvokeFlag::None),
         };
+        CopyableInvokeOutputs outputs2{};
         invoke_status =
             ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
                                             Calldata{0x00, 0x00, 0x00, 0xFF},
                                             std::span<uint32_t>{}, inputs2,
-                                            CopyableInvokeOutputs{});
+                                            outputs2);
+        // A child frame that traps / runs out of gas now returns
+        // kSyscallErrorCodeNone with frame_status == Fault.
         if (!invoke_status.has_value() ||
-            invoke_status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+            invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs2.frame_status != InvocationFrameStatusCode::Fault) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -780,7 +784,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   // this key will return kRPCUnrecoverable.
   snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
 
-  // Parent: TryInvoke the child, assert FrameReverted.
+  // Parent: TryInvoke the child, assert the frame aborted (manual revert).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
@@ -790,19 +794,25 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           ADD_FAILURE()
               << "TryInvoke returned system error (lock probe reached "
                  "banned key?)";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-          ADD_FAILURE() << "Expected FrameReverted, got "
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeNone, got "
                         << static_cast<int32_t>(r.value());
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "Expected frame_status Abort, got "
+                        << static_cast<int32_t>(outputs.frame_status);
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -937,6 +947,88 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
     // Should be a deterministic error (deserialization failure), not a crash
     EXPECT_FALSE(res.result_.has_value());
   });
+}
+
+// A contract that supplies a buffer shorter than the stored value must be told
+// the FULL length of the value (so it can detect truncation), while only
+// buffer-sized bytes are copied and bytes past the buffer are left untouched.
+TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
+{
+  constexpr static StorageKeyContractData kKey{};
+
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto value = make_bytestring("12345678"); // 8 bytes
+        auto [set_res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), kKey, std::as_bytes(std::span(value)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!set_res.has_value() ||
+            set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "BytestringSet failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Read the 8-byte value into a 4-byte buffer (with a sentinel byte
+        // just past the buffer to detect overruns).
+        std::array<uint8_t, 5> backing;
+        backing.fill(0xEE);
+        std::span<std::byte> short_buf =
+            std::as_writable_bytes(std::span(backing).first(4));
+        RuntimeMemoryLength written_len = 0;
+        auto get_res = ctx.syscall<SyscallNo::kBytestringGet>(kKey, short_buf,
+                                                              written_len);
+        if (!get_res.has_value() ||
+            get_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "BytestringGet failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (written_len != 8) {
+          ADD_FAILURE() << "expected full length 8, got " << written_len;
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (backing[0] != '1' || backing[3] != '4') {
+          ADD_FAILURE() << "buffer prefix not copied";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (backing[4] != 0xEE) {
+          ADD_FAILURE() << "byte past buffer was overwritten";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+  ContractAddress address{};
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = address,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
 }
 
 // NOLINTEND(bugprone-exception-escape)

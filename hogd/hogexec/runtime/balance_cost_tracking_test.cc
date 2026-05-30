@@ -328,6 +328,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         auto calldata1 = erc20_meta::make_calldata<"transfer">(
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
@@ -335,19 +336,20 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          CopyableInvokeOutputs outputs{};
           return ctx.syscall<SyscallNo::kInvoke>(
               native_token_addr,
               std::as_bytes(std::span(calldata1.data(), calldata1.size())),
-              std::span<const std::byte>{}, inputs, outputs);
+              std::span<const std::byte>{}, inputs, r1_outputs);
         }();
 
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Should fail in try_invoke (insufficient funds for balance
-        // cost)
-        if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // Should fail in try_invoke (insufficient funds for balance cost): the
+        // child frame runs (code None) but does not return normally — it
+        // reverts or faults, so frame_status is not Return.
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -499,8 +501,10 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
     }
 
     // Reading sender's balance must now surface as a deterministic
-    // error (inner Deterministic becomes DeterministicWasm to caller).
+    // fault: the child frame runs but traps, so the invoke syscall returns
+    // kSyscallErrorCodeNone with frame_status == Fault.
     auto calldata_get = erc20_meta::make_calldata<"get_balance">();
+    CopyableInvokeOutputs r_get_outputs{};
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
@@ -510,13 +514,14 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
       };
       return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
                                              std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
+                                             inputs, r_get_outputs);
     }();
 
     if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-      ADD_FAILURE() << "get_balance after overspend did not return "
-                       "kDeterministicWasm";
+        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+        r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+      ADD_FAILURE() << "get_balance after overspend did not return a "
+                       "deterministic fault";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
@@ -602,6 +607,7 @@ TEST_F(BalanceCostTrackingTest,
 
     auto calldata_get =
         erc20_meta::make_calldata<"get_balance_of">(kSenderAddr);
+    CopyableInvokeOutputs r_get_outputs{};
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
@@ -611,13 +617,14 @@ TEST_F(BalanceCostTrackingTest,
       };
       return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
                                              std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
+                                             inputs, r_get_outputs);
     }();
 
     if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-      ADD_FAILURE() << "get_balance_of after overspend did not return "
-                       "kDeterministicWasm";
+        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+        r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+      ADD_FAILURE() << "get_balance_of after overspend did not return a "
+                       "deterministic fault";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
