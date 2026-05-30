@@ -103,8 +103,8 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 }
 
 HogDBStatus<int128_t>
-ItemLock::commit_change(ItemChange change, const LockContext &ctx)
-{
+ItemLock::commit_change(ItemChange change, const LockContext &ctx) noexcept
+try {
   bool did_finalize = false;
 
   if (change.is_exclusive()) {
@@ -163,6 +163,21 @@ ItemLock::commit_change(ItemChange change, const LockContext &ctx)
         }
       },
       lock_contents_);
+}
+catch (const std::exception &e) {
+  // An allocation failure (bad_alloc / length_error / bad_array_new_length,
+  // all derived from std::exception) can throw partway through commit, leaving
+  // the lock partially mutated -- e.g. an RCQ consume marker published without
+  // the matching balance entry that block close uses to reject it (issue
+  // #2266).  We cannot safely roll the in-memory state back, so surface
+  // kInternal: the RPC layer maps it to an unrecoverable error and halts the
+  // node, rather than leaving a half-committed lock to be staged later.  The
+  // noexcept specifier guarantees that even an exception outside this family
+  // terminates here instead of being downgraded to a recoverable SYSTEM_ERR by
+  // the SRPC dispatcher.
+  error("ItemLock::commit_change: unrecoverable allocation/internal failure: {}",
+        e.what());
+  return HogDBError{HogDBCode::kInternal};
 }
 
 void
