@@ -1867,10 +1867,21 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
       .memory_bytes = parsed->memory_bytes,
   };
 
-  // Pick the lowest-ID dispatch entry as the smoke target. For counter
-  // this lands on whichever of initialize/increment/decrement/get
-  // sorts first by ContractEntrypointID hash.
-  const auto smoke_entry = image.dispatch_table.front();
+  // Pick the smoke target. Default is the lowest-ID dispatch entry; set
+  // RV32_SMOKE_METHOD_ID=0x<16-hex> to target a specific method (e.g. a
+  // no-arg getter that returns cleanly without calldata). For counter the
+  // default lands on whichever of initialize/increment/decrement/get sorts
+  // first by ContractEntrypointID hash.
+  auto smoke_entry = image.dispatch_table.front();
+  if (const char *want = std::getenv("RV32_SMOKE_METHOD_ID")) {
+    const uint64_t target = std::strtoull(want, nullptr, 0);
+    const auto it = std::ranges::find(image.dispatch_table, target,
+                                      &rv32::DispatchEntry::method_id);
+    ASSERT_NE(it, image.dispatch_table.end())
+        << "RV32_SMOKE_METHOD_ID=0x" << std::hex << target
+        << " not in the artifact dispatch table";
+    smoke_entry = *it;
+  }
   std::cerr << "[smoke] invoking method_id=0x" << std::hex
             << smoke_entry.method_id << " at pc=" << std::dec << smoke_entry.pc
             << "\n";
@@ -1893,10 +1904,30 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
               << " syscalls=" << handler.get_trace()->system_calls.size()
               << "\n";
   }
+  // Read the buffer that matches the frame's discriminant. The frame output
+  // is an XDR union keyed on status_code, so accessing return_buffer() on an
+  // Abort frame (or vice versa) throws — branch on the discriminant first.
   const auto frame_output = handler.get_most_recent_frame_output();
-  std::cerr << "[smoke] frame status_code="
-            << static_cast<int>(frame_output.status_code())
-            << " return_bytes=" << frame_output.return_buffer().size() << "\n";
+  const auto frame_status = frame_output.status_code();
+  std::cerr << "[smoke] frame status_code=" << static_cast<int>(frame_status);
+  switch (frame_status) {
+  case InvocationFrameStatusCode::Return: {
+    const auto &return_buffer = frame_output.return_buffer();
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::cerr << " (Return) return_bytes=" << return_buffer.size() << " hex=";
+    for (const auto byte : return_buffer) {
+      std::cerr << kHex[(byte >> 4) & 0xf] << kHex[byte & 0xf];
+    }
+    break;
+  }
+  case InvocationFrameStatusCode::Abort:
+    std::cerr << " (Abort) abort_bytes=" << frame_output.abort_buffer().size();
+    break;
+  case InvocationFrameStatusCode::Fault:
+    std::cerr << " (Fault) no buffer";
+    break;
+  }
+  std::cerr << "\n";
   if (handler.get_transaction_stats() != nullptr) {
     std::cerr << "[smoke] stats invalid_syscall_count="
               << handler.get_transaction_stats()->invalid_syscall_count << "\n";
