@@ -19,8 +19,8 @@ wasmi = "0.36.5"
 bindgen = "0.71"
 wasmtime = { version = "=44.0.1", features = ["winch", "runtime", "cranelift", "pooling-allocator"], default-features = false }
 siphasher = { version = "1.0.1", default-features = false }
-hogexec-internal = { version = "0.10.0", registry = "groundhog" }
-groundhog-xdr = { version = "0.10.0", registry = "groundhog", features = ["xdrs"] }
+hogexec-internal = { version = "0.15.0", registry = "groundhog" }
+groundhog-xdr = { version = "0.15.0", registry = "groundhog", features = ["xdrs"] }
 groundhog-wasm-meter = { version = "0.8.0", registry = "groundhog" }
 
 # Shared optimization profiles
