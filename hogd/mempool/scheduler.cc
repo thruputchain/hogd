@@ -669,6 +669,14 @@ Scheduler::process_transfers_helper(const Delta &delta,
     // a best-effort scheduling heuristic that reconciles once state is present.
     if (num_received_abs >
         to_schedule_hogs + already_scheduled_hogs + received_hogs) {
+      // This replaces a former CHECK_LE abort. The skip is expected on a
+      // validating node with stale/empty buckets, but an oversized deduction on
+      // a fully-initialised node would signal a hog-accounting bug. Log it so
+      // the deviation is observable rather than silent.
+      debug("process_transfers_helper: hog-age deduction exceeds cached "
+            "buckets for address {}; skipping update (stale/empty state on a "
+            "validating node, or a hog-accounting discrepancy)",
+            show_byte_array(account));
       return;
     }
 

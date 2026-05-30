@@ -492,6 +492,10 @@ SystemCallHandler::add_replay_nonce_delta()
   if (!tx_uniquifier_.has_value()) {
     return;
   }
+  // tx_uniquifier_ and root_invoked_address_ are populated together by the
+  // Transaction constructor; a uniquifier without a root address would make the
+  // access below undefined. Make that invariant explicit.
+  assert(root_invoked_address_.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
                                     .key = StorageKey(
