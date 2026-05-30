@@ -1,13 +1,17 @@
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/musttail.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_corpus.h"
+#include "hogd/hogexec/runtime/rv32/test_program_builder.h"
+#include "hogd/hogexec/runtime/rv32/threaded_machine.h"
 #include "hogd/hogexec/runtime/rv32/threaded_program.h"
 
 namespace hogd::rv32 {
@@ -92,6 +96,37 @@ tail_caller(int x)
 TEST(Rv32Threaded, harnessBuildsAndMusttailLowers)
 {
   EXPECT_EQ(tail_caller(41), 42);
+}
+
+using test_program::addi;
+using test_program::op;
+
+std::shared_ptr<const ThreadedProgram>
+threaded_from_words(std::span<const uint32_t> words)
+{
+  auto prog = ThreadedProgram::create(words_to_bytes(words));
+  EXPECT_TRUE(prog.has_value());
+  return std::make_shared<const ThreadedProgram>(std::move(prog.value()));
+}
+
+TEST(Rv32Threaded, runsBasicArithmetic)
+{
+  // x1=5; x2=x1+7; x3=x1+x2. No terminator: falls off end -> bad-pc sentinel.
+  const std::vector<uint32_t> words = {addi(1, 0, 5), addi(2, 1, 7),
+                                       op(3, 1, 2, 0, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+
+  RecordingHost host;
+  NullObserver obs;
+  const StepResult result = machine.run(host, obs);
+
+  EXPECT_EQ(result, StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(1), 5U);
+  EXPECT_EQ(machine.reg(2), 12U);
+  EXPECT_EQ(machine.reg(3), 17U);
+  EXPECT_EQ(machine.reg(0), 0U);
 }
 
 } // namespace
