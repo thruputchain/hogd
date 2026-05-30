@@ -8,6 +8,7 @@
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/oracle.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 // Exercises the external-oracle differential harness (oracle.h) against the

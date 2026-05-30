@@ -43,8 +43,8 @@ namespace hogd::rv32 {
 // independently rather than sharing our DecodedInstruction. `initial_memory` is
 // written at data address 0 over a zero-filled region of `memory_bytes`.
 // `initial_memory` must fit in `memory_bytes`. `gas_limit` is hogd-only; normal
-// differential runs should keep it non-binding so an external oracle that models
-// no gas can still compare against the same execution boundary.
+// differential runs should keep it non-binding so an external oracle that
+// models no gas can still compare against the same execution boundary.
 struct DifferentialProgram {
   std::vector<uint32_t> code;
   std::array<uint32_t, kRegisterCount> initial_regs = {};
