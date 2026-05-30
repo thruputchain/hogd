@@ -109,9 +109,14 @@ if [ ! -f "${ELF}" ]; then
   exit 1
 fi
 
-RV32_LOWER_BIN="$(command -v rv32-lower || true)"
+RV32_LOWER_BIN="${RV32_LOWER_BIN:-$(command -v rv32-lower || true)}"
 if [ -z "${RV32_LOWER_BIN}" ]; then
   echo "error: rv32-lower not found on PATH" >&2
+  echo "install with: ${INSTALL_HINT}" >&2
+  exit 1
+fi
+if [ ! -x "${RV32_LOWER_BIN}" ]; then
+  echo "error: rv32-lower is not executable: ${RV32_LOWER_BIN}" >&2
   echo "install with: ${INSTALL_HINT}" >&2
   exit 1
 fi
