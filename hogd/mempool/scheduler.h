@@ -299,8 +299,15 @@ private:
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState, ByteArrayHasher> accounts_;
 
-  // The number of txs on the runqueue.
-  std::atomic<size_t> size_ = 0;
+  // The number of txs on the runqueue. [size_] is signed because it can
+  // temporarily go below 0 in the following scenario:
+  // 1. [add_txs()] adds txs to the runqueue, but does not yet increment
+  //    [size_].
+  // 2. [schedule()] removes txs from the runqueue.
+  // 3. [schedule()] decrements [size_]. It is at this point that [size_] may
+  //    now be less than 0.
+  // 4. [add_txs()] increments [size_].
+  std::atomic<ssize_t> size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
   // The RPC client that the scheduler uses to talk to the database. The
