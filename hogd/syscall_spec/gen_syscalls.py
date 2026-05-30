@@ -213,12 +213,12 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
     if primitive_type:
         if optional:
             raise Exception("optional primitive_type is unimplemented")
-        # By-value primitives occupy a single 32-bit syscall argument slot, so
-        # the type must be at most 32 bits wide. This invariant is enforced at
-        # compile time by a static_assert in narrow_slot<T> (syscall_arg_params.h):
-        # passing a wider type by value (e.g. a 64-bit BlockHeight) fails to
-        # build. Wider types must instead be passed by reference (omit
-        # primitive_type so they are emitted as `const T&`, an offset slot).
+        # By-value primitives occupy a single 32-bit syscall argument slot,
+        # so the type must be at most 32 bits wide. This is enforced at
+        # compile time by a static_assert in narrow_slot<T>
+        # (syscall_arg_params.h); a wider by-value type (e.g. a 64-bit
+        # BlockHeight) fails to build. Wider types must be passed by
+        # reference (omit primitive_type so they emit as `const T&`).
         return 1, f"{typename} {arg_name}"
 
     if optional:
