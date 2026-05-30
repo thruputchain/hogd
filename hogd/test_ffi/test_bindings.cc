@@ -474,11 +474,18 @@ open_mock_invocation_frame(void *syscall_handler,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  auto res = context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
-  if (res != kTestFFIErrorCodeNone) {
-    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  try {
+    auto res =
+        context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
+    if (res != kTestFFIErrorCodeNone) {
+      error("failed to start mock invocation frame: {}",
+            std::to_underlying(res));
+    }
+    return res;
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during start_mock_invocation_frame: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-  return res;
 }
 
 ForeignTracedInvokeResult
@@ -492,8 +499,15 @@ finish_mock_invocation_frame(void *syscall_handler,
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
-  return context->finish_mock_invocation_frame(
-      static_cast<InvokeErrorCode>(invoke_error_code));
+  try {
+    return context->finish_mock_invocation_frame(
+        static_cast<InvokeErrorCode>(invoke_error_code));
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during finish_mock_invocation_frame: {}",
+              e);
+    return make_ffi_result_type<ForeignTracedInvokeResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
 }
 
 TestFFIErrorCode
