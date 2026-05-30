@@ -60,11 +60,20 @@ entry_pc_for_method(const RuntimeContractImage &image, uint64_t method_id)
   return it->pc;
 }
 
+bool
+runtime_contract_image_is_valid(const RuntimeContractImage &image)
+{
+  return image.program != nullptr &&
+         image.initial_memory.size() <= image.memory_bytes &&
+         dispatch_table_is_valid(image.dispatch_table, *image.program);
+}
+
 class Runtime final : public hogd::Runtime {
 public:
   Runtime(RuntimeContractImage image,
           std::unique_ptr<HostCallContext> host_call_context)
-    : hogd::Runtime(std::move(host_call_context)), image_(std::move(image))
+    : hogd::Runtime(std::move(host_call_context)), image_(std::move(image)),
+      image_is_valid_(runtime_contract_image_is_valid(image_))
   {}
 
 protected:
@@ -77,9 +86,7 @@ protected:
             method_name);
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
-    if (image_.program == nullptr ||
-        image_.initial_memory.size() > image_.memory_bytes ||
-        !dispatch_table_is_valid(image_.dispatch_table, *image_.program)) {
+    if (!image_is_valid_) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
     auto entry_pc = entry_pc_for_method(image_, *method_id);
@@ -136,6 +143,7 @@ protected:
 
 private:
   RuntimeContractImage image_;
+  const bool image_is_valid_;
 };
 
 } // namespace
@@ -153,10 +161,7 @@ RuntimeContext::verify_contract(Contract const &contract) const
   }
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
-  if (it == contracts_.end() || it->second.program == nullptr ||
-      it->second.initial_memory.size() > it->second.memory_bytes ||
-      !dispatch_table_is_valid(it->second.dispatch_table,
-                               *it->second.program)) {
+  if (it == contracts_.end() || !runtime_contract_image_is_valid(it->second)) {
     return InvokeErrorCode::Deterministic;
   }
   return InvokeErrorCode::None;

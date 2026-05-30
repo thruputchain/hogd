@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -322,8 +323,9 @@ Program::create(std::span<const uint8_t> code)
   // Store only decoded instructions. The raw guest code bytes are intentionally
   // not guest-addressable and cannot be modified after validation.
   for (size_t offset = 0; offset < code.size(); offset += kInstructionBytes) {
-    program.instructions_.push_back(
-        decode_instruction(load_u32_le(code, offset)).instruction);
+    const DecodeResult result = decode_instruction(load_u32_le(code, offset));
+    assert(result.ok);
+    program.instructions_.push_back(result.instruction);
   }
   return program;
 }
