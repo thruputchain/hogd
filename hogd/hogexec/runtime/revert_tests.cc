@@ -149,7 +149,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   auto key1 = make_storage_key("test1");
   auto key2 = make_storage_key("test2");
 
-  // Contract 0 (addr_0): try_invoke addr_1:0, assert FrameReverted,
+  // Contract 0 (addr_0): try_invoke addr_1:0, assert frame status Abort,
   // then invoke check methods on addr_2 and addr_3 to verify writes are gone.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
@@ -157,6 +157,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
       [addr_1, addr_2,
        addr_3](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // try_invoke addr_1:0
+        CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -166,12 +167,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
           return ctx.syscall<SyscallNo::kInvoke>(addr_1,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r1_outputs);
         }();
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        // addr_1 manually reverted, so the invoke succeeds
+        // (kSyscallErrorCodeNone) and the child frame status is Abort.
+        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -402,6 +406,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
   fns_caller.emplace(
       0,
       [addr_fault](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeOutputs r0_outputs{};
         auto r0 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -411,15 +416,17 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
           return ctx.syscall<SyscallNo::kInvoke>(addr_fault,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r0_outputs);
         }();
         if (!r0.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r0.value() !=
-            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+        // The child frame faulted, so the invoke now succeeds
+        // (kSyscallErrorCodeNone) with frame status Fault.
+        if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r0_outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "GetReturnBufferOnFault: Expected nested invoke "
-                           "to return kSyscallErrorCodeDeterministicWasm";
+                           "to report frame status Fault";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -488,7 +495,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
 }
 
 // Regression test for issue 1745: a manually-reverted TryInvoke child that
-// wrote storage should return FrameReverted + abort payload regardless of
+// wrote storage should report frame status Abort + abort payload regardless of
 // whether another transaction holds a conflicting reservation on the
 // discarded key.
 TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
@@ -499,7 +506,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
 
   auto abort_payload = make_bytestring("manual_revert_payload");
 
-  // Parent: TryInvoke the child, then assert FrameReverted + abort payload.
+  // Parent: TryInvoke the child, then assert frame status Abort + abort
+  // payload.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
@@ -518,9 +526,12 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-          ADD_FAILURE() << "Expected FrameReverted, got "
-                        << static_cast<int32_t>(r.value());
+        // The child manually reverted, so the invoke succeeds
+        // (kSyscallErrorCodeNone) and reports frame status Abort.
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "Expected frame status Abort, got "
+                        << static_cast<int32_t>(outputs.frame_status);
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (outputs.return_buffer_len != abort_payload.size()) {
@@ -592,7 +603,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
   ASSERT_TRUE(lock_res.has_value());
   ASSERT_TRUE(lock_res.value());
 
-  // Run the parent transaction — should succeed with FrameReverted.
+  // Run the parent transaction — should succeed with child frame status Abort.
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
@@ -635,16 +646,20 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-          ADD_FAILURE() << "Expected FrameReverted, got "
-                        << static_cast<int32_t>(r.value());
+        // The child manually reverted, so the invoke succeeds
+        // (kSyscallErrorCodeNone) and reports frame status Abort.
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "Expected frame status Abort, got "
+                        << static_cast<int32_t>(outputs.frame_status);
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};

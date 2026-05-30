@@ -31,6 +31,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -200,7 +201,11 @@ make_native_initial_token_claim_contract()
           return NativeContractBuilder::host_fn_error_conversion(
               invoke_result.error());
         }
-        if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
+        // Propagate a failed initializer: a nonzero code means it was rejected
+        // before running, and a child frame that ran but did not return
+        // normally (Abort/Fault) must revert the whole claim too.
+        if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Return) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};

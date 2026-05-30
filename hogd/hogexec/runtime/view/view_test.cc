@@ -547,15 +547,19 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+        // The supplied-false bit forces the try_invoke to roll back: the child
+        // frame runs (code None) but does not return normally.
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status == InvocationFrameStatusCode::Return) {
           ADD_FAILURE() << "try_invoke should have failed";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -606,17 +610,20 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
+        CopyableInvokeOutputs outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         std::string_view branch =
-            r.value() == SyscallErrorCode::kSyscallErrorCodeNone ? "success"
-                                                                 : "failure";
+            (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+             outputs.frame_status == InvocationFrameStatusCode::Return)
+                ? "success"
+                : "failure";
         ReturnBuffer out;
         out.resize(branch.size());
         std::memcpy(out.data(), branch.data(), branch.size());
@@ -1108,14 +1115,18 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
+        CopyableInvokeOutputs r_outputs{};
         auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
                                                  std::span<const std::byte>{},
                                                  std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+                                                 r_outputs);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Unrecoverable};
         }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return emit_event(ctx, "after");

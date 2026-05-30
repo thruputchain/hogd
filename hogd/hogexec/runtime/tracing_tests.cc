@@ -1,6 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -377,15 +378,17 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
+        CopyableInvokeOutputs outputs{};
         auto r =
             ctx.syscall<SyscallNo::kInvoke>(callee_addr,
                                             std::as_bytes(std::span(calldata)),
                                             std::span<uint32_t>{}, inputs,
-                                            CopyableInvokeOutputs{});
+                                            outputs);
 
         if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-          ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "Expected child frame to fault";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -437,9 +440,10 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   }
   ASSERT_NE(invoke_syscall, nullptr);
 
-  // Invoke should report kSyscallErrorCodeDeterministicWasm
+  // The Invoke syscall itself succeeds (a child frame ran); the child's fault
+  // is recorded on the child frame's trace status below, not the syscall code.
   ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+            SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Should have a child trace
   auto const &invoke_trace = invoke_syscall->body.invoke();
@@ -568,10 +572,10 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   }
   ASSERT_NE(invoke_syscall, nullptr);
 
-  // Invoke should report kSyscallErrorCodeDeterministicWasm (lock failure
-  // converted the child result to Deterministic)
+  // The Invoke syscall itself succeeds (a child frame ran); the lock failure
+  // is reflected in the frame result, not the syscall error code.
   ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+            SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Should have a child trace
   auto const &invoke_trace = invoke_syscall->body.invoke();
@@ -631,6 +635,115 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
   handler.enable_tracing();
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+}
+
+// A short (here, zero-length) contract output buffer must not affect the debug
+// trace: GetReturnedBuffer records the full pre-truncation return buffer
+// regardless of how much fit in the contract's buffer. This distinguishes the
+// new behavior — the old code recorded an empty buffer when nothing was copied.
+TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+
+  // Child: return a 9-byte buffer to its parent.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        std::array<std::byte, 9> ret_buf{};
+        std::memcpy(ret_buf.data(), "RETURNED!", 9);
+        auto ret =
+            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
+                                            false,
+                                            std::span<const std::byte>{});
+        EXPECT_FALSE(ret.has_value()); // Return yields a non-recoverable status
+        return {};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  // Parent: invoke the child, then read the returned buffer into a ZERO-length
+  // output buffer.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0,
+      [kChildAddress](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs outputs{};
+        auto invoke_res =
+            ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
+                                            std::span<const std::byte>{},
+                                            std::span<uint32_t const>{}, inputs,
+                                            outputs);
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+        RuntimeMemoryLength return_written_len = 0;
+        RuntimeMemoryLength ids_written_len = 0;
+        auto get_res =
+            ctx.syscall<SyscallNo::kGetReturnedBuffer>(std::span<std::byte>{},
+                                                       return_written_len,
+                                                       std::span<std::byte>{},
+                                                       ids_written_len);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        // Full length reported even though the contract's buffer was empty.
+        EXPECT_EQ(return_written_len, 9U);
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kCallerAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *runtime_context);
+  handler.enable_tracing();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  // Find the GetReturnedBuffer syscall in the root (caller) frame.
+  const SyscallTrace *grb = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kGetReturnedBuffer) {
+      grb = &sc;
+      break;
+    }
+  }
+  ASSERT_NE(grb, nullptr);
+
+  auto const &grb_trace = grb->body.get_returned_buffer();
+  ASSERT_NE(grb_trace.outputs, nullptr);
+  auto const &traced_buffer = grb_trace.outputs->buffer;
+
+  // The trace holds the FULL pre-truncation buffer, even though the contract's
+  // output buffer was empty (old behavior recorded an empty buffer here).
+  ASSERT_EQ(traced_buffer.size(), 9U);
+  EXPECT_EQ(std::memcmp(traced_buffer.data(), "RETURNED!", 9), 0);
 }
 
 // NOLINTEND(bugprone-exception-escape)

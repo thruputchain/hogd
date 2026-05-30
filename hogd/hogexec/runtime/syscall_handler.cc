@@ -312,15 +312,27 @@ SystemCallHandler::get_most_recent_frame_events() const
 
 InvokeStatus<void>
 SystemCallHandler::handle_root_host_fn_status(
-    SystemStatus<SyscallErrorCode> status)
+    SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status)
 {
   if (status.has_value()) {
+    SyscallStatus<InvocationFrameStatusCode> const &frame = status.value();
+    // An invoke rejected before a child frame ran (e.g. reentrance, invalid
+    // input) is a top-level deterministic failure.
+    if (!frame.has_value()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
     // TODO(geoff): Consider whether we want to have "frame reverted" on the
     // root frame as a "transaction failed" or "transaction succeeded"
-    return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
-            status.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)
-               ? InvokeStatus<void>{}
-               : InvokeError{InvokeErrorCode::Deterministic};
+    switch (frame.value()) {
+    case InvocationFrameStatusCode::Return:
+    case InvocationFrameStatusCode::Abort:
+      return InvokeStatus<void>{};
+    case InvocationFrameStatusCode::Fault:
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    error("handle_root_host_fn_status: received unknown frame status {}",
+          std::to_underlying(frame.value()));
+    return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   switch (status.error().code()) {
   case SystemErrorCode::ValidationFailure:
@@ -523,7 +535,7 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
+std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
@@ -534,16 +546,21 @@ SystemCallHandler::invoke(ContractAddress const &address,
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
+  // The SyscallError returns below all happen before a child frame is created,
+  // so they are complete no-ops: nothing is mutated, and the caller leaves its
+  // output state untouched.
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallError{
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+            0};
   }
 
   // reentrance guard
   // check if the address is already on the stack
   if (!hack_DONTUSE_TEST_BYPASS_allow_reentrance_ &&
       invocation_frame_stack_.has_active_frame_for(address)) {
-    return {SyscallErrorCode::kSyscallErrorCodeReentrance, 0};
+    return {SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance}, 0};
   }
 
   auto runtime = resolve_runtime(address);
@@ -554,7 +571,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
   }
   if (!runtime.value()) {
     trace("Failed to instantiate runtime for address: {}", x23::show(address));
-    return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallError{
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+            0};
   }
 
   Invocation invocation = {.invoked_address = address,
@@ -578,15 +597,23 @@ SystemCallHandler::invoke(ContractAddress const &address,
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
 
-  auto out = cumulative_result.to_host_fn_result();
-  if (out.first.has_value() &&
-      out.first.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-    if (manually_reverted) {
-      out.first = SyscallErrorCode::kSyscallErrorCodeFrameReverted;
-    }
+  // A child frame ran. Map its result to a frame status (the success value) or
+  // propagate a SystemError. There is no SyscallError here: a frame that ran
+  // never produces the "rejected before running" channel.
+  auto [frame_status, gas_consumed] = cumulative_result.to_frame_status();
+  if (!frame_status.has_value()) {
+    return {frame_status.error(), gas_consumed};
   }
-
-  return out;
+  // to_frame_status() reports Return for any frame whose deterministic
+  // execution succeeded; a manual revert (the contract called Return with
+  // revert=true) is exactly that case with should_revert() set, so it maps to
+  // Abort. A hard fault already reports Fault and is left unchanged
+  // (should_revert() is also true for faults, so it must not override Fault).
+  InvocationFrameStatusCode status_code = frame_status.value();
+  if (status_code == InvocationFrameStatusCode::Return && manually_reverted) {
+    status_code = InvocationFrameStatusCode::Abort;
+  }
+  return {status_code, gas_consumed};
 }
 
 std::unique_ptr<InvocationFrameTrace>
