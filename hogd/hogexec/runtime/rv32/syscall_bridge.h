@@ -18,8 +18,8 @@ namespace hogd::rv32 {
 // representable in one 32-bit slot -- a guest pointer/length, a signed or
 // unsigned 32-bit scalar, or an enum. A scalar needing the full 64-bit range
 // must travel through guest memory by pointer instead. wrap_outer's
-// static_assert enforces both the <=7-word count and <=32-bit by-value scalar
-// shape.
+// static_assert enforces the <=7-word count; SyscallArgParams<T> and
+// narrow_slot enforce the <=32-bit by-value scalar shape.
 //
 // The syscall ABI version is validated at artifact load time, so no per-call
 // version register is needed. Results: the syscall return code is delivered in

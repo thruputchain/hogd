@@ -79,10 +79,10 @@ The bridge ABI is register-native:
 - **ABI constraint on syscall signatures:** every register-passed argument must
   be representable in one 32-bit slot — a guest pointer/length, a signed or
   unsigned 32-bit scalar, or an enum. A scalar that needs the full 64-bit range
-  must travel through guest memory by pointer. The `<= 7` argument-word count
-  and `<= 32`-bit by-value scalar shape are enforced by `static_assert`s in
-  `wrap_outer`. Wider values such as `BlockHeight` travel through guest memory
-  by pointer.
+  must travel through guest memory by pointer. `wrap_outer` enforces the
+  `<= 7` argument-word count; `SyscallArgParams<T>` and `narrow_slot` enforce
+  the `<= 32`-bit by-value scalar shape. Wider values such as `BlockHeight`
+  travel through guest memory by pointer.
 - Result: the syscall return code is delivered in `a0`; output buffers and
   lengths are written into guest memory through the pointers the guest supplied.
   There is no result frame or footer.

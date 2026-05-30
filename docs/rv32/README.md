@@ -35,7 +35,8 @@ and no protocol-visible behavior.
   - Validates RV32IM code, decodes once, executes deterministic instructions,
     meters gas, and exposes `ecall`.
 - Host bridge: `syscall_bridge.{h,cc}`.
-  - Converts RV32 memory-frame `ecall`s into the shared `syscall_entry` path.
+  - Converts RV32 register-native `ecall`s (syscall number in `a0`, args in
+    `a1`-`a7`) into the shared `syscall_entry` path.
 - Artifact and dispatch: `artifact.{h,cc}`, `dispatch.{h,cc}`.
   - Parses the strict v3 artifact format, validates SHA256 section commitments,
     and maps method IDs to validated PCs.

@@ -9,6 +9,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,14 @@ namespace {
 constexpr uint32_t kInputAddress = 128;
 constexpr uint32_t kOutputAddress = 192;
 constexpr uint64_t kPlentyOfGas = 1'000'000;
+constexpr size_t kRv32SyscallArgumentWords = 7;
+
+static_assert(std::is_standard_layout_v<hogd::rv32::EcallArgs>);
+static_assert(sizeof(hogd::rv32::EcallArgs) ==
+              (1 + kRv32SyscallArgumentWords) * sizeof(uint32_t));
+static_assert(offsetof(hogd::rv32::EcallArgs, a0) == 0 * sizeof(uint32_t));
+static_assert(offsetof(hogd::rv32::EcallArgs, a1) == 1 * sizeof(uint32_t));
+static_assert(offsetof(hogd::rv32::EcallArgs, a7) == 7 * sizeof(uint32_t));
 
 // Register-native ABI: the syscall number and up to seven argument words are
 // placed in a0..a7. Build the EcallArgs the bridge consumes from raw register
@@ -53,7 +62,7 @@ make_ecall_args(std::span<const uint32_t> words)
   hogd::rv32::EcallArgs args = {};
   uint32_t *slots[] = {&args.a0, &args.a1, &args.a2, &args.a3,
                        &args.a4, &args.a5, &args.a6, &args.a7};
-  constexpr size_t kMaxArgs = 8;
+  constexpr size_t kMaxArgs = 1 + kRv32SyscallArgumentWords;
   EXPECT_LE(words.size(), kMaxArgs);
   for (size_t i = 0; i < words.size() && i < kMaxArgs; ++i) {
     *slots[i] = words[i];

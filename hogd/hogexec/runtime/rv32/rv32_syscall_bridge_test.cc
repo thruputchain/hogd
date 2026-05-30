@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -201,15 +202,21 @@ parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
   case ParserProbeMode::kSignedI32:
   {
     auto parsed = SyscallArgParams<int32_t>::parse(guard, memory, arg1);
-    return {.result_code = SyscallArgParams<int32_t>::validate(parsed) ? 0 : -1,
+    if (!SyscallArgParams<int32_t>::validate(parsed)) {
+      return {.result_code = -2, .panic = 0, .gas_consumed = 0};
+    }
+    return {.result_code = SyscallArgParams<int32_t>::deref(parsed),
             .panic = 0,
             .gas_consumed = 0};
   }
   case ParserProbeMode::kUnsignedU32:
   {
     auto parsed = SyscallArgParams<uint32_t>::parse(guard, memory, arg1);
-    return {.result_code =
-                SyscallArgParams<uint32_t>::validate(parsed) ? 0 : -1,
+    if (!SyscallArgParams<uint32_t>::validate(parsed)) {
+      return {.result_code = -2, .panic = 0, .gas_consumed = 0};
+    }
+    return {.result_code = std::bit_cast<int32_t>(
+                SyscallArgParams<uint32_t>::deref(parsed)),
             .panic = 0,
             .gas_consumed = 0};
   }
@@ -361,13 +368,13 @@ TEST(Rv32SyscallBridgeTest, parserProbeUnsignedScalarAcceptsFullU32Range)
             0U);
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x7FFFFFFFU})
                 .continue_value(),
-            0U);
+            0x7FFFFFFFU);
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0x80000000U})
                 .continue_value(),
-            0U);
+            0x80000000U);
   EXPECT_EQ(call_parser_probe(memory, {kUnsignedU32Mode, 0xFFFFFFFFU})
                 .continue_value(),
-            0U);
+            0xFFFFFFFFU);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
@@ -386,13 +393,13 @@ TEST(Rv32SyscallBridgeTest, parserProbeCanonicalizesRegisterScalars)
             0U);
   EXPECT_EQ(
       call_parser_probe(memory, {kSignedI32Mode, 0x7FFFFFFFU}).continue_value(),
-      0U);
+      0x7FFFFFFFU);
   EXPECT_EQ(
       call_parser_probe(memory, {kSignedI32Mode, 0xFFFFFFFFU}).continue_value(),
-      0U);
+      0xFFFFFFFFU);
   EXPECT_EQ(
       call_parser_probe(memory, {kSignedI32Mode, 0x80000000U}).continue_value(),
-      0U);
+      0x80000000U);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeOptionalPointerSentinelFromAllOnesReg)

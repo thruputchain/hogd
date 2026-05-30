@@ -394,14 +394,14 @@ def discover_dispatch_entries(
     for symbol in symbols:
         if not ENTRYPOINT_SYMBOL_RE.match(symbol.name):
             continue
-        if symbol.sym_type != STT_FUNC:
-            raise ElfError(
-                f"entry-point-shaped symbol {symbol.name!r} is not a function"
-            )
         if symbol.bind not in (STB_GLOBAL, STB_WEAK):
             # Local symbols matching the hex shape would be a name collision
             # rather than an intended export. Skip them silently.
             continue
+        if symbol.sym_type != STT_FUNC:
+            raise ElfError(
+                f"entry-point-shaped symbol {symbol.name!r} is not a function"
+            )
         if symbol.section_index != text_index:
             # Reject absolute symbols (SHN_ABS), undefined symbols, and
             # symbols in any other section. A dispatch entry must point

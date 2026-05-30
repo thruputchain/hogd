@@ -56,7 +56,7 @@ artifact, dispatch, gas, and host-boundary edges took most review cycles.
 - Keep ELF parsing out of runtime code.
 - Use a Groundhog artifact as the execution input.
 - Use runtime-side artifact dispatch, not WASM export lookup.
-- Keep host calls as explicit memory-frame `ecall`s.
+- Keep host calls as explicit register-native `ecall`s.
 - Compare RV32/WASM at the host-visible result layer, not by raw gas equality.
 
 ## What Not To Copy
