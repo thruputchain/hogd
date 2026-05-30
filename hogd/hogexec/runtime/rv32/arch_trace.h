@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <span>
 #include <string>
@@ -147,9 +148,13 @@ public:
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
   {
     // Harness bookkeeping only. The Host boundary is noexcept; an allocation
-    // failure here (only under OOM in a test) would terminate, which is
-    // acceptable for harness infrastructure.
-    calls_.push_back(args);
+    // failure while recording test-only state should terminate instead of
+    // escaping through the VM host boundary.
+    try {
+      calls_.push_back(args);
+    } catch (...) {
+      std::terminate();
+    }
     if (behaviour_ == OnEcall::kContinue) {
       return HostResult::continue_with(0, 0);
     }
