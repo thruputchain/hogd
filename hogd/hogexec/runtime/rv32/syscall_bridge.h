@@ -21,9 +21,6 @@ namespace hogd::rv32 {
 // 64-bit range (or the full unsigned-32 range) must travel through guest memory
 // by pointer instead. wrap_outer's static_assert enforces the <=7-word count;
 // the <=32-bit-scalar half is currently a documented convention, not enforced.
-// Known gap: MintAuthToken takes a 64-bit BlockHeight by value, so RV32 guests
-// cannot express expiry heights >= 2^31 -- resolve before this VM leaves the
-// kMockTest gate.
 //
 // The syscall ABI version is validated at artifact load time, so no per-call
 // version register is needed. Results: the syscall return code is delivered in

@@ -83,10 +83,8 @@ The bridge ABI is register-native:
   full 64-bit range (or the full unsigned-32 range) must travel through guest
   memory by pointer. The `<= 7` argument-word count is enforced by a
   `static_assert` in `wrap_outer`; the `<= 32`-bit-scalar half is a documented
-  convention, not yet machine-enforced. **Known gap:** `MintAuthToken` takes a
-  64-bit `BlockHeight` expiry by value, so an RV32 guest cannot express expiry
-  heights `>= 2^31` (silently confined, no fault) — to be resolved before this
-  VM leaves the `kMockTest` gate, e.g. by passing the height by pointer.
+  convention, not yet machine-enforced. Wider values such as `BlockHeight`
+  travel through guest memory by pointer.
 - Result: the syscall return code is delivered in `a0`; output buffers and
   lengths are written into guest memory through the pointers the guest supplied.
   There is no result frame or footer.
