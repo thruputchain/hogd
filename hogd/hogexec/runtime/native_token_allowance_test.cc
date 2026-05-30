@@ -1022,6 +1022,11 @@ TEST_F(NativeTokenAllowanceTest,
   auto const *cost_model = get_default_cost_model();
   int128_t balance_cost = cost_model->get_balance_cost();
   ASSERT_GT(balance_cost, 0);
+  // The fixed transfer amount must comfortably exceed the balance-creation
+  // cost so the zero address ends with a positive committed balance; guard the
+  // assumption so a future cost-model change fails here rather than confusingly
+  // downstream.
+  ASSERT_GT(kTransferAmount, balance_cost);
   const int128_t expected_zero_balance = kTransferAmount - balance_cost;
 
   setup_grant_storage_token(kOwnerAddr, kInitialOwnerBalance);
