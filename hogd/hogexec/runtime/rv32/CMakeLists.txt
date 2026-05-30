@@ -120,6 +120,22 @@ target_link_libraries(
 )
 gtest_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
 
+# External-oracle differential test (spike_oracle.h). Core-only; drives the real
+# Spike (riscv-isa-sim) as a subprocess located via RV32_ORACLE_BIN and SKIPS
+# when unset, so this adds no build-graph or default-CI dependency.
+add_executable(
+  rv32_spike_oracle_test
+  rv32_spike_oracle_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_spike_oracle_test
+  rv32_isa_core
+  GTest::gtest
+)
+gtest_discover_tests(rv32_spike_oracle_test TEST_PREFIX rv32.spike_oracle.)
+
 add_executable(
   rv32_vm_test
   rv32_vm_test.cc
