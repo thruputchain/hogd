@@ -150,7 +150,7 @@ template<> struct SyscallArgParams<bool> {
 // Integer types that fit in a single 32-bit syscall argument slot.
 // Delegates to narrow_slot for range validation. narrow_slot static_asserts
 // that T is at most 32 bits wide (wider types must be passed by reference).
-template<std::integral T> requires (sizeof(T) <= 8 && !std::same_as<T, bool>)
+template<std::integral T> requires (sizeof(T) <= 4 && !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
@@ -179,7 +179,7 @@ struct SyscallArgParams<T> {
 };
 
 // primitive type enum values
-template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 8)
+template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 4)
 struct SyscallArgParams<T> {
   using underlying_t = std::underlying_type_t<T>;
 
