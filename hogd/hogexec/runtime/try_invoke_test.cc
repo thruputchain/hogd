@@ -2719,7 +2719,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // consumes a replay nonce whose cost is charged at commit (after execution).
   // During execution the sender therefore still holds exactly this reserve
   // after transferring write_cost away; it is deducted at commit, ending at 0.
-  int128_t replay_reserve = replay_cache_cost_charged(1);
+  auto replay_reserve = static_cast<uint128_t>(replay_cache_cost_charged(1));
 
   // Sender contract
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_sender;
@@ -2770,7 +2770,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
         uint128_t balance_unsigned_int =
             uint128_t{std::get<0>(res)} << 64 | uint128_t{std::get<1>(res)};
 
-        if (balance_unsigned_int != static_cast<uint128_t>(replay_reserve)) {
+        if (balance_unsigned_int != replay_reserve) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
