@@ -104,11 +104,14 @@ The target end state: `groundhog-rv32-artifact` holds it as the single Rust
 source of truth, with hogd's `artifact.h` cross-checking the VM-profile and
 gas-schedule digests at build time.
 
-Today neither side of that exists yet: `artifact.h` pins the constants in C++
-with internal `static_assert`s, and `rv32_lower.py` only *documents* that such a
-cross-check "should" exist. So this is a **Phase 1/2 acceptance criterion**, not
-current state — landing `groundhog-rv32-artifact` must include the cross-check
-(or an equivalent shared-constant mechanism) against `artifact.h`.
+As of 2026-05-30 a Rust implementation of the format exists — the `artifact`
+module of `groundhog-rv32-lower` — but the cross-check still does not:
+`artifact.h` pins the constants in C++ with internal `static_assert`s, and the
+Rust constants are hand-mirrored (the same way `rv32_lower.py` mirrored them).
+So the *commitment* half of this is still a **Phase 1/2 acceptance criterion**,
+not current state — promoting the module to a standalone `groundhog-rv32-artifact`
+crate must include the cross-check (or an equivalent shared-constant mechanism)
+against `artifact.h`.
 
 Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
@@ -162,9 +165,19 @@ it lands on `$PATH` the way wasm-opt does.
   and execution through the `LoweredSdkArtifactSmoke` harness (parse + invoke
   first dispatch entry). Still open: running it with real calldata and plumbing a
   CI-built artifact instead of the `RV32_SMOKE_ARTIFACT` env var.
-- **Phase 1:** stand up `groundhog-rv32-artifact` (format truth) and port the
-  python lowerer to the `groundhog-rv32-lower` crate (lib + bin `rv32-lower`) at
-  output parity with the python script.
+- **Phase 1 — lowerer ported (2026-05-30):** `groundhog-rv32-lower` (lib + bin
+  `rv32-lower`) landed in groundhog-rpc at `crates/tools/rv32-lower`, **at
+  byte-for-byte output parity** with `scripts/rv32_lower.py` — verified on
+  `counter-rv32` (identical `.rv32a` artifact and JSON metadata sidecar). The
+  v3 format lives as the crate's `artifact` module — the single Rust source of
+  truth — with a hermetic synthetic-ELF test suite (happy path + every
+  validation/rejection rule) and an opt-in real-ELF parity test
+  (`RV32_LOWER_PARITY_ELF`, mirroring the Spike-oracle out-of-default-CI
+  posture). Housed in groundhog-rpc for now; self-contained so it can lift to
+  its own repo later. **Still open** (the other half of this phase's acceptance
+  criterion): splitting the `artifact` module out to a standalone
+  `groundhog-rv32-artifact` crate (protocol-rs) and wiring the build-time digest
+  cross-check against hogd's `artifact.h`.
 - **Phase 2:** point hogd's `rv32_runtime_context_test` smoke test at the
   `rv32-lower` binary; delete `scripts/rv32_lower.py`. One implementation from
   here on.
