@@ -53,7 +53,7 @@ macro_rules! define_trampoline {
             function_pointer: crate::ErasedFnPtr,
             host_call_context: *mut ::std::os::raw::c_void,
             contract_memory: crate::WasmContext,
-            $($arg: u64),*
+            $($arg: u32),*
         ) -> TrampolineResult {
             // fn-ptr to fn-ptr transmute is well-defined in Rust
             // (all fn pointers have the same size and representation).

@@ -1047,7 +1047,7 @@ test_ffi_invoke(const ContractAddress &input_address,
 
 // std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 // syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
-//   BlockHeight input_expiry_height,
+//   const BlockHeight &input_expiry_height,
 //   std::span<const std::byte> input_serialized_auth_token,
 //   uint32_t &output_token_id) noexcept
 HostFnStatus<SyscallErrorCode>
@@ -1055,9 +1055,12 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
                          std::span<const std::byte> input_serialized_auth_token,
                          uint32_t &output_token_id)
 {
+  // expiry_height is a 64-bit BlockHeight, which exceeds a single 32-bit ABI
+  // slot, so it is passed by reference (as an offset/pointer) rather than by
+  // value. In the native mock the offset slot carries a host pointer.
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kMintAuthToken),
-      static_cast<uint64_t>(input_expiry_height),
+      reinterpret_cast<uint64_t>(&input_expiry_height),
       reinterpret_cast<uint64_t>(input_serialized_auth_token.data()),
       input_serialized_auth_token.size_bytes(),
       reinterpret_cast<uint64_t>(&output_token_id), 0, 0, 0);

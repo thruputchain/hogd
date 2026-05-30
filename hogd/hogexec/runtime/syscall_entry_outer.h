@@ -265,7 +265,7 @@ parse(AliasGuard &guard, std::span<std::byte> contract_memory,
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
-template<typename T, uint64_t... Args>
+template<typename T, uint32_t... Args>
 concept is_parseable =
     requires(AliasGuard &guard, std::span<std::byte> contract_memory) {
       SyscallArgParams<T>::parse(guard, contract_memory, Args...);
@@ -650,8 +650,8 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
-           SyscallNo syscall_no, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-           uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7) noexcept
+           SyscallNo syscall_no, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+           uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7) noexcept
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;

@@ -21,7 +21,7 @@ wasmtime = { version = "=44.0.1", features = ["winch", "runtime", "cranelift", "
 siphasher = { version = "1.0.1", default-features = false }
 hogexec-internal = { version = "0.10.0", registry = "groundhog" }
 groundhog-xdr = { version = "0.10.0", registry = "groundhog", features = ["xdrs"] }
-groundhog-wasm-meter = { version = "0.7.0", registry = "groundhog" }
+groundhog-wasm-meter = { version = "0.8.0", registry = "groundhog" }
 
 # Shared optimization profiles
 [profile.release]

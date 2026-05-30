@@ -21,7 +21,7 @@ SystemCallHandler *ctx_check = nullptr;
 
 extern "C" TrampolineResult
 foo(ExternHostCallContext external_context, WasmContext /*unused*/,
-    uint64_t value)
+    uint32_t value)
 {
   auto *ctx = reinterpret_cast<HostCallContext *>(external_context);
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);

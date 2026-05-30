@@ -80,6 +80,15 @@ signed_i32_type_test(int32_t input_value) noexcept
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+unsigned_u32_type_test(uint32_t input_value) noexcept
+{
+  // The inner syscall is only reached when the (by-value, non-pointer) slot
+  // narrows cleanly to a u32; the test passes the largest valid u32.
+  EXPECT_EQ(input_value, UINT32_MAX);
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 gas_metering_test() noexcept
 {
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
@@ -138,6 +147,17 @@ struct SignedI32TypeTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &signed_i32_type_test;
+  constexpr static std::array<std::string_view, 1> kInputNames = {
+      "input_value"};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+struct UnsignedU32TypeTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &unsigned_u32_type_test;
   constexpr static std::array<std::string_view, 1> kInputNames = {
       "input_value"};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -272,28 +292,86 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
 
+  // Under the wasm32 ABI each value slot carries a bare 32-bit value. The
+  // canonical encoding of int32_t -1 is therefore 0xFFFFFFFF in the low 32
+  // bits, with the upper 32 bits zero. (signed_i32_type_test asserts the
+  // parsed value is -1.)
   auto res_canonical =
       mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                        UINT64_MAX, 0, 0, 0, 0,
-                                                        0, 0);
+                                                        0x00000000FFFFFFFFULL,
+                                                        0, 0, 0, 0, 0, 0);
   ASSERT_EQ(res_canonical.panic, 0);
   ASSERT_EQ(res_canonical.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
-  auto res_noncanonical =
+  // The mock keeps u64 slots so it can carry host pointers, but a value slot
+  // must still fit the real 32-bit ABI slot. A value with any bits set above
+  // bit 31 cannot have come from the runtime, so the mock faults it (returns
+  // an FFI error) rather than silently truncating. UINT64_MAX -- the old
+  // sign-extended-to-64 encoding of -1 -- is now rejected.
+  auto res_high_bits =
       mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                        0x00000000FFFFFFFFULL,
-                                                        0, 0, 0, 0, 0, 0);
-  ASSERT_EQ(res_noncanonical.panic, 0);
-  ASSERT_EQ(res_noncanonical.result_code,
+                                                        UINT64_MAX, 0, 0, 0, 0,
+                                                        0, 0);
+  ASSERT_EQ(res_high_bits.panic, 0);
+  ASSERT_EQ(res_high_bits.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
 
+  // One bit above UINT32_MAX also faults (low 32 bits zero, but it still does
+  // not fit a 32-bit slot).
   auto res_overflow =
       mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                        0x0000000080000000ULL,
+                                                        0x0000000100000000ULL,
                                                         0, 0, 0, 0, 0, 0);
   ASSERT_EQ(res_overflow.panic, 0);
   ASSERT_EQ(res_overflow.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+
+  context.pop_mock_runtime();
+  context.pop_context();
+}
+
+// A value-typed (non-pointer/offset) slot that does not narrow down to a u32
+// is rejected with a fault, rather than silently truncated. The mock keeps u64
+// slots so it can carry host pointers in offset slots, but value slots must
+// still fit the real 32-bit wasm32 ABI slot.
+TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+
+  // The largest valid u32 narrows cleanly and reaches the inner syscall.
+  auto res_max =
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          0x00000000FFFFFFFFULL,
+                                                          0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_max.panic, 0);
+  ASSERT_EQ(res_max.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+
+  // Exactly one past UINT32_MAX does not fit a 32-bit slot -> fault.
+  auto res_overflow =
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          0x0000000100000000ULL,
+                                                          0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_overflow.panic, 0);
+  ASSERT_EQ(res_overflow.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+
+  // A fully out-of-range value also faults.
+  auto res_max_u64 =
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          UINT64_MAX, 0, 0, 0, 0,
+                                                          0, 0);
+  ASSERT_EQ(res_max_u64.panic, 0);
+  ASSERT_EQ(res_max_u64.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
 
   context.pop_mock_runtime();
