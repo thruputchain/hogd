@@ -70,10 +70,11 @@ narrow_slot(uint32_t input)
 }
 
 // Mock/native (test_ffi) analogue of narrow_slot. The mock entrypoint keeps
-// u64 argument slots so it can carry host pointers in offset slots, but a
-// *value* slot must still fit the real 32-bit ABI slot. Returns std::nullopt
-// (which becomes an FFI fault) if the value would not fit a 32-bit slot, so
-// the mock faithfully rejects values the real wasm32 ABI could not carry.
+// u64 argument slots so it can carry host pointers in offset slots; it rejects
+// a *value* slot that does not fit a 32-bit slot up front as an FFI usage error
+// (see mock_syscall_parser), so by the time we get here the value fits in 32
+// bits. The defensive `> UINT32_MAX` guard is a belt-and-suspenders fallback
+// that returns std::nullopt rather than silently truncating.
 template<std::integral T> requires (!std::same_as<T, bool>)
 constexpr std::optional<T>
 narrow_slot_mock(uint64_t input)
