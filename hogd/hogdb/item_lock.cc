@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <exception>
 #include <format>
 #include <limits>
 #include <mutex>
