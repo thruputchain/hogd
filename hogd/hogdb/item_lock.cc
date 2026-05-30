@@ -163,8 +163,7 @@ try {
         }
       },
       lock_contents_);
-}
-catch (const std::exception &e) {
+} catch (const std::exception &e) {
   // An allocation failure (bad_alloc / length_error / bad_array_new_length,
   // all derived from std::exception) can throw partway through commit, leaving
   // the lock partially mutated -- e.g. an RCQ consume marker published without
@@ -175,8 +174,9 @@ catch (const std::exception &e) {
   // noexcept specifier guarantees that even an exception outside this family
   // terminates here instead of being downgraded to a recoverable SYSTEM_ERR by
   // the SRPC dispatcher.
-  error("ItemLock::commit_change: unrecoverable allocation/internal failure: {}",
-        e.what());
+  error(
+      "ItemLock::commit_change: unrecoverable allocation/internal failure: {}",
+      e.what());
   return HogDBError{HogDBCode::kInternal};
 }
 
