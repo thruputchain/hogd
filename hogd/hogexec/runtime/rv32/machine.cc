@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/rv32/machine.h"
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -11,124 +10,10 @@
 #include <utility>
 
 #include "hogd/hogexec/runtime/rv32/host.h"
+#include "hogd/hogexec/runtime/rv32/isa_ops.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
-namespace {
-
-// Keep architectural values as raw 32-bit patterns. Converting through signed
-// C++ arithmetic is only done in helpers that pin the RISC-V edge cases.
-uint32_t
-bits_from_i32(int32_t value)
-{
-  return std::bit_cast<uint32_t>(value);
-}
-
-int32_t
-i32_from_bits(uint32_t value)
-{
-  return std::bit_cast<int32_t>(value);
-}
-
-uint32_t
-sign_extend(uint32_t value, uint32_t bits_count)
-{
-  const uint32_t sign_bit = uint32_t{1} << (bits_count - 1);
-  return (value ^ sign_bit) - sign_bit;
-}
-
-uint32_t
-arithmetic_shift_right(uint32_t value, uint32_t amount)
-{
-  // C++ signed right shift is implementation-defined, and shifting by 32 is
-  // undefined. Decode/execution masks amounts before this helper; amount==0
-  // still needs a separate path to avoid the 32-bit fill expression below.
-  if (amount == 0) {
-    return value;
-  }
-  const uint32_t shifted = value >> amount;
-  if ((value & 0x80000000U) == 0) {
-    return shifted;
-  }
-  return shifted | (~uint32_t{0} << (32 - amount));
-}
-
-uint32_t
-mulh(uint32_t lhs, uint32_t rhs)
-{
-  // MULH variants differ only in signedness of the high half. Keep the casts
-  // explicit so future refactors do not accidentally collapse the variants.
-  const int64_t product =
-      int64_t{i32_from_bits(lhs)} * int64_t{i32_from_bits(rhs)};
-  return static_cast<uint32_t>(static_cast<uint64_t>(product) >> 32);
-}
-
-uint32_t
-mulhsu(uint32_t lhs, uint32_t rhs)
-{
-  const int64_t product = int64_t{i32_from_bits(lhs)} * int64_t{rhs};
-  return static_cast<uint32_t>(static_cast<uint64_t>(product) >> 32);
-}
-
-uint32_t
-mulhu(uint32_t lhs, uint32_t rhs)
-{
-  const uint64_t product = uint64_t{lhs} * uint64_t{rhs};
-  return static_cast<uint32_t>(product >> 32);
-}
-
-uint32_t
-div_signed(uint32_t lhs, uint32_t rhs)
-{
-  const int32_t divisor = i32_from_bits(rhs);
-  const int32_t dividend = i32_from_bits(lhs);
-  // RISC-V defines division by zero and signed overflow results; avoid C++ UB.
-  if (divisor == 0) {
-    return std::numeric_limits<uint32_t>::max();
-  }
-  if (dividend == std::numeric_limits<int32_t>::min() && divisor == -1) {
-    return lhs;
-  }
-  return bits_from_i32(static_cast<int32_t>(dividend / divisor));
-}
-
-uint32_t
-rem_signed(uint32_t lhs, uint32_t rhs)
-{
-  const int32_t divisor = i32_from_bits(rhs);
-  const int32_t dividend = i32_from_bits(lhs);
-  // RISC-V defines division by zero and signed overflow results; avoid C++ UB.
-  if (divisor == 0) {
-    return lhs;
-  }
-  if (dividend == std::numeric_limits<int32_t>::min() && divisor == -1) {
-    return 0;
-  }
-  return bits_from_i32(static_cast<int32_t>(dividend % divisor));
-}
-
-bool
-branch_taken(Op op, uint32_t lhs, uint32_t rhs)
-{
-  switch (op) {
-  case Op::kBeq:
-    return lhs == rhs;
-  case Op::kBne:
-    return lhs != rhs;
-  case Op::kBlt:
-    return i32_from_bits(lhs) < i32_from_bits(rhs);
-  case Op::kBge:
-    return i32_from_bits(lhs) >= i32_from_bits(rhs);
-  case Op::kBltu:
-    return lhs < rhs;
-  case Op::kBgeu:
-    return lhs >= rhs;
-  default:
-    return false;
-  }
-}
-
-} // namespace
 
 Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
                  uint64_t gas, uint32_t initial_pc)
