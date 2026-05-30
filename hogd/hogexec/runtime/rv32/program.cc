@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 #include <array>
-#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -9,73 +8,22 @@
 #include <span>
 
 #include "hogd/hogexec/runtime/rv32/encoding.h"
+#include "hogd/hogexec/runtime/rv32/isa_ops.h"
 
 namespace hogd::rv32 {
 namespace {
-
-constexpr uint32_t kOpcodeMask = 0x7f;
-
-uint32_t
-bits(uint32_t value, uint32_t low, uint32_t width)
-{
-  return (value >> low) & ((uint32_t{1} << width) - 1);
-}
-
-int32_t
-sign_extend(uint32_t value, uint32_t bits_count)
-{
-  const uint32_t sign_bit = uint32_t{1} << (bits_count - 1);
-  const int64_t extended = (value & sign_bit) != 0
-                               ? int64_t{value} - (int64_t{1} << bits_count)
-                               : int64_t{value};
-  return static_cast<int32_t>(extended);
-}
 
 DecodedInstruction
 base_decode(uint32_t word)
 {
   DecodedInstruction instruction;
   instruction.word = word;
-  instruction.rd = static_cast<uint8_t>(bits(word, 7, 5));
-  instruction.funct3 = static_cast<uint8_t>(bits(word, 12, 3));
-  instruction.rs1 = static_cast<uint8_t>(bits(word, 15, 5));
-  instruction.rs2 = static_cast<uint8_t>(bits(word, 20, 5));
-  instruction.funct7 = static_cast<uint8_t>(bits(word, 25, 7));
+  instruction.rd = rd(word);
+  instruction.funct3 = funct3(word);
+  instruction.rs1 = rs1(word);
+  instruction.rs2 = rs2(word);
+  instruction.funct7 = funct7(word);
   return instruction;
-}
-
-int32_t
-imm_i(uint32_t word)
-{
-  return sign_extend(bits(word, 20, 12), 12);
-}
-
-int32_t
-imm_s(uint32_t word)
-{
-  return sign_extend((bits(word, 25, 7) << 5) | bits(word, 7, 5), 12);
-}
-
-int32_t
-imm_b(uint32_t word)
-{
-  const uint32_t value = (bits(word, 31, 1) << 12) | (bits(word, 7, 1) << 11) |
-                         (bits(word, 25, 6) << 5) | (bits(word, 8, 4) << 1);
-  return sign_extend(value, 13);
-}
-
-int32_t
-imm_u(uint32_t word)
-{
-  return std::bit_cast<int32_t>(word & 0xfffff000U);
-}
-
-int32_t
-imm_j(uint32_t word)
-{
-  const uint32_t value = (bits(word, 31, 1) << 20) | (bits(word, 12, 8) << 12) |
-                         (bits(word, 20, 1) << 11) | (bits(word, 21, 10) << 1);
-  return sign_extend(value, 21);
 }
 
 DecodeResult
@@ -107,9 +55,9 @@ decode_instruction(uint32_t word)
   }
 
   auto instruction = base_decode(word);
-  const uint32_t opcode = word & kOpcodeMask;
+  const uint32_t op_code = opcode(word);
 
-  switch (opcode) {
+  switch (op_code) {
   case 0x37:
     instruction.kind = InstructionKind::kLui;
     instruction.op = Op::kLui;
