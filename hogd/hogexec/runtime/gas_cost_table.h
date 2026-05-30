@@ -8,7 +8,11 @@ namespace hogd {
 /**
  * Table of gas costs for various operations.
  *
- * All of these values are placeholders.
+ * These values are placeholders, but RV32 artifacts commit to them:
+ * kSyscallGasCostSchedule is folded into rv32::kGasScheduleDigest and pinned in
+ * artifact.h. Changing any cost/name/order is a coordinated gas-schedule
+ * update: update the pinned digest/version deliberately and regenerate
+ * committed RV32 artifacts/lowerer constants.
  */
 constexpr static uint64_t kSHA256HashByteCost = 100;
 constexpr static uint64_t kSHA256HashBaseCost = 500;
