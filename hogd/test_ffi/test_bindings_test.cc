@@ -171,6 +171,12 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -178,7 +184,8 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -294,6 +301,12 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -301,7 +314,8 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -350,6 +364,12 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -357,7 +377,8 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -672,6 +693,12 @@ TEST(TestBindingsTest, MockContractRevertTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -679,7 +706,8 @@ TEST(TestBindingsTest, MockContractRevertTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -753,6 +781,12 @@ TEST(TestBindingsTest, MockContractReturnTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -760,7 +794,8 @@ TEST(TestBindingsTest, MockContractReturnTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -831,6 +866,12 @@ TEST(TestBindingsTest, MockContractFaultTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -838,7 +879,8 @@ TEST(TestBindingsTest, MockContractFaultTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -904,6 +946,12 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -911,7 +959,8 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 

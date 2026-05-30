@@ -124,6 +124,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
                                      .entrypoint = entrypoint_from_method_id(0),
                                      .gas_limit = UINT64_MAX,
                                      .calldata = {}},
+            .uniquifier = fw.make_new_uniquifier(),
             .contracts_to_deploy = {contract_to_deploy},
         },
         context);

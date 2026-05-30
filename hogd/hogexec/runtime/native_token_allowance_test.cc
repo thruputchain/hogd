@@ -81,6 +81,10 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
   constexpr static ContractAddress kOwnerAddr = make_contract_address(170);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(171);
 
+  // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost.
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
+
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     auto client = ContractTraitClient<itc_erc20::ERC20>(
@@ -117,7 +121,8 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -132,6 +137,9 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
   constexpr static ContractAddress kOwnerAddr = make_contract_address(172);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(173);
 
+  // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost.
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost());
@@ -181,7 +189,8 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -234,7 +243,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -247,6 +257,9 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
   constexpr static ContractAddress kOwnerAddr = make_contract_address(177);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(178);
 
+  // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost.
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost());
@@ -298,7 +311,8 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -314,7 +328,12 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   constexpr static ContractAddress kSpenderAddr = make_contract_address(180);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(181);
 
-  setup_grant_storage_token(kOwnerAddr, 1'000'000);
+  // kOwnerAddr commits 2 txs (Tx1, Tx3) and kSpenderAddr commits 1 (Tx2);
+  // grant each enough to pay the replay-cache storage cost. (Tx4 fails to
+  // commit, so it consumes no replay-cache entry.)
+  setup_grant_storage_token(kOwnerAddr,
+                            1'000'000 + replay_cache_cost_charged(2));
+  setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost() * 4);
@@ -408,7 +427,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -426,7 +446,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -444,7 +465,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -462,7 +484,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -513,7 +536,8 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -527,7 +551,11 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   constexpr static ContractAddress kOwnerAddr = make_contract_address(184);
   constexpr static int128_t kInitialBalance = 1'000'000;
 
-  setup_grant_storage_token(kOwnerAddr, kInitialBalance);
+  // kOwnerAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost so the post-commit balance assertion
+  // (== kInitialBalance) still holds after the self-transfer nets to zero.
+  setup_grant_storage_token(kOwnerAddr,
+                            kInitialBalance + replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -565,7 +593,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -575,8 +604,14 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   advance_block();
 
   auto hogs_transferred = get_hogs_transferred(committed_block);
-  EXPECT_TRUE(hogs_transferred.empty())
-      << "zero-delta self-transfer must not be published to scheduler";
+  // The zero-value self-transfer itself publishes no delta. The replay nonce
+  // consumed by this transaction, however, charges its storage cost to the
+  // invoked address, which is published to the scheduler -- so the only delta
+  // is exactly that replay cost.
+  EXPECT_EQ(hogs_transferred.size(), 1U)
+      << "only the replay-nonce cost should be published for a zero-delta "
+         "self-transfer";
+  EXPECT_EQ(hogs_transferred.at(kOwnerAddr), -replay_cache_cost_charged(1));
 
   auto balance_item = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(kOwnerAddr));
@@ -598,7 +633,11 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
   constexpr static int128_t kOverflowIncrement = 10;
   constexpr static uint128_t kTransferAmount = 10'000;
 
-  setup_grant_storage_token(kOwnerAddr, 1'000'000);
+  // kOwnerAddr commits 1 tx (Tx1) and kSpenderAddr commits 1 tx (Tx2); grant
+  // each enough to pay the replay-cache storage cost.
+  setup_grant_storage_token(kOwnerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
+  setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
@@ -703,7 +742,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -722,7 +762,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -741,7 +782,10 @@ TEST_F(NativeTokenAllowanceTest,
   constexpr static int128_t kSeedAllowance =
       std::numeric_limits<int128_t>::max() - 5;
 
-  setup_grant_storage_token(kOwnerAddr, 1'000'000);
+  // kOwnerAddr commits 1 tx (Tx1); grant it enough to pay the replay-cache
+  // storage cost. (Tx2 by kSpenderAddr fails to commit, consuming no entry.)
+  setup_grant_storage_token(kOwnerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
@@ -842,7 +886,8 @@ TEST_F(NativeTokenAllowanceTest,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -861,7 +906,8 @@ TEST_F(NativeTokenAllowanceTest,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -873,6 +919,9 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(196);
 
+  // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost.
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost());
@@ -913,7 +962,8 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -927,7 +977,11 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(197);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(198);
-  setup_grant_storage_token(kOwnerAddr, 1'000'000);
+  // kOwnerAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost. (The asserted native-token-contract
+  // storage balance below is unaffected by the replay cost.)
+  setup_grant_storage_token(kOwnerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress, 0);
@@ -978,7 +1032,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());

@@ -354,6 +354,10 @@ protected:
     auto native_contract_xdr = make_native_contract(0);
     write_contract(native_contract_xdr);
     write_deployment(kNativeContractAddress, native_contract_xdr);
+    // Each test commits exactly one transaction against this root invoked
+    // address (N = 1), and that commit now charges the replay-cache cost.
+    setup_grant_storage_token(kNativeContractAddress,
+                              replay_cache_cost_charged(1));
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
@@ -387,7 +391,8 @@ TEST_F(TupleReturnWasmTest, BasicTwoTuple)
                       Serializer<
                           NativeContractBuilder::kDefaultSerializationFormat>::
                           serialize(std::make_tuple(0U))
-                              .value()}},
+                              .value()},
+          .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -411,7 +416,8 @@ TEST_F(TupleReturnWasmTest, NestedTuple)
                       Serializer<
                           NativeContractBuilder::kDefaultSerializationFormat>::
                           serialize(std::make_tuple(0U))
-                              .value()}},
+                              .value()},
+          .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -429,7 +435,8 @@ TEST_F(TupleReturnWasmTest, SingleElementTuple)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(2),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -447,7 +454,8 @@ TEST_F(TupleReturnWasmTest, ThreeElementTuple)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(3),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -465,7 +473,8 @@ TEST_F(TupleReturnWasmTest, DeeplyNested)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(4),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -483,7 +492,8 @@ TEST_F(TupleReturnWasmTest, TupleWithFixedArray)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(5),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -501,7 +511,8 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableArray)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(6),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -519,7 +530,8 @@ TEST_F(TupleReturnWasmTest, NestedArrays)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(7),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -537,7 +549,8 @@ TEST_F(TupleReturnWasmTest, ArrayOfTuples)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(8),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -555,7 +568,8 @@ TEST_F(TupleReturnWasmTest, NestedArray2D)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(9),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -573,7 +587,8 @@ TEST_F(TupleReturnWasmTest, NestedArray3D)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(10),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -591,7 +606,8 @@ TEST_F(TupleReturnWasmTest, DeeplyNestedArray)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(11),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -609,7 +625,8 @@ TEST_F(TupleReturnWasmTest, TupleWithOption)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(12),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -627,7 +644,8 @@ TEST_F(TupleReturnWasmTest, TupleAllOptional)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(13),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -645,7 +663,8 @@ TEST_F(TupleReturnWasmTest, NestedOptionTuple)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(14),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -663,7 +682,8 @@ TEST_F(TupleReturnWasmTest, KitchenSink)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(15),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -681,7 +701,8 @@ TEST_F(TupleReturnWasmTest, ArraysAndTuples)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(16),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -699,7 +720,8 @@ TEST_F(TupleReturnWasmTest, TupleWithNestedArray)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(17),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -717,7 +739,8 @@ TEST_F(TupleReturnWasmTest, Tuple8Elements)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(18),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -735,7 +758,8 @@ TEST_F(TupleReturnWasmTest, Tuple16Elements)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(19),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -753,7 +777,8 @@ TEST_F(TupleReturnWasmTest, EmptyTuple)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(20),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -771,7 +796,8 @@ TEST_F(TupleReturnWasmTest, TupleWithBytes)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(21),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -789,7 +815,8 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableBytes)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(22),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -807,7 +834,8 @@ TEST_F(TupleReturnWasmTest, NestedBytesArray)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(23),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -825,7 +853,8 @@ TEST_F(TupleReturnWasmTest, TupleArrayOption)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(24),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -843,7 +872,8 @@ TEST_F(TupleReturnWasmTest, NestedEverything)
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(25),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

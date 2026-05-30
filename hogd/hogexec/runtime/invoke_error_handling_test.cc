@@ -231,6 +231,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   write_contract(orchestrator_xdr);
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
+  // The orchestrator is the root invoked address; committing its transaction
+  // consumes a replay-cache entry charged to it. It commits one transaction
+  // (N=1), so grant the single-consume cost (0 on MockInMemory).
+  setup_grant_storage_token(kOrchestratorAddress,
+                            replay_cache_cost_charged(1) * 1);
+
   // now invoke the contract
   {
     auto handler = make_new_system_call_handler(
@@ -244,6 +250,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                             .gas_limit = UINT64_MAX,
                             .calldata = {},
                         },
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *runtime_context);
 
@@ -398,6 +405,10 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
   write_deployment(native_contract_address, native_contract_xdr);
   write_contract(target_xdr);
   write_deployment(target_address, target_xdr);
+  // The committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it the cost.
+  setup_grant_storage_token(native_contract_address,
+                            replay_cache_cost_charged(1));
 
   {
     auto handler = make_new_system_call_handler(
@@ -411,6 +422,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                             .gas_limit = UINT64_MAX,
                             .calldata = {},
                         },
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *runtime_context);
 
@@ -482,6 +494,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 

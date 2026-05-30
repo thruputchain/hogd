@@ -125,7 +125,8 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -268,7 +269,8 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   handler.hack_dont_use_test_bypass_allow_reentrance();
 
@@ -372,7 +374,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto res = handler.root_invoke();
@@ -394,7 +397,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto res = handler.root_invoke();
@@ -483,7 +487,8 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = gas_limit,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -671,7 +676,8 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -826,7 +832,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                                  entrypoint_from_method_id(
                                                      error_type),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto res = handler.root_invoke();
@@ -856,7 +863,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                              .entrypoint =
                                                  entrypoint_from_method_id(3),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto res = handler.root_invoke();
@@ -1054,7 +1062,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();

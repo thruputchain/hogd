@@ -102,7 +102,8 @@ TEST_P(RevertTest, RootFrameReverts)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   // Execute the transaction - it should succeed
@@ -356,7 +357,8 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -473,7 +475,8 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   // Execute the transaction - it should succeed
@@ -600,7 +603,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -688,7 +692,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
                      Invocation{.invoked_address = kAddrParent,
                                 .entrypoint = entrypoint_from_method_id(0),
                                 .gas_limit = UINT64_MAX,
-                                .calldata = {}}};
+                                .calldata = {}},
+                 .uniquifier = make_new_uniquifier()};
 
   // Proposal mode: run and extract proposal data.
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);

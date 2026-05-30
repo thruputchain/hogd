@@ -70,10 +70,24 @@ protected:
     write_deployment(kERC20ContractAddress, erc20_contract);
     write_deployment(kWalletContractAddress, wallet_contract);
 
-    // Grant storage tokens
-    setup_grant_storage_token(kHTLCContractAddress, 1'000'000'000);
-    setup_grant_storage_token(kERC20ContractAddress, 1'000'000'000);
-    setup_grant_storage_token(kWalletContractAddress, 1'000'000'000);
+    // Grant storage tokens.
+    //
+    // Each committed transaction now charges the replay-cache cost to its root
+    // invoked address, so top up the addresses that commit transactions by the
+    // cost of the (worst-case) number of commits they make in any single test.
+    // No test here asserts an exact native-token balance, so a slightly
+    // generous count only adds spare and keeps every commit succeeding.
+    //   - HTLC address commits initialize_htlc plus up to two claim/refund
+    //     transactions in a test => N = 3.
+    //   - ERC20 address commits only initialize_erc20 => N = 1.
+    //   - Wallet address commits initialize_wallet + mint + approve + create
+    //     => N = 4.
+    setup_grant_storage_token(kHTLCContractAddress,
+                              1'000'000'000 + replay_cache_cost_charged(3));
+    setup_grant_storage_token(kERC20ContractAddress,
+                              1'000'000'000 + replay_cache_cost_charged(1));
+    setup_grant_storage_token(kWalletContractAddress,
+                              1'000'000'000 + replay_cache_cost_charged(4));
     setup_grant_storage_token(kReceiverAddress, 1'000'000'000);
 
     // Initialize contracts
@@ -293,7 +307,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 0}}},
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -316,7 +330,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 1}}},
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -337,7 +351,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 2}}},
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -423,7 +437,10 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     const ContractAddress kBalanceCheckerAddress = make_contract_address(4);
     write_contract(native_contract_xdr);
     write_deployment(kBalanceCheckerAddress, native_contract_xdr);
-    setup_grant_storage_token(kBalanceCheckerAddress, 1'000'000'000);
+    // This address commits exactly one transaction (N = 1) below, which now
+    // charges the replay-cache cost.
+    setup_grant_storage_token(kBalanceCheckerAddress,
+                              1'000'000'000 + replay_cache_cost_charged(1));
     advance_block();
 
     // Invoke the balance checker native contract
@@ -437,7 +454,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 7}},
+                                   .nonce = nonce_++}},
         *balance_check_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

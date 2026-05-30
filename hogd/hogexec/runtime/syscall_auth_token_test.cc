@@ -39,6 +39,17 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDB)
   {}
+
+protected:
+  void SetUp() override
+  {
+    // Every test in this fixture invokes the contract at
+    // make_contract_address(0) as the root transaction and commits exactly
+    // one transaction against it, consuming a replay-cache entry charged to
+    // that address. Grant enough to cover that single commit.
+    setup_grant_storage_token(make_contract_address(0),
+                              replay_cache_cost_charged(1));
+  }
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -161,6 +172,7 @@ TEST_F(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -241,6 +253,7 @@ TEST_F(SyscallAuthTokenTest, InvokeRejectsDuplicateForwardedAuthTokenIds)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -344,6 +357,7 @@ TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -478,6 +492,7 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -493,6 +508,17 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDB)
   {}
+
+protected:
+  void SetUp() override
+  {
+    // Every test in this fixture invokes the contract at
+    // make_contract_address(0) as the root transaction and commits exactly
+    // one transaction against it, consuming a replay-cache entry charged to
+    // that address. Grant enough to cover that single commit.
+    setup_grant_storage_token(make_contract_address(0),
+                              replay_cache_cost_charged(1));
+  }
 };
 
 TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
@@ -566,6 +592,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -643,6 +670,7 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -824,6 +852,7 @@ TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -912,6 +941,7 @@ TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1017,6 +1047,7 @@ TEST_F(SyscallAuthTokenTest, GetReturnedBufferRejectsPartialAuthTokenOutputSpan)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1094,6 +1125,7 @@ TEST_F(SyscallAuthTokenTest, ReturnUnownedAuthTokensCausesExit)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1240,6 +1272,7 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1309,6 +1342,7 @@ TEST_F(SyscallAuthTokenTest, ForwardFabricatedAuthTokenIdIsRejected)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1423,6 +1457,7 @@ TEST_F(SyscallAuthTokenTest, ReplayConsumedAuthTokenIsRejected)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1545,6 +1580,7 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1606,6 +1642,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1696,6 +1733,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1766,6 +1804,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -1879,6 +1918,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2017,6 +2057,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2114,6 +2155,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2194,6 +2236,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotMintToken)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2304,6 +2347,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2417,6 +2461,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2515,6 +2560,7 @@ TEST_F(SyscallAuthTokenTest, ReturnRevertWithMintedAuthTokenCausesExit)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();
@@ -2631,6 +2677,7 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
                       },
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
   auto res = handler.root_invoke();

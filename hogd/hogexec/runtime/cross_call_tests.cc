@@ -61,7 +61,8 @@ protected:
                 Transaction{
                     .invocation =
                         fibonacci_caller_client_.make_invocation<"initialize">(
-                            UINT64_MAX, fibonacci_contract_address_)}},
+                            UINT64_MAX, fibonacci_contract_address_),
+                    .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -80,11 +81,11 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{.invocation =
-                                fibonacci_caller_client_
-                                    .make_invocation<"call_fibonacci">(
-                                        UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
+            .tx = Transaction{.invocation =
+                                  fibonacci_caller_client_
+                                      .make_invocation<"call_fibonacci">(
+                                          UINT64_MAX, uint32_t{5}, UINT64_MAX),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -96,11 +97,11 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
     // try again with larger number
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{.invocation =
-                                fibonacci_caller_client_
-                                    .make_invocation<"call_fibonacci">(
-                                        UINT64_MAX, uint32_t{20}, UINT64_MAX)}},
+            .tx = Transaction{.invocation =
+                                  fibonacci_caller_client_
+                                      .make_invocation<"call_fibonacci">(
+                                          UINT64_MAX, uint32_t{20}, UINT64_MAX),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -120,7 +121,8 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
                                   fibonacci_caller_client_
                                       .make_invocation<"call_fibonacci">(
                                           UINT64_MAX, uint32_t{20},
-                                          uint64_t{1000})}},
+                                          uint64_t{1000}),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     // inner call OOG => caller using the non-try client hits unreachable
@@ -138,7 +140,8 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_
                                       .make_invocation<"call_fibonacci">(
-                                          1000, uint32_t{20}, UINT64_MAX)}},
+                                          1000, uint32_t{20}, UINT64_MAX),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
@@ -155,11 +158,11 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{.invocation =
-                                fibonacci_caller_client_.make_invocation<
-                                    "call_fibonacci_expect_out_of_gas">(
-                                    UINT64_MAX, uint32_t{20}, uint64_t{1000})}},
+            .tx = Transaction{.invocation =
+                                  fibonacci_caller_client_.make_invocation<
+                                      "call_fibonacci_expect_out_of_gas">(
+                                      UINT64_MAX, uint32_t{20}, uint64_t{1000}),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -172,11 +175,11 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{.invocation =
-                                fibonacci_caller_client_.make_invocation<
-                                    "call_fibonacci_expect_out_of_gas">(
-                                    UINT64_MAX, uint32_t{20}, uint64_t{1010})}},
+            .tx = Transaction{.invocation =
+                                  fibonacci_caller_client_.make_invocation<
+                                      "call_fibonacci_expect_out_of_gas">(
+                                      UINT64_MAX, uint32_t{20}, uint64_t{1010}),
+                              .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

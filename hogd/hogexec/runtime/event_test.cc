@@ -192,6 +192,7 @@ TEST_F(EventTest, EventSuccess)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context, &tx_id);
 
@@ -308,6 +309,7 @@ TEST_F(EventTest, BadEventInputs)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context, &tx_id);
 
@@ -392,6 +394,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context, &tx_id);
 
@@ -472,6 +475,7 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context, &tx_id);
 
@@ -604,6 +608,7 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context, &tx_id);
 
@@ -925,6 +930,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context, &tx_id_1);
 
@@ -946,6 +952,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context, &tx_id_2);
 
