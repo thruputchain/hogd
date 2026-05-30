@@ -350,7 +350,9 @@ Machine::complete_ecall(const HostResult &result)
 
   // ECALL instruction gas has already been charged by step(). Debit host gas
   // before committing the host result so an over-budget syscall cannot mutate
-  // a0, halt state, or final trap state.
+  // a0, halt state, or final trap state. The production syscall bridge caps
+  // host gas to the MachineView budget; this path is defensive for direct Host
+  // implementations.
   if (!consume_gas(result.gas_consumed)) {
     memory_ = ecall_memory_snapshot_;
     ecall_memory_snapshot_.clear();

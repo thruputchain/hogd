@@ -107,10 +107,11 @@ missed — these are the ones worth pinning explicitly:
   defined results (DIV/0 → −1, REM/0 → dividend, DIV overflow → INT_MIN,
   REM overflow → 0). Oracles agree — a *non*-divergence worth asserting so a
   future regression here is caught.
-- **JALR target alignment:** we require pc%4==0; JALR clears bit 0 per spec, so
-  a 2-aligned target traps `kBadPc` for us and raises mcause 0
-  (instruction-address-misaligned) on the oracle. Maps cleanly; just don't
-  compare past it.
+- **Control-flow target alignment:** we require pc%4==0; JALR clears bit 0 per
+  spec, so a 2-aligned JALR/branch target traps `kBadPc` for us and raises
+  mcause 0 (instruction-address-misaligned) on the oracle. This is a current
+  trap-taxonomy choice, not `kMisalignedAccess` (data only). Maps cleanly; just
+  don't compare past it.
 - **x0 writes, FENCE as no-op:** both match a stock oracle; note for
   completeness.
 
