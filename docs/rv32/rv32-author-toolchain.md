@@ -139,7 +139,8 @@ groundhog build            # cargo-build rv32 → shell out to rv32-lower → .r
 `groundhog build` should locate `rv32-lower` the way it locates wasm-opt
 (`which::which`) and emit a clean "install the lowerer" error if missing
 (mirror `CliError::WasmOptNotFound`). Distribution: ship the `rv32-lower` binary
-via `groundhogup` / `cargo install`, like wasm-opt.
+through whatever channel installs the `groundhog` CLI (e.g. `cargo install`), so
+it lands on `$PATH` the way wasm-opt does.
 
 ## Open questions (Geoff-owned, runtime side)
 
