@@ -159,7 +159,7 @@ add_executable(
 
 target_link_libraries(
   rv32_spec_model_crosscheck_test
-  rv32_vm
+  rv32_isa_core
   GTest::gtest
 )
 gtest_discover_tests(

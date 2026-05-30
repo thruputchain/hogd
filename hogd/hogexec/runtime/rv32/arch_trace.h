@@ -101,6 +101,16 @@ describe_divergence(const ArchState &expected, const ArchState &actual)
                          expected.regs[i], actual.regs[i]);
     }
   }
+  if (expected.memory.size() != actual.memory.size()) {
+    return std::format("memory size: expected {}, actual {}",
+                       expected.memory.size(), actual.memory.size());
+  }
+  for (size_t i = 0; i < expected.memory.size(); ++i) {
+    if (expected.memory[i] != actual.memory[i]) {
+      return std::format("memory[{}]: expected 0x{:02x}, actual 0x{:02x}", i,
+                         expected.memory[i], actual.memory[i]);
+    }
+  }
   if (expected.halted != actual.halted) {
     return std::format("halted: expected {}, actual {}", expected.halted,
                        actual.halted);
@@ -116,16 +126,6 @@ describe_divergence(const ArchState &expected, const ArchState &actual)
   if (expected.gas_remaining != actual.gas_remaining) {
     return std::format("gas_remaining: expected {}, actual {}",
                        expected.gas_remaining, actual.gas_remaining);
-  }
-  if (expected.memory.size() != actual.memory.size()) {
-    return std::format("memory size: expected {}, actual {}",
-                       expected.memory.size(), actual.memory.size());
-  }
-  for (size_t i = 0; i < expected.memory.size(); ++i) {
-    if (expected.memory[i] != actual.memory[i]) {
-      return std::format("memory[{}]: expected 0x{:02x}, actual 0x{:02x}", i,
-                         expected.memory[i], actual.memory[i]);
-    }
   }
   return "";
 }
@@ -228,6 +228,11 @@ describe_trace_divergence(const ExecTrace &expected, const ExecTrace &actual)
   if (expected.steps.size() != actual.steps.size()) {
     return std::format("step count: expected {}, actual {}",
                        expected.steps.size(), actual.steps.size());
+  }
+  if (expected.final_result != actual.final_result) {
+    return std::format("final result expected {}, actual {}",
+                       static_cast<int>(expected.final_result),
+                       static_cast<int>(actual.final_result));
   }
   return "";
 }

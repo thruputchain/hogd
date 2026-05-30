@@ -63,6 +63,12 @@ TEST(Rv32ArchTrace, describeDivergencePinpointsFirstDifferingField)
   EXPECT_NE(describe_divergence(base, mem_diff).find("memory[1]"),
             std::string::npos);
 
+  ArchState memory_and_trap_diff = base;
+  memory_and_trap_diff.memory[1] = 0xee;
+  memory_and_trap_diff.trap = Trap::kBadMemory;
+  EXPECT_NE(describe_divergence(base, memory_and_trap_diff).find("memory[1]"),
+            std::string::npos);
+
   ArchState trap_diff = base;
   trap_diff.trap = Trap::kBadMemory;
   EXPECT_NE(describe_divergence(base, trap_diff).find("bad_memory"),
@@ -147,6 +153,21 @@ TEST(Rv32ArchTrace, lockstepTraceLocatesComputationalDivergence)
   EXPECT_NE(diff.find("x3"), std::string::npos) << diff;
   EXPECT_EQ(add_trace.steps[2].state.regs[3], 13U); // 10 + 3
   EXPECT_EQ(sub_trace.steps[2].state.regs[3], 7U);  // 10 - 3
+}
+
+TEST(Rv32ArchTrace, traceDivergenceComparesFinalResult)
+{
+  ArchState state;
+  state.pc = 4;
+  ExecTrace expected{
+      .steps = {TraceStep{.result = StepResult::kContinue, .state = state}},
+      .final_result = StepResult::kHalted,
+  };
+  ExecTrace actual = expected;
+  actual.final_result = StepResult::kTrap;
+
+  const std::string diff = describe_trace_divergence(expected, actual);
+  EXPECT_NE(diff.find("final result"), std::string::npos) << diff;
 }
 
 } // namespace
