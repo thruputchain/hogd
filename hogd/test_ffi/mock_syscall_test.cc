@@ -299,8 +299,10 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   // (improperly sign-extended) encoding for the mock to reject here -- a value
   // that does not fit a 32-bit slot is a harness/FFI error, covered separately
   // by ParseMockUnsignedSlotOverflow.
-  auto res = mock_syscall_parser<SignedI32TypeTestSyscallMeta>(
-      SyscallNo::kExit, 0x00000000FFFFFFFFULL, 0, 0, 0, 0, 0, 0);
+  auto res =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        0x00000000FFFFFFFFULL,
+                                                        0, 0, 0, 0, 0, 0);
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
@@ -349,8 +351,8 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
   // A fully out-of-range value is likewise an FFI error, not a syscall fault.
   auto res_max_u64 =
       mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                          UINT64_MAX, 0, 0, 0, 0,
-                                                          0, 0);
+                                                          UINT64_MAX, 0, 0, 0,
+                                                          0, 0, 0);
   ASSERT_EQ(res_max_u64.result_code, 0);
   ASSERT_EQ(res_max_u64.panic,
             std::to_underlying(HostFnErrorCode::Unrecoverable));
