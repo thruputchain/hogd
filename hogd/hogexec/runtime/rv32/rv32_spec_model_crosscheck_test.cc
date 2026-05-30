@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
@@ -62,15 +63,6 @@ struct SpecState {
   Trap trap = Trap::kNone;
   bool halted = false;
   uint32_t halt_code = 0;
-};
-
-class HaltWithA0Host final : public Host {
-public:
-  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
-  {
-    (void)args;
-    return HostResult::halt(view.reg(10));
-  }
 };
 
 uint32_t
@@ -903,24 +895,29 @@ compare_to_machine(const CrosscheckCase &test_case)
   ASSERT_TRUE(machine.view().write_memory(0, test_case.initial_memory))
       << test_case.name;
 
-  HaltWithA0Host host;
+  RecordingHost host;
   const StepResult actual_result = run_machine(machine, host);
 
   EXPECT_EQ(actual_result, expected_result) << test_case.name;
-  EXPECT_EQ(machine.trap(), expected.trap) << test_case.name;
-  EXPECT_EQ(machine.halted(), expected.halted) << test_case.name;
-  EXPECT_EQ(machine.pc(), expected.pc) << test_case.name;
-  EXPECT_EQ(machine.gas_remaining(), expected.gas_remaining) << test_case.name;
-  if (expected_result == StepResult::kHalted) {
-    EXPECT_EQ(machine.halt_code(), expected.halt_code) << test_case.name;
-  }
-  for (size_t i = 0; i < expected.regs.size(); ++i) {
-    EXPECT_EQ(machine.reg(i), expected.regs[i]) << test_case.name << " x" << i;
-  }
-  EXPECT_EQ(std::vector<uint8_t>(machine.memory().begin(),
-                                 machine.memory().end()),
-            expected.memory)
-      << test_case.name;
+
+  // Compare the full observable state through the shared differential-testing
+  // representation (arch_trace.h) -- the same ArchState an external oracle
+  // would produce. halt_code is 0 unless halted on both the spec and the
+  // machine, so this unconditional comparison matches the previous
+  // result-gated halt_code check.
+  const ArchState expected_state{
+      .pc = expected.pc,
+      .regs = expected.regs,
+      .memory = expected.memory,
+      .gas_remaining = expected.gas_remaining,
+      .trap = expected.trap,
+      .halted = expected.halted,
+      .halt_code = expected.halt_code,
+  };
+  const ArchState actual_state = capture_arch_state(machine);
+  EXPECT_TRUE(actual_state == expected_state)
+      << test_case.name << ": "
+      << describe_divergence(expected_state, actual_state);
 }
 
 TEST(Rv32SpecModelCrosscheckTest, randomizedProgramsMatchSpec)

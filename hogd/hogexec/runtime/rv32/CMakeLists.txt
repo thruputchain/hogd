@@ -89,6 +89,21 @@ target_link_libraries(
 )
 gtest_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
 
+# Differential-testing substrate (arch_trace.h). Also core-only: it must stay
+# linkable against an external oracle harness with no hogd dependencies.
+add_executable(
+  rv32_arch_trace_test
+  rv32_arch_trace_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_arch_trace_test
+  rv32_isa_core
+  GTest::gtest
+)
+gtest_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
+
 add_executable(
   rv32_vm_test
   rv32_vm_test.cc
