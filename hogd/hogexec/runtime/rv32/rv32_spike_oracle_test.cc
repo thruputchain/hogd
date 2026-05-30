@@ -7,9 +7,9 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
-#include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/oracle.h"
 #include "hogd/hogexec/runtime/rv32/spike_oracle.h"
+#include "hogd/hogexec/runtime/rv32/test_corpus.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 // External-oracle differential test (C3): runs a corpus through both our
@@ -20,9 +20,9 @@
 // rv32_isa_core ONLY.
 //
 // First increment: register-only, ecall-terminated, zero-initial-register
-// programs (no loads/stores, no jalr), so our 0-based pc-space maps to Spike's
-// DRAM by a constant offset with no address-space mismatch. Memory programs and
-// a constrained-random corpus are the next increments.
+// programs (no loads/stores, no jalr, no auipc / linking jal), so our 0-based
+// pc-space maps to Spike's DRAM by a constant offset with no address-space
+// mismatch. Memory programs and computed jumps are the next increments.
 
 namespace hogd::rv32 {
 namespace {
@@ -45,6 +45,23 @@ reg_program(std::vector<uint32_t> words)
   program.memory_bytes = 256;
   program.initial_memory.assign(256, 0);
   return program;
+}
+
+// Run the program through Spike once and assert both in-tree oracles agree with
+// it on the architectural trajectory.
+void
+expect_oracles_agree_with_spike(SpikeOracle &spike, MachineOracle &machine,
+                                SpecModelOracle &spec,
+                                const DifferentialProgram &program)
+{
+  const ExecTrace spike_trace = spike.run(program);
+  // More than the synthetic halt step -> Spike actually retired the program.
+  EXPECT_GT(spike_trace.steps.size(), 1U) << "no Spike commits parsed";
+  EXPECT_EQ(describe_arch_trace_divergence(machine.run(program), spike_trace),
+            "")
+      << "Machine vs Spike";
+  EXPECT_EQ(describe_arch_trace_divergence(spec.run(program), spike_trace), "")
+      << "spec model vs Spike";
 }
 
 struct NamedProgram {
@@ -80,7 +97,7 @@ register_only_corpus()
   };
 }
 
-TEST(Rv32SpikeOracle, machineMatchesSpikeOnRegisterOnlyCorpus)
+TEST(Rv32SpikeOracle, handCorpusMatchesSpike)
 {
   if (!spike_oracle_available()) {
     GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
@@ -89,20 +106,16 @@ TEST(Rv32SpikeOracle, machineMatchesSpikeOnRegisterOnlyCorpus)
   ASSERT_TRUE(binary.has_value());
   SpikeOracle spike(binary.value());
   MachineOracle machine;
+  SpecModelOracle spec;
 
   for (const NamedProgram &prog : register_only_corpus()) {
     SCOPED_TRACE(prog.name);
-    const DifferentialProgram program = reg_program(prog.words);
-    const ExecTrace machine_trace = machine.run(program);
-    const ExecTrace spike_trace = spike.run(program);
-    EXPECT_EQ(machine_trace.final_result, StepResult::kHalted);
-    // More than the synthetic halt step -> Spike actually retired the program.
-    EXPECT_GT(spike_trace.steps.size(), 1U) << "no Spike commits parsed";
-    EXPECT_EQ(describe_arch_trace_divergence(machine_trace, spike_trace), "");
+    expect_oracles_agree_with_spike(spike, machine, spec,
+                                    reg_program(prog.words));
   }
 }
 
-TEST(Rv32SpikeOracle, specModelMatchesSpikeOnRegisterOnlyCorpus)
+TEST(Rv32SpikeOracle, randomCorpusMatchesSpike)
 {
   if (!spike_oracle_available()) {
     GTEST_SKIP() << "RV32_ORACLE_BIN not set or not executable";
@@ -110,14 +123,20 @@ TEST(Rv32SpikeOracle, specModelMatchesSpikeOnRegisterOnlyCorpus)
   const std::optional<std::string> binary = spike_oracle_binary();
   ASSERT_TRUE(binary.has_value());
   SpikeOracle spike(binary.value());
+  MachineOracle machine;
   SpecModelOracle spec;
 
-  for (const NamedProgram &prog : register_only_corpus()) {
-    SCOPED_TRACE(prog.name);
-    const DifferentialProgram program = reg_program(prog.words);
-    EXPECT_EQ(describe_arch_trace_divergence(spec.run(program),
-                                             spike.run(program)),
-              "");
+  // Same generator as the fast non-gated Machine-vs-spec pass in the oracle
+  // test, here checked against the independent Spike reference. Fewer seeds
+  // because each Spike run costs the subprocess timeout.
+  for (uint64_t seed = 0; seed < 24; ++seed) {
+    SCOPED_TRACE(seed);
+    DifferentialProgram program;
+    program.code =
+        test_corpus::generate_register_only_program(0xD1FFULL + seed, 48);
+    program.memory_bytes = 256;
+    program.initial_memory.assign(256, 0);
+    expect_oracles_agree_with_spike(spike, machine, spec, program);
   }
 }
 

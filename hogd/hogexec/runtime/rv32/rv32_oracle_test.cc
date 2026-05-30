@@ -9,6 +9,7 @@
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/oracle.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
+#include "hogd/hogexec/runtime/rv32/test_corpus.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 // Exercises the external-oracle differential harness (oracle.h) against the
@@ -238,6 +239,29 @@ TEST(Rv32Oracle, runningOffCodeImageTrapsConsistently)
   EXPECT_EQ(machine_trace.final_result, StepResult::kTrap);
   EXPECT_EQ(spec_trace.final_result, StepResult::kTrap);
   EXPECT_EQ(describe_arch_trace_divergence(spec_trace, machine_trace), "");
+}
+
+// Fast, non-gated breadth: the constrained-random register-only corpus
+// (test_corpus.h) -- the same corpus the gated Spike test uses -- run through
+// Machine and the spec model. Validates the generator in default CI and makes a
+// Machine-vs-Spike failure attributable (if Machine and spec already agree
+// here, a Spike divergence points at the Spike mapping, not the VM).
+TEST(Rv32Oracle, machineMatchesSpecOnRandomRegisterCorpus)
+{
+  MachineOracle machine_oracle;
+  SpecModelOracle spec_oracle;
+  for (uint64_t seed = 0; seed < 256; ++seed) {
+    SCOPED_TRACE(seed);
+    DifferentialProgram program;
+    program.code =
+        test_corpus::generate_register_only_program(0xC0FFEEULL + seed, 64);
+    program.memory_bytes = 256;
+    program.initial_memory.assign(256, 0);
+    const ExecTrace expected = spec_oracle.run(program);
+    const ExecTrace actual = machine_oracle.run(program);
+    EXPECT_EQ(actual.final_result, StepResult::kHalted);
+    EXPECT_EQ(describe_arch_trace_divergence(expected, actual), "");
+  }
 }
 
 } // namespace
