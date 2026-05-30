@@ -49,9 +49,9 @@ ARTIFACT_ENTRY_ABI_VERSION = 1
 # Bumped 0 -> 1 with the register-native syscall ABI (args in a0..a7, no frame).
 ARTIFACT_SYSCALL_ABI_VERSION = 1
 DISPATCH_ENTRY_BYTES = 16
-GAS_TABLE_VERSION = 1
-# Must match hogd/hogexec/runtime/rv32/program.h kGasScheduleDigest.
-GAS_SCHEDULE_DIGEST = 0xEC026096ED9849F7
+GAS_TABLE_VERSION = 2
+# Must match hogd/hogexec/runtime/rv32/artifact.h kGasScheduleDigest.
+GAS_SCHEDULE_DIGEST = 0xEBE53DCEEA581D0C
 
 # ---------------------------------------------------------------------------
 # ELF constants.

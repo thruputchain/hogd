@@ -498,6 +498,15 @@ TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpec)
 
   regs = {};
   compare_to_machine(CrosscheckCase{
+      .name = "ebreak_trap",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 7),
+                       spec(0x00100073U, Op::kEbreak)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  compare_to_machine(CrosscheckCase{
       .name = "out_of_gas_before_first_mutation",
       .instructions = {op_imm(Op::kAddi, 1, 0, 1),
                        spec(0x00000073U, Op::kEcall)},

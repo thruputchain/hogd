@@ -25,7 +25,7 @@ inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 // Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
 // into the header at kArtifactGasVersionOffset and validated at load.
-inline constexpr uint32_t kGasTableVersion = 1;
+inline constexpr uint32_t kGasTableVersion = 2;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -109,7 +109,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0xec026096ed9849f7ULL);
+static_assert(kGasScheduleDigest == 0xebe53dceea581d0cULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 

@@ -112,7 +112,7 @@ current state — landing `groundhog-rv32-artifact` must include the cross-check
 
 Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
-gas table version 1 + gas-schedule digest `0xEC026096ED9849F7`, VM-profile digest
+gas table version 2 + gas-schedule digest `0xEBE53DCEEA581D0C`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory / dispatch
 sections.
 

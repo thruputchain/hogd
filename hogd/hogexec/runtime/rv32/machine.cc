@@ -719,6 +719,9 @@ Machine::execute(const DecodedInstruction &instruction)
         .a7 = registers_[17],
     };
     return StepResult::kEcall;
+  case Op::kEbreak:
+    set_trap(Trap::kBreakpoint);
+    return StepResult::kTrap;
   default:
     assert(false && "invalid decoded op");
     set_trap(Trap::kInvalidInstruction);

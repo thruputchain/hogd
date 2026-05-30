@@ -274,14 +274,20 @@ decode_instruction(uint32_t word)
     instruction.op = Op::kFence;
     return decoded(instruction);
   case 0x73:
-    if (word != 0x00000073U) {
-      // ECALL is the only accepted SYSTEM instruction. CSR, privileged, and
-      // environment-return forms are rejected before a Program can be created.
-      return unsupported(ProgramError::kUnsupportedSystemInstruction);
+    if (word == 0x00000073U) {
+      instruction.kind = InstructionKind::kEcall;
+      instruction.op = Op::kEcall;
+      return decoded(instruction);
     }
-    instruction.kind = InstructionKind::kEcall;
-    instruction.op = Op::kEcall;
-    return decoded(instruction);
+    if (word == 0x00100073U) {
+      instruction.kind = InstructionKind::kEbreak;
+      instruction.op = Op::kEbreak;
+      return decoded(instruction);
+    }
+    // ECALL and EBREAK are the only accepted SYSTEM instructions. CSR,
+    // privileged, and environment-return forms are rejected before a Program
+    // can be created.
+    return unsupported(ProgramError::kUnsupportedSystemInstruction);
   default:
     return unsupported(ProgramError::kUnsupportedInstruction);
   }

@@ -80,10 +80,11 @@ the field from comparison. Getting this list right is most of the work.
    size and the same initial register/sp/pc state, or the corpus must stay in
    bounds. Out-of-bounds is a `kBadMemory` trap for us; on the oracle it is an
    access fault only if the region is genuinely unmapped there.
-4. **Restricted ISA.** No compressed, no CSR, no EBREAK, no privileged, no FP.
-   These are rejected at *load* by our validator. The oracle must run the same
-   restricted subset; any reference program touching them is out of scope (and
-   is already covered by `rv32_unsupported_profile_test.cc` as rejection).
+4. **Restricted ISA.** No compressed, no CSR, no privileged, no FP. `EBREAK`
+   is accepted only as a deterministic terminal breakpoint trap, not as full
+   debug/CSR machinery. The oracle must run the same restricted subset; any
+   reference program outside it is out of scope (and is already covered by
+   `rv32_unsupported_profile_test.cc` as rejection).
 5. **Traps stop us; they vector on real RISC-V.** On a fault our `Machine`
    *halts* (`StepResult::kTrap`); real RISC-V sets mepc/mcause/mtval and jumps
    to a handler. So post-trap architectural state diverges by construction.

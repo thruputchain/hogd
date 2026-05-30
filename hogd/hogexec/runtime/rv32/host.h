@@ -26,6 +26,7 @@ enum class Trap {
   kBadPc,
   kBadMemory,
   kMisalignedAccess,
+  kBreakpoint,
   kOutOfGas,
   kHostTrap,
 };

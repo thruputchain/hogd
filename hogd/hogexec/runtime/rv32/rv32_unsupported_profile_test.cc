@@ -22,7 +22,7 @@ struct UnsupportedProfileCase {
   ProgramError expected_error = ProgramError::kUnsupportedInstruction;
 };
 
-constexpr std::array<UnsupportedProfileCase, 18> kUnsupportedProfileCases = {{
+constexpr std::array<UnsupportedProfileCase, 17> kUnsupportedProfileCases = {{
     {.upstream_source = "rv32ua/lrsc.S",
      .instruction = "lr.w",
      .word = 0x100120afU,
@@ -79,10 +79,6 @@ constexpr std::array<UnsupportedProfileCase, 18> kUnsupportedProfileCases = {{
      .instruction = "czero.eqz",
      .word = 0x0e20d1b3U,
      .expected_error = ProgramError::kUnsupportedInstruction},
-    {.upstream_source = "rv32si/sbreak.S",
-     .instruction = "ebreak",
-     .word = 0x00100073U,
-     .expected_error = ProgramError::kUnsupportedSystemInstruction},
     {.upstream_source = "rv32si/wfi.S",
      .instruction = "wfi",
      .word = 0x10500073U,

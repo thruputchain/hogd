@@ -181,6 +181,15 @@ conformance_cases()
        .check_gas_consumed = true,
        .expected_gas_consumed = 4,
        .expected_regs = {{1, 1}, {2, 3}}},
+      {.name = "ebreak_is_deterministic_runtime_trap",
+       .code = {addi(1, 0, 7), 0x00100073U, addi(1, 0, 9)},
+       .expected_result = StepResult::kTrap,
+       .expected_trap = Trap::kBreakpoint,
+       .expected_halted = true,
+       .expected_pc = 4,
+       .check_gas_consumed = true,
+       .expected_gas_consumed = 2,
+       .expected_regs = {{1, 7}}},
       {.name = "misaligned_load_traps_without_writeback",
        .code = {addi(1, 0, 1), load(2, 2, 1, 0), 0x00000073U},
        .initial_regs = {{2, 0}},
@@ -285,11 +294,6 @@ TEST_P(Rv32ConformanceTest, matchesExpectedMachineState)
               expected.bytes)
         << test_case.name << " memory@" << expected.address;
   }
-}
-
-TEST(Rv32ConformanceTest, rejectsEbreakAsUnsupportedSystemInstruction)
-{
-  EXPECT_EQ(make_program({0x00100073U}), nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(Core, Rv32ConformanceTest,

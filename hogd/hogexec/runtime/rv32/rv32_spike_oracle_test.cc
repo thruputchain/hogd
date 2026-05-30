@@ -171,6 +171,10 @@ TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
   EXPECT_TRUE(spike.run(reg_program({test_program::jalr(2, 1, 0), kEcall}))
                   .steps.empty());
 
+  // Contains ebreak -> deterministic trap, outside this adapter's synthetic
+  // terminal-ecall reconstruction.
+  EXPECT_TRUE(spike.run(reg_program({0x00100073U, kEcall})).steps.empty());
+
   // No terminal ecall.
   EXPECT_TRUE(spike.run(reg_program({addi(1, 0, 5)})).steps.empty());
 

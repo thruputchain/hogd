@@ -126,6 +126,7 @@ protected:
       case Trap::kBadPc:
       case Trap::kBadMemory:
       case Trap::kMisalignedAccess:
+      case Trap::kBreakpoint:
         return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
       case Trap::kNone:
         CHECK(false);

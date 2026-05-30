@@ -38,6 +38,7 @@ enum class InstructionKind {
   kOp,
   kFence,
   kEcall,
+  kEbreak,
 };
 
 enum class Op {
@@ -88,6 +89,7 @@ enum class Op {
   kRemu,
   kFence,
   kEcall,
+  kEbreak,
   kCount,
 };
 
@@ -147,6 +149,7 @@ constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kRemu, .name = "REMU", .cost = kDivInstructionGas},
     {.op = Op::kFence, .name = "FENCE", .cost = kBaseInstructionGas},
     {.op = Op::kEcall, .name = "ECALL", .cost = kBaseInstructionGas},
+    {.op = Op::kEbreak, .name = "EBREAK", .cost = kBaseInstructionGas},
 }};
 
 constexpr bool

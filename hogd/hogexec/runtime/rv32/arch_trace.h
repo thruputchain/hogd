@@ -59,6 +59,8 @@ trap_name(Trap trap)
     return "bad_memory";
   case Trap::kMisalignedAccess:
     return "misaligned_access";
+  case Trap::kBreakpoint:
+    return "breakpoint";
   case Trap::kOutOfGas:
     return "out_of_gas";
   case Trap::kHostTrap:

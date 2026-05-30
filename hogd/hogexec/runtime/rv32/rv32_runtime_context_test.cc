@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <initializer_list>
@@ -579,6 +578,16 @@ make_misaligned_access_image()
           addi(1, 0, 1),
           i_type(0x03, 2, 2, 1, 0),
       }),
+      .initial_memory = std::vector<uint8_t>(256),
+      .memory_bytes = 256,
+  };
+}
+
+rv32::RuntimeContractImage
+make_breakpoint_image()
+{
+  return rv32::RuntimeContractImage{
+      .program = make_program({0x00100073U}),
       .initial_memory = std::vector<uint8_t>(256),
       .memory_bytes = 256,
   };
@@ -1755,6 +1764,7 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
   expect_deterministic(make_bad_pc_image());
   expect_deterministic(make_bad_memory_image());
   expect_deterministic(make_misaligned_access_image());
+  expect_deterministic(make_breakpoint_image());
 }
 
 TEST_F(Rv32RuntimeContextTest, SameInputsTrapDeterministically)

@@ -487,6 +487,9 @@ step_spec(SpecState &state, std::span<const SpecInstruction> instructions)
     state.halted = true;
     state.halt_code = state.regs[10];
     return StepResult::kHalted;
+  case Op::kEbreak:
+    set_trap(state, Trap::kBreakpoint);
+    return StepResult::kTrap;
   default:
     set_trap(state, Trap::kInvalidInstruction);
     return StepResult::kTrap;
