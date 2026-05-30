@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <span>
 #include <string>
+#include <vector>
 
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/test_corpus.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 // Exercises the differential-testing substrate (arch_trace.h) against the
@@ -193,6 +196,66 @@ TEST(Rv32ArchTrace, traceObserverChainsStatesIntoExecTrace)
   EXPECT_EQ(trace.steps[1].state.pc, 8U);
   EXPECT_EQ(trace.steps[1].result, StepResult::kHalted);
   EXPECT_EQ(trace.final_result, StepResult::kHalted);
+}
+
+// Test-only adapter: drives the canonical Machine through the observer protocol,
+// mimicking how a run-to-completion experimental machine would emit a trace.
+inline ExecTrace
+traced_run(Machine &machine, Host &host, size_t max_steps = 4096)
+{
+  TraceObserver obs;
+  obs.on_initial(capture_arch_state(machine));
+  for (size_t i = 0; i < max_steps; ++i) {
+    StepResult result = machine.step();
+    if (result == StepResult::kEcall) {
+      const auto pending = machine.pending_ecall();
+      result = !pending.has_value()
+                   ? StepResult::kTrap
+                   : machine.complete_ecall(
+                         host.ecall(machine.view(), pending.value()));
+    }
+    obs.on_retire(capture_arch_state(machine), result);
+    if (result != StepResult::kContinue) {
+      break;
+    }
+  }
+  return obs.trace();
+}
+
+TEST(Rv32ArchTrace, observerTraceMatchesStepTracerOverCorpus)
+{
+  // Register-only corpus programs exercise the full arithmetic/logical/shift/mul/
+  // div data path, forward branches, and the ecall terminator -- enough to prove
+  // the observer path produces the canonical trace. Memory load/store coverage is
+  // out of scope here (a generate_memory_program variant exists for later).
+  for (uint64_t seed = 0; seed < 32; ++seed) {
+    const std::vector<uint32_t> code =
+        test_corpus::generate_register_only_program(seed, /*body_len=*/64);
+    const auto program =
+        make_program(std::span<const uint32_t>(code.data(), code.size()));
+    ASSERT_NE(program, nullptr) << "seed " << seed;
+
+    Machine step_machine(program, /*memory_bytes=*/4096, /*gas=*/100000);
+    RecordingHost step_host;
+    const ExecTrace step_trace = trace_execution(step_machine, step_host);
+
+    Machine obs_machine(program, /*memory_bytes=*/4096, /*gas=*/100000);
+    RecordingHost obs_host;
+    const ExecTrace obs_trace = traced_run(obs_machine, obs_host);
+
+    EXPECT_EQ(describe_trace_divergence(step_trace, obs_trace), "")
+        << "seed " << seed;
+
+    // describe_trace_divergence intentionally compares state/result but NOT
+    // state_before, so assert state_before parity explicitly here -- this is the
+    // end-to-end check that the observer's chaining is correct over real runs
+    // (the synthetic traceObserverChainsStatesIntoExecTrace covers the protocol).
+    ASSERT_EQ(obs_trace.steps.size(), step_trace.steps.size()) << "seed " << seed;
+    for (size_t i = 0; i < step_trace.steps.size(); ++i) {
+      EXPECT_EQ(obs_trace.steps[i].state_before, step_trace.steps[i].state_before)
+          << "seed " << seed << " step " << i;
+    }
+  }
 }
 
 } // namespace
