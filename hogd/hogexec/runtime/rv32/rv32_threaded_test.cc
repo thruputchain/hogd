@@ -221,5 +221,78 @@ TEST(Rv32Threaded, auipcIsPcRelative)
   EXPECT_EQ(machine.reg(1), 4U);
 }
 
+TEST(Rv32Threaded, storeThenLoadRoundTrips)
+{
+  using test_program::load;
+  using test_program::store;
+  // x1=0 (base); x3=0x7ff (data); sw x3,16(x1); lw x4,16(x1). x4 should read
+  // back 0x7ff. (x2 avoided: it is the initialized stack pointer.)
+  const std::vector<uint32_t> words = {addi(1, 0, 0), addi(3, 0, 0x7ff),
+                                       store(1, 3, 16, 2), load(4, 2, 1, 16)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.reg(4), 0x7ffU);
+}
+
+TEST(Rv32Threaded, signedByteLoadSignExtends)
+{
+  using test_program::load;
+  using test_program::store;
+  // Store byte 0x80 at addr 8; lb sign-extends to 0xffffff80; lbu zero-extends
+  // to 0x80. This is the one path the SignExtend template parameter governs.
+  const std::vector<uint32_t> words = {addi(1, 0, 0), addi(3, 0, 0x80),
+                                       store(1, 3, 8, 0), // sb
+                                       load(4, 0, 1, 8),  // lb
+                                       load(5, 4, 1, 8)}; // lbu
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(4), 0xffffff80U); // lb: sign-extended
+  EXPECT_EQ(machine.reg(5), 0x80U);       // lbu: zero-extended
+}
+
+TEST(Rv32Threaded, misalignedLoadTraps)
+{
+  using test_program::load;
+  // x1=1; lw x4,0(x1) -> address 1, misaligned -> kMisalignedAccess.
+  const std::vector<uint32_t> words = {addi(1, 0, 1), load(4, 2, 1, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+}
+
+TEST(Rv32Threaded, outOfBoundsStoreTraps)
+{
+  using test_program::store;
+  // x1=0; sw x3, 2044(x1) -> address 2044 >= memory size 256 -> kBadMemory.
+  // 2044 is 4-byte aligned so alignment check passes; bounds check fires.
+  const std::vector<uint32_t> words = {addi(1, 0, 0), store(1, 3, 2044, 2)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+}
+
+TEST(Rv32Threaded, ebreakTraps)
+{
+  const std::vector<uint32_t> words = {0x00100073U}; // ebreak
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+}
+
 } // namespace
 } // namespace hogd::rv32

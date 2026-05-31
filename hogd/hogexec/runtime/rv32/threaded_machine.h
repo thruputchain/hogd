@@ -365,6 +365,90 @@ op_invalid(Ctx<Obs> &c)
   return trap_step(c, Trap::kInvalidInstruction);
 }
 
+// Width-parameterized little-endian memory helpers. Not shared with
+// spec::load_le (the spec namespace is independent test infrastructure) or
+// encoding.h's load_u32_le (fixed 4-byte width); a local copy keeps the
+// interpreter self-contained and width-generic.
+inline uint32_t
+le_load(std::span<const uint8_t> mem, uint32_t addr, uint32_t w)
+{
+  uint32_t v = 0;
+  for (uint32_t i = 0; i < w; ++i) {
+    v |= uint32_t{mem[addr + i]} << (i * 8);
+  }
+  return v;
+}
+
+inline void
+le_store(std::span<uint8_t> mem, uint32_t addr, uint32_t w, uint32_t v)
+{
+  for (uint32_t i = 0; i < w; ++i) {
+    mem[addr + i] = static_cast<uint8_t>(v >> (i * 8));
+  }
+}
+
+template<class Obs, uint32_t Width, bool SignExtend>
+StepResult
+op_load(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  const uint32_t addr = c.m.regs_[in.rs1] + bits_from_i32(in.imm);
+  if ((addr % Width) != 0) {
+    return trap_step(c, Trap::kMisalignedAccess);
+  }
+  if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
+    return trap_step(c, Trap::kBadMemory);
+  }
+  uint32_t v = le_load(c.m.memory_, addr, Width);
+  if constexpr (SignExtend) {
+    v = sign_extend(v, Width * 8);
+  }
+  c.m.write_reg(in.rd, v);
+  c.idx += 1;
+  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
+template<class Obs, uint32_t Width>
+StepResult
+op_store(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  const uint32_t addr = c.m.regs_[in.rs1] + bits_from_i32(in.imm);
+  if ((addr % Width) != 0) {
+    return trap_step(c, Trap::kMisalignedAccess);
+  }
+  if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
+    return trap_step(c, Trap::kBadMemory);
+  }
+  le_store(c.m.memory_, addr, Width, c.m.regs_[in.rs2]);
+  c.idx += 1;
+  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
+template<class Obs>
+StepResult
+op_fence(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  c.idx += 1;
+  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
+template<class Obs>
+StepResult
+op_ebreak(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas); // ebreak charges gas, then traps (canonical)
+  return trap_step(c, Trap::kBreakpoint);
+}
+
 template<class Obs>
 Handler<Obs>
 handler_for(Op op)
@@ -439,8 +523,28 @@ handler_for(Op op)
     return &op_rr<Obs, rem_signed>;
   case Op::kRemu:
     return &op_rr<Obs, remu_op>;
+  case Op::kLb:
+    return &op_load<Obs, 1, true>;
+  case Op::kLh:
+    return &op_load<Obs, 2, true>;
+  case Op::kLw:
+    return &op_load<Obs, 4, false>;
+  case Op::kLbu:
+    return &op_load<Obs, 1, false>;
+  case Op::kLhu:
+    return &op_load<Obs, 2, false>;
+  case Op::kSb:
+    return &op_store<Obs, 1>;
+  case Op::kSh:
+    return &op_store<Obs, 2>;
+  case Op::kSw:
+    return &op_store<Obs, 4>;
+  case Op::kFence:
+    return &op_fence<Obs>;
+  case Op::kEbreak:
+    return &op_ebreak<Obs>;
   default:
-    return &op_invalid<Obs>; // control flow / memory / ecall wired in Tasks 5-7
+    return &op_invalid<Obs>; // ecall wired in Task 7
   }
 }
 
