@@ -261,12 +261,8 @@ is_barrier(Op op)
 // twice; pass a side-effect-free expression.
 #define HOGD_CHARGE_OR_TRAP(c, ip, amount)                                     \
   if ((c).m->gas_remaining_ < (amount)) {                                      \
-    (c).m->pc_ = pc_of((c), (ip));                                             \
-    (c).m->trap_ = Trap::kOutOfGas;                                            \
-    (c).m->halted_ = true;                                                     \
-    if constexpr (Trace)                                                       \
-      (c).m->obs_->on_retire(capture(c), StepResult::kTrap);                   \
-    return StepResult::kTrap;                                                  \
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>((c), (ip), mem,       \
+                                                         memsize);             \
   }                                                                            \
   (c).m->gas_remaining_ -= (amount)
 
@@ -301,13 +297,7 @@ enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
   const uint32_t run_gas = ip->gas_to_run;
   if (c.m->gas_remaining_ < run_gas) {
-    c.m->pc_ = pc_of(c, ip);
-    c.m->trap_ = Trap::kOutOfGas;
-    c.m->halted_ = true;
-    if constexpr (Trace) {
-      c.m->obs_->on_retire(capture(c), StepResult::kTrap);
-    }
-    return StepResult::kTrap;
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize);
   }
   c.m->gas_remaining_ -= run_gas;
   HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize);
