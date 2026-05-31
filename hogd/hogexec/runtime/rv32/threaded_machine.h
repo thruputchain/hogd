@@ -44,8 +44,11 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 // Executable instruction: handler pointer + decoded operands + gas. `gas` is
 // this instruction's own cost (charged by barriers); `gas_to_run` is the total
 // cost of the non-barrier run starting here (charged once by enter_run), 0 for
-// a barrier. 24 bytes.
-struct Slot {
+// a barrier. The fields total 24 bytes; alignas(32) rounds sizeof up to a power
+// of two so `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a
+// shift instead of a divide/multiply by 24, at the cost of 8 padding
+// bytes/slot.
+struct alignas(32) Slot {
   Handler handler = nullptr;
   uint32_t gas = static_cast<uint32_t>(kBaseInstructionGas);
   uint32_t gas_to_run = 0;
