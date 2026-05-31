@@ -142,17 +142,17 @@ public:
     if (!valid_differential_program(program)) {
       return invalid_differential_program_trace();
     }
-    std::vector<SpecInstruction> instructions;
+    std::vector<spec::SpecInstruction> instructions;
     instructions.reserve(program.code.size());
     for (const uint32_t word : program.code) {
       const DecodeResult decoded = decode_instruction(word);
       if (!decoded.ok) {
         return invalid_differential_program_trace();
       }
-      instructions.push_back(decoded_to_spec(decoded.instruction));
+      instructions.push_back(spec::decoded_to_spec(decoded.instruction));
     }
 
-    SpecState state;
+    spec::SpecState state;
     state.regs = program.initial_regs;
     state.regs[0] = 0;
     state.memory.assign(program.memory_bytes, 0);
@@ -161,9 +161,9 @@ public:
     state.pc = program.initial_pc;
     state.gas_remaining = program.gas_limit;
 
-    return trace_spec(state,
-                      std::span<const SpecInstruction>(instructions.data(),
-                                                       instructions.size()));
+    return spec::trace_spec(
+        state, std::span<const spec::SpecInstruction>(instructions.data(),
+                                                      instructions.size()));
   }
 };
 

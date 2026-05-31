@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
@@ -24,6 +25,8 @@
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
+#include "hogd/hogexec/runtime/rv32/threaded_machine.h"
+#include "hogd/hogexec/runtime/rv32/threaded_program.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
@@ -404,8 +407,8 @@ run_rv32_artifact_benchmark(benchmark::State &state,
                          benchmark::Counter::kAvgIterations);
 }
 
-std::shared_ptr<const Program>
-make_recursive_fibonacci_program()
+std::vector<uint32_t>
+recursive_fibonacci_words()
 {
   constexpr uint8_t kRa = 1;
   constexpr uint8_t kSp = 2;
@@ -413,7 +416,7 @@ make_recursive_fibonacci_program()
   constexpr uint8_t kT1 = 6;
   constexpr uint8_t kA0 = 10;
 
-  return make_program({
+  return {
       addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
 
       addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
@@ -422,7 +425,167 @@ make_recursive_fibonacci_program()
       addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, 2, kSp, 4),
       op(kA0, kA0, kT1, 0, 0), load(kRa, 2, kSp, 12),   addi(kSp, kSp, 16),
       jalr(0, kRa, 0),
-  });
+  };
+}
+
+std::shared_ptr<const Program>
+make_recursive_fibonacci_program()
+{
+  const std::vector<uint32_t> words = recursive_fibonacci_words();
+  return make_program(std::span<const uint32_t>(words.data(), words.size()));
+}
+
+// Same fibonacci program decoded for the direct-threaded interpreter, for a
+// like-for-like switch-vs-threaded comparison.
+std::shared_ptr<const ThreadedProgram>
+make_recursive_fibonacci_threaded_program()
+{
+  const std::vector<uint32_t> words = recursive_fibonacci_words();
+  std::vector<uint8_t> bytes(words.size() * kInstructionBytes);
+  for (size_t i = 0; i < words.size(); ++i) {
+    store_u32_le(bytes, i * kInstructionBytes, words[i]);
+  }
+  return std::make_shared<const ThreadedProgram>(
+      ThreadedProgram::create(bytes).value());
+}
+
+// A compute-bound counterpart to recursive fibonacci: a tight loop of
+// register-to-register ALU with ZERO loads/stores. fibonacci is ~53% guest
+// load/store (heavy stack spills); this is ~90% ALU + one branch per iteration,
+// so it stresses the dispatch/ALU path instead of the memory-latency path.
+//
+//   acc = 0; for (i = 1<<15; i != 0; --i) { acc += i; <scratch ALU churn>; }
+//   ecall  -> halt with acc = sum(1..32768) = 536887296
+std::vector<uint32_t>
+compute_loop_words()
+{
+  constexpr uint8_t kT0 = 5;  // loop counter
+  constexpr uint8_t kT1 = 6;  // shift-amount / scratch constant
+  constexpr uint8_t kT2 = 7;  // scratch (churned, result unused)
+  constexpr uint8_t kT3 = 28; // scratch
+  constexpr uint8_t kA0 = 10; // accumulator / halt result
+  // funct3/funct7: add=(0,0) sub=(0,0x20) xor=(4,0) sll=(1,0)
+  return {
+      addi(kA0, 0, 0),         // acc = 0
+      addi(kT0, 0, 1),         // t0 = 1
+      addi(kT1, 0, 15),        // t1 = 15
+      op(kT0, kT0, kT1, 1, 0), // t0 = 1 << 15 = 32768 (iteration count)
+      // loop head (instruction index 4); 10-instruction body:
+      op(kA0, kA0, kT0, 0, 0),    // acc += counter  (only acc update)
+      op(kT2, kT2, kT0, 0, 0),    // scratch churn (no loads/stores) ...
+      op(kT2, kT2, kT0, 4, 0),    // xor
+      op(kT3, kT2, kT1, 1, 0),    // sll
+      op(kT3, kT3, kT2, 0, 0),    // add
+      op(kT3, kT3, kA0, 4, 0),    // xor
+      op(kT2, kT2, kT3, 0, 0),    // add
+      op(kT2, kT2, kT0, 0, 0x20), // sub
+      addi(kT0, kT0, -1),         // counter--
+      branch(1, kT0, 0, -36),     // bne t0, x0, loop  (back 9 instrs)
+      0x00000073U,                // ecall -> halt with a0
+  };
+}
+
+std::shared_ptr<const Program>
+make_compute_loop_program()
+{
+  const std::vector<uint32_t> words = compute_loop_words();
+  return make_program(std::span<const uint32_t>(words.data(), words.size()));
+}
+
+std::shared_ptr<const ThreadedProgram>
+make_compute_loop_threaded_program()
+{
+  const std::vector<uint32_t> words = compute_loop_words();
+  std::vector<uint8_t> bytes(words.size() * kInstructionBytes);
+  for (size_t i = 0; i < words.size(); ++i) {
+    store_u32_le(bytes, i * kInstructionBytes, words[i]);
+  }
+  return std::make_shared<const ThreadedProgram>(
+      ThreadedProgram::create(bytes).value());
+}
+
+constexpr uint32_t kComputeLoopResult = 536887296; // sum(1..32768)
+
+int64_t
+compute_loop_instruction_count()
+{
+  const auto program = make_compute_loop_program();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *program, kBenchGasLimit);
+  if (stats.result != StepResult::kHalted ||
+      machine.halt_code() != kComputeLoopResult) {
+    std::abort();
+  }
+  return static_cast<int64_t>(stats.instructions);
+}
+
+// Independent-ILP variant: same 10-instruction loop body, but the eight adds
+// target eight DIFFERENT accumulators (a0..a7), so they have no
+// within-iteration dependency and their loop-carried chains run in parallel --
+// maximal ILP. If this is much faster than the dependency-chain compute loop
+// above, the interpreter is register-forwarding-bound (each dependent op stalls
+// on the store-to-load forward through regs_), which is what register pinning
+// would fix. If it's about the same, the limit is dispatch, and pinning won't
+// help.
+std::vector<uint32_t>
+compute_loop_independent_words()
+{
+  constexpr uint8_t kT0 = 5; // loop counter
+  constexpr uint8_t kT1 = 6; // shift-amount constant
+  return {
+      addi(kT0, 0, 1),         // t0 = 1
+      addi(kT1, 0, 15),        // t1 = 15
+      op(kT0, kT0, kT1, 1, 0), // t0 = 1 << 15 = 32768
+      // loop head (index 3); eight independent accumulators a0..a7 (x10..x17),
+      // each += counter; a0..a7 all start 0 from reset:
+      op(10, 10, kT0, 0, 0),
+      op(11, 11, kT0, 0, 0),
+      op(12, 12, kT0, 0, 0),
+      op(13, 13, kT0, 0, 0),
+      op(14, 14, kT0, 0, 0),
+      op(15, 15, kT0, 0, 0),
+      op(16, 16, kT0, 0, 0),
+      op(17, 17, kT0, 0, 0),
+      addi(kT0, kT0, -1),     // counter--
+      branch(1, kT0, 0, -36), // bne t0, x0, loop (back 9 instrs)
+      0x00000073U,            // ecall -> halt with a0 = sum(1..32768)
+  };
+}
+
+std::shared_ptr<const Program>
+make_compute_loop_independent_program()
+{
+  const std::vector<uint32_t> words = compute_loop_independent_words();
+  return make_program(std::span<const uint32_t>(words.data(), words.size()));
+}
+
+std::shared_ptr<const ThreadedProgram>
+make_compute_loop_independent_threaded_program()
+{
+  const std::vector<uint32_t> words = compute_loop_independent_words();
+  std::vector<uint8_t> bytes(words.size() * kInstructionBytes);
+  for (size_t i = 0; i < words.size(); ++i) {
+    store_u32_le(bytes, i * kInstructionBytes, words[i]);
+  }
+  return std::make_shared<const ThreadedProgram>(
+      ThreadedProgram::create(bytes).value());
+}
+
+int64_t
+compute_loop_independent_instruction_count()
+{
+  const auto program = make_compute_loop_independent_program();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *program, kBenchGasLimit);
+  if (stats.result != StepResult::kHalted ||
+      machine.halt_code() != kComputeLoopResult) {
+    std::abort();
+  }
+  return static_cast<int64_t>(stats.instructions);
 }
 
 struct WasmiBenchContract {
@@ -570,6 +733,135 @@ bm_rv32_fibonacci_recursive_20(benchmark::State &state)
     std::abort();
   }
   run_rv32_benchmark(state, program);
+}
+
+// Executed-instruction count for the fibonacci program (same dynamic count for
+// both interpreters), used to report instructions/sec.
+int64_t
+fibonacci_instruction_count()
+{
+  const auto program = make_recursive_fibonacci_program();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *program, kBenchGasLimit);
+  if (stats.result != StepResult::kHalted) {
+    std::abort();
+  }
+  return static_cast<int64_t>(stats.instructions);
+}
+
+// Canonical switch interpreter via the production Machine::run() path (no
+// per-step instrumentation), for a fair comparison against the threaded run().
+void
+bm_rv32_run_fibonacci_recursive_20(benchmark::State &state)
+{
+  const auto program = make_recursive_fibonacci_program();
+  const int64_t instructions = fibonacci_instruction_count();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted || machine.halt_code() != kFib20Result) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
+}
+
+// Direct-threaded interpreter via the untraced ThreadedMachine::run() (the
+// zero-cost production path), same fibonacci program.
+void
+bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
+{
+  const auto program = make_recursive_fibonacci_threaded_program();
+  const int64_t instructions = fibonacci_instruction_count();
+  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted || machine.halt_code() != kFib20Result) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
+}
+
+// Compute-bound (ALU/dispatch-heavy, no loads/stores) counterpart to fib, on
+// the canonical switch interpreter's untraced run().
+void
+bm_rv32_run_compute_loop(benchmark::State &state)
+{
+  const auto program = make_compute_loop_program();
+  const int64_t instructions = compute_loop_instruction_count();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted ||
+        machine.halt_code() != kComputeLoopResult) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
+}
+
+// Same compute-bound program on the direct-threaded interpreter.
+void
+bm_rv32_threaded_compute_loop(benchmark::State &state)
+{
+  const auto program = make_compute_loop_threaded_program();
+  const int64_t instructions = compute_loop_instruction_count();
+  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted ||
+        machine.halt_code() != kComputeLoopResult) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
+}
+
+// Independent-ILP compute loop on the direct-threaded interpreter (vs the
+// dependency-chain bm_rv32_threaded_compute_loop): dispatch-bound vs
+// register-forwarding-bound probe.
+void
+bm_rv32_threaded_compute_loop_independent(benchmark::State &state)
+{
+  const auto program = make_compute_loop_independent_threaded_program();
+  const int64_t instructions = compute_loop_independent_instruction_count();
+  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted ||
+        machine.halt_code() != kComputeLoopResult) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
 }
 
 void
@@ -773,6 +1065,11 @@ bm_rv32_artifact_compiled_sha256_return(benchmark::State &state)
 BENCHMARK(bm_dispatch_arithmetic);
 BENCHMARK(bm_load_store_loop);
 BENCHMARK(bm_rv32_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_run_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_threaded_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_run_compute_loop);
+BENCHMARK(bm_rv32_threaded_compute_loop);
+BENCHMARK(bm_rv32_threaded_compute_loop_independent);
 BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
 BENCHMARK(bm_syscall_bridge_roundtrip)->Arg(4096)->Arg(65536);

@@ -200,6 +200,25 @@ gtest_discover_tests(
   NO_PRETTY_VALUES
 )
 
+# Direct-threaded experimental interpreter (header-only threaded_*.h, requires a
+# musttail attribute: clang, or GCC >= 15). Core-only: links rv32_isa_core ONLY
+# because the differential test constructs the canonical Machine to diff
+# against. Built unconditionally -- a toolchain without musttail hits the
+# #error in musttail.h and fails the build, which is intended: the supported
+# compilers all provide it, and a silent skip would hide a broken toolchain.
+add_executable(
+  rv32_threaded_test
+  rv32_threaded_test.cc
+  rv32_vm_test_main.cc
+)
+
+target_link_libraries(
+  rv32_threaded_test
+  rv32_isa_core
+  GTest::gtest
+)
+gtest_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
+
 add_executable(
   rv32_unsupported_profile_test
   rv32_unsupported_profile_test.cc

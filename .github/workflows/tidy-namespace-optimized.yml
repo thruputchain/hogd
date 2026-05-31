@@ -113,9 +113,9 @@ jobs:
 
       - name: Configure Environment
         run: |
-          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-21
-          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
-          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          # Create conf.sh for scripts/env.sh to pick up gcc-15 and clang-21
+          echo 'GCC_CC=gcc-15' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-15' >> ./scripts/conf.sh
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           echo 'NPROC=29' >> ./scripts/conf.sh

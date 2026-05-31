@@ -39,7 +39,7 @@ using test_program::u_type;
 
 struct CrosscheckCase {
   std::string name;
-  std::vector<SpecInstruction> instructions;
+  std::vector<spec::SpecInstruction> instructions;
   std::array<uint32_t, kRegisterCount> initial_regs = {};
   std::vector<uint8_t> initial_memory;
   uint64_t gas_limit = 1'000;
@@ -76,20 +76,20 @@ run_machine(Machine &machine, Host &host)
   return StepResult::kTrap;
 }
 
-SpecInstruction
+spec::SpecInstruction
 spec(uint32_t word, Op op_value, uint8_t rd = 0, uint8_t rs1 = 0,
      uint8_t rs2 = 0, int32_t imm = 0)
 {
-  return SpecInstruction{.word = word,
-                         .op = op_value,
-                         .rd = rd,
-                         .rs1 = rs1,
-                         .rs2 = rs2,
-                         .imm = imm,
-                         .gas = gas_cost_for_op(op_value)};
+  return spec::SpecInstruction{.word = word,
+                               .op = op_value,
+                               .rd = rd,
+                               .rs1 = rs1,
+                               .rs2 = rs2,
+                               .imm = imm,
+                               .gas = gas_cost_for_op(op_value)};
 }
 
-SpecInstruction
+spec::SpecInstruction
 op_imm(Op op_value, uint8_t rd, uint8_t rs1, int32_t imm)
 {
   uint8_t funct3 = 0;
@@ -132,7 +132,7 @@ op_imm(Op op_value, uint8_t rd, uint8_t rs1, int32_t imm)
               op_value, rd, rs1, 0, imm);
 }
 
-SpecInstruction
+spec::SpecInstruction
 op_reg(Op op_value, uint8_t rd, uint8_t rs1, uint8_t rs2)
 {
   uint8_t funct3 = 0;
@@ -244,7 +244,7 @@ aligned_offset(std::mt19937_64 &rng, uint32_t width)
   return 128 + (width * random_u32_inclusive(rng, slots));
 }
 
-SpecInstruction
+spec::SpecInstruction
 random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
 {
   static constexpr std::array<Op, 18> kRegOps = {
@@ -283,7 +283,7 @@ random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
     }};
     const auto [op_value, funct3] =
         kLoadOps[static_cast<size_t>(rng() % kLoadOps.size())];
-    const uint32_t width = load_width(op_value);
+    const uint32_t width = spec::load_width(op_value);
     const auto imm = static_cast<int32_t>(aligned_offset(rng, width) - 128);
     const uint8_t rd = random_reg(rng);
     return spec(load(rd, funct3, 29, imm), op_value, rd, 29, 0, imm);
@@ -296,7 +296,7 @@ random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
     }};
     const auto [op_value, funct3] =
         kStoreOps[static_cast<size_t>(rng() % kStoreOps.size())];
-    const uint32_t width = store_width(op_value);
+    const uint32_t width = spec::store_width(op_value);
     const auto imm = static_cast<int32_t>(aligned_offset(rng, width) - 128);
     const uint8_t rs2 = random_reg(rng);
     return spec(store(29, rs2, imm, funct3), op_value, 0, 29, rs2, imm);
@@ -384,11 +384,11 @@ make_random_crosscheck_cases()
 }
 
 std::vector<uint32_t>
-words_for(std::span<const SpecInstruction> instructions)
+words_for(std::span<const spec::SpecInstruction> instructions)
 {
   std::vector<uint32_t> words;
   words.reserve(instructions.size());
-  for (const SpecInstruction &instruction : instructions) {
+  for (const spec::SpecInstruction &instruction : instructions) {
     words.push_back(instruction.word);
   }
   return words;
@@ -402,12 +402,13 @@ compare_to_machine(const CrosscheckCase &test_case)
       make_program(std::span<const uint32_t>(words.data(), words.size()));
   ASSERT_NE(program, nullptr) << test_case.name;
 
-  SpecState expected;
+  spec::SpecState expected;
   expected.regs = test_case.initial_regs;
   expected.regs[0] = 0;
   expected.memory = test_case.initial_memory;
   expected.gas_remaining = test_case.gas_limit;
-  const StepResult expected_result = run_spec(expected, test_case.instructions);
+  const StepResult expected_result =
+      spec::run_spec(expected, test_case.instructions);
 
   Machine machine(program,
                   static_cast<uint32_t>(test_case.initial_memory.size()),
@@ -428,7 +429,7 @@ compare_to_machine(const CrosscheckCase &test_case)
   // would produce. halt_code is 0 unless halted on both the spec and the
   // machine, so this unconditional comparison matches the previous
   // result-gated halt_code check.
-  const ArchState expected_state = spec_state_to_arch(expected);
+  const ArchState expected_state = spec::spec_state_to_arch(expected);
   const ArchState actual_state = capture_arch_state(machine);
   EXPECT_TRUE(actual_state == expected_state)
       << test_case.name << ": "

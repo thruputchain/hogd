@@ -171,8 +171,8 @@ set -e
 
 # Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
 cat > ./scripts/conf.sh << 'CONF'
-GCC_CC=gcc-14
-GCC_CXX=g++-14
+GCC_CC=gcc-15
+GCC_CXX=g++-15
 CLANG_CC=/usr/bin/clang-21
 CLANG_CXX=/usr/bin/clang++-21
 CONF
@@ -215,8 +215,8 @@ set -e
 
 # Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
 cat > ./scripts/conf.sh << 'CONF'
-GCC_CC=gcc-14
-GCC_CXX=g++-14
+GCC_CC=gcc-15
+GCC_CXX=g++-15
 CLANG_CC=/usr/bin/clang-21
 CLANG_CXX=/usr/bin/clang++-21
 CONF
@@ -263,8 +263,8 @@ set -e
 
 # Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
 cat > ./scripts/conf.sh << 'CONF'
-GCC_CC=gcc-14
-GCC_CXX=g++-14
+GCC_CC=gcc-15
+GCC_CXX=g++-15
 CLANG_CC=/usr/bin/clang-21
 CLANG_CXX=/usr/bin/clang++-21
 CONF

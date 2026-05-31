@@ -23,12 +23,19 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     ca-certificates \
     wget \
     gnupg \
+    software-properties-common \
     && $SUDO rm -rf /var/lib/apt/lists/*
 
 # Add LLVM repository for clang-21
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | $SUDO tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc \
     && echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | $SUDO tee /etc/apt/sources.list.d/llvm.list
+
+# Add the toolchain PPA for gcc-15 (noble's default archive only ships gcc-14;
+# gcc-15 is needed for __attribute__((musttail)) used by the rv32 threaded
+# interpreter).
+RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
+    $SUDO add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 # Install all build dependencies
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
@@ -52,6 +59,8 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     llvm-21 \
     gcc-14 \
     g++-14 \
+    gcc-15 \
+    g++-15 \
     python3 \
     python3-flake8 \
     shfmt \

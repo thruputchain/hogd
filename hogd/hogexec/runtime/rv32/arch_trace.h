@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -180,6 +181,59 @@ struct TraceStep {
 struct ExecTrace {
   std::vector<TraceStep> steps;
   StepResult final_result = StepResult::kTrap;
+};
+
+// Observer contract for differential tracing. A machine that runs to completion
+// (e.g. a tail-call-threaded interpreter) templates its run loop on an observer
+// and, after each retired instruction, calls on_retire. Instantiated with
+// NullObserver the calls compile to nothing (kEnabled == false guards them via
+// `if constexpr`), so the production path pays zero cost; instantiated with
+// TraceObserver it accumulates the same ExecTrace that trace_execution
+// produces, so describe_trace_divergence compares any machine uniformly.
+struct NullObserver {
+  static constexpr bool kEnabled = false;
+  void on_initial(const ArchState & /*state*/) {}
+  void on_retire(const ArchState & /*state*/, StepResult /*result*/) {}
+};
+
+class TraceObserver {
+public:
+  static constexpr bool kEnabled = true;
+
+  // Architectural state before the first instruction -> step[0].state_before.
+  void on_initial(const ArchState &state)
+  {
+    pending_before_ = state;
+    initialized_ = true;
+  }
+
+  // Architectural state after a retired instruction. Chains so that
+  // step[i].state_before == step[i-1].state, matching trace_execution. The
+  // caller must resolve any ecall before calling this and pass the resolved
+  // result; StepResult::kEcall must never be passed (it would be recorded as a
+  // terminal final_result), exactly as trace_execution never stores kEcall.
+  void on_retire(const ArchState &state, StepResult result)
+  {
+    // on_initial() must run first, or state_before would be a zeroed ArchState
+    // for step[0] (silently wrong). The production run() always calls it; this
+    // guards a future caller that wires the observer up out of order.
+    assert(initialized_ && "on_initial() must be called before on_retire()");
+    trace_.steps.push_back(TraceStep{.result = result,
+                                     .state_before = pending_before_,
+                                     .state = state});
+    if (result != StepResult::kContinue) {
+      trace_.final_result = result;
+    }
+    pending_before_ = state;
+  }
+
+  [[nodiscard]] const ExecTrace &trace() const { return trace_; }
+
+private:
+  ArchState pending_before_;
+  bool initialized_ = false; // set by on_initial(); guards on_retire() ordering
+  ExecTrace
+      trace_; // final_result defaults to kTrap (truncation), as in ExecTrace.
 };
 
 // Run `machine` one instruction at a time -- dispatching any ecall through

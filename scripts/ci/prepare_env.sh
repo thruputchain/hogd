@@ -34,5 +34,5 @@ cargo --version
 echo 'cargo fetch'
 CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
-echo 'set gcc-14 in check'
-echo "GCC_CC=gcc-14 GCC_CXX=g++-14" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+echo 'set gcc-15 in check'
+echo "GCC_CC=gcc-15 GCC_CXX=g++-15" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
