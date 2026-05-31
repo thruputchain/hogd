@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/dispatch.h"
+#include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
@@ -24,6 +25,8 @@
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
+#include "hogd/hogexec/runtime/rv32/threaded_machine.h"
+#include "hogd/hogexec/runtime/rv32/threaded_program.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
@@ -404,8 +407,8 @@ run_rv32_artifact_benchmark(benchmark::State &state,
                          benchmark::Counter::kAvgIterations);
 }
 
-std::shared_ptr<const Program>
-make_recursive_fibonacci_program()
+std::vector<uint32_t>
+recursive_fibonacci_words()
 {
   constexpr uint8_t kRa = 1;
   constexpr uint8_t kSp = 2;
@@ -413,7 +416,7 @@ make_recursive_fibonacci_program()
   constexpr uint8_t kT1 = 6;
   constexpr uint8_t kA0 = 10;
 
-  return make_program({
+  return {
       addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
 
       addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
@@ -422,7 +425,28 @@ make_recursive_fibonacci_program()
       addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, 2, kSp, 4),
       op(kA0, kA0, kT1, 0, 0), load(kRa, 2, kSp, 12),   addi(kSp, kSp, 16),
       jalr(0, kRa, 0),
-  });
+  };
+}
+
+std::shared_ptr<const Program>
+make_recursive_fibonacci_program()
+{
+  const std::vector<uint32_t> words = recursive_fibonacci_words();
+  return make_program(std::span<const uint32_t>(words.data(), words.size()));
+}
+
+// Same fibonacci program decoded for the direct-threaded interpreter, for a
+// like-for-like switch-vs-threaded comparison.
+std::shared_ptr<const ThreadedProgram>
+make_recursive_fibonacci_threaded_program()
+{
+  const std::vector<uint32_t> words = recursive_fibonacci_words();
+  std::vector<uint8_t> bytes(words.size() * kInstructionBytes);
+  for (size_t i = 0; i < words.size(); ++i) {
+    store_u32_le(bytes, i * kInstructionBytes, words[i]);
+  }
+  return std::make_shared<const ThreadedProgram>(
+      ThreadedProgram::create(bytes).value());
 }
 
 struct WasmiBenchContract {
@@ -570,6 +594,67 @@ bm_rv32_fibonacci_recursive_20(benchmark::State &state)
     std::abort();
   }
   run_rv32_benchmark(state, program);
+}
+
+// Executed-instruction count for the fibonacci program (same dynamic count for
+// both interpreters), used to report instructions/sec.
+int64_t
+fibonacci_instruction_count()
+{
+  const auto program = make_recursive_fibonacci_program();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  const Rv32RunStats stats =
+      run_rv32_program(machine, host, *program, kBenchGasLimit);
+  if (stats.result != StepResult::kHalted) {
+    std::abort();
+  }
+  return static_cast<int64_t>(stats.instructions);
+}
+
+// Canonical switch interpreter via the production Machine::run() path (no
+// per-step instrumentation), for a fair comparison against the threaded run().
+void
+bm_rv32_run_fibonacci_recursive_20(benchmark::State &state)
+{
+  const auto program = make_recursive_fibonacci_program();
+  const int64_t instructions = fibonacci_instruction_count();
+  Machine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    const StepResult result = machine.run(host);
+    if (result != StepResult::kHalted || machine.halt_code() != kFib20Result) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
+}
+
+// Direct-threaded interpreter via ThreadedMachine::run<NullObserver>() (the
+// zero-cost production path), same fibonacci program.
+void
+bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
+{
+  const auto program = make_recursive_fibonacci_threaded_program();
+  const int64_t instructions = fibonacci_instruction_count();
+  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  HaltHost host;
+  for (auto _ : state) {
+    state.PauseTiming();
+    machine.reset(kBenchGasLimit);
+    state.ResumeTiming();
+    NullObserver observer;
+    const StepResult result = machine.run(host, observer);
+    if (result != StepResult::kHalted || machine.halt_code() != kFib20Result) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(machine.halt_code());
+  }
+  state.SetItemsProcessed(state.iterations() * instructions);
 }
 
 void
@@ -773,6 +858,8 @@ bm_rv32_artifact_compiled_sha256_return(benchmark::State &state)
 BENCHMARK(bm_dispatch_arithmetic);
 BENCHMARK(bm_load_store_loop);
 BENCHMARK(bm_rv32_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_run_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_threaded_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
 BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
 BENCHMARK(bm_syscall_bridge_roundtrip)->Arg(4096)->Arg(65536);
