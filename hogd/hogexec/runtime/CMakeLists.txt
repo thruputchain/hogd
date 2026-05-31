@@ -239,6 +239,10 @@ if(HOGD_RV32_SDK_RS_DIR)
       --sdk-rs-dir "${HOGD_RV32_SDK_RS_DIR}"
       --out "${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
       --metadata "${HOGD_RV32_GENERATED_SMOKE_METADATA}"
+    # Only the lowering scripts are tracked here, not the sdk_rs contract
+    # sources (which live outside this tree and can't be globbed reliably).
+    # Editing the contract therefore needs a reconfigure/clean rebuild to
+    # refresh the artifact; cargo's own incremental build keeps that cheap.
     DEPENDS
       ${CMAKE_SOURCE_DIR}/scripts/rv32_build_sdk_smoke_artifact.sh
       ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh

@@ -73,17 +73,20 @@ if [ ! -f "${EXAMPLE_DIR}/Cargo.toml" ]; then
 fi
 
 RUSTC_VERSION="$(cd "${EXAMPLE_DIR}" && rustc --version)"
-BUILD_FLAGS="CARGO_PROFILE_RELEASE_STRIP=false cargo build --release --locked --no-default-features --features entrypoints --target ${TARGET_TRIPLE} -p ${PACKAGE}"
+
+# Single source of truth for the cargo invocation: the recorded --build-flags
+# metadata is derived from the exact env + argv used below, so the two can't
+# drift. CARGO_ENV holds `name=value` assignments applied via `export`.
+CARGO_ENV="CARGO_PROFILE_RELEASE_STRIP=false"
+set -- cargo build --release --locked --no-default-features \
+  --features entrypoints --target "${TARGET_TRIPLE}" -p "${PACKAGE}"
+BUILD_FLAGS="${CARGO_ENV} $*"
 
 (
   cd "${EXAMPLE_DIR}"
-  CARGO_PROFILE_RELEASE_STRIP=false cargo build \
-    --release \
-    --locked \
-    --no-default-features \
-    --features entrypoints \
-    --target "${TARGET_TRIPLE}" \
-    -p "${PACKAGE}"
+  # shellcheck disable=SC2086
+  export ${CARGO_ENV}
+  "$@"
 )
 
 ELF="${SDK_RS_DIR}/target/${TARGET_TRIPLE}/release/counter_rv32"
