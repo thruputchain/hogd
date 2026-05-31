@@ -634,7 +634,7 @@ bm_rv32_run_fibonacci_recursive_20(benchmark::State &state)
   state.SetItemsProcessed(state.iterations() * instructions);
 }
 
-// Direct-threaded interpreter via ThreadedMachine::run<NullObserver>() (the
+// Direct-threaded interpreter via the untraced ThreadedMachine::run() (the
 // zero-cost production path), same fibonacci program.
 void
 bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
@@ -647,8 +647,7 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
     state.PauseTiming();
     machine.reset(kBenchGasLimit);
     state.ResumeTiming();
-    NullObserver observer;
-    const StepResult result = machine.run(host, observer);
+    const StepResult result = machine.run(host);
     if (result != StepResult::kHalted || machine.halt_code() != kFib20Result) {
       std::abort();
     }

@@ -41,7 +41,7 @@ enum class InstructionKind {
   kEbreak,
 };
 
-enum class Op {
+enum class Op : uint8_t {
   kLui,
   kAuipc,
   kJal,

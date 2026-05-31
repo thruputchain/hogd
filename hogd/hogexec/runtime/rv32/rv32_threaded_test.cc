@@ -119,8 +119,7 @@ TEST(Rv32Threaded, runsBasicArithmetic)
   ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
 
   RecordingHost host;
-  NullObserver obs;
-  const StepResult result = machine.run(host, obs);
+  const StepResult result = machine.run(host);
 
   EXPECT_EQ(result, StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
@@ -139,9 +138,8 @@ TEST(Rv32Threaded, branchTakenSkipsInstruction)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off end
-  EXPECT_EQ(machine.reg(3), 0U); // branch skipped the addi
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.reg(3), 0U);                   // branch skipped the addi
 }
 
 TEST(Rv32Threaded, branchNotTakenFallsThrough)
@@ -153,8 +151,7 @@ TEST(Rv32Threaded, branchNotTakenFallsThrough)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(3), 99U);
 }
 
@@ -169,8 +166,7 @@ TEST(Rv32Threaded, jalLinksAndJumps)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(1), 4U);
   EXPECT_EQ(machine.reg(4), 0U); // skipped
   EXPECT_EQ(machine.reg(3), 9U); // target executed
@@ -183,8 +179,7 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
   EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
 }
@@ -201,8 +196,7 @@ TEST(Rv32Threaded, jalrLinksAndJumpsToComputedTarget)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs),
+  EXPECT_EQ(machine.run(host),
             StepResult::kTrap);  // falls off after target
   EXPECT_EQ(machine.reg(5), 8U); // link = pc_of_jalr (4) + 4
   EXPECT_EQ(machine.reg(3), 0U); // pc=8 skipped
@@ -217,8 +211,7 @@ TEST(Rv32Threaded, auipcIsPcRelative)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(1), 4U);
 }
 
@@ -233,8 +226,7 @@ TEST(Rv32Threaded, storeThenLoadRoundTrips)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(4), 0x7ffU);
 }
 
@@ -251,8 +243,7 @@ TEST(Rv32Threaded, signedByteLoadSignExtends)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(4), 0xffffff80U); // lb: sign-extended
   EXPECT_EQ(machine.reg(5), 0x80U);       // lbu: zero-extended
 }
@@ -265,8 +256,7 @@ TEST(Rv32Threaded, misalignedLoadTraps)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
 }
 
@@ -279,8 +269,7 @@ TEST(Rv32Threaded, outOfBoundsStoreTraps)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadMemory);
 }
 
@@ -290,8 +279,7 @@ TEST(Rv32Threaded, ebreakTraps)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
 }
 
@@ -302,8 +290,7 @@ TEST(Rv32Threaded, ecallHaltsWithA0)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kHalted);
+  EXPECT_EQ(machine.run(host), StepResult::kHalted);
   EXPECT_EQ(machine.halt_code(), 7U);
   ASSERT_EQ(host.call_count(), 1U);
   EXPECT_EQ(host.calls()[0].a0, 7U);
@@ -316,8 +303,7 @@ TEST(Rv32Threaded, ecallContinueWritesA0AndAdvances)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host(RecordingHost::OnEcall::kContinue);
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off after addi
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off after addi
   EXPECT_EQ(machine.reg(10), 0U); // continue_with(0) wrote a0=0
   EXPECT_EQ(machine.reg(11), 5U); // execution continued past ecall
 }
@@ -375,16 +361,16 @@ TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
   }
 }
 
-TEST(Rv32Threaded, nullObserverRunCompletes)
+TEST(Rv32Threaded, untracedRunCompletes)
 {
-  // The zero-cost production instantiation builds and runs to the ecall halt.
+  // The zero-cost production path (run(host), untraced handlers) builds and
+  // runs to the ecall halt.
   const std::vector<uint32_t> words =
       test_corpus::generate_register_only_program(123, 64);
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, /*memory_bytes=*/4096, kCorpusGasBudget);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs),
+  EXPECT_EQ(machine.run(host),
             StepResult::kHalted); // corpus ends in ecall
 }
 
@@ -396,8 +382,7 @@ TEST(Rv32Threaded, nullProgramTrapsInvalidInstruction)
   EXPECT_TRUE(machine.halted());
   EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
   RecordingHost host;
-  NullObserver obs;
-  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
 }
 
 } // namespace

@@ -18,10 +18,38 @@
 
 // Direct-threaded, musttail RV32IM interpreter. Mirrors Machine's semantics,
 // gas/trap ordering, and ecall protocol exactly -- enforced by the
-// threaded-vs-canonical differential test in rv32_threaded_test (added in a
-// later step) -- but dispatches by tail-calling a precomputed per-instruction
-// handler-pointer array instead of a switch.
+// threaded-vs-canonical differential test in rv32_threaded_test -- but
+// dispatches by tail-calling the next instruction's handler. Each handler takes
+// the current instruction pointer `ip`; the common case tail-calls (ip + 1), so
+// there is no instruction-index arithmetic and no per-instruction pc update.
+//
+// pc is not maintained per instruction: it is (ip - base) * 4, computed on
+// demand only by the control-flow handlers (auipc/jal/jalr/branch) and
+// materialized into pc_ only when producing observable state (trap/halt, and
+// each step on the traced path).
+//
+// Tracing is a build-time choice: each handler is templated on a `Trace` bool,
+// and the executable Slot array is filled with either the untraced (production,
+// zero-cost) or traced (records an ExecTrace via a TraceObserver) handler set
+// when it is built. The array is built once and cached across reset().
 namespace hogd::rv32 {
+
+struct Ctx;
+struct Slot;
+using Handler = StepResult (*)(Ctx &, const Slot *);
+
+// Executable instruction: the handler pointer baked alongside the decoded
+// operands. Handlers walk a Slot pointer (ip), so the array is the instruction
+// stream.
+struct Slot {
+  Handler handler = nullptr;
+  Op op = Op::kAdd; // only op_branch reads this (to pick the comparison)
+  uint8_t rd = 0;
+  uint8_t rs1 = 0;
+  uint8_t rs2 = 0;
+  int32_t imm = 0;
+  uint64_t gas = kBaseInstructionGas;
+};
 
 class ThreadedMachine {
 public:
@@ -66,9 +94,14 @@ public:
       return;
     }
     regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+    // exec_ intentionally preserved across reset(): the program is immutable,
+    // so the baked handler array stays valid and is reused.
   }
 
-  template<class Obs> StepResult run(Host &host, Obs &obs);
+  // Production fast path: untraced handlers, no per-step observation.
+  StepResult run(Host &host);
+  // Differential/tracing path: records each retired step into `obs`.
+  StepResult run(Host &host, TraceObserver &obs);
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
@@ -91,37 +124,46 @@ public:
     }
   }
 
-  // Public so free-function handlers (below) can manipulate state. This is an
-  // experimental, single-translation-unit interpreter; the handlers are
+  // Build (once, then cached) the executable Slot array from the decoded
+  // program, baking the traced or untraced handler set per `trace`. Defined
+  // out-of-line below, after the handler functions it references.
+  void build_exec(bool trace);
+
+  // Public so the free-function handlers (below) can manipulate state. This is
+  // an experimental, single-translation-unit interpreter; the handlers are
   // effectively part of the machine.
   std::shared_ptr<const ThreadedProgram> program_;
   std::array<uint32_t, kRegisterCount> regs_ = {};
   std::vector<uint8_t> memory_;
+  std::vector<Slot> exec_; // size n+1; [n] is the bad-pc sentinel
   uint32_t initial_pc_ = 0;
   uint32_t pc_ = 0;
   uint64_t gas_remaining_ = 0;
   Trap trap_ = Trap::kNone;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
+  bool exec_built_ = false;
+  bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
 };
 
-template<class Obs> struct Ctx;
-template<class Obs> using Handler = StepResult (*)(Ctx<Obs> &);
-
-template<class Obs> struct Ctx {
+struct Ctx {
   ThreadedMachine &m;
   Host &host;
-  Obs &obs;
-  const Instr *code = nullptr;
-  const Handler<Obs> *handlers =
-      nullptr; // size n+1; [n] is the bad-pc sentinel
-  size_t idx = 0;
+  TraceObserver *obs = nullptr; // non-null and used only on the traced path
+  const Slot *base = nullptr;   // exec_.data(); pc = (ip - base) * 4
 };
 
-template<class Obs>
+// pc of the instruction at `ip`. Cheap (a multiply); called only by the
+// control-flow handlers and when materializing observable state.
+inline uint32_t
+pc_of(const Ctx &c, const Slot *ip)
+{
+  return static_cast<uint32_t>(ip - c.base) * kInstructionBytes;
+}
+
 inline ArchState
-capture(const Ctx<Obs> &c)
+capture(const Ctx &c)
 {
   ArchState s;
   s.pc = c.m.pc_;
@@ -134,38 +176,42 @@ capture(const Ctx<Obs> &c)
   return s;
 }
 
-// Tail-dispatch to the next handler, after a per-step observation. A macro (not
-// an inlined helper) so HOGD_MUSTTAIL applies to the real tail call.
-#define HOGD_THREAD_NEXT(c)                                                    \
-  do {                                                                         \
-    if constexpr (Obs::kEnabled)                                               \
-      (c).obs.on_retire(capture(c), StepResult::kContinue);                    \
-    HOGD_MUSTTAIL return (c).handlers[(c).idx]((c));                           \
-  } while (0)
+// Tail-dispatch to the instruction at `next`. On the traced path, materialize
+// pc_ to that instruction's address and record the retired step first. `Trace`
+// is the enclosing handler's template parameter.
+#define HOGD_THREAD_NEXT(c, next)                                              \
+  if constexpr (Trace) {                                                       \
+    (c).m.pc_ = pc_of((c), (next));                                            \
+    (c).obs->on_retire(capture(c), StepResult::kContinue);                     \
+  }                                                                            \
+  HOGD_MUSTTAIL return (next)->handler((c), (next))
 
-// Charge gas; on failure set kOutOfGas, observe a terminal step, return kTrap.
-// `amount` is evaluated twice; pass a side-effect-free expression (call sites
-// pass the plain `in.gas` field).
-#define HOGD_CHARGE_OR_TRAP(c, amount)                                         \
+// Charge gas; on failure set kOutOfGas at `ip`'s pc, observe a terminal step,
+// return kTrap. `amount` is evaluated twice; pass a side-effect-free
+// expression.
+#define HOGD_CHARGE_OR_TRAP(c, ip, amount)                                     \
   do {                                                                         \
     if ((c).m.gas_remaining_ < (amount)) {                                     \
+      (c).m.pc_ = pc_of((c), (ip));                                            \
       (c).m.trap_ = Trap::kOutOfGas;                                           \
       (c).m.halted_ = true;                                                    \
-      if constexpr (Obs::kEnabled)                                             \
-        (c).obs.on_retire(capture(c), StepResult::kTrap);                      \
+      if constexpr (Trace)                                                     \
+        (c).obs->on_retire(capture(c), StepResult::kTrap);                     \
       return StepResult::kTrap;                                                \
     }                                                                          \
     (c).m.gas_remaining_ -= (amount);                                          \
   } while (0)
 
-template<class Obs>
+// Set a terminal trap at `pc`, observe it, return kTrap.
+template<bool Trace>
 inline StepResult
-trap_step(Ctx<Obs> &c, Trap t)
+trap_at(Ctx &c, uint32_t pc, Trap t)
 {
+  c.m.pc_ = pc;
   c.m.trap_ = t;
   c.m.halted_ = true;
-  if constexpr (Obs::kEnabled) {
-    c.obs.on_retire(capture(c), StepResult::kTrap);
+  if constexpr (Trace) {
+    c.obs->on_retire(capture(c), StepResult::kTrap);
   }
   return StepResult::kTrap;
 }
@@ -237,120 +283,96 @@ remu_op(uint32_t a, uint32_t b)
   return b == 0 ? a : a % b;
 }
 
-template<class Obs, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_rr(Ctx<Obs> &c)
+op_rr(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  c.m.write_reg(in.rd, Fn(c.m.regs_[in.rs1], c.m.regs_[in.rs2]));
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  c.m.write_reg(ip->rd, Fn(c.m.regs_[ip->rs1], c.m.regs_[ip->rs2]));
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_ri(Ctx<Obs> &c)
+op_ri(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  c.m.write_reg(in.rd, Fn(c.m.regs_[in.rs1], bits_from_i32(in.imm)));
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  c.m.write_reg(ip->rd, Fn(c.m.regs_[ip->rs1], bits_from_i32(ip->imm)));
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_lui(Ctx<Obs> &c)
+op_lui(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  c.m.write_reg(in.rd, bits_from_i32(in.imm));
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  c.m.write_reg(ip->rd, bits_from_i32(ip->imm));
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_auipc(Ctx<Obs> &c)
+op_auipc(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  c.m.write_reg(in.rd, c.m.pc_ + bits_from_i32(in.imm));
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  c.m.write_reg(ip->rd, pc_of(c, ip) + bits_from_i32(ip->imm));
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 // Validate a byte target against the program image. Mirrors
-// Machine::validate_control_target via ThreadedProgram::contains_pc.
-template<class Obs>
+// Machine::validate_control_target via ThreadedProgram::contains_pc, which
+// already checks 4-byte alignment and in-range.
 inline bool
-valid_target(Ctx<Obs> &c, uint32_t target)
+valid_target(Ctx &c, uint32_t target)
 {
-  // contains_pc already checks 4-byte alignment and in-range, so delegate to it
-  // wholesale -- same as Machine::validate_control_target.
   return c.m.program_->contains_pc(target);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_branch(Ctx<Obs> &c)
+op_branch(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  if (!branch_taken(in.op, c.m.regs_[in.rs1], c.m.regs_[in.rs2])) {
-    c.idx += 1;
-    c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-    HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  if (!branch_taken(ip->op, c.m.regs_[ip->rs1], c.m.regs_[ip->rs2])) {
+    HOGD_THREAD_NEXT(c, ip + 1);
   }
-  // Taken: pc_ still holds this branch's address (the not-taken path returned
-  // before advancing), so target = this-pc + imm.
-  const uint32_t target = c.m.pc_ + bits_from_i32(in.imm);
+  const uint32_t target = pc_of(c, ip) + bits_from_i32(ip->imm);
   if (!valid_target(c, target)) {
-    return trap_step(c, Trap::kBadPc);
+    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
   }
-  c.m.pc_ = target;
-  c.idx = target / kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  const Slot *next = c.base + (target / kInstructionBytes);
+  HOGD_THREAD_NEXT(c, next);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_jal(Ctx<Obs> &c)
+op_jal(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  const uint32_t link = c.m.pc_ + kInstructionBytes;
-  const uint32_t target = c.m.pc_ + bits_from_i32(in.imm);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  const uint32_t pc = pc_of(c, ip);
+  const uint32_t target = pc + bits_from_i32(ip->imm);
   if (!valid_target(c, target)) {
-    return trap_step(c, Trap::kBadPc);
+    return trap_at<Trace>(c, pc, Trap::kBadPc);
   }
-  c.m.write_reg(in.rd, link);
-  c.m.pc_ = target;
-  c.idx = target / kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  c.m.write_reg(ip->rd, pc + kInstructionBytes);
+  const Slot *next = c.base + (target / kInstructionBytes);
+  HOGD_THREAD_NEXT(c, next);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_jalr(Ctx<Obs> &c)
+op_jalr(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  const uint32_t link = c.m.pc_ + kInstructionBytes;
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  const uint32_t pc = pc_of(c, ip);
   const uint32_t target =
-      (c.m.regs_[in.rs1] + bits_from_i32(in.imm)) & ~uint32_t{1};
+      (c.m.regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
   if (!valid_target(c, target)) {
-    return trap_step(c, Trap::kBadPc);
+    return trap_at<Trace>(c, pc, Trap::kBadPc);
   }
-  c.m.write_reg(in.rd, link);
-  c.m.pc_ = target;
-  c.idx = target / kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  c.m.write_reg(ip->rd, pc + kInstructionBytes);
+  const Slot *next = c.base + (target / kInstructionBytes);
+  HOGD_THREAD_NEXT(c, next);
 }
 
 // op_ecall resolves the host call inline (the threaded machine runs to
@@ -358,26 +380,21 @@ op_jalr(Ctx<Obs> &c)
 // scope so that the memory snapshot and host result -- both non-trivially
 // destructible -- are destroyed before the musttail in the kContinue path,
 // which the compiler requires.
-template<class Obs>
+template<bool Trace>
 StepResult
-op_ecall(Ctx<Obs> &c)
+op_ecall(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
   // ECALL instruction gas (canonical charges it in step(), before execute()).
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  // On OOG here, pc stays at the ecall (HOGD_CHARGE_OR_TRAP uses ip).
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
 
-  // Advance pc past the ecall before calling the host (canonical ordering).
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+  // pc advances past the ecall before the host call (canonical ordering).
+  const Slot *next = ip + 1;
+  const uint32_t pc_after = pc_of(c, next);
 
-  // The only value that must outlive the inner scope (where the host result
-  // lives) is the a0 write for the kContinue path; every other status returns
-  // from inside the scope.
   uint32_t continue_value = 0;
-
   {
-    // Snapshot memory for host-OOG rollback. snapshot and hr are destroyed at
-    // the closing brace, before any musttail return.
+    // Snapshot memory for host-OOG rollback; destroyed before the musttail.
     const std::vector<uint8_t> snapshot = c.m.memory_;
     const EcallArgs args{.a0 = c.m.regs_[10],
                          .a1 = c.m.regs_[11],
@@ -387,9 +404,8 @@ op_ecall(Ctx<Obs> &c)
                          .a5 = c.m.regs_[15],
                          .a6 = c.m.regs_[16],
                          .a7 = c.m.regs_[17]};
-    // view reflects the already-advanced pc, matching canonical (which calls
-    // view() after execute() advanced pc_).
-    MachineView view(c.m.pc_, c.m.gas_remaining_,
+    // view reflects the already-advanced pc, matching canonical.
+    MachineView view(pc_after, c.m.gas_remaining_,
                      std::span<const uint32_t, kRegisterCount>(c.m.regs_),
                      c.m.memory_);
     const HostResult hr = c.host.ecall(view, args);
@@ -397,7 +413,7 @@ op_ecall(Ctx<Obs> &c)
     // Debit host gas before committing; over-budget host cannot mutate state.
     if (c.m.gas_remaining_ < hr.gas_consumed) {
       c.m.memory_ = snapshot;
-      return trap_step(c, Trap::kOutOfGas);
+      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
     }
     c.m.gas_remaining_ -= hr.gas_consumed;
 
@@ -406,46 +422,48 @@ op_ecall(Ctx<Obs> &c)
       continue_value = hr.continue_value();
       break;
     case HostStatus::kHalt:
+      c.m.pc_ = pc_after;
       c.m.halt_code_ = hr.halt_code();
       c.m.halted_ = true;
-      if constexpr (Obs::kEnabled) {
-        c.obs.on_retire(capture(c), StepResult::kHalted);
+      if constexpr (Trace) {
+        c.obs->on_retire(capture(c), StepResult::kHalted);
       }
       return StepResult::kHalted;
     case HostStatus::kOutOfGas:
       c.m.memory_ = snapshot;
-      return trap_step(c, Trap::kOutOfGas);
+      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
     case HostStatus::kTrap:
     default:
       // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
       // has no payload field (ArchState carries only the Trap, which is what
       // the differential test compares), so just set the trap class.
-      return trap_step(c, Trap::kHostTrap);
+      return trap_at<Trace>(c, pc_after, Trap::kHostTrap);
     }
   } // snapshot and hr destroyed here
 
-  // kContinue: write a0 and tail-dispatch to the next handler.
+  // kContinue: write a0 and tail-dispatch to the next instruction.
   c.m.write_reg(10, continue_value);
-  HOGD_THREAD_NEXT(c);
+  HOGD_THREAD_NEXT(c, next);
 }
 
-// Sentinel: reached only by sequential fall-off past the last instruction.
-// Traps kBadPc with NO gas charged (matches "invalid fetch traps without gas").
-template<class Obs>
+// Sentinel: reached only by sequential fall-off past the last instruction. Its
+// pc is (ip - base) * 4 == the out-of-range pc. Traps kBadPc with NO gas
+// charged (matches "invalid fetch traps without gas").
+template<bool Trace>
 StepResult
-op_bad_pc(Ctx<Obs> &c)
+op_bad_pc(Ctx &c, const Slot *ip)
 {
-  return trap_step(c, Trap::kBadPc);
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
 }
 
 // Defensive default for handler_for; unreachable by construction, since
 // ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
 // carries an unhandled Op. Charges no gas.
-template<class Obs>
+template<bool Trace>
 StepResult
-op_invalid(Ctx<Obs> &c)
+op_invalid(Ctx &c, const Slot *ip)
 {
-  return trap_step(c, Trap::kInvalidInstruction);
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kInvalidInstruction);
 }
 
 // Width-parameterized little-endian memory helpers. Not shared with
@@ -470,196 +488,212 @@ le_store(std::span<uint8_t> mem, uint32_t addr, uint32_t w, uint32_t v)
   }
 }
 
-template<class Obs, uint32_t Width, bool SignExtend>
+template<bool Trace, uint32_t Width, bool SignExtend>
 StepResult
-op_load(Ctx<Obs> &c)
+op_load(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  const uint32_t addr = c.m.regs_[in.rs1] + bits_from_i32(in.imm);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  const uint32_t addr = c.m.regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
-    return trap_step(c, Trap::kMisalignedAccess);
+    return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
   }
   if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
-    return trap_step(c, Trap::kBadMemory);
+    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
   uint32_t v = le_load(c.m.memory_, addr, Width);
   if constexpr (SignExtend) {
     v = sign_extend(v, Width * 8);
   }
-  c.m.write_reg(in.rd, v);
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  c.m.write_reg(ip->rd, v);
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs, uint32_t Width>
+template<bool Trace, uint32_t Width>
 StepResult
-op_store(Ctx<Obs> &c)
+op_store(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  const uint32_t addr = c.m.regs_[in.rs1] + bits_from_i32(in.imm);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  const uint32_t addr = c.m.regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
-    return trap_step(c, Trap::kMisalignedAccess);
+    return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
   }
   if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
-    return trap_step(c, Trap::kBadMemory);
+    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
-  le_store(c.m.memory_, addr, Width, c.m.regs_[in.rs2]);
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  le_store(c.m.memory_, addr, Width, c.m.regs_[ip->rs2]);
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_fence(Ctx<Obs> &c)
+op_fence(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas);
-  c.idx += 1;
-  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
-  HOGD_THREAD_NEXT(c);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  HOGD_THREAD_NEXT(c, ip + 1);
 }
 
-template<class Obs>
+template<bool Trace>
 StepResult
-op_ebreak(Ctx<Obs> &c)
+op_ebreak(Ctx &c, const Slot *ip)
 {
-  const Instr &in = c.code[c.idx];
-  HOGD_CHARGE_OR_TRAP(c, in.gas); // ebreak charges gas, then traps (canonical)
-  return trap_step(c, Trap::kBreakpoint);
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas); // ebreak charges gas, then traps
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBreakpoint);
 }
 
-template<class Obs>
-Handler<Obs>
+template<bool Trace>
+Handler
 handler_for(Op op)
 {
   switch (op) {
   case Op::kJal:
-    return &op_jal<Obs>;
+    return &op_jal<Trace>;
   case Op::kJalr:
-    return &op_jalr<Obs>;
+    return &op_jalr<Trace>;
   case Op::kBeq:
   case Op::kBne:
   case Op::kBlt:
   case Op::kBge:
   case Op::kBltu:
   case Op::kBgeu:
-    return &op_branch<Obs>;
+    return &op_branch<Trace>;
   case Op::kLui:
-    return &op_lui<Obs>;
+    return &op_lui<Trace>;
   case Op::kAuipc:
-    return &op_auipc<Obs>;
+    return &op_auipc<Trace>;
   case Op::kAddi:
-    return &op_ri<Obs, add_op>;
+    return &op_ri<Trace, add_op>;
   case Op::kSlti:
-    return &op_ri<Obs, slt_op>;
+    return &op_ri<Trace, slt_op>;
   case Op::kSltiu:
-    return &op_ri<Obs, sltu_op>;
+    return &op_ri<Trace, sltu_op>;
   case Op::kXori:
-    return &op_ri<Obs, xor_op>;
+    return &op_ri<Trace, xor_op>;
   case Op::kOri:
-    return &op_ri<Obs, or_op>;
+    return &op_ri<Trace, or_op>;
   case Op::kAndi:
-    return &op_ri<Obs, and_op>;
+    return &op_ri<Trace, and_op>;
   case Op::kSlli:
-    return &op_ri<Obs, sll_op>;
+    return &op_ri<Trace, sll_op>;
   case Op::kSrli:
-    return &op_ri<Obs, srl_op>;
+    return &op_ri<Trace, srl_op>;
   case Op::kSrai:
-    return &op_ri<Obs, sra_op>;
+    return &op_ri<Trace, sra_op>;
   case Op::kAdd:
-    return &op_rr<Obs, add_op>;
+    return &op_rr<Trace, add_op>;
   case Op::kSub:
-    return &op_rr<Obs, sub_op>;
+    return &op_rr<Trace, sub_op>;
   case Op::kSll:
-    return &op_rr<Obs, sll_op>;
+    return &op_rr<Trace, sll_op>;
   case Op::kSlt:
-    return &op_rr<Obs, slt_op>;
+    return &op_rr<Trace, slt_op>;
   case Op::kSltu:
-    return &op_rr<Obs, sltu_op>;
+    return &op_rr<Trace, sltu_op>;
   case Op::kXor:
-    return &op_rr<Obs, xor_op>;
+    return &op_rr<Trace, xor_op>;
   case Op::kSrl:
-    return &op_rr<Obs, srl_op>;
+    return &op_rr<Trace, srl_op>;
   case Op::kSra:
-    return &op_rr<Obs, sra_op>;
+    return &op_rr<Trace, sra_op>;
   case Op::kOr:
-    return &op_rr<Obs, or_op>;
+    return &op_rr<Trace, or_op>;
   case Op::kAnd:
-    return &op_rr<Obs, and_op>;
+    return &op_rr<Trace, and_op>;
   case Op::kMul:
-    return &op_rr<Obs, mul_op>;
+    return &op_rr<Trace, mul_op>;
   case Op::kMulh:
-    return &op_rr<Obs, mulh>;
+    return &op_rr<Trace, mulh>;
   case Op::kMulhsu:
-    return &op_rr<Obs, mulhsu>;
+    return &op_rr<Trace, mulhsu>;
   case Op::kMulhu:
-    return &op_rr<Obs, mulhu>;
+    return &op_rr<Trace, mulhu>;
   case Op::kDiv:
-    return &op_rr<Obs, div_signed>;
+    return &op_rr<Trace, div_signed>;
   case Op::kDivu:
-    return &op_rr<Obs, divu_op>;
+    return &op_rr<Trace, divu_op>;
   case Op::kRem:
-    return &op_rr<Obs, rem_signed>;
+    return &op_rr<Trace, rem_signed>;
   case Op::kRemu:
-    return &op_rr<Obs, remu_op>;
+    return &op_rr<Trace, remu_op>;
   case Op::kLb:
-    return &op_load<Obs, 1, true>;
+    return &op_load<Trace, 1, true>;
   case Op::kLh:
-    return &op_load<Obs, 2, true>;
+    return &op_load<Trace, 2, true>;
   case Op::kLw:
-    return &op_load<Obs, 4, false>;
+    return &op_load<Trace, 4, false>;
   case Op::kLbu:
-    return &op_load<Obs, 1, false>;
+    return &op_load<Trace, 1, false>;
   case Op::kLhu:
-    return &op_load<Obs, 2, false>;
+    return &op_load<Trace, 2, false>;
   case Op::kSb:
-    return &op_store<Obs, 1>;
+    return &op_store<Trace, 1>;
   case Op::kSh:
-    return &op_store<Obs, 2>;
+    return &op_store<Trace, 2>;
   case Op::kSw:
-    return &op_store<Obs, 4>;
+    return &op_store<Trace, 4>;
   case Op::kFence:
-    return &op_fence<Obs>;
+    return &op_fence<Trace>;
   case Op::kEbreak:
-    return &op_ebreak<Obs>;
+    return &op_ebreak<Trace>;
   case Op::kEcall:
-    return &op_ecall<Obs>;
+    return &op_ecall<Trace>;
   default:
-    return &op_invalid<Obs>;
+    return &op_invalid<Trace>;
   }
 }
 
-template<class Obs>
-StepResult
-ThreadedMachine::run(Host &host, Obs &obs)
+inline void
+ThreadedMachine::build_exec(bool trace)
+{
+  const std::span<const Instr> code = program_->code();
+  const size_t n = code.size();
+  exec_.resize(n + 1);
+  for (size_t i = 0; i < n; ++i) {
+    const Instr &d = code[i];
+    exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
+                                     : handler_for<false>(d.op),
+                    .op = d.op,
+                    .rd = d.rd,
+                    .rs1 = d.rs1,
+                    .rs2 = d.rs2,
+                    .imm = d.imm,
+                    .gas = d.gas};
+  }
+  // Sentinel for sequential fall-off past the last instruction.
+  exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
+  exec_built_ = true;
+  exec_traced_ = trace;
+}
+
+inline StepResult
+ThreadedMachine::run(Host &host)
 {
   if (halted_) {
     return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
   }
-  const std::span<const Instr> code = program_->code();
-  const size_t n = code.size();
-  std::vector<Handler<Obs>> handlers(n + 1);
-  for (size_t i = 0; i < n; ++i) {
-    handlers[i] = handler_for<Obs>(code[i].op);
+  if (!exec_built_ || exec_traced_) {
+    build_exec(/*trace=*/false);
   }
-  handlers[n] = &op_bad_pc<Obs>;
+  Ctx c{.m = *this, .host = host, .obs = nullptr, .base = exec_.data()};
+  const Slot *ip = c.base + (pc_ / kInstructionBytes);
+  // store-then-return (NOT a tail call): keeps this frame (owning `c`) alive
+  // for the whole musttail chain.
+  const StepResult result = ip->handler(c, ip);
+  return result;
+}
 
-  Ctx<Obs> c{.m = *this,
-             .host = host,
-             .obs = obs,
-             .code = code.data(),
-             .handlers = handlers.data(),
-             .idx = pc_ / kInstructionBytes};
-  if constexpr (Obs::kEnabled) {
-    obs.on_initial(capture(c));
+inline StepResult
+ThreadedMachine::run(Host &host, TraceObserver &obs)
+{
+  if (halted_) {
+    return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
   }
-  // store-then-return (NOT a tail call): keeps this frame (owning `handlers`
-  // and `c`) alive for the whole musttail chain.
-  const StepResult result = c.handlers[c.idx](c);
+  if (!exec_built_ || !exec_traced_) {
+    build_exec(/*trace=*/true);
+  }
+  Ctx c{.m = *this, .host = host, .obs = &obs, .base = exec_.data()};
+  const Slot *ip = c.base + (pc_ / kInstructionBytes);
+  obs.on_initial(capture(c));
+  const StepResult result = ip->handler(c, ip);
   return result;
 }
 
