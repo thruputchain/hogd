@@ -26,6 +26,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/json.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -92,6 +93,8 @@ constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
     WasmEngine::kWasmi,
     WasmEngine::kWasmtime,
 };
+constexpr std::string_view kRv32SmokeCounterInterface = "Counter";
+constexpr std::string_view kRv32SmokeCounterVersion = "0.2.0";
 
 std::string
 get_lowered_sdk_smoke_artifact_path()
@@ -130,6 +133,13 @@ artifact_format_fingerprint_hex()
   out << "0x" << std::hex << std::setfill('0') << std::setw(16)
       << rv32::kArtifactFormatFingerprint;
   return out.str();
+}
+
+Runtime::MethodID
+rv32_smoke_counter_method_id(std::string_view method)
+{
+  return sdk_method_id(kRv32SmokeCounterInterface, kRv32SmokeCounterVersion,
+                       method);
 }
 
 void
@@ -735,7 +745,8 @@ make_wasmi_contract_xdr()
 }
 
 Transaction
-make_root_transaction(GasAmount gas_limit, Runtime::MethodID method_id = 0)
+make_root_transaction(GasAmount gas_limit, Runtime::MethodID method_id = 0,
+                      Calldata calldata = Calldata{}, uint64_t nonce = 1)
 {
   return Transaction{
       .invocation =
@@ -743,12 +754,12 @@ make_root_transaction(GasAmount gas_limit, Runtime::MethodID method_id = 0)
               .invoked_address = kRv32ContractAddress,
               .entrypoint = entrypoint_from_method_id(method_id),
               .gas_limit = gas_limit,
-              .calldata = Calldata{},
+              .calldata = std::move(calldata),
           },
       .uniquifier =
           Uniquifier{
               .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
-              .nonce = 1,
+              .nonce = nonce,
           },
   };
 }
@@ -1910,6 +1921,102 @@ TEST_F(Rv32RuntimeContextTest,
   else {
     ADD_FAILURE() << "artifact_format_fingerprint must be a string";
   }
+}
+
+TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
+{
+  const auto artifact_path = get_lowered_sdk_smoke_artifact_path();
+  if (artifact_path.empty()) {
+    GTEST_SKIP() << "build the generated ITC smoke artifact "
+                    "or set RV32_SMOKE_ARTIFACT=/path/to/contract.rv32a to "
+                    "run this end-to-end calldata smoke test";
+  }
+
+  std::ifstream input(artifact_path, std::ios::binary);
+  ASSERT_TRUE(input.is_open()) << "cannot open " << artifact_path;
+  std::vector<uint8_t> artifact_bytes((std::istreambuf_iterator<char>(input)),
+                                      std::istreambuf_iterator<char>());
+  ASSERT_GT(artifact_bytes.size(), 0U);
+
+  auto parsed = rv32::parse_artifact(artifact_bytes);
+  ASSERT_TRUE(parsed.has_value())
+      << "parse_artifact rejected the lowered artifact (error="
+      << static_cast<int>(parsed.error()) << ")";
+
+  rv32::RuntimeContractImage image{
+      .program = parsed->program,
+      .initial_memory = std::move(parsed->initial_memory),
+      .dispatch_table = std::move(parsed->dispatch_table),
+      .memory_bytes = parsed->memory_bytes,
+  };
+
+  const Runtime::MethodID increment_method =
+      rv32_smoke_counter_method_id("increment");
+  const Runtime::MethodID get_method = rv32_smoke_counter_method_id("get");
+  ASSERT_NE(std::ranges::find(image.dispatch_table, increment_method,
+                              &rv32::DispatchEntry::method_id),
+            image.dispatch_table.end())
+      << "lowered counter artifact is missing increment dispatch entry";
+  ASSERT_NE(std::ranges::find(image.dispatch_table, get_method,
+                              &rv32::DispatchEntry::method_id),
+            image.dispatch_table.end())
+      << "lowered counter artifact is missing get dispatch entry";
+
+  auto rv32_context =
+      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  constexpr uint64_t kIncrementAmount = 7;
+  // Match the Rust SDK client generator: a single-argument call is encoded as
+  // that scalar value using the contract's CXS serialization format.
+  auto increment_calldata = Serializer<SerializationFormat::kCxs>::serialize(
+      kIncrementAmount);
+  ASSERT_TRUE(increment_calldata.has_value());
+
+  auto increment_handler = make_new_system_call_handler(
+      make_root_transaction(kParityGas, increment_method,
+                            std::move(*increment_calldata), 1),
+      rv32_context);
+  increment_handler.enable_tracing();
+  const auto increment_result = increment_handler.root_invoke();
+  ASSERT_TRUE(increment_result.is_root_success())
+      << "rv32 counter increment did not return cleanly";
+  EXPECT_EQ(increment_handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Return);
+  ASSERT_EQ(increment_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
+  ASSERT_NE(increment_handler.get_trace(), nullptr);
+  auto const *increment_trace = increment_handler.get_trace();
+  ASSERT_EQ(increment_trace->storage_writes.size(), 1U);
+  auto const &increment_write = increment_trace->storage_writes[0];
+  EXPECT_EQ(increment_write.addrkey.address, kRv32ContractAddress);
+  ASSERT_EQ(increment_write.delta.type(),
+            StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  EXPECT_EQ(from_xdr(increment_write.delta.nnint().set_value), 0);
+  EXPECT_EQ(from_xdr(increment_write.delta.nnint().add_value),
+            kIncrementAmount);
+
+  advance_block();
+
+  auto get_handler = make_new_system_call_handler(
+      make_root_transaction(kParityGas, get_method, Calldata{}, 2),
+      rv32_context);
+  get_handler.enable_tracing();
+  const auto get_result = get_handler.root_invoke();
+  ASSERT_TRUE(get_result.is_root_success())
+      << "rv32 counter get did not return cleanly after increment";
+  const auto get_output = get_handler.get_most_recent_frame_output();
+  ASSERT_EQ(get_output.status_code(), InvocationFrameStatusCode::Return);
+
+  const auto &return_buffer = get_output.return_buffer();
+  ASSERT_NE(get_handler.get_trace(), nullptr);
+  EXPECT_TRUE(get_handler.get_trace()->storage_writes.empty());
+  auto decoded = Serializer<SerializationFormat::kCxs>::deserialize<uint64_t>(
+      std::as_bytes(std::span(return_buffer.data(), return_buffer.size())));
+  ASSERT_TRUE(decoded.has_value()) << "failed to decode rv32 counter get()";
+  EXPECT_EQ(*decoded, kIncrementAmount);
+  ASSERT_EQ(get_handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
 // Smoke test for SDK-lowered RV32 artifacts.
