@@ -50,11 +50,14 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 // bytes/slot.
 struct alignas(32) Slot {
   Handler handler = nullptr;
+  uint32_t *rd = nullptr; // &regs_[rd], or &trash_ when rd==0 (the x0 sink:
+                          // writes to x0 land in trash, so regs_[0] stays 0 and
+                          // no separate sink store is needed). 8-byte aligned,
+                          // so it sits right after handler.
   uint32_t gas = static_cast<uint32_t>(kBaseInstructionGas);
   uint32_t gas_to_run = 0;
   int32_t imm = 0;
-  Op op = Op::kAdd; // only op_branch reads this (to pick the comparison)
-  uint8_t rd = 0;
+  Op op = Op::kAdd; // read by op_branch_bad_target (cold) and build_exec
   uint8_t rs1 = 0;
   uint8_t rs2 = 0;
 };
@@ -122,16 +125,6 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<const uint8_t> memory() const { return memory_; }
 
-  // x0 is hardwired to zero. Branchless sink: write unconditionally, then force
-  // regs_[0] back to 0 -- avoids a per-instruction branch on rd. `i` is an
-  // unchecked index: callers pass a decoded 5-bit register field
-  // (< kRegisterCount), so no bounds check on the hot path.
-  void write_reg(uint8_t i, uint32_t v)
-  {
-    regs_[i] = v;
-    regs_[0] = 0;
-  }
-
   // Build (once, then cached) the executable Slot array from the decoded
   // program, baking the traced or untraced handler set per `trace`. Defined
   // out-of-line below, after the handler functions it references.
@@ -160,6 +153,7 @@ public:
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
+  uint32_t trash_ = 0; // x0 write sink: Slot::rd points here when rd==0
 };
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
@@ -376,7 +370,7 @@ template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
 op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  c.m->write_reg(ip->rd, Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2]));
+  *ip->rd = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -384,7 +378,7 @@ template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
 op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  c.m->write_reg(ip->rd, Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm)));
+  *ip->rd = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -392,7 +386,7 @@ template<bool Trace>
 StepResult
 op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  c.m->write_reg(ip->rd, bits_from_i32(ip->imm));
+  *ip->rd = bits_from_i32(ip->imm);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -400,7 +394,7 @@ template<bool Trace>
 StepResult
 op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  c.m->write_reg(ip->rd, pc_of(c, ip) + bits_from_i32(ip->imm));
+  *ip->rd = pc_of(c, ip) + bits_from_i32(ip->imm);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -498,7 +492,7 @@ StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  c.m->write_reg(ip->rd, pc_of(c, ip) + kInstructionBytes);
+  *ip->rd = pc_of(c, ip) + kInstructionBytes;
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
@@ -525,7 +519,7 @@ op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
   if (!valid_target(c, target)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
   }
-  c.m->write_reg(ip->rd, pc + kInstructionBytes);
+  *ip->rd = pc + kInstructionBytes;
   const Slot *next = c.base + (target / kInstructionBytes);
   HOGD_ENTER_RUN(c, next);
 }
@@ -576,7 +570,7 @@ op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
   if constexpr (SignExtend) {
     v = sign_extend(v, Width * 8);
   }
-  c.m->write_reg(ip->rd, v);
+  *ip->rd = v;
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -673,7 +667,7 @@ op_ecall(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
   // kContinue: write a0 and start the next run. Reload the pinned memory base
   // and size: the host wrote through a fixed-size view (so they are unchanged
   // in practice), but reloading keeps this correct without relying on that.
-  c.m->write_reg(10, continue_value);
+  c.m->regs_[10] = continue_value;
   mem = c.m->memory_.data();
   memsize = static_cast<uint32_t>(c.m->memory_.size());
   HOGD_ENTER_RUN(c, next);
@@ -816,11 +810,11 @@ ThreadedMachine::build_exec(bool trace)
     const Instr &d = code[i];
     exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
                                      : handler_for<false>(d.op),
+                    .rd = (d.rd == 0) ? &trash_ : &regs_[d.rd],
                     .gas = static_cast<uint32_t>(d.gas),
                     .gas_to_run = 0, // filled by the backward pass below
                     .imm = d.imm,
                     .op = d.op,
-                    .rd = d.rd,
                     .rs1 = d.rs1,
                     .rs2 = d.rs2};
     // Resolve the PC-relative target of jal and the conditional branches once,
