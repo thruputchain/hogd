@@ -294,5 +294,32 @@ TEST(Rv32Threaded, ebreakTraps)
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
 }
 
+TEST(Rv32Threaded, ecallHaltsWithA0)
+{
+  // x10(a0)=7, then ecall. RecordingHost default halts with a0.
+  const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kHalted);
+  EXPECT_EQ(machine.halt_code(), 7U);
+  ASSERT_EQ(host.call_count(), 1U);
+  EXPECT_EQ(host.calls()[0].a0, 7U);
+}
+
+TEST(Rv32Threaded, ecallContinueWritesA0AndAdvances)
+{
+  const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
+                                       addi(11, 0, 5)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host(RecordingHost::OnEcall::kContinue);
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off after addi
+  EXPECT_EQ(machine.reg(10), 0U); // continue_with(0) wrote a0=0
+  EXPECT_EQ(machine.reg(11), 5U); // execution continued past ecall
+}
+
 } // namespace
 } // namespace hogd::rv32

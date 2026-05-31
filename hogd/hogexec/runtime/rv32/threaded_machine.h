@@ -347,6 +347,82 @@ op_jalr(Ctx<Obs> &c)
   HOGD_THREAD_NEXT(c);
 }
 
+// op_ecall resolves the host call inline (the threaded machine runs to
+// completion without a kEcall yield). The HostResult is evaluated in an inner
+// scope so that the memory snapshot and host result -- both non-trivially
+// destructible -- are destroyed before the musttail in the kContinue path,
+// which the compiler requires.
+template<class Obs>
+StepResult
+op_ecall(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  // ECALL instruction gas (canonical charges it in step(), before execute()).
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+
+  // Advance pc past the ecall before calling the host (canonical ordering).
+  c.idx += 1;
+  c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+
+  // The only value that must outlive the inner scope (where the host result
+  // lives) is the a0 write for the kContinue path; every other status returns
+  // from inside the scope.
+  uint32_t continue_value = 0;
+
+  {
+    // Snapshot memory for host-OOG rollback. snapshot and hr are destroyed at
+    // the closing brace, before any musttail return.
+    const std::vector<uint8_t> snapshot = c.m.memory_;
+    const EcallArgs args{.a0 = c.m.regs_[10],
+                         .a1 = c.m.regs_[11],
+                         .a2 = c.m.regs_[12],
+                         .a3 = c.m.regs_[13],
+                         .a4 = c.m.regs_[14],
+                         .a5 = c.m.regs_[15],
+                         .a6 = c.m.regs_[16],
+                         .a7 = c.m.regs_[17]};
+    // view reflects the already-advanced pc, matching canonical (which calls
+    // view() after execute() advanced pc_).
+    MachineView view(c.m.pc_, c.m.gas_remaining_,
+                     std::span<const uint32_t, kRegisterCount>(c.m.regs_),
+                     c.m.memory_);
+    const HostResult hr = c.host.ecall(view, args);
+
+    // Debit host gas before committing; over-budget host cannot mutate state.
+    if (c.m.gas_remaining_ < hr.gas_consumed) {
+      c.m.memory_ = snapshot;
+      return trap_step(c, Trap::kOutOfGas);
+    }
+    c.m.gas_remaining_ -= hr.gas_consumed;
+
+    switch (hr.status) {
+    case HostStatus::kContinue:
+      continue_value = hr.continue_value();
+      break;
+    case HostStatus::kHalt:
+      c.m.halt_code_ = hr.halt_code();
+      c.m.halted_ = true;
+      if constexpr (Obs::kEnabled) {
+        c.obs.on_retire(capture(c), StepResult::kHalted);
+      }
+      return StepResult::kHalted;
+    case HostStatus::kOutOfGas:
+      c.m.memory_ = snapshot;
+      return trap_step(c, Trap::kOutOfGas);
+    case HostStatus::kTrap:
+    default:
+      // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
+      // has no payload field (ArchState carries only the Trap, which is what
+      // the differential test compares), so just set the trap class.
+      return trap_step(c, Trap::kHostTrap);
+    }
+  } // snapshot and hr destroyed here
+
+  // kContinue: write a0 and tail-dispatch to the next handler.
+  c.m.write_reg(10, continue_value);
+  HOGD_THREAD_NEXT(c);
+}
+
 // Sentinel: reached only by sequential fall-off past the last instruction.
 // Traps kBadPc with NO gas charged (matches "invalid fetch traps without gas").
 template<class Obs>
@@ -543,8 +619,10 @@ handler_for(Op op)
     return &op_fence<Obs>;
   case Op::kEbreak:
     return &op_ebreak<Obs>;
+  case Op::kEcall:
+    return &op_ecall<Obs>;
   default:
-    return &op_invalid<Obs>; // ecall wired in Task 7
+    return &op_invalid<Obs>;
   }
 }
 
