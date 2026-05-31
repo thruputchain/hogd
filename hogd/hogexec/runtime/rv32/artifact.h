@@ -135,6 +135,13 @@ format_fingerprint_layout_field(uint64_t digest, const char *offset_name,
   return format_fingerprint_u64(digest, size_name, size);
 }
 
+// The `format_version` parameter is a sensitivity-test hook only (the
+// static_assert below perturbs it to prove the digest reacts), NOT a
+// version-dispatch mechanism: the domain string below is hard-wired to the
+// current format version. At a format bump, bump BOTH the domain string
+// (`...format.vN`) and kArtifactFormatVersion together — passing a different
+// format_version here does not produce a correct fingerprint for another
+// version on its own.
 constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 {
