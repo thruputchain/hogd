@@ -206,7 +206,7 @@ it lands on `$PATH` the way wasm-opt does.
   cross-check against hogd's `artifact.h`.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `scripts/rv32_make_smoke_artifact.sh`, which requires
-  exactly `rv32-lower 0.4.2`; `scripts/rv32_lower.py` was deleted. One
+  exactly `rv32-lower 0.4.3`; `scripts/rv32_lower.py` was deleted. One
   supported implementation from here on. The runtime smoke can now be driven by
   a generated SDK artifact by configuring CMake with
   `-DHOGD_RV32_SDK_RS_DIR=/path/to/sdk_rs` and, when `rv32-lower` is not on
