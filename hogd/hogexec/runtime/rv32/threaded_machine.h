@@ -949,6 +949,11 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
   if (halted_) {
     return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
   }
+  // Same precondition as start(): a fresh run must not begin with an
+  // outstanding ecall (drive<true> would execute past it without applying the
+  // host result). run(Host&) gets this via start(); the traced path asserts it
+  // directly since it drives the chain itself.
+  assert(!pending_ecall_.has_value());
   if (!exec_built_ || !exec_traced_) {
     build_exec(/*trace=*/true);
   }
