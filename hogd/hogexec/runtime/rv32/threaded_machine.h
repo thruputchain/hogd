@@ -421,19 +421,30 @@ op_branch(Ctx c, const Slot *ip)
   HOGD_ENTER_RUN(c, next);
 }
 
+// jal's target is PC-relative and known at decode time, so build_exec resolves
+// it: for an in-range target, `imm` is rewritten to the *slot delta* to the
+// target (target_slot - this_slot), and the byte target / alignment / range
+// check is hoisted out of the hot path. An out-of-range target instead gets the
+// op_jal_bad_target handler below, so this fast path has no validity check.
 template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  const uint32_t pc = pc_of(c, ip);
-  const uint32_t target = pc + bits_from_i32(ip->imm);
-  if (!valid_target(c, target)) {
-    return trap_at<Trace>(c, pc, Trap::kBadPc);
-  }
-  c.m->write_reg(ip->rd, pc + kInstructionBytes);
-  const Slot *next = c.base + (target / kInstructionBytes);
+  c.m->write_reg(ip->rd, pc_of(c, ip) + kInstructionBytes);
+  const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
+}
+
+// Baked by build_exec in place of op_jal when the jal's (static) target is out
+// of range. Charges the jal's gas first (matching the in-range ordering), then
+// traps kBadPc at the jal's own pc.
+template<bool Trace>
+StepResult
+op_jal_bad_target(Ctx c, const Slot *ip)
+{
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
 }
 
 template<bool Trace>
@@ -456,22 +467,27 @@ op_jalr(Ctx c, const Slot *ip)
 // spec::load_le (the spec namespace is independent test infrastructure) or
 // encoding.h's load_u32_le (fixed 4-byte width); a local copy keeps the
 // interpreter self-contained and width-generic.
+// Single fixed-width access via memcpy, which clang lowers to one ldr/str for a
+// constant Width (the byte-shift loop, even unrolled, was left as N byte
+// loads). The caller has already alignment- and bounds-checked addr; the host
+// is little-endian like RV32, so the bytes map directly.
+static_assert(std::endian::native == std::endian::little,
+              "le_load/le_store assume a little-endian host");
+
+template<uint32_t Width>
 inline uint32_t
-le_load(std::span<const uint8_t> mem, uint32_t addr, uint32_t w)
+le_load(std::span<const uint8_t> mem, uint32_t addr)
 {
   uint32_t v = 0;
-  for (uint32_t i = 0; i < w; ++i) {
-    v |= uint32_t{mem[addr + i]} << (i * 8);
-  }
+  std::memcpy(&v, mem.data() + addr, Width);
   return v;
 }
 
+template<uint32_t Width>
 inline void
-le_store(std::span<uint8_t> mem, uint32_t addr, uint32_t w, uint32_t v)
+le_store(std::span<uint8_t> mem, uint32_t addr, uint32_t v)
 {
-  for (uint32_t i = 0; i < w; ++i) {
-    mem[addr + i] = static_cast<uint8_t>(v >> (i * 8));
-  }
+  std::memcpy(mem.data() + addr, &v, Width);
 }
 
 // Loads/stores are non-barriers: no self-charge (their gas is in the run total
@@ -488,7 +504,7 @@ op_load(Ctx c, const Slot *ip)
   if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
-  uint32_t v = le_load(c.m->memory_, addr, Width);
+  uint32_t v = le_load<Width>(c.m->memory_, addr);
   if constexpr (SignExtend) {
     v = sign_extend(v, Width * 8);
   }
@@ -507,7 +523,7 @@ op_store(Ctx c, const Slot *ip)
   if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
-  le_store(c.m->memory_, addr, Width, c.m->regs_[ip->rs2]);
+  le_store<Width>(c.m->memory_, addr, c.m->regs_[ip->rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -728,6 +744,21 @@ ThreadedMachine::build_exec(bool trace)
                     .rd = d.rd,
                     .rs1 = d.rs1,
                     .rs2 = d.rs2};
+    // Resolve jal's PC-relative target once, here, so op_jal needs no per-jump
+    // alignment/range check. In range: rewrite imm to the target slot delta
+    // (exact -- a valid target is 4-aligned, so the byte imm is a multiple of
+    // kInstructionBytes). Out of range: swap in the trapping handler.
+    if (d.op == Op::kJal) {
+      const uint32_t pc = static_cast<uint32_t>(i) * kInstructionBytes;
+      const uint32_t target = pc + bits_from_i32(d.imm);
+      if (program_->contains_pc(target)) {
+        exec_[i].imm = d.imm / static_cast<int32_t>(kInstructionBytes);
+      }
+      else {
+        exec_[i].handler =
+            trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
+      }
+    }
   }
   // Sentinel for sequential fall-off past the last instruction.
   exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <limits>
 
@@ -115,17 +116,12 @@ imm_j(uint32_t word)
 constexpr uint32_t
 arithmetic_shift_right(uint32_t value, uint32_t amount)
 {
-  // C++ signed right shift is implementation-defined, and shifting by 32 is
-  // undefined. Callers must mask the shift amount to 5 bits before calling;
-  // amount==0 still needs a separate path to avoid the 32-bit fill below.
-  if (amount == 0) {
-    return value;
-  }
-  const uint32_t shifted = value >> amount;
-  if ((value & 0x80000000U) == 0) {
-    return shifted;
-  }
-  return shifted | (~uint32_t{0} << (32 - amount));
+  // C++20 mandates two's complement and defines signed right shift as an
+  // arithmetic shift. Callers mask the shift amount to 5 bits, so amount is in
+  // [0, 31] and there is no UB. This lowers to a single arithmetic-shift
+  // instruction; the prior unsigned-plus-sign-fill form blinded the compiler.
+  assert(amount <= 31 && "shift amount must be masked to 5 bits by the caller");
+  return static_cast<uint32_t>(static_cast<int32_t>(value) >> amount);
 }
 
 constexpr uint32_t
