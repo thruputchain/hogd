@@ -39,10 +39,10 @@ It also surfaced two staleness/ergonomics problems that motivate this design:
 - **North star:** `groundhog build` produces a deployable rv32 artifact.
 - **The CLI is a convenience layer, not a gate.** You can already get a WASM
   artifact without the `groundhog` CLI; the CLI exists to hide "a ton of annoying
-  configs." The rv32 lowerer must be usable the same way: a standalone,
-  scriptable binary you can drop in a Makefile/CI step — the `wasm-opt` model.
-  (`groundhog build` already locates wasm-opt with `which::which` and shells out;
-  it does not embed it.)
+  configs." The rv32 lowerer must remain usable the same way: a standalone,
+  scriptable binary you can drop in a Makefile/CI step. For the CLI path,
+  `groundhog build --target rv32` can call the same lowerer as a Rust library to
+  avoid an extra binary install and shell-out.
 - **One implementation.** A single Rust lowerer used by both the build path and
   hogd's own tests, replacing the python script — so the format can't drift.
 - **Minimize cross-repo coupling.** The artifact format is the one hard contract;
@@ -55,14 +55,16 @@ It also surfaced two staleness/ergonomics problems that motivate this design:
 | `groundhog-rv32-artifact` (lib) | groundhog-rpc (`crates/rv32/artifact`) | **Single Rust source of truth** for the artifact format: header constants, writer, validator. |
 | `groundhog-rv32-lower` (lib + bin `rv32-lower`) | groundhog-rpc (alongside CLI build tooling) | The `wasm-opt` analog: `rv32-lower --elf in --out x.rv32a`. Validate ELF layout → package code+memory → hash → write artifact. Depends on `groundhog-rv32-artifact`. (Crate keeps the `groundhog-` prefix; the binary is the short `rv32-lower`, as `groundhog-cli` → `groundhog`.) |
 | `#[contract]` macro + `rv32-runtime` | sdk_rs | Entry symbols, the guest-side dispatcher (see below), and typed syscall wrappers. `_start` routes to the selected method once the method-id-passing mechanism is chosen (open question below) — the `_start` ABI is not yet settled. |
-| `groundhog build` (rv32 path) | groundhog-rpc | Convenience orchestration: cargo-build the rv32 bin → shell out to `rv32-lower` → emit `.rv32a` + the contract spec it already produces. |
-| VM / artifact loader / dispatch | hogd | Consume side. `artifact.h` pins the format constants in C++ today; making the Rust crate authoritative with a build-time digest cross-check is a Phase 1/2 acceptance criterion, not current state (Geoff). |
+| `groundhog build` (rv32 path) | groundhog-rpc | Convenience orchestration: cargo-build the rv32 bin → call the lowerer library → emit `.rv32a` + the contract spec/metadata it already produces. |
+| VM / artifact loader / dispatch | hogd | Consume side. `artifact.h` pins the format constants in C++ and exposes the matching format fingerprint; hogd's smoke metadata check proves the consumed lowerer/runtime pair agree. |
 
 Why `groundhog-rv32-lower` lives in groundhog-rpc, not sdk_rs: the existing WASM
 path already keeps build/instrument tooling in the CLI repo (sdk_rs has no wasm
 lowerer — the CLI instruments wasm). The rv32 lowerer is tooling, so it mirrors
-that split. It could alternatively be its own repo; what matters is that it is a
-focused standalone binary shelled out to, not a library the big CLI must embed.
+that split. It could alternatively be its own repo; what matters is that the
+format/lowering implementation is focused and reusable: a library for
+`groundhog build`, plus a standalone `rv32-lower` binary for scripts and direct
+interop checks.
 
 ## Dispatch: adopt guest-side dispatch (Geoff)
 
@@ -104,14 +106,12 @@ The target end state: `groundhog-rv32-artifact` holds it as the single Rust
 source of truth, with hogd's `artifact.h` cross-checking the VM-profile and
 gas-schedule digests at build time.
 
-As of 2026-05-30 a Rust implementation of the format exists — the `artifact`
-module of `groundhog-rv32-lower` — but the cross-check still does not:
-`artifact.h` pins the constants in C++ with internal `static_assert`s, and the
-Rust constants are hand-mirrored (the same way `rv32_lower.py` mirrored them).
-So the *commitment* half of this is still a **Phase 1/2 acceptance criterion**,
-not current state — promoting the module to a standalone `groundhog-rv32-artifact`
-crate must include the cross-check (or an equivalent shared-constant mechanism)
-against `artifact.h`.
+As of 2026-05-31 the Rust format implementation has been promoted into the
+standalone `groundhog-rv32-artifact` crate. Rust and C++ each pin the same
+`FORMAT_FINGERPRINT`/`kArtifactFormatFingerprint`, and hogd's generated-smoke
+metadata check verifies the stamped lowerer fingerprint against `artifact.h`.
+That gives the format extraction a regression guard and keeps cross-repo drift
+visible while the implementation remains duplicated across languages.
 
 Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
@@ -155,14 +155,24 @@ failure-path smoke checks, but they abort on empty calldata.
 Convenience:
 
 ```
-groundhog build            # cargo-build rv32 → shell out to rv32-lower → .rv32a + spec
+groundhog build --target rv32  # cargo-build rv32 → lower in-process → .rv32a + metadata/spec
 ```
 
-`groundhog build` should locate `rv32-lower` the way it locates wasm-opt
-(`which::which`) and emit a clean "install the lowerer" error if missing
-(mirror `CliError::WasmOptNotFound`). Distribution: ship the `rv32-lower` binary
-through whatever channel installs the `groundhog` CLI (e.g. `cargo install`), so
-it lands on `$PATH` the way wasm-opt does.
+`groundhog build --target rv32` should be the golden author/CI path once the
+library-backed lowerer path has settled: it builds the RV32 ELF and invokes the
+lowerer in-process, so users do not need a separate `rv32-lower` binary just to
+build a contract. Keep shipping `rv32-lower` for Makefiles, direct scripting,
+manual interop checks, and hogd-side pinned smoke tests while they still need an
+explicit tool boundary.
+
+**Follow-up:** hogd currently exercises WASM contracts through
+`built_contracts/build_wasm.sh`, which wraps `groundhog build --json`, but its
+RV32 smoke artifact still goes through `built_contracts/build_risc.sh` →
+`scripts/rv32_make_smoke_artifact.sh` → pinned `rv32-lower`. Once the
+`groundhog build --target rv32` output is accepted as the golden path, migrate
+hogd's RV32 CI/integration smoke to call `groundhog build --target rv32 --json`
+too. At that point the WASM and RV32 contract fixtures share one clean build
+entrypoint, and `rv32-lower` remains the lower-level scriptable escape hatch.
 
 ## Open questions (Geoff-owned, runtime side)
 
@@ -188,18 +198,16 @@ it lands on `$PATH` the way wasm-opt does.
   `rv32-lower`) landed in groundhog-rpc at `crates/rv32/lower`, **at
   byte-for-byte output parity** with `scripts/rv32_lower.py` — verified on
   `counter-rv32` (identical `.rv32a` artifact and JSON metadata sidecar). The
-  v3 format lives as the crate's `artifact` module — the single Rust source of
-  truth — with a hermetic synthetic-ELF test suite (happy path + every
-  validation/rejection rule) and an opt-in real-ELF parity test
+  v3 format now lives in the standalone `groundhog-rv32-artifact` crate — the
+  single Rust source of truth — with a hermetic synthetic-ELF test suite (happy
+  path + every validation/rejection rule) and an opt-in real-ELF parity test
   (`RV32_LOWER_PARITY_ELF`, mirroring the Spike-oracle out-of-default-CI
   posture). Housed in groundhog-rpc for now; self-contained so it can lift to
-  its own repo later. **Still open** (the other half of this phase's acceptance
-  criterion): splitting the `artifact` module out to a standalone
-  `groundhog-rv32-artifact` crate (groundhog-rpc `crates/rv32/artifact`) and wiring the build-time digest
-  cross-check against hogd's `artifact.h`.
+  its own repo later. The build-time digest cross-check against hogd's
+  `artifact.h` remains the cross-repo guard.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `built_contracts/build_risc.sh`, which wraps
-  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.4`;
+  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.5`;
   `scripts/rv32_lower.py` was deleted. One supported implementation from here
   on. The runtime smoke now builds its generated SDK artifact from the
   `rv32_smoke_counter` fixture in the `built_contracts/integration_test_contracts`
@@ -209,8 +217,10 @@ it lands on `$PATH` the way wasm-opt does.
 - **Phase 3 (needs Geoff):** method_id-passing + guest-side dispatcher in the
   SDK macro; thin the lowerer to validate+package+hash; optionally cut artifact
   v4. The strip-symbols requirement disappears here.
-- **Phase 4:** wire the `groundhog build` rv32 path as the convenience layer over
-  the standalone tool.
+- **Phase 4:** make `groundhog build --target rv32` the shared golden path for
+  RV32 authors and hogd's generated smoke artifact, matching the existing WASM
+  integration shape. Keep `rv32-lower` available as the standalone lower-level
+  tool for scripts, debugging, and pinned interop checks.
 
 Phases 1–2 are valuable on their own (they kill the two-implementations drift)
 and do not block on the runtime-side dispatch decision in Phase 3.
