@@ -99,6 +99,7 @@ TEST(Rv32Threaded, harnessBuildsAndMusttailLowers)
 }
 
 using test_program::addi;
+using test_program::make_program;
 using test_program::op;
 
 std::shared_ptr<const ThreadedProgram>
@@ -319,6 +320,72 @@ TEST(Rv32Threaded, ecallContinueWritesA0AndAdvances)
   EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off after addi
   EXPECT_EQ(machine.reg(10), 0U); // continue_with(0) wrote a0=0
   EXPECT_EQ(machine.reg(11), 5U); // execution continued past ecall
+}
+
+// Far above any corpus program's need (body_len 96 -> ~97 instructions), so
+// runs are never gas-limited and the diff reflects pure ISA semantics.
+constexpr uint64_t kCorpusGasBudget = 1'000'000;
+
+TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
+{
+  auto check = [](const std::vector<uint32_t> &words, uint64_t seed,
+                  const char *kind, uint32_t memory_bytes) {
+    const std::vector<uint8_t> bytes = words_to_bytes(words);
+
+    // Canonical reference trace.
+    const auto canonical =
+        make_program(std::span<const uint32_t>(words.data(), words.size()));
+    ASSERT_NE(canonical, nullptr) << kind << " seed " << seed;
+    Machine cmachine(canonical, memory_bytes, kCorpusGasBudget);
+    RecordingHost chost;
+    const ExecTrace ctrace = trace_execution(cmachine, chost);
+
+    // Threaded trace (same program, same memory size and gas -> a fair diff).
+    auto threaded = ThreadedProgram::create(bytes);
+    ASSERT_TRUE(threaded.has_value()) << kind << " seed " << seed;
+    auto tprog =
+        std::make_shared<const ThreadedProgram>(std::move(threaded.value()));
+    ThreadedMachine tmachine(tprog, memory_bytes, kCorpusGasBudget);
+    RecordingHost thost;
+    TraceObserver tobs;
+    tmachine.run(thost, tobs);
+    const ExecTrace &ttrace = tobs.trace();
+
+    EXPECT_EQ(describe_trace_divergence(ctrace, ttrace), "")
+        << kind << " seed " << seed;
+    // describe_trace_divergence compares step.state (post-step) and step.result
+    // but NOT step.state_before, so check that field separately -- it's the
+    // guard against observer state-chaining bugs.
+    ASSERT_EQ(ttrace.steps.size(), ctrace.steps.size())
+        << kind << " seed " << seed;
+    for (size_t i = 0; i < ctrace.steps.size(); ++i) {
+      EXPECT_EQ(ttrace.steps[i].state_before, ctrace.steps[i].state_before)
+          << kind << " seed " << seed << " step " << i;
+    }
+  };
+
+  // 64 seeds (more than the decode test's 16: execution is the primary
+  // differential signal). Register-only programs never touch memory, so 4096 is
+  // arbitrary-but-sufficient; memory programs need the corpus data region.
+  for (uint64_t seed = 0; seed < 64; ++seed) {
+    check(test_corpus::generate_register_only_program(seed, 96), seed, "reg",
+          4096);
+    check(test_corpus::generate_memory_program(seed, 96), seed, "mem",
+          test_corpus::kCorpusMemoryBytes);
+  }
+}
+
+TEST(Rv32Threaded, nullObserverRunCompletes)
+{
+  // The zero-cost production instantiation builds and runs to the ecall halt.
+  const std::vector<uint32_t> words =
+      test_corpus::generate_register_only_program(123, 64);
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/4096, kCorpusGasBudget);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs),
+            StepResult::kHalted); // corpus ends in ecall
 }
 
 } // namespace
