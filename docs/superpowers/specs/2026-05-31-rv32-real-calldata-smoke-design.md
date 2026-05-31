@@ -42,6 +42,12 @@ The trait type (`fibonacci::Fibonacci`) is a **generated header**:
 `build/built_contracts/fibonacci.h`, produced by the contract codegen (the
 `all_wasm_headers`-style step `rv32_runtime_context_test` already depends on).
 
+As of this spec, that part is **not** true for `rv32_smoke_counter`: the RV32
+smoke build produces the lowered artifact (`.rv32a`) and lowerer metadata
+(`.rv32.json`), but it does not produce a `rv32_smoke_counter_spec.json` or
+generated C++ trait header. Creating that trait source is therefore the first
+implementation task, not just a confirmation step.
+
 ## Goal / non-goals
 
 **Goal.** A test that invokes the lowered rv32 counter's `increment(u64)` with a
@@ -78,17 +84,31 @@ subsequent `get` (same pattern fibonacci relies on).
 1. **Generated Counter trait** (`counter::Counter` analog of
    `fibonacci::Fibonacci`). The codegen must emit a C++ trait header for the
    `rv32_smoke_counter` contract from its contract spec, the same way it does for
-   wasm contracts. Wire that header's generation as a build dependency of
-   `rv32_runtime_context_test` (alongside the existing `all_wasm_headers`
-   dependency). **Open item to confirm in the plan:** that the codegen path which
-   produces `fibonacci.h` also runs for an rv32 ITC contract's spec — if it is
-   wasm-only today, extending it to emit the counter trait is part of this slice.
+   wasm contracts. This is the first implementation task:
+   - produce a `rv32_smoke_counter_spec.json` for the RV32 smoke contract,
+     either by adding a spec-only/WASM-compatible build of the same fixture or
+     by teaching the RV32 `groundhog build --target rv32` path to emit the
+     contract spec sidecar;
+   - run `built_contracts/generate_header.py` on that spec to produce
+     `rv32_smoke_counter.h`;
+   - because the contract declares `throws = Error`, generate or include any
+     required XDR/type header the same way existing throwing contracts do; and
+   - wire the generated header as a build dependency of
+     `rv32_runtime_context_test`.
+
+   Current shape to account for: `rv32_smoke_counter` is an `rlib` plus an RV32
+   `[[bin]]` wrapper that links `groundhog-rv32-runtime`; it is not currently
+   just another `add_wasm_builds(SPEC_CONTRACTS ...)` entry.
 
 2. **New test** `LoweredSdkArtifactCalldataRoundTrip` in
    `rv32/rv32_runtime_context_test.cc`. Reuses the existing artifact-load +
    `RuntimeContractImage` setup from `LoweredSdkArtifactSmoke` (factor the shared
    load/parse into a helper so the two tests don't duplicate it), installs the
    rv32 counter, builds the native driver above, and asserts the round-trip.
+   The runtime context must be a `MultiplexedContext` with `ContractType::kNative`
+   routed to the native driver context and `ContractType::kMockTest` routed to
+   `rv32::RuntimeContext`, because the current RV32 runtime is still modeled as a
+   mock-test contract type.
 
 ### Data flow
 
@@ -117,9 +137,11 @@ root_invoke(driver tx)
 - `LoweredSdkArtifactCalldataRoundTrip`: `increment(N)` then `get() == N` for a
   representative `N` (e.g. 7). Optionally a second `N` to guard against a
   constant-folded decode.
-- Runs only when the generated artifact/metadata is present (same `GTEST_SKIP`
-  guard as the existing smoke), so default builds without the ITC toolchain are
-  unaffected.
+- Runs when the generated artifact, lowerer metadata, and generated Counter
+  header are present. The existing CMake target currently depends on building the
+  RV32 smoke artifact before test discovery, so a missing RV32 toolchain may fail
+  at build time rather than reaching a `GTEST_SKIP`; if skip-on-missing remains a
+  requirement, the CMake dependency needs to become optional or environment-gated.
 
 ## Geoff touchpoint
 
@@ -131,9 +153,17 @@ encoding, that's the ABI seam to examine with him.
 
 ## Risks / open items
 
-- **Counter trait generation (primary risk):** confirm the codegen produces a
-  C++ trait for the rv32 ITC contract; if it's wasm-only, emitting the counter
-  trait is the first plan task.
+- **Counter trait generation (primary task):** the current RV32 smoke producer
+  does not emit a contract spec or C++ trait header. This slice must either add a
+  compatible spec-generation path for `rv32_smoke_counter` or switch hogd's RV32
+  fixture build to a `groundhog build --target rv32` path that emits the spec
+  sidecar.
+- **Throw type/header wiring:** `rv32_smoke_counter` declares `throws = Error`;
+  if the generated C++ trait models that exception type, the build must also
+  generate/include the corresponding type header.
+- **Native/RV32 multiplexing:** the driver and callee require a mixed runtime
+  context (`kNative` + `kMockTest`). Reuse the `fibonacci_test` driver pattern
+  and the RV32 context setup, but make the contract-type routing explicit.
 - **Cross-call state visibility:** `increment` then `get` must share committed
   storage within the driver's transaction. This is the same assumption
   `fibonacci_test`/cross-contract tests already rely on; verify with the
@@ -151,4 +181,8 @@ encoding, that's the ABI seam to examine with him.
 3. A wrong encoding or broken guest decode fails the test (hard assertion).
 4. `make_root_transaction` and the v3 dispatch model are unchanged; no
    guest-side method_id work.
-5. The test skips cleanly when the ITC smoke artifact isn't built.
+5. The build produces the Counter C++ trait from the contract spec and wires it
+   into `rv32_runtime_context_test`.
+6. The test behavior around missing RV32 toolchain/artifact inputs is explicit:
+   either the CMake build requires them, or the target is made optional enough
+   for the GTest body to skip cleanly.
