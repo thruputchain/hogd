@@ -1903,7 +1903,10 @@ TEST_F(Rv32RuntimeContextTest,
   const auto fingerprint_text = fingerprint->as_string();
   ASSERT_TRUE(fingerprint_text.has_value())
       << "artifact_format_fingerprint must be a string";
-  ASSERT_EQ(*fingerprint_text, artifact_format_fingerprint_hex());
+  // Use value() (checked access) rather than operator*: clang-tidy's
+  // bugprone-unchecked-optional-access does not treat the ASSERT_TRUE above as
+  // a guard, and value() is safe here because of it.
+  ASSERT_EQ(fingerprint_text.value(), artifact_format_fingerprint_hex());
 }
 
 // Smoke test for SDK-lowered RV32 artifacts.
