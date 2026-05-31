@@ -429,16 +429,52 @@ valid_target(Ctx c, uint32_t target)
   return c.m->program_->contains_pc(target);
 }
 
+// Branch comparison predicates. Baked into op_branch as a template parameter so
+// the hot path runs one comparison directly, instead of a runtime switch on
+// ip->op (which lowered to a binary search over the six branch kinds).
+inline bool
+beq_cmp(uint32_t a, uint32_t b)
+{
+  return a == b;
+}
+inline bool
+bne_cmp(uint32_t a, uint32_t b)
+{
+  return a != b;
+}
+inline bool
+blt_cmp(uint32_t a, uint32_t b)
+{
+  return i32_from_bits(a) < i32_from_bits(b);
+}
+inline bool
+bge_cmp(uint32_t a, uint32_t b)
+{
+  return i32_from_bits(a) >= i32_from_bits(b);
+}
+inline bool
+bltu_cmp(uint32_t a, uint32_t b)
+{
+  return a < b;
+}
+inline bool
+bgeu_cmp(uint32_t a, uint32_t b)
+{
+  return a >= b;
+}
+
 // Like jal, a branch's taken target is PC-relative and resolved at decode time:
 // in range, imm is rewritten to the target slot delta and op_branch skips the
 // alignment/range check; out of range, op_branch_bad_target (below) is baked.
 // The not-taken path falls through to ip+1 regardless of the target's validity.
-template<bool Trace>
+// Cmp is the comparison, fixed per branch kind at decode (handler_for), so the
+// hot path is charge -> one compare -> dispatch, with no op-kind switch.
+template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
 op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
@@ -681,12 +717,17 @@ handler_for(Op op)
   case Op::kJalr:
     return &op_jalr<Trace>;
   case Op::kBeq:
+    return &op_branch<Trace, beq_cmp>;
   case Op::kBne:
+    return &op_branch<Trace, bne_cmp>;
   case Op::kBlt:
+    return &op_branch<Trace, blt_cmp>;
   case Op::kBge:
+    return &op_branch<Trace, bge_cmp>;
   case Op::kBltu:
+    return &op_branch<Trace, bltu_cmp>;
   case Op::kBgeu:
-    return &op_branch<Trace>;
+    return &op_branch<Trace, bgeu_cmp>;
   case Op::kLui:
     return &op_lui<Trace>;
   case Op::kAuipc:
