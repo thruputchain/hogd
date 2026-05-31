@@ -29,7 +29,13 @@ public:
                   uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
     : program_(std::move(program)), initial_pc_(initial_pc)
   {
-    if (!program_ || !program_->contains_pc(initial_pc_)) {
+    if (!program_) {
+      construction_trap_ = Trap::kInvalidInstruction;
+      trap_ = Trap::kInvalidInstruction;
+      halted_ = true;
+      return;
+    }
+    if (!program_->contains_pc(initial_pc_)) {
       construction_trap_ = Trap::kBadPc;
       trap_ = Trap::kBadPc;
       halted_ = true;
@@ -432,8 +438,9 @@ op_bad_pc(Ctx<Obs> &c)
   return trap_step(c, Trap::kBadPc);
 }
 
-// Default for ops not yet wired (control flow, memory, ecall arrive in later
-// tasks). Charges no gas; replaced as those tasks land.
+// Defensive default for handler_for; unreachable by construction, since
+// ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
+// carries an unhandled Op. Charges no gas.
 template<class Obs>
 StepResult
 op_invalid(Ctx<Obs> &c)

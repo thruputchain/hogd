@@ -388,5 +388,17 @@ TEST(Rv32Threaded, nullObserverRunCompletes)
             StepResult::kHalted); // corpus ends in ecall
 }
 
+TEST(Rv32Threaded, nullProgramTrapsInvalidInstruction)
+{
+  // Matches canonical Machine: a null program is a construction trap of
+  // kInvalidInstruction (a bad initial pc on a valid program is kBadPc).
+  ThreadedMachine machine(nullptr, 256, 100);
+  EXPECT_TRUE(machine.halted());
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+}
+
 } // namespace
 } // namespace hogd::rv32
