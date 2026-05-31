@@ -265,6 +265,9 @@ Machine::complete_ecall(const HostResult &result)
 StepResult
 Machine::start()
 {
+  // start() begins a fresh drive; an outstanding ecall must be completed via
+  // resume_from_ecall() first. Mirrors ThreadedMachine::start()'s precondition.
+  assert(!pending_ecall_.has_value());
   // Drive from the current pc to the next yield. step() returns kEcall when an
   // ecall is pending, so calling start() with an outstanding ecall re-yields
   // kEcall rather than mis-stepping.

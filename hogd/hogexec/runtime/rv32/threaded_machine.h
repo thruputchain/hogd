@@ -123,13 +123,13 @@ public:
   // Yield-based seam: drive the machine without a Host in the dispatch loop.
   // start() runs until the first kEcall/halt/trap; resume_from_ecall() applies
   // the host result and continues. pending_ecall() exposes the stashed args.
-  StepResult start();
-  StepResult resume_from_ecall(const HostResult &result);
+  [[nodiscard]] StepResult start();
+  [[nodiscard]] StepResult resume_from_ecall(const HostResult &result);
   [[nodiscard]] std::optional<EcallArgs> pending_ecall() const
   {
     return pending_ecall_;
   }
-  MachineView view();
+  [[nodiscard]] MachineView view();
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
