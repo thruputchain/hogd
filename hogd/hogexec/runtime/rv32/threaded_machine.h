@@ -16,39 +16,44 @@
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/threaded_program.h"
 
-// Direct-threaded, musttail RV32IM interpreter. Mirrors Machine's semantics,
-// gas/trap ordering, and ecall protocol exactly -- enforced by the
-// threaded-vs-canonical differential test in rv32_threaded_test -- but
-// dispatches by tail-calling the next instruction's handler. Each handler takes
-// the current instruction pointer `ip`; the common case tail-calls (ip + 1), so
-// there is no instruction-index arithmetic and no per-instruction pc update.
+// Direct-threaded, musttail RV32IM interpreter. Handlers take the current
+// instruction pointer `ip` and tail-call (ip + 1) in the common case, so there
+// is no instruction-index arithmetic and no per-instruction pc update; pc is
+// derived as (ip - base) * 4 only by the control-flow handlers and when
+// materializing observable state.
 //
-// pc is not maintained per instruction: it is (ip - base) * 4, computed on
-// demand only by the control-flow handlers (auipc/jal/jalr/branch) and
-// materialized into pc_ only when producing observable state (trap/halt, and
-// each step on the traced path).
+// Gas is metered at *start of run* (block granularity, like the wasm engines):
+// a "run" is a maximal sequence of non-barrier instructions (ALU/lui/auipc/
+// fence -- none of which trap or branch). enter_run() charges the whole run's
+// gas in one check; the non-barrier handlers inside do no gas work. Barriers
+// (loads/stores/branches/jal/jalr/ecall/ebreak) end a run and self-charge their
+// own gas. On out-of-gas, the run is aborted at its head -- so the exact
+// instruction and intermediate gas_remaining differ from a per-instruction
+// machine, but total gas to any barrier (and thus to any ecall and to halt) is
+// identical, which is all that persists.
 //
-// Tracing is a build-time choice: each handler is templated on a `Trace` bool,
-// and the executable Slot array is filled with either the untraced (production,
-// zero-cost) or traced (records an ExecTrace via a TraceObserver) handler set
-// when it is built. The array is built once and cached across reset().
+// Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
+// the executable Slot array is built (once, cached across reset()) with either
+// the untraced (production) or traced (records an ExecTrace) handler set.
 namespace hogd::rv32 {
 
 struct Ctx;
 struct Slot;
-using Handler = StepResult (*)(Ctx &, const Slot *);
+using Handler = StepResult (*)(Ctx, const Slot *);
 
-// Executable instruction: the handler pointer baked alongside the decoded
-// operands. Handlers walk a Slot pointer (ip), so the array is the instruction
-// stream.
+// Executable instruction: handler pointer + decoded operands + gas. `gas` is
+// this instruction's own cost (charged by barriers); `gas_to_run` is the total
+// cost of the non-barrier run starting here (charged once by enter_run), 0 for
+// a barrier. 24 bytes.
 struct Slot {
   Handler handler = nullptr;
+  uint32_t gas = static_cast<uint32_t>(kBaseInstructionGas);
+  uint32_t gas_to_run = 0;
+  int32_t imm = 0;
   Op op = Op::kAdd; // only op_branch reads this (to pick the comparison)
   uint8_t rd = 0;
   uint8_t rs1 = 0;
   uint8_t rs2 = 0;
-  int32_t imm = 0;
-  uint64_t gas = kBaseInstructionGas;
 };
 
 class ThreadedMachine {
@@ -114,14 +119,14 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<const uint8_t> memory() const { return memory_; }
 
-  // x0 is hardwired to zero. `i` is an unchecked index: callers pass a decoded
-  // 5-bit register field (< kRegisterCount), so no bounds check on the hot
-  // path.
+  // x0 is hardwired to zero. Branchless sink: write unconditionally, then force
+  // regs_[0] back to 0 -- avoids a per-instruction branch on rd. `i` is an
+  // unchecked index: callers pass a decoded 5-bit register field
+  // (< kRegisterCount), so no bounds check on the hot path.
   void write_reg(uint8_t i, uint32_t v)
   {
-    if (i != 0) {
-      regs_[i] = v;
-    }
+    regs_[i] = v;
+    regs_[0] = 0;
   }
 
   // Build (once, then cached) the executable Slot array from the decoded
@@ -136,6 +141,8 @@ public:
   std::array<uint32_t, kRegisterCount> regs_ = {};
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_; // size n+1; [n] is the bad-pc sentinel
+  Host *host_ = nullptr;   // set for the duration of run(); cold (ecall only)
+  TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   uint32_t initial_pc_ = 0;
   uint32_t pc_ = 0;
   uint64_t gas_remaining_ = 0;
@@ -147,73 +154,131 @@ public:
   uint32_t halt_code_ = 0;
 };
 
+// Passed BY VALUE through the musttail chain: two pointers fit in two registers
+// (AArch64), so the machine pointer and run base stay in registers across the
+// whole run instead of being reloaded from memory on every handler. Cold state
+// (host/obs) lives on the machine, reached via m.
 struct Ctx {
-  ThreadedMachine &m;
-  Host &host;
-  TraceObserver *obs = nullptr; // non-null and used only on the traced path
-  const Slot *base = nullptr;   // exec_.data(); pc = (ip - base) * 4
+  ThreadedMachine *m = nullptr;
+  const Slot *base = nullptr; // exec_.data(); pc = (ip - base) * 4
 };
 
 // pc of the instruction at `ip`. Cheap (a multiply); called only by the
 // control-flow handlers and when materializing observable state.
 inline uint32_t
-pc_of(const Ctx &c, const Slot *ip)
+pc_of(const Ctx c, const Slot *ip)
 {
   return static_cast<uint32_t>(ip - c.base) * kInstructionBytes;
 }
 
 inline ArchState
-capture(const Ctx &c)
+capture(const Ctx c)
 {
   ArchState s;
-  s.pc = c.m.pc_;
-  s.regs = c.m.regs_;
-  s.memory.assign(c.m.memory_.begin(), c.m.memory_.end());
-  s.gas_remaining = c.m.gas_remaining_;
-  s.trap = c.m.trap_;
-  s.halted = c.m.halted_;
-  s.halt_code = c.m.halt_code_;
+  s.pc = c.m->pc_;
+  s.regs = c.m->regs_;
+  s.memory.assign(c.m->memory_.begin(), c.m->memory_.end());
+  s.gas_remaining = c.m->gas_remaining_;
+  s.trap = c.m->trap_;
+  s.halted = c.m->halted_;
+  s.halt_code = c.m->halt_code_;
   return s;
 }
 
-// Tail-dispatch to the instruction at `next`. On the traced path, materialize
-// pc_ to that instruction's address and record the retired step first. `Trace`
-// is the enclosing handler's template parameter.
+// A barrier ends a gas run: it transfers control (branches/jumps/ecall/ebreak),
+// so the run can't be pre-charged past it (the continuation isn't known). Its
+// gas is charged individually. Loads/stores are NOT barriers: they're
+// straight-line, so they fold into runs; a mid-run fault is terminal and has
+// already paid the run's gas (block-granular metering, like the wasm engines).
+inline bool
+is_barrier(Op op)
+{
+  switch (op) {
+  case Op::kBeq:
+  case Op::kBne:
+  case Op::kBlt:
+  case Op::kBge:
+  case Op::kBltu:
+  case Op::kBgeu:
+  case Op::kJal:
+  case Op::kJalr:
+  case Op::kEcall:
+  case Op::kEbreak:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Tail-dispatch to the next instruction in the *same* run (no gas work; the run
+// was pre-charged by enter_run). On the traced path, materialize pc_ and record
+// the retired step first. `Trace` is the enclosing handler's template
+// parameter.
 #define HOGD_THREAD_NEXT(c, next)                                              \
   if constexpr (Trace) {                                                       \
-    (c).m.pc_ = pc_of((c), (next));                                            \
-    (c).obs->on_retire(capture(c), StepResult::kContinue);                     \
+    (c).m->pc_ = pc_of((c), (next));                                           \
+    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
   }                                                                            \
   HOGD_MUSTTAIL return (next)->handler((c), (next))
 
-// Charge gas; on failure set kOutOfGas at `ip`'s pc, observe a terminal step,
-// return kTrap. `amount` is evaluated twice; pass a side-effect-free
-// expression.
+// Tail-dispatch that *starts a new run* at `next` (after a barrier): record the
+// retired step (traced), then enter_run charges the new run's gas.
+#define HOGD_ENTER_RUN(c, next)                                                \
+  if constexpr (Trace) {                                                       \
+    (c).m->pc_ = pc_of((c), (next));                                           \
+    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
+  }                                                                            \
+  HOGD_MUSTTAIL return enter_run<Trace>((c), (next))
+
+// Charge a single instruction's gas (barriers); on failure set kOutOfGas at
+// `ip`'s pc, observe a terminal step, return kTrap. `amount` is evaluated
+// twice; pass a side-effect-free expression.
 #define HOGD_CHARGE_OR_TRAP(c, ip, amount)                                     \
-  do {                                                                         \
-    if ((c).m.gas_remaining_ < (amount)) {                                     \
-      (c).m.pc_ = pc_of((c), (ip));                                            \
-      (c).m.trap_ = Trap::kOutOfGas;                                           \
-      (c).m.halted_ = true;                                                    \
-      if constexpr (Trace)                                                     \
-        (c).obs->on_retire(capture(c), StepResult::kTrap);                     \
-      return StepResult::kTrap;                                                \
-    }                                                                          \
-    (c).m.gas_remaining_ -= (amount);                                          \
-  } while (0)
+  if ((c).m->gas_remaining_ < (amount)) {                                      \
+    (c).m->pc_ = pc_of((c), (ip));                                             \
+    (c).m->trap_ = Trap::kOutOfGas;                                            \
+    (c).m->halted_ = true;                                                     \
+    if constexpr (Trace)                                                       \
+      (c).m->obs_->on_retire(capture(c), StepResult::kTrap);                   \
+    return StepResult::kTrap;                                                  \
+  }                                                                            \
+  (c).m->gas_remaining_ -= (amount)
 
 // Set a terminal trap at `pc`, observe it, return kTrap.
 template<bool Trace>
 inline StepResult
-trap_at(Ctx &c, uint32_t pc, Trap t)
+trap_at(Ctx c, uint32_t pc, Trap t)
 {
-  c.m.pc_ = pc;
-  c.m.trap_ = t;
-  c.m.halted_ = true;
+  c.m->pc_ = pc;
+  c.m->trap_ = t;
+  c.m->halted_ = true;
   if constexpr (Trace) {
-    c.obs->on_retire(capture(c), StepResult::kTrap);
+    c.m->obs_->on_retire(capture(c), StepResult::kTrap);
   }
   return StepResult::kTrap;
+}
+
+// Charge the gas for the whole non-barrier run starting at `ip`, then dispatch
+// to it. Called at every run head: program start, every jump/branch target, and
+// the instruction after each barrier. Block-granular OOG: if the run does not
+// fit, abort at its head (total gas to the next barrier is what persists). For
+// a barrier, gas_to_run is 0 and the barrier self-charges.
+template<bool Trace>
+StepResult
+enter_run(Ctx c, const Slot *ip)
+{
+  const uint32_t run_gas = ip->gas_to_run;
+  if (c.m->gas_remaining_ < run_gas) {
+    c.m->pc_ = pc_of(c, ip);
+    c.m->trap_ = Trap::kOutOfGas;
+    c.m->halted_ = true;
+    if constexpr (Trace) {
+      c.m->obs_->on_retire(capture(c), StepResult::kTrap);
+    }
+    return StepResult::kTrap;
+  }
+  c.m->gas_remaining_ -= run_gas;
+  HOGD_MUSTTAIL return ip->handler(c, ip);
 }
 
 // Pure ALU operations, shared by R-type and I-type handlers.
@@ -283,70 +348,77 @@ remu_op(uint32_t a, uint32_t b)
   return b == 0 ? a : a % b;
 }
 
+// --- Non-barrier handlers: no gas work (the run was pre-charged) ------------
+
 template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_rr(Ctx &c, const Slot *ip)
+op_rr(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  c.m.write_reg(ip->rd, Fn(c.m.regs_[ip->rs1], c.m.regs_[ip->rs2]));
+  c.m->write_reg(ip->rd, Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2]));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_ri(Ctx &c, const Slot *ip)
+op_ri(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  c.m.write_reg(ip->rd, Fn(c.m.regs_[ip->rs1], bits_from_i32(ip->imm)));
+  c.m->write_reg(ip->rd, Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm)));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_lui(Ctx &c, const Slot *ip)
+op_lui(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  c.m.write_reg(ip->rd, bits_from_i32(ip->imm));
+  c.m->write_reg(ip->rd, bits_from_i32(ip->imm));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_auipc(Ctx &c, const Slot *ip)
+op_auipc(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  c.m.write_reg(ip->rd, pc_of(c, ip) + bits_from_i32(ip->imm));
+  c.m->write_reg(ip->rd, pc_of(c, ip) + bits_from_i32(ip->imm));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
+
+template<bool Trace>
+StepResult
+op_fence(Ctx c, const Slot *ip)
+{
+  HOGD_THREAD_NEXT(c, ip + 1);
+}
+
+// --- Barrier handlers: self-charge gas, end the run -------------------------
 
 // Validate a byte target against the program image. Mirrors
 // Machine::validate_control_target via ThreadedProgram::contains_pc, which
 // already checks 4-byte alignment and in-range.
 inline bool
-valid_target(Ctx &c, uint32_t target)
+valid_target(Ctx c, uint32_t target)
 {
-  return c.m.program_->contains_pc(target);
+  return c.m->program_->contains_pc(target);
 }
 
 template<bool Trace>
 StepResult
-op_branch(Ctx &c, const Slot *ip)
+op_branch(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  if (!branch_taken(ip->op, c.m.regs_[ip->rs1], c.m.regs_[ip->rs2])) {
-    HOGD_THREAD_NEXT(c, ip + 1);
+  if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+    HOGD_ENTER_RUN(c, ip + 1);
   }
   const uint32_t target = pc_of(c, ip) + bits_from_i32(ip->imm);
   if (!valid_target(c, target)) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
   }
   const Slot *next = c.base + (target / kInstructionBytes);
-  HOGD_THREAD_NEXT(c, next);
+  HOGD_ENTER_RUN(c, next);
 }
 
 template<bool Trace>
 StepResult
-op_jal(Ctx &c, const Slot *ip)
+op_jal(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   const uint32_t pc = pc_of(c, ip);
@@ -354,116 +426,25 @@ op_jal(Ctx &c, const Slot *ip)
   if (!valid_target(c, target)) {
     return trap_at<Trace>(c, pc, Trap::kBadPc);
   }
-  c.m.write_reg(ip->rd, pc + kInstructionBytes);
+  c.m->write_reg(ip->rd, pc + kInstructionBytes);
   const Slot *next = c.base + (target / kInstructionBytes);
-  HOGD_THREAD_NEXT(c, next);
+  HOGD_ENTER_RUN(c, next);
 }
 
 template<bool Trace>
 StepResult
-op_jalr(Ctx &c, const Slot *ip)
+op_jalr(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   const uint32_t pc = pc_of(c, ip);
   const uint32_t target =
-      (c.m.regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
+      (c.m->regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
   if (!valid_target(c, target)) {
     return trap_at<Trace>(c, pc, Trap::kBadPc);
   }
-  c.m.write_reg(ip->rd, pc + kInstructionBytes);
+  c.m->write_reg(ip->rd, pc + kInstructionBytes);
   const Slot *next = c.base + (target / kInstructionBytes);
-  HOGD_THREAD_NEXT(c, next);
-}
-
-// op_ecall resolves the host call inline (the threaded machine runs to
-// completion without a kEcall yield). The HostResult is evaluated in an inner
-// scope so that the memory snapshot and host result -- both non-trivially
-// destructible -- are destroyed before the musttail in the kContinue path,
-// which the compiler requires.
-template<bool Trace>
-StepResult
-op_ecall(Ctx &c, const Slot *ip)
-{
-  // ECALL instruction gas (canonical charges it in step(), before execute()).
-  // On OOG here, pc stays at the ecall (HOGD_CHARGE_OR_TRAP uses ip).
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-
-  // pc advances past the ecall before the host call (canonical ordering).
-  const Slot *next = ip + 1;
-  const uint32_t pc_after = pc_of(c, next);
-
-  uint32_t continue_value = 0;
-  {
-    // Snapshot memory for host-OOG rollback; destroyed before the musttail.
-    const std::vector<uint8_t> snapshot = c.m.memory_;
-    const EcallArgs args{.a0 = c.m.regs_[10],
-                         .a1 = c.m.regs_[11],
-                         .a2 = c.m.regs_[12],
-                         .a3 = c.m.regs_[13],
-                         .a4 = c.m.regs_[14],
-                         .a5 = c.m.regs_[15],
-                         .a6 = c.m.regs_[16],
-                         .a7 = c.m.regs_[17]};
-    // view reflects the already-advanced pc, matching canonical.
-    MachineView view(pc_after, c.m.gas_remaining_,
-                     std::span<const uint32_t, kRegisterCount>(c.m.regs_),
-                     c.m.memory_);
-    const HostResult hr = c.host.ecall(view, args);
-
-    // Debit host gas before committing; over-budget host cannot mutate state.
-    if (c.m.gas_remaining_ < hr.gas_consumed) {
-      c.m.memory_ = snapshot;
-      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
-    }
-    c.m.gas_remaining_ -= hr.gas_consumed;
-
-    switch (hr.status) {
-    case HostStatus::kContinue:
-      continue_value = hr.continue_value();
-      break;
-    case HostStatus::kHalt:
-      c.m.pc_ = pc_after;
-      c.m.halt_code_ = hr.halt_code();
-      c.m.halted_ = true;
-      if constexpr (Trace) {
-        c.obs->on_retire(capture(c), StepResult::kHalted);
-      }
-      return StepResult::kHalted;
-    case HostStatus::kOutOfGas:
-      c.m.memory_ = snapshot;
-      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
-    case HostStatus::kTrap:
-    default:
-      // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
-      // has no payload field (ArchState carries only the Trap, which is what
-      // the differential test compares), so just set the trap class.
-      return trap_at<Trace>(c, pc_after, Trap::kHostTrap);
-    }
-  } // snapshot and hr destroyed here
-
-  // kContinue: write a0 and tail-dispatch to the next instruction.
-  c.m.write_reg(10, continue_value);
-  HOGD_THREAD_NEXT(c, next);
-}
-
-// Sentinel: reached only by sequential fall-off past the last instruction. Its
-// pc is (ip - base) * 4 == the out-of-range pc. Traps kBadPc with NO gas
-// charged (matches "invalid fetch traps without gas").
-template<bool Trace>
-StepResult
-op_bad_pc(Ctx &c, const Slot *ip)
-{
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
-}
-
-// Defensive default for handler_for; unreachable by construction, since
-// ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
-// carries an unhandled Op. Charges no gas.
-template<bool Trace>
-StepResult
-op_invalid(Ctx &c, const Slot *ip)
-{
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kInvalidInstruction);
+  HOGD_ENTER_RUN(c, next);
 }
 
 // Width-parameterized little-endian memory helpers. Not shared with
@@ -488,56 +469,140 @@ le_store(std::span<uint8_t> mem, uint32_t addr, uint32_t w, uint32_t v)
   }
 }
 
+// Loads/stores are non-barriers: no self-charge (their gas is in the run total
+// pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
+// still fault (misaligned/oob), which is terminal.
 template<bool Trace, uint32_t Width, bool SignExtend>
 StepResult
-op_load(Ctx &c, const Slot *ip)
+op_load(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  const uint32_t addr = c.m.regs_[ip->rs1] + bits_from_i32(ip->imm);
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
   }
-  if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
+  if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
-  uint32_t v = le_load(c.m.memory_, addr, Width);
+  uint32_t v = le_load(c.m->memory_, addr, Width);
   if constexpr (SignExtend) {
     v = sign_extend(v, Width * 8);
   }
-  c.m.write_reg(ip->rd, v);
+  c.m->write_reg(ip->rd, v);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace, uint32_t Width>
 StepResult
-op_store(Ctx &c, const Slot *ip)
+op_store(Ctx c, const Slot *ip)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  const uint32_t addr = c.m.regs_[ip->rs1] + bits_from_i32(ip->imm);
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
   }
-  if (!memory_range_in_bounds(c.m.memory_.size(), addr, Width)) {
+  if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
     return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
   }
-  le_store(c.m.memory_, addr, Width, c.m.regs_[ip->rs2]);
+  le_store(c.m->memory_, addr, Width, c.m->regs_[ip->rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_fence(Ctx &c, const Slot *ip)
-{
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  HOGD_THREAD_NEXT(c, ip + 1);
-}
-
-template<bool Trace>
-StepResult
-op_ebreak(Ctx &c, const Slot *ip)
+op_ebreak(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas); // ebreak charges gas, then traps
   return trap_at<Trace>(c, pc_of(c, ip), Trap::kBreakpoint);
+}
+
+// op_ecall resolves the host call inline (the threaded machine runs to
+// completion without a kEcall yield). The HostResult is evaluated in an inner
+// scope so that the memory snapshot and host result -- both non-trivially
+// destructible -- are destroyed before the musttail in the kContinue path,
+// which the compiler requires.
+template<bool Trace>
+StepResult
+op_ecall(Ctx c, const Slot *ip)
+{
+  // ECALL instruction gas (canonical charges it in step(), before execute()).
+  // On OOG here, pc stays at the ecall.
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+
+  // pc advances past the ecall before the host call (canonical ordering).
+  const Slot *next = ip + 1;
+  const uint32_t pc_after = pc_of(c, next);
+
+  uint32_t continue_value = 0;
+  {
+    // Snapshot memory for host-OOG rollback; destroyed before the musttail.
+    const std::vector<uint8_t> snapshot = c.m->memory_;
+    const EcallArgs args{.a0 = c.m->regs_[10],
+                         .a1 = c.m->regs_[11],
+                         .a2 = c.m->regs_[12],
+                         .a3 = c.m->regs_[13],
+                         .a4 = c.m->regs_[14],
+                         .a5 = c.m->regs_[15],
+                         .a6 = c.m->regs_[16],
+                         .a7 = c.m->regs_[17]};
+    // view reflects the already-advanced pc, matching canonical.
+    MachineView view(pc_after, c.m->gas_remaining_,
+                     std::span<const uint32_t, kRegisterCount>(c.m->regs_),
+                     c.m->memory_);
+    const HostResult hr = c.m->host_->ecall(view, args);
+
+    // Debit host gas before committing; over-budget host cannot mutate state.
+    if (c.m->gas_remaining_ < hr.gas_consumed) {
+      c.m->memory_ = snapshot;
+      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
+    }
+    c.m->gas_remaining_ -= hr.gas_consumed;
+
+    switch (hr.status) {
+    case HostStatus::kContinue:
+      continue_value = hr.continue_value();
+      break;
+    case HostStatus::kHalt:
+      c.m->pc_ = pc_after;
+      c.m->halt_code_ = hr.halt_code();
+      c.m->halted_ = true;
+      if constexpr (Trace) {
+        c.m->obs_->on_retire(capture(c), StepResult::kHalted);
+      }
+      return StepResult::kHalted;
+    case HostStatus::kOutOfGas:
+      c.m->memory_ = snapshot;
+      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
+    case HostStatus::kTrap:
+    default:
+      // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
+      // has no payload field (ArchState carries only the Trap, which is what
+      // the differential test compares), so just set the trap class.
+      return trap_at<Trace>(c, pc_after, Trap::kHostTrap);
+    }
+  } // snapshot and hr destroyed here
+
+  // kContinue: write a0 and start the next run.
+  c.m->write_reg(10, continue_value);
+  HOGD_ENTER_RUN(c, next);
+}
+
+// Sentinel: reached only by sequential fall-off past the last instruction. Its
+// pc is (ip - base) * 4 == the out-of-range pc. Traps kBadPc with NO gas
+// charged (matches "invalid fetch traps without gas").
+template<bool Trace>
+StepResult
+op_bad_pc(Ctx c, const Slot *ip)
+{
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
+}
+
+// Defensive default for handler_for; unreachable by construction, since
+// ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
+// carries an unhandled Op. Charges no gas.
+template<bool Trace>
+StepResult
+op_invalid(Ctx c, const Slot *ip)
+{
+  return trap_at<Trace>(c, pc_of(c, ip), Trap::kInvalidInstruction);
 }
 
 template<bool Trace>
@@ -651,15 +716,28 @@ ThreadedMachine::build_exec(bool trace)
     const Instr &d = code[i];
     exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
                                      : handler_for<false>(d.op),
+                    .gas = static_cast<uint32_t>(d.gas),
+                    .gas_to_run = 0, // filled by the backward pass below
+                    .imm = d.imm,
                     .op = d.op,
                     .rd = d.rd,
                     .rs1 = d.rs1,
-                    .rs2 = d.rs2,
-                    .imm = d.imm,
-                    .gas = d.gas};
+                    .rs2 = d.rs2};
   }
   // Sentinel for sequential fall-off past the last instruction.
   exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
+  // gas_to_run[i] = gas of the maximal non-barrier run starting at i (0 for a
+  // barrier); backward so each entry sees its successor's already-computed sum.
+  for (size_t i = n; i-- > 0;) {
+    if (is_barrier(exec_[i].op)) {
+      exec_[i].gas_to_run = 0;
+    }
+    else {
+      const bool next_in_run = (i + 1 < n) && !is_barrier(exec_[i + 1].op);
+      exec_[i].gas_to_run =
+          exec_[i].gas + (next_in_run ? exec_[i + 1].gas_to_run : 0);
+    }
+  }
   exec_built_ = true;
   exec_traced_ = trace;
 }
@@ -673,11 +751,13 @@ ThreadedMachine::run(Host &host)
   if (!exec_built_ || exec_traced_) {
     build_exec(/*trace=*/false);
   }
-  Ctx c{.m = *this, .host = host, .obs = nullptr, .base = exec_.data()};
+  host_ = &host;
+  obs_ = nullptr;
+  Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   // store-then-return (NOT a tail call): keeps this frame (owning `c`) alive
   // for the whole musttail chain.
-  const StepResult result = ip->handler(c, ip);
+  const StepResult result = enter_run<false>(c, ip);
   return result;
 }
 
@@ -690,10 +770,12 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
   if (!exec_built_ || !exec_traced_) {
     build_exec(/*trace=*/true);
   }
-  Ctx c{.m = *this, .host = host, .obs = &obs, .base = exec_.data()};
+  host_ = &host;
+  obs_ = &obs;
+  Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   obs.on_initial(capture(c));
-  const StepResult result = ip->handler(c, ip);
+  const StepResult result = enter_run<true>(c, ip);
   return result;
 }
 

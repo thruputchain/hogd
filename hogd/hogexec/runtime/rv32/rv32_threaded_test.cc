@@ -335,19 +335,42 @@ TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
     RecordingHost thost;
     TraceObserver tobs;
     tmachine.run(thost, tobs);
-    const ExecTrace &ttrace = tobs.trace();
 
-    EXPECT_EQ(describe_trace_divergence(ctrace, ttrace), "")
+    // The threaded machine meters gas at start-of-run (block granularity), so
+    // its intermediate gas_remaining runs ahead of the canonical machine's
+    // per-instruction trajectory. Everything else -- pc, regs, memory, control
+    // flow, per-step result -- is byte-identical, and the total gas consumed
+    // matches (gas charged up to any barrier is the same under either scheme).
+    // So normalize intermediate gas_remaining out of the per-step comparison
+    // and check the final gas_remaining separately.
+    auto strip_gas = [](ExecTrace t) {
+      for (TraceStep &s : t.steps) {
+        s.state.gas_remaining = 0;
+        s.state_before.gas_remaining = 0;
+      }
+      return t;
+    };
+    const ExecTrace cstripped = strip_gas(ctrace);
+    const ExecTrace tstripped = strip_gas(tobs.trace());
+
+    EXPECT_EQ(describe_trace_divergence(cstripped, tstripped), "")
         << kind << " seed " << seed;
     // describe_trace_divergence compares step.state (post-step) and step.result
     // but NOT step.state_before, so check that field separately -- it's the
     // guard against observer state-chaining bugs.
-    ASSERT_EQ(ttrace.steps.size(), ctrace.steps.size())
+    ASSERT_EQ(tstripped.steps.size(), cstripped.steps.size())
         << kind << " seed " << seed;
-    for (size_t i = 0; i < ctrace.steps.size(); ++i) {
-      EXPECT_EQ(ttrace.steps[i].state_before, ctrace.steps[i].state_before)
+    for (size_t i = 0; i < cstripped.steps.size(); ++i) {
+      EXPECT_EQ(tstripped.steps[i].state_before,
+                cstripped.steps[i].state_before)
           << kind << " seed " << seed << " step " << i;
     }
+    // Total gas consumed must match: gas at every barrier (incl. the terminal
+    // ecall) is identical under block vs per-instruction metering.
+    ASSERT_FALSE(ctrace.steps.empty());
+    EXPECT_EQ(tobs.trace().steps.back().state.gas_remaining,
+              ctrace.steps.back().state.gas_remaining)
+        << kind << " seed " << seed;
   };
 
   // 64 seeds (more than the decode test's 16: execution is the primary
