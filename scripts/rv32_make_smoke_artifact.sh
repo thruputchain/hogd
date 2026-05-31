@@ -9,7 +9,7 @@
 set -eu
 
 # Bump this together with docs/rv32/rv32-author-toolchain.md.
-LOWERER_VERSION="0.4.2"
+LOWERER_VERSION="0.4.3"
 EXPECTED_VERSION="rv32-lower ${LOWERER_VERSION}"
 INSTALL_HINT="CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ cargo install --registry groundhog groundhog-rv32-lower@${LOWERER_VERSION}"
 
@@ -109,9 +109,14 @@ if [ ! -f "${ELF}" ]; then
   exit 1
 fi
 
-RV32_LOWER_BIN="$(command -v rv32-lower || true)"
+RV32_LOWER_BIN="${RV32_LOWER_BIN:-$(command -v rv32-lower || true)}"
 if [ -z "${RV32_LOWER_BIN}" ]; then
   echo "error: rv32-lower not found on PATH" >&2
+  echo "install with: ${INSTALL_HINT}" >&2
+  exit 1
+fi
+if [ ! -x "${RV32_LOWER_BIN}" ]; then
+  echo "error: rv32-lower is not executable: ${RV32_LOWER_BIN}" >&2
   echo "install with: ${INSTALL_HINT}" >&2
   exit 1
 fi

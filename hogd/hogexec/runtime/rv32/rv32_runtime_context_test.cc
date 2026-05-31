@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -88,6 +89,21 @@ constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
     WasmEngine::kWasmi,
     WasmEngine::kWasmtime,
 };
+
+std::string
+get_lowered_sdk_smoke_artifact_path()
+{
+  if (const char *artifact_path = std::getenv("RV32_SMOKE_ARTIFACT");
+      artifact_path != nullptr && artifact_path[0] != '\0') {
+    return artifact_path;
+  }
+
+#ifdef HOGD_RV32_GENERATED_SMOKE_ARTIFACT
+  return HOGD_RV32_GENERATED_SMOKE_ARTIFACT;
+#else
+  return {};
+#endif
+}
 
 void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
@@ -1833,24 +1849,22 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
   EXPECT_EQ(result.gas_consumed_, 0U);
 }
 
-// SPIKE smoke test for SDK-lowered RV32 artifacts.
+// Smoke test for SDK-lowered RV32 artifacts.
 //
-// Set RV32_SMOKE_ARTIFACT to a `.rv32a` path produced from an sdk_rs
-// counter-rv32 ELF by scripts/rv32_make_smoke_artifact.sh, which wraps the
-// published rv32-lower binary. The test parses, validates, and invokes the
+// By default this uses the generated artifact produced from the ITC
+// rv32_smoke_counter fixture. Set RV32_SMOKE_ARTIFACT to override it with any
+// `.rv32a` path produced by scripts/rv32_make_smoke_artifact.sh, which wraps
+// the published rv32-lower binary. The test parses, validates, invokes the
 // selected dispatch entry, and prints the observed outcome. It's intentionally
 // informational — EXPECT, not ASSERT — so a failure here surfaces the actual
 // VM/SDK gap rather than just printing a green/red ctest line.
-//
-// Until cross-repo CI builds the SDK contract automatically, the env
-// var is the cleanest way to plumb the artifact in without committing
-// a binary blob to the hogd tree.
 TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 {
-  const char *artifact_path = std::getenv("RV32_SMOKE_ARTIFACT");
-  if (artifact_path == nullptr) {
-    GTEST_SKIP() << "set RV32_SMOKE_ARTIFACT=/path/to/contract.rv32a to run "
-                    "this end-to-end smoke test";
+  const auto artifact_path = get_lowered_sdk_smoke_artifact_path();
+  if (artifact_path.empty()) {
+    GTEST_SKIP() << "build the generated ITC smoke artifact "
+                    "or set RV32_SMOKE_ARTIFACT=/path/to/contract.rv32a to "
+                    "run this end-to-end smoke test";
   }
 
   std::ifstream input(artifact_path, std::ios::binary);

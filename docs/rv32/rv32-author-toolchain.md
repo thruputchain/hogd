@@ -134,29 +134,22 @@ CARGO_PROFILE_RELEASE_STRIP=false \
 rv32-lower --elf target/.../release/<contract>-rv32 --out <contract>.rv32a
 ```
 
-Hogd's manual smoke-test helper wraps the same published binary and pins the
-expected producer version:
+Hogd's `build_risc.sh` helper sits alongside `build_wasm.sh`: it builds the ITC
+RV32 contract with Cargo, lowers it with the pinned published `rv32-lower`
+binary, and writes the artifact plus metadata sidecar into the requested build
+directory:
 
 ```
-CARGO_PROFILE_RELEASE_STRIP=false \
-  cargo build --release -p counter-rv32
-scripts/rv32_make_smoke_artifact.sh \
-  --elf target/.../release/<contract>-rv32 \
-  --out /tmp/<contract>.rv32a \
-  --metadata /tmp/<contract>.json \
-  --rustc-version "$(rustc --version)" \
-  --target-triple riscv32im-unknown-none-elf \
-  --build-flags "CARGO_PROFILE_RELEASE_STRIP=false cargo build --release -p counter-rv32" \
-  --json
-RV32_SMOKE_ARTIFACT=/tmp/<contract>.rv32a \
-RV32_SMOKE_METHOD_ID=0x39281451083172C6 \
+built_contracts/build_risc.sh rv32_smoke_counter /tmp/rv32-smoke
+RV32_SMOKE_ARTIFACT=/tmp/rv32-smoke/rv32_smoke_counter.rv32a \
+RV32_SMOKE_METHOD_ID=0x143934D51BD51575 \
   build/gcc-rv32-ci/hogd/hogexec/runtime/rv32_runtime_context_test \
   --gtest_filter='*LoweredSdkArtifactSmoke'
 ```
 
 `CARGO_PROFILE_RELEASE_STRIP=false` is required while v3 lowering discovers
-`_start` and dispatch PCs from the ELF symbol table. The method id above is
-counter's no-arg `get` entrypoint; calldata-taking methods are still useful
+`_start` and dispatch PCs from the ELF symbol table. The method id above is the
+smoke counter's no-arg `get` entrypoint; calldata-taking methods are still useful
 failure-path smoke checks, but they abort on empty calldata.
 
 Convenience:
@@ -205,10 +198,14 @@ it lands on `$PATH` the way wasm-opt does.
   `groundhog-rv32-artifact` crate (protocol-rs) and wiring the build-time digest
   cross-check against hogd's `artifact.h`.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
-  producer now uses `scripts/rv32_make_smoke_artifact.sh`, which requires
-  exactly `rv32-lower 0.4.2` on `$PATH`; `scripts/rv32_lower.py` was deleted.
-  One supported implementation from here on. Still open: making this a CI-built
-  artifact instead of an env-var-plumbed manual smoke.
+  producer now uses `built_contracts/build_risc.sh`, which wraps
+  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.3`;
+  `scripts/rv32_lower.py` was deleted. One supported implementation from here
+  on. The runtime smoke now builds its generated SDK artifact from the
+  `rv32_smoke_counter` fixture in the `built_contracts/integration_test_contracts`
+  submodule, so hogd consumes the same ITC source boundary as the WASM fixtures.
+  `RV32_SMOKE_ARTIFACT` remains a manual override, and
+  `-DHOGD_RV32_LOWER_BIN=/path/to/rv32-lower` can point at a non-`PATH` lowerer.
 - **Phase 3 (needs Geoff):** method_id-passing + guest-side dispatcher in the
   SDK macro; thin the lowerer to validate+package+hash; optionally cut artifact
   v4. The strip-symbols requirement disappears here.

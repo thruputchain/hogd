@@ -212,6 +212,53 @@ add_executable(
   rv32/rv32_syscall_entry_bridge_test_main.cc
 )
 
+set(HOGD_RV32_LOWER_BIN "" CACHE FILEPATH
+    "Optional rv32-lower binary used to build the RV32 SDK smoke artifact")
+set(HOGD_RV32_GENERATED_SMOKE_ARTIFACT
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32a")
+set(HOGD_RV32_GENERATED_SMOKE_METADATA
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32.json")
+if(HOGD_RV32_LOWER_BIN)
+  set(HOGD_RV32_SMOKE_ENV
+      ${CMAKE_COMMAND} -E env "RV32_LOWER_BIN=${HOGD_RV32_LOWER_BIN}")
+else()
+  set(HOGD_RV32_SMOKE_ENV)
+endif()
+
+add_custom_command(
+  OUTPUT
+    ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
+    ${HOGD_RV32_GENERATED_SMOKE_METADATA}
+  COMMAND
+    ${HOGD_RV32_SMOKE_ENV}
+    /bin/sh
+    ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    rv32_smoke_counter
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
+  DEPENDS
+    ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh
+    ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
+    ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/src/lib.rs
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/src/main.rs
+  COMMENT "Building RV32 ITC smoke artifact"
+  VERBATIM
+  USES_TERMINAL
+)
+add_custom_target(
+  rv32_itc_smoke_artifact
+  DEPENDS ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
+          ${HOGD_RV32_GENERATED_SMOKE_METADATA}
+)
+add_dependencies(rv32_runtime_context_test rv32_itc_smoke_artifact)
+target_compile_definitions(
+  rv32_runtime_context_test
+  PRIVATE
+  HOGD_RV32_GENERATED_SMOKE_ARTIFACT="${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
+)
+
 target_link_libraries(
   rv32_runtime_context_test
   precompiles
