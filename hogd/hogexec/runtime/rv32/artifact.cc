@@ -132,7 +132,7 @@ parse_artifact(std::span<const uint8_t> bytes)
   if (vm_profile_digest != kArtifactVmProfileDigest) {
     return std::unexpected(ArtifactError::kUnsupportedVmProfile);
   }
-  if (flags != 0) {
+  if (flags != kArtifactFlagsRequiredValue) {
     return std::unexpected(ArtifactError::kUnsupportedFlags);
   }
   if (entry_abi_version != kArtifactEntryAbiVersion) {

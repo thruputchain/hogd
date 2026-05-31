@@ -23,6 +23,7 @@ inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
+inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
 // into the header at kArtifactGasVersionOffset and validated at load.
 inline constexpr uint32_t kGasTableVersion = 2;
@@ -47,6 +48,9 @@ inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
 inline constexpr size_t kArtifactDispatchDigestOffset =
     kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes;
+inline constexpr char kArtifactSectionDigestAlgorithm[] = "sha256";
+inline constexpr char kArtifactCanonicalSectionOrder[] =
+    "header|code|dispatch|initial_memory";
 
 static_assert(kArtifactDispatchDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
@@ -59,48 +63,26 @@ static_assert(kArtifactDispatchDigestOffset + kArtifactDigestBytes ==
 // concern, not an ISA-execution one, so it lives here rather than in the
 // portable program.h core (which only needs the instruction costs themselves).
 constexpr uint64_t
-gas_schedule_digest_byte(uint64_t digest, uint8_t value)
-{
-  return fnv_digest_byte(digest, value);
-}
-
-constexpr uint64_t
-gas_schedule_digest_u64(uint64_t digest, uint64_t value)
-{
-  return fnv_digest_u64(digest, value);
-}
-
-constexpr uint64_t
-gas_schedule_digest_name(uint64_t digest, const char *name)
-{
-  for (const char *cursor = name; *cursor != '\0'; ++cursor) {
-    digest = gas_schedule_digest_byte(digest, static_cast<uint8_t>(*cursor));
-  }
-  return gas_schedule_digest_byte(digest, 0);
-}
-
-constexpr uint64_t
 gas_schedule_digest()
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = gas_schedule_digest_u64(digest, kGasTableVersion);
-  digest = gas_schedule_digest_name(digest, "rv32-instructions");
-  digest = gas_schedule_digest_u64(digest, kOpCount);
+  digest = fnv_digest_u64(digest, kGasTableVersion);
+  digest = fnv_digest_name(digest, "rv32-instructions");
+  digest = fnv_digest_u64(digest, kOpCount);
   for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
     const auto &entry = kInstructionGasSchedule[i];
-    digest = gas_schedule_digest_u64(digest, i);
-    digest = gas_schedule_digest_u64(digest, static_cast<size_t>(entry.op));
-    digest = gas_schedule_digest_u64(digest, entry.cost);
-    digest = gas_schedule_digest_name(digest, entry.name);
+    digest = fnv_digest_u64(digest, i);
+    digest = fnv_digest_u64(digest, static_cast<size_t>(entry.op));
+    digest = fnv_digest_u64(digest, entry.cost);
+    digest = fnv_digest_name(digest, entry.name);
   }
-  digest = gas_schedule_digest_name(digest, "host-syscalls");
-  digest =
-      gas_schedule_digest_u64(digest, hogd::kSyscallGasCostSchedule.size());
+  digest = fnv_digest_name(digest, "host-syscalls");
+  digest = fnv_digest_u64(digest, hogd::kSyscallGasCostSchedule.size());
   for (size_t i = 0; i < hogd::kSyscallGasCostSchedule.size(); ++i) {
     const auto &entry = hogd::kSyscallGasCostSchedule[i];
-    digest = gas_schedule_digest_u64(digest, i);
-    digest = gas_schedule_digest_u64(digest, entry.cost);
-    digest = gas_schedule_digest_name(digest, entry.name);
+    digest = fnv_digest_u64(digest, i);
+    digest = fnv_digest_u64(digest, entry.cost);
+    digest = fnv_digest_name(digest, entry.name);
   }
   return digest;
 }
@@ -110,6 +92,189 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
 static_assert(kGasScheduleDigest == 0xebe53dceea581d0cULL);
+
+constexpr uint64_t
+format_fingerprint_u64(uint64_t digest, const char *name, uint64_t value)
+{
+  return fnv_digest_u64(fnv_digest_name(digest, name), value);
+}
+
+template<size_t N>
+constexpr uint64_t
+format_fingerprint_bytes(uint64_t digest, const char *name,
+                         const std::array<uint8_t, N> &bytes)
+{
+  digest = fnv_digest_name(digest, name);
+  digest = fnv_digest_u64(digest, N);
+  for (uint8_t byte : bytes) {
+    digest = fnv_digest_byte(digest, byte);
+  }
+  return digest;
+}
+
+template<size_t N>
+constexpr uint64_t
+format_fingerprint_string(uint64_t digest, const char *name,
+                          const char (&value)[N])
+{
+  static_assert(N > 0);
+  digest = fnv_digest_name(digest, name);
+  digest = fnv_digest_u64(digest, N - 1);
+  for (size_t i = 0; i < N - 1; ++i) {
+    digest = fnv_digest_byte(digest, static_cast<uint8_t>(value[i]));
+  }
+  return digest;
+}
+
+constexpr uint64_t
+format_fingerprint_layout_field(uint64_t digest, const char *offset_name,
+                                const char *size_name, uint64_t offset,
+                                uint64_t size)
+{
+  digest = format_fingerprint_u64(digest, offset_name, offset);
+  return format_fingerprint_u64(digest, size_name, size);
+}
+
+constexpr uint64_t
+format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
+{
+  uint64_t digest = kFnvOffsetBasis;
+  digest = fnv_digest_name(digest, "groundhog.rv32.artifact.format.v3");
+
+  digest = format_fingerprint_bytes(digest, "magic", kArtifactMagic);
+  digest = format_fingerprint_u64(digest, "format_version", format_version);
+  digest = format_fingerprint_u64(digest, "header_bytes", kArtifactHeaderBytes);
+  digest = format_fingerprint_u64(digest, "vm_profile_digest",
+                                  kArtifactVmProfileDigest);
+  digest = format_fingerprint_u64(digest, "flags_required_value",
+                                  kArtifactFlagsRequiredValue);
+  digest = format_fingerprint_u64(digest, "entry_abi_version",
+                                  kArtifactEntryAbiVersion);
+  digest = format_fingerprint_u64(digest, "syscall_abi_version",
+                                  kArtifactSyscallAbiVersion);
+  digest =
+      format_fingerprint_u64(digest, "gas_table_version", kGasTableVersion);
+  digest =
+      format_fingerprint_u64(digest, "gas_schedule_digest", kGasScheduleDigest);
+
+  digest = format_fingerprint_layout_field(digest, "header.magic.offset",
+                                           "header.magic.size", 0,
+                                           kArtifactMagic.size());
+  digest =
+      format_fingerprint_layout_field(digest, "header.format_version.offset",
+                                      "header.format_version.size",
+                                      kArtifactFormatVersionOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.header_size.offset",
+                                           "header.header_size.size",
+                                           kArtifactHeaderSizeOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.vm_profile.offset",
+                                           "header.vm_profile.size",
+                                           kArtifactVmProfileOffset, 8);
+  digest = format_fingerprint_layout_field(digest, "header.flags.offset",
+                                           "header.flags.size",
+                                           kArtifactFlagsOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.entry_abi.offset",
+                                           "header.entry_abi.size",
+                                           kArtifactEntryAbiOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.syscall_abi.offset",
+                                           "header.syscall_abi.size",
+                                           kArtifactSyscallAbiOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.gas_version.offset",
+                                           "header.gas_version.size",
+                                           kArtifactGasVersionOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.gas_digest.offset",
+                                           "header.gas_digest.size",
+                                           kArtifactGasDigestOffset, 8);
+  digest = format_fingerprint_layout_field(digest, "header.memory_bytes.offset",
+                                           "header.memory_bytes.size",
+                                           kArtifactMemoryBytesOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.code_size.offset",
+                                           "header.code_size.size",
+                                           kArtifactCodeSizeOffset, 4);
+  digest = format_fingerprint_layout_field(digest,
+                                           "header.initial_memory_size.offset",
+                                           "header.initial_memory_size.size",
+                                           kArtifactInitialMemorySizeOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.code_offset.offset",
+                                           "header.code_offset.size",
+                                           kArtifactCodeOffsetOffset, 4);
+  digest =
+      format_fingerprint_layout_field(digest,
+                                      "header.initial_memory_offset.offset",
+                                      "header.initial_memory_offset.size",
+                                      kArtifactInitialMemoryOffsetOffset, 4);
+  digest =
+      format_fingerprint_layout_field(digest, "header.dispatch_offset.offset",
+                                      "header.dispatch_offset.size",
+                                      kArtifactDispatchOffsetOffset, 4);
+  digest =
+      format_fingerprint_layout_field(digest, "header.dispatch_size.offset",
+                                      "header.dispatch_size.size",
+                                      kArtifactDispatchSizeOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "header.code_digest.offset",
+                                           "header.code_digest.size",
+                                           kArtifactCodeDigestOffset,
+                                           kArtifactDigestBytes);
+  digest =
+      format_fingerprint_layout_field(digest,
+                                      "header.initial_memory_digest.offset",
+                                      "header.initial_memory_digest.size",
+                                      kArtifactInitialMemoryDigestOffset,
+                                      kArtifactDigestBytes);
+  digest =
+      format_fingerprint_layout_field(digest, "header.dispatch_digest.offset",
+                                      "header.dispatch_digest.size",
+                                      kArtifactDispatchDigestOffset,
+                                      kArtifactDigestBytes);
+
+  digest = format_fingerprint_string(digest, "section_digest_algorithm",
+                                     kArtifactSectionDigestAlgorithm);
+  digest = format_fingerprint_u64(digest, "digest_bytes", kArtifactDigestBytes);
+  digest =
+      format_fingerprint_u64(digest, "instruction_bytes", kInstructionBytes);
+  digest = format_fingerprint_u64(digest, "max_code_bytes", kMaxCodeBytes);
+  digest = format_fingerprint_u64(digest, "max_memory_bytes", kMaxMemoryBytes);
+  digest = format_fingerprint_u64(digest, "max_dispatch_entries",
+                                  kMaxDispatchEntries);
+  digest =
+      format_fingerprint_u64(digest, "max_dispatch_bytes", kMaxDispatchBytes);
+
+  digest = format_fingerprint_u64(digest, "dispatch_entry_bytes",
+                                  kDispatchEntryBytes);
+  digest = format_fingerprint_layout_field(digest, "dispatch.method_id.offset",
+                                           "dispatch.method_id.size",
+                                           kDispatchEntryMethodOffset, 8);
+  digest = format_fingerprint_layout_field(digest, "dispatch.pc.offset",
+                                           "dispatch.pc.size",
+                                           kDispatchEntryPcOffset, 4);
+  digest = format_fingerprint_layout_field(digest, "dispatch.reserved.offset",
+                                           "dispatch.reserved.size",
+                                           kDispatchEntryReservedOffset, 4);
+  digest = format_fingerprint_u64(digest, "dispatch_reserved_allowed_mask", 0);
+  digest = format_fingerprint_u64(digest, "dispatch_table_nonempty", 1);
+  digest = format_fingerprint_u64(digest, "dispatch_size_multiple_of_entry", 1);
+  digest = format_fingerprint_u64(digest,
+                                  "dispatch_method_ids_strictly_increasing", 1);
+  digest =
+      format_fingerprint_u64(digest, "dispatch_pc_must_be_valid_program_pc", 1);
+
+  digest = format_fingerprint_u64(digest, "memory_bytes_nonzero", 1);
+  digest = format_fingerprint_u64(digest, "code_size_nonzero", 1);
+  digest = format_fingerprint_u64(digest,
+                                  "initial_memory_size_equals_memory_bytes", 1);
+  digest = format_fingerprint_string(digest, "canonical_section_order",
+                                     kArtifactCanonicalSectionOrder);
+  digest = format_fingerprint_u64(digest, "sections_must_be_in_bounds", 1);
+  digest = format_fingerprint_u64(digest, "sections_must_not_overlap", 1);
+  digest =
+      format_fingerprint_u64(digest, "no_section_gaps_or_trailing_bytes", 1);
+  return digest;
+}
+
+inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
+static_assert(kArtifactFormatFingerprint == 0x38927fa2342c674aULL);
+static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
+              kArtifactFormatFingerprint);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 

@@ -78,10 +78,15 @@ Fold **exactly what `artifact.cc` validates at load**, in a fixed field order:
 - syscall ABI version (1)
 - gas-table version (2) and gas-schedule digest
 - every header field offset and size (the `kArtifact*Offset` set)
-- digest size (32)
+- section digest algorithm (SHA-256) and digest size (32)
 - dispatch-entry size/layout (16)
 - max code / memory / dispatch sizes
-- alignment assumptions
+- policy invariants the loader enforces: flags required value = 0, canonical
+  section order (`header | code | dispatch | initial_memory`), no gaps/trailing
+  bytes, full-memory image (`initial_memory_size == memory_bytes`), non-empty
+  dispatch table, dispatch size multiple of entry size, reserved dispatch field
+  = 0, strictly increasing method ids, valid/aligned dispatch PCs, and
+  `instruction_bytes = 4`
 
 **Explicitly excluded:** metadata-only provenance fields that the runtime never
 inspects — `rustc_version`, `build_flags`, `target_triple`. Folding those would
@@ -117,15 +122,16 @@ const _: () = assert!(compute_format_fingerprint() == FORMAT_FINGERPRINT);
 ```
 
 Change any folded constant on either side → that side's fingerprint moves → its
-assert fails to compile until the literal is updated. Because the literal is
-shared, the two cannot both pass unless they genuinely agree.
+assert fails to compile until the literal is updated. Layer A makes local drift
+intentional; Layer B proves the currently consumed lowerer/runtime pair agree.
 
 **Layer B — cross-repo interop proof, rides the smoke path.** `rv32-lower` gains
 `--print-format-fingerprint` and **stamps `FORMAT_FINGERPRINT` into the
-`.rv32.json` metadata** it already emits. hogd's smoke test reads the stamped
-value back and asserts it equals the C++ `kArtifactFormatFingerprint`. This is
-the step that proves the two repos agree (vs. trusting a copied number), and it
-is nearly free — it reuses the smoke-artifact plumbing landed in #2434.
+`.rv32.json` metadata** it already emits under `artifact_format_fingerprint`.
+hogd's smoke test reads the stamped value back and asserts it equals the C++
+`kArtifactFormatFingerprint`. This is the step that proves the two repos agree
+(vs. trusting a copied number), and it is nearly free — it reuses the
+smoke-artifact plumbing landed in #2434.
 
 Unlike the informational `LoweredSdkArtifactSmoke` body (EXPECT, not ASSERT),
 the fingerprint check is a **hard failure** — drift detection is the whole
@@ -137,8 +143,10 @@ execution smoke.
 1. **Slice 1 — the cross-check, where the code lives today** (this design).
    hogd `artifact.h` fingerprint + `static_assert`; `rv32-lower` fingerprint +
    `--print-format-fingerprint` + metadata stamp; hogd smoke metadata assertion.
-   Touches **hogd** and **groundhog-rpc** only. Front-loads the value with no
-   cross-repo publish dance.
+   Touches **hogd** and **groundhog-rpc** only. Front-loads the value; the hogd
+   PR still consumes a published `rv32-lower`, so the normal lowerer publish and
+   wrapper-version bump happen before the hogd CI path can require the metadata
+   field.
 
 2. **Slice 2 — extract `groundhog-rv32-artifact`** (follow-up). Lift the format
    module out of `rv32-lower` into a standalone crate in protocol-rs (alongside

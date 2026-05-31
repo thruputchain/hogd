@@ -5,11 +5,13 @@
 #include <cstdlib>
 #include <fstream>
 #include <initializer_list>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +24,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/json.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
@@ -103,6 +106,30 @@ get_lowered_sdk_smoke_artifact_path()
 #else
   return {};
 #endif
+}
+
+std::string
+get_lowered_sdk_smoke_metadata_path()
+{
+  if (const char *metadata_path = std::getenv("RV32_SMOKE_METADATA");
+      metadata_path != nullptr && metadata_path[0] != '\0') {
+    return metadata_path;
+  }
+
+#ifdef HOGD_RV32_GENERATED_SMOKE_METADATA
+  return HOGD_RV32_GENERATED_SMOKE_METADATA;
+#else
+  return {};
+#endif
+}
+
+std::string
+artifact_format_fingerprint_hex()
+{
+  std::ostringstream out;
+  out << "0x" << std::hex << std::setfill('0') << std::setw(16)
+      << rv32::kArtifactFormatFingerprint;
+  return out.str();
 }
 
 void
@@ -1847,6 +1874,36 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
   EXPECT_EQ(result.gas_consumed_, 0U);
+}
+
+// Metadata cross-check for SDK-lowered RV32 artifacts.
+TEST_F(Rv32RuntimeContextTest,
+       LoweredSdkArtifactFormatFingerprintMatchesRuntime)
+{
+  const auto metadata_path = get_lowered_sdk_smoke_metadata_path();
+  if (metadata_path.empty()) {
+    GTEST_SKIP() << "build the generated ITC smoke artifact metadata "
+                    "or set RV32_SMOKE_METADATA=/path/to/contract.rv32.json";
+  }
+
+  std::ifstream input(metadata_path);
+  ASSERT_TRUE(input.is_open()) << "cannot open " << metadata_path;
+  const std::string metadata((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_FALSE(metadata.empty());
+
+  auto parsed = json::parse(metadata);
+  ASSERT_TRUE(parsed.has_value()) << "could not parse " << metadata_path
+                                  << " as JSON: " << parsed.error().message;
+  ASSERT_EQ(parsed->type(), json::Value::Type::kObject);
+
+  const json::Value *fingerprint = parsed->find("artifact_format_fingerprint");
+  ASSERT_NE(fingerprint, nullptr)
+      << "metadata is missing artifact_format_fingerprint";
+  const auto fingerprint_text = fingerprint->as_string();
+  ASSERT_TRUE(fingerprint_text.has_value())
+      << "artifact_format_fingerprint must be a string";
+  ASSERT_EQ(*fingerprint_text, artifact_format_fingerprint_hex());
 }
 
 // Smoke test for SDK-lowered RV32 artifacts.
