@@ -86,8 +86,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::halt(static_cast<uint32_t>(result.result_code),
                             result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::OutOfGas):
-    // OOG is atomic with respect to guest memory: Machine::complete_ecall
-    // charges reported host gas, then rolls back the pre-host snapshot.
+    // The bridge returns out_of_gas before writing any guest memory, so there
+    // is nothing to roll back; complete_ecall no longer snapshots memory.
     return HostResult::out_of_gas(result.gas_consumed);
   default:
     // Unknown or fatal host panics trap without committing scratch memory.

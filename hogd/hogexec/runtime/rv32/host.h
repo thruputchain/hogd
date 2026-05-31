@@ -139,8 +139,9 @@ struct HostResult {
     return HostResult(HostStatus::kHalt, gas_consumed,
                       HostHaltPayload{.code = code});
   }
-  // Host OutOfGas rolls back host memory effects but does not rewind the
-  // already-executed ECALL instruction.
+  // Host OutOfGas keeps the already-executed ECALL charged and pc advanced.
+  // Host guest-memory writes persist (no per-ecall rollback); transaction-level
+  // abort is the runtime layer's responsibility.
   static HostResult out_of_gas(uint64_t gas_consumed = 0)
   {
     return HostResult(HostStatus::kOutOfGas, gas_consumed,

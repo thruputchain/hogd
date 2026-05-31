@@ -628,7 +628,7 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
   EXPECT_EQ(first_last_result.gas_consumed, second_last_result.gas_consumed);
 }
 
-TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
+TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallWritePersists)
 {
   const auto program = make_program({
       addi(10, 0, 0),
@@ -646,7 +646,9 @@ TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallRollsBack)
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
   EXPECT_EQ(machine.gas_remaining(), 2U);
   EXPECT_EQ(machine.reg(10), 0U);
-  EXPECT_EQ(machine.memory()[8], 0x41U);
+  // The second ecall's host write commits before complete_ecall debits host
+  // gas and traps OOG; there is no per-ecall snapshot, so the write persists.
+  EXPECT_EQ(machine.memory()[8], 0x42U);
 }
 
 } // namespace
