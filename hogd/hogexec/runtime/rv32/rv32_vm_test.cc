@@ -192,8 +192,8 @@ struct MutatingTrapHost : Host {
 TEST(Rv32MachineYieldApi, startYieldsEcallThenResumeContinues)
 {
   // addi a0,x0,1 ; ecall ; addi a1,x0,5  -> after ecall, a0 := continue_with(9)
-  const auto program = make_program(
-      {addi(10, 0, 1), 0x00000073U, addi(11, 0, 5)});
+  const auto program =
+      make_program({addi(10, 0, 1), 0x00000073U, addi(11, 0, 5)});
   Machine machine(program, 64, 100);
 
   EXPECT_EQ(machine.start(), StepResult::kEcall);
@@ -202,10 +202,10 @@ TEST(Rv32MachineYieldApi, startYieldsEcallThenResumeContinues)
 
   // Continue: write a0=9, run on to fall-off-end trap.
   const StepResult r = machine.resume_from_ecall(HostResult::continue_with(9));
-  EXPECT_EQ(r, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_EQ(r, StepResult::kTrap);         // falls off the end after addi a1
   EXPECT_EQ(machine.trap(), Trap::kBadPc); // fall-off-end is a bad-pc trap
-  EXPECT_EQ(machine.reg(10), 9U);  // a0 from continue_with
-  EXPECT_EQ(machine.reg(11), 5U);  // execution continued past the ecall
+  EXPECT_EQ(machine.reg(10), 9U);          // a0 from continue_with
+  EXPECT_EQ(machine.reg(11), 5U);          // execution continued past the ecall
 }
 
 TEST(Rv32MachineYieldApi, resumeFromEcallHaltAndTrapAreTerminal)

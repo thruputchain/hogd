@@ -22,8 +22,9 @@
 namespace hogd::rv32 {
 namespace {
 
-// Writes 4 bytes at a fixed offset through the view, then returns a configurable
-// status. Used to prove host guest-memory writes persist (no per-ecall rollback).
+// Writes 4 bytes at a fixed offset through the view, then returns a
+// configurable status. Used to prove host guest-memory writes persist (no
+// per-ecall rollback).
 struct ThreadedMemoryHost : Host {
   enum class Outcome { kContinue, kOutOfGas };
   explicit ThreadedMemoryHost(Outcome outcome) : outcome_(outcome) {}
@@ -466,8 +467,7 @@ TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
     auto program = threaded_from_words(words);
     ThreadedMachine machine(program, 256, 100);
     EXPECT_EQ(machine.start(), StepResult::kEcall);
-    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()),
-              StepResult::kTrap);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()), StepResult::kTrap);
     EXPECT_EQ(machine.trap(), Trap::kHostTrap);
   }
 }
@@ -525,8 +525,8 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnContinue)
 TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
 {
   // ecall as the first instruction. The host writes 4 bytes at offset 4 through
-  // view(), then reports OutOfGas. The headline semantic: the OOG trap fires AND
-  // the host write persists -- there is NO per-ecall rollback.
+  // view(), then reports OutOfGas. The headline semantic: the OOG trap fires
+  // AND the host write persists -- there is NO per-ecall rollback.
   const std::vector<uint32_t> words = {0x00000073U};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);

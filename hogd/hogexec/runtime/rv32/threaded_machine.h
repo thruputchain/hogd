@@ -169,7 +169,7 @@ public:
   std::array<uint32_t, kRegisterCount> regs_ = {};
   std::shared_ptr<const ThreadedProgram> program_;
   std::vector<uint8_t> memory_;
-  std::vector<Slot> exec_; // size n+1; [n] is the bad-pc sentinel
+  std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
@@ -856,8 +856,9 @@ ThreadedMachine::drive()
   const auto memsize = static_cast<uint32_t>(memory_.size());
   // Plain call+return, not a musttail: a non-static member function cannot
   // tail-call the free function enter_run (musttail needs matching signatures,
-  // and the implicit `this` differs). enter_run begins the musttail chain, which
-  // runs in O(1) stack; this is the single non-recursive bridge frame into it.
+  // and the implicit `this` differs). enter_run begins the musttail chain,
+  // which runs in O(1) stack; this is the single non-recursive bridge frame
+  // into it.
   return enter_run<Trace>(c, ip, mem, memsize);
 }
 
