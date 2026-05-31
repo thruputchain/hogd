@@ -938,6 +938,7 @@ ThreadedMachine::run(Host &host)
   // Thin synchronous wrapper over the untraced yield API.
   StepResult result = start();
   while (result == StepResult::kEcall) {
+    assert(pending_ecall_.has_value());
     result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
   }
   return result;
@@ -961,6 +962,7 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
   obs.on_initial(capture(Ctx{.m = this, .base = exec_.data()}));
   StepResult result = drive<true>();
   while (result == StepResult::kEcall) {
+    assert(pending_ecall_.has_value());
     const StepResult applied =
         apply_ecall<true>(host.ecall(view(), pending_ecall_.value()));
     if (applied != StepResult::kContinue) {

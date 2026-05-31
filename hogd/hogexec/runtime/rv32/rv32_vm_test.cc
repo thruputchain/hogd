@@ -27,7 +27,7 @@
 // Some legacy VM tests keep descriptive snake_case names and compact aggregate
 // tables; the checks still run through clang-tidy for the production code
 // paths.
-// NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed)
+// NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed,bugprone-unchecked-optional-access)
 
 namespace hogd::rv32 {
 namespace {
@@ -1571,4 +1571,4 @@ TEST(Rv32ConformanceTest, randomized_store_bounds_are_deterministic)
 } // namespace
 } // namespace hogd::rv32
 
-// NOLINTEND(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed)
+// NOLINTEND(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed,bugprone-unchecked-optional-access)

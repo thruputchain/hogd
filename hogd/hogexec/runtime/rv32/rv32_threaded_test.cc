@@ -51,6 +51,8 @@ words_to_bytes(std::span<const uint32_t> words)
   return bytes;
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST(Rv32Threaded, decodeMatchesCanonicalOverCorpus)
 {
   auto check = [](const std::vector<uint32_t> &words, uint64_t seed,
@@ -541,6 +543,8 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
   EXPECT_EQ(machine.memory()[4], 0xaaU);
   EXPECT_EQ(machine.memory()[7], 0xddU);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
 } // namespace hogd::rv32
