@@ -70,12 +70,12 @@ The `cpp` command runs `scripts/check.sh -p -s` which executes these steps:
 | Step | Name | Description | Time Est. |
 |------|------|-------------|-----------|
 | 1 | Format Check | clang-format on `*.cc/*.h`, cargo fmt on Rust, shfmt on shell | ~10s |
-| 2 | GCC Debug Build | Full build with gcc-14, `-Werror`, Debug mode | ~5-8 min |
+| 2 | GCC Debug Build | Full build with gcc-15, `-Werror`, Debug mode | ~5-8 min |
 | 3 | GCC Debug Tests | Run all ~814 tests via ctest (parallel) | ~3-5 min |
 | 4 | LLVM Debug Build | Full build with clang-21, `-Werror`, Debug mode | ~5-8 min |
 | 5 | LLVM Debug Tests | Run all ~814 tests via ctest (parallel) | ~3-5 min |
 | 6 | Tidy | clang-tidy + clippy + flake8 | SKIPPED (`-s`) |
-| 7 | GCC Release Build | Full build with gcc-14, Release mode (optimized) | ~5-8 min |
+| 7 | GCC Release Build | Full build with gcc-15, Release mode (optimized) | ~5-8 min |
 
 **Total: ~20-35 minutes** (depending on cache hits)
 
@@ -186,7 +186,7 @@ Only these remain:
 ## Toolchain Versions
 
 - **Clang/LLVM**: 21 (from apt.llvm.org) - includes clang-format-21, clang-tidy-21, lld-21
-- **GCC**: 14
+- **GCC**: 15
 - **Rust**: 1.90.0 (default, required by CMakeLists.txt), stable, nightly-2025-09-24 (for wasm32 builds)
 - **cbindgen**: latest
 - **Additional tools**: shfmt, wabt, binaryen
