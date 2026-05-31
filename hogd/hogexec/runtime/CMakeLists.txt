@@ -212,56 +212,52 @@ add_executable(
   rv32/rv32_syscall_entry_bridge_test_main.cc
 )
 
-set(HOGD_RV32_SDK_RS_DIR "" CACHE PATH
-    "Optional sdk_rs checkout used to build the RV32 SDK smoke artifact")
 set(HOGD_RV32_LOWER_BIN "" CACHE FILEPATH
     "Optional rv32-lower binary used to build the RV32 SDK smoke artifact")
-if(HOGD_RV32_SDK_RS_DIR)
-  set(HOGD_RV32_GENERATED_SMOKE_ARTIFACT
-      "${CMAKE_CURRENT_BINARY_DIR}/rv32-sdk-smoke/counter_rv32.rv32a")
-  set(HOGD_RV32_GENERATED_SMOKE_METADATA
-      "${CMAKE_CURRENT_BINARY_DIR}/rv32-sdk-smoke/counter_rv32.rv32.json")
-  if(HOGD_RV32_LOWER_BIN)
-    set(HOGD_RV32_SMOKE_ENV
-        ${CMAKE_COMMAND} -E env "RV32_LOWER_BIN=${HOGD_RV32_LOWER_BIN}")
-  else()
-    set(HOGD_RV32_SMOKE_ENV)
-  endif()
-
-  add_custom_command(
-    OUTPUT
-      ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
-      ${HOGD_RV32_GENERATED_SMOKE_METADATA}
-    COMMAND
-      ${HOGD_RV32_SMOKE_ENV}
-      /bin/sh
-      ${CMAKE_SOURCE_DIR}/scripts/rv32_build_sdk_smoke_artifact.sh
-      --sdk-rs-dir "${HOGD_RV32_SDK_RS_DIR}"
-      --out "${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
-      --metadata "${HOGD_RV32_GENERATED_SMOKE_METADATA}"
-    # Only the lowering scripts are tracked here, not the sdk_rs contract
-    # sources (which live outside this tree and can't be globbed reliably).
-    # Editing the contract therefore needs a reconfigure/clean rebuild to
-    # refresh the artifact; cargo's own incremental build keeps that cheap.
-    DEPENDS
-      ${CMAKE_SOURCE_DIR}/scripts/rv32_build_sdk_smoke_artifact.sh
-      ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh
-    COMMENT "Building RV32 SDK smoke artifact"
-    VERBATIM
-    USES_TERMINAL
-  )
-  add_custom_target(
-    rv32_sdk_smoke_artifact
-    DEPENDS ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
-            ${HOGD_RV32_GENERATED_SMOKE_METADATA}
-  )
-  add_dependencies(rv32_runtime_context_test rv32_sdk_smoke_artifact)
-  target_compile_definitions(
-    rv32_runtime_context_test
-    PRIVATE
-    HOGD_RV32_GENERATED_SMOKE_ARTIFACT="${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
-  )
+set(HOGD_RV32_GENERATED_SMOKE_ARTIFACT
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32a")
+set(HOGD_RV32_GENERATED_SMOKE_METADATA
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32.json")
+if(HOGD_RV32_LOWER_BIN)
+  set(HOGD_RV32_SMOKE_ENV
+      ${CMAKE_COMMAND} -E env "RV32_LOWER_BIN=${HOGD_RV32_LOWER_BIN}")
+else()
+  set(HOGD_RV32_SMOKE_ENV)
 endif()
+
+add_custom_command(
+  OUTPUT
+    ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
+    ${HOGD_RV32_GENERATED_SMOKE_METADATA}
+  COMMAND
+    ${HOGD_RV32_SMOKE_ENV}
+    /bin/sh
+    ${CMAKE_SOURCE_DIR}/scripts/rv32_build_itc_smoke_artifact.sh
+    --out "${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
+    --metadata "${HOGD_RV32_GENERATED_SMOKE_METADATA}"
+  DEPENDS
+    ${CMAKE_SOURCE_DIR}/scripts/rv32_build_itc_smoke_artifact.sh
+    ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh
+    ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
+    ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/src/lib.rs
+    ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/src/main.rs
+  COMMENT "Building RV32 ITC smoke artifact"
+  VERBATIM
+  USES_TERMINAL
+)
+add_custom_target(
+  rv32_itc_smoke_artifact
+  DEPENDS ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
+          ${HOGD_RV32_GENERATED_SMOKE_METADATA}
+)
+add_dependencies(rv32_runtime_context_test rv32_itc_smoke_artifact)
+target_compile_definitions(
+  rv32_runtime_context_test
+  PRIVATE
+  HOGD_RV32_GENERATED_SMOKE_ARTIFACT="${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
+)
 
 target_link_libraries(
   rv32_runtime_context_test

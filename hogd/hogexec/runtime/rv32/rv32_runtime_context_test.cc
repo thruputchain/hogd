@@ -1851,22 +1851,18 @@ TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
 
 // Smoke test for SDK-lowered RV32 artifacts.
 //
-// By default this uses the generated artifact produced when CMake is configured
-// with HOGD_RV32_SDK_RS_DIR. Set RV32_SMOKE_ARTIFACT to override it with any
-// `.rv32a` path produced from an sdk_rs counter-rv32 ELF by
-// scripts/rv32_make_smoke_artifact.sh, which wraps the published rv32-lower
-// binary. The test parses, validates, invokes the selected dispatch entry, and
-// prints the observed outcome. It's intentionally informational — EXPECT, not
-// ASSERT — so a failure here surfaces the actual VM/SDK gap rather than just
-// printing a green/red ctest line.
-//
-// Without a generated artifact or env override the test skips, keeping default
-// builds independent of a sibling sdk_rs checkout.
+// By default this uses the generated artifact produced from the ITC
+// rv32_smoke_counter fixture. Set RV32_SMOKE_ARTIFACT to override it with any
+// `.rv32a` path produced by scripts/rv32_make_smoke_artifact.sh, which wraps
+// the published rv32-lower binary. The test parses, validates, invokes the
+// selected dispatch entry, and prints the observed outcome. It's intentionally
+// informational — EXPECT, not ASSERT — so a failure here surfaces the actual
+// VM/SDK gap rather than just printing a green/red ctest line.
 TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 {
   const auto artifact_path = get_lowered_sdk_smoke_artifact_path();
   if (artifact_path.empty()) {
-    GTEST_SKIP() << "configure with -DHOGD_RV32_SDK_RS_DIR=/path/to/sdk_rs "
+    GTEST_SKIP() << "build the generated ITC smoke artifact "
                     "or set RV32_SMOKE_ARTIFACT=/path/to/contract.rv32a to "
                     "run this end-to-end smoke test";
   }
