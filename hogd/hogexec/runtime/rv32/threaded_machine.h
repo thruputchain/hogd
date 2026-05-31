@@ -195,6 +195,24 @@ capture(const Ctx c)
 // gas is charged individually. Loads/stores are NOT barriers: they're
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
 // already paid the run's gas (block-granular metering, like the wasm engines).
+// The conditional branches (B-type). Their taken target is PC-relative and
+// static, so build_exec resolves it the same way as jal.
+inline bool
+is_conditional_branch(Op op)
+{
+  switch (op) {
+  case Op::kBeq:
+  case Op::kBne:
+  case Op::kBlt:
+  case Op::kBge:
+  case Op::kBltu:
+  case Op::kBgeu:
+    return true;
+  default:
+    return false;
+  }
+}
+
 inline bool
 is_barrier(Op op)
 {
@@ -249,13 +267,18 @@ is_barrier(Op op)
   }                                                                            \
   (c).m->gas_remaining_ -= (amount)
 
-// Set a terminal trap at `pc`, observe it, return kTrap.
-template<bool Trace>
-inline StepResult
-trap_at(Ctx c, uint32_t pc, Trap t)
+// Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
+// a template parameter (it is a compile-time literal at every call site), so
+// the signature is StepResult(Ctx, const Slot*) -- identical to a handler's, so
+// fault sites can HOGD_MUSTTAIL into it (a single tail-branch, no frame).
+// cold+noinline: faults are off the hot path, and out-of-lining keeps the pc_of
+// divide and the pc_/trap_/halted_ stores out of every handler body.
+template<bool Trace, Trap T>
+[[gnu::noinline, gnu::cold]] StepResult
+trap_at(Ctx c, const Slot *ip)
 {
-  c.m->pc_ = pc;
-  c.m->trap_ = t;
+  c.m->pc_ = pc_of(c, ip);
+  c.m->trap_ = T;
   c.m->halted_ = true;
   if constexpr (Trace) {
     c.m->obs_->on_retire(capture(c), StepResult::kTrap);
@@ -405,6 +428,10 @@ valid_target(Ctx c, uint32_t target)
   return c.m->program_->contains_pc(target);
 }
 
+// Like jal, a branch's taken target is PC-relative and resolved at decode time:
+// in range, imm is rewritten to the target slot delta and op_branch skips the
+// alignment/range check; out of range, op_branch_bad_target (below) is baked.
+// The not-taken path falls through to ip+1 regardless of the target's validity.
 template<bool Trace>
 StepResult
 op_branch(Ctx c, const Slot *ip)
@@ -413,12 +440,22 @@ op_branch(Ctx c, const Slot *ip)
   if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
-  const uint32_t target = pc_of(c, ip) + bits_from_i32(ip->imm);
-  if (!valid_target(c, target)) {
-    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
-  }
-  const Slot *next = c.base + (target / kInstructionBytes);
+  const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
+}
+
+// Baked in place of op_branch when the (static) taken target is out of range. A
+// not-taken branch still falls through normally; only a taken one traps kBadPc
+// (at the branch's own pc, after its gas is charged).
+template<bool Trace>
+StepResult
+op_branch_bad_target(Ctx c, const Slot *ip)
+{
+  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
+  if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+    HOGD_ENTER_RUN(c, ip + 1);
+  }
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip);
 }
 
 // jal's target is PC-relative and known at decode time, so build_exec resolves
@@ -444,7 +481,7 @@ StepResult
 op_jal_bad_target(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip);
 }
 
 template<bool Trace>
@@ -456,7 +493,7 @@ op_jalr(Ctx c, const Slot *ip)
   const uint32_t target =
       (c.m->regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
   if (!valid_target(c, target)) {
-    return trap_at<Trace>(c, pc, Trap::kBadPc);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip);
   }
   c.m->write_reg(ip->rd, pc + kInstructionBytes);
   const Slot *next = c.base + (target / kInstructionBytes);
@@ -499,10 +536,10 @@ op_load(Ctx c, const Slot *ip)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
-    return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip);
   }
   if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
-    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip);
   }
   uint32_t v = le_load<Width>(c.m->memory_, addr);
   if constexpr (SignExtend) {
@@ -518,10 +555,10 @@ op_store(Ctx c, const Slot *ip)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
-    return trap_at<Trace>(c, pc_of(c, ip), Trap::kMisalignedAccess);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip);
   }
   if (!memory_range_in_bounds(c.m->memory_.size(), addr, Width)) {
-    return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadMemory);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip);
   }
   le_store<Width>(c.m->memory_, addr, c.m->regs_[ip->rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
@@ -532,7 +569,7 @@ StepResult
 op_ebreak(Ctx c, const Slot *ip)
 {
   HOGD_CHARGE_OR_TRAP(c, ip, ip->gas); // ebreak charges gas, then traps
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBreakpoint);
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip);
 }
 
 // op_ecall resolves the host call inline (the threaded machine runs to
@@ -573,7 +610,7 @@ op_ecall(Ctx c, const Slot *ip)
     // Debit host gas before committing; over-budget host cannot mutate state.
     if (c.m->gas_remaining_ < hr.gas_consumed) {
       c.m->memory_ = snapshot;
-      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
+      return trap_at<Trace, Trap::kOutOfGas>(c, next);
     }
     c.m->gas_remaining_ -= hr.gas_consumed;
 
@@ -591,13 +628,13 @@ op_ecall(Ctx c, const Slot *ip)
       return StepResult::kHalted;
     case HostStatus::kOutOfGas:
       c.m->memory_ = snapshot;
-      return trap_at<Trace>(c, pc_after, Trap::kOutOfGas);
+      return trap_at<Trace, Trap::kOutOfGas>(c, next);
     case HostStatus::kTrap:
     default:
       // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
       // has no payload field (ArchState carries only the Trap, which is what
       // the differential test compares), so just set the trap class.
-      return trap_at<Trace>(c, pc_after, Trap::kHostTrap);
+      return trap_at<Trace, Trap::kHostTrap>(c, next);
     }
   } // snapshot and hr destroyed here
 
@@ -613,7 +650,7 @@ template<bool Trace>
 StepResult
 op_bad_pc(Ctx c, const Slot *ip)
 {
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kBadPc);
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip);
 }
 
 // Defensive default for handler_for; unreachable by construction, since
@@ -623,7 +660,7 @@ template<bool Trace>
 StepResult
 op_invalid(Ctx c, const Slot *ip)
 {
-  return trap_at<Trace>(c, pc_of(c, ip), Trap::kInvalidInstruction);
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kInvalidInstruction>(c, ip);
 }
 
 template<bool Trace>
@@ -744,19 +781,24 @@ ThreadedMachine::build_exec(bool trace)
                     .rd = d.rd,
                     .rs1 = d.rs1,
                     .rs2 = d.rs2};
-    // Resolve jal's PC-relative target once, here, so op_jal needs no per-jump
-    // alignment/range check. In range: rewrite imm to the target slot delta
-    // (exact -- a valid target is 4-aligned, so the byte imm is a multiple of
-    // kInstructionBytes). Out of range: swap in the trapping handler.
-    if (d.op == Op::kJal) {
+    // Resolve the PC-relative target of jal and the conditional branches once,
+    // here, so their handlers need no per-execution alignment/range check. In
+    // range: rewrite imm to the target slot delta (exact -- a valid target is
+    // 4-aligned, so the byte imm is a multiple of kInstructionBytes). Out of
+    // range: swap in the op-specific trapping handler.
+    if (d.op == Op::kJal || is_conditional_branch(d.op)) {
       const uint32_t pc = static_cast<uint32_t>(i) * kInstructionBytes;
       const uint32_t target = pc + bits_from_i32(d.imm);
       if (program_->contains_pc(target)) {
         exec_[i].imm = d.imm / static_cast<int32_t>(kInstructionBytes);
       }
-      else {
+      else if (d.op == Op::kJal) {
         exec_[i].handler =
             trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
+      }
+      else {
+        exec_[i].handler =
+            trace ? &op_branch_bad_target<true> : &op_branch_bad_target<false>;
       }
     }
   }
