@@ -189,6 +189,85 @@ struct MutatingTrapHost : Host {
   bool wrote = false;
 };
 
+TEST(Rv32MachineYieldApi, startYieldsEcallThenResumeContinues)
+{
+  // addi a0,x0,1 ; ecall ; addi a1,x0,5  -> after ecall, a0 := continue_with(9)
+  const auto program = make_program(
+      {addi(10, 0, 1), 0x00000073U, addi(11, 0, 5)});
+  Machine machine(program, 64, 100);
+
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
+  ASSERT_TRUE(machine.pending_ecall().has_value());
+  EXPECT_EQ(machine.pending_ecall()->a0, 1U);
+
+  // Continue: write a0=9, run on to fall-off-end trap.
+  const StepResult r = machine.resume_from_ecall(HostResult::continue_with(9));
+  EXPECT_EQ(r, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_EQ(machine.trap(), Trap::kBadPc); // fall-off-end is a bad-pc trap
+  EXPECT_EQ(machine.reg(10), 9U);  // a0 from continue_with
+  EXPECT_EQ(machine.reg(11), 5U);  // execution continued past the ecall
+}
+
+TEST(Rv32MachineYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
+{
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
+              StepResult::kHalted);
+    EXPECT_EQ(machine.halt_code(), 7U);
+  }
+  {
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 16, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap(0, 42)),
+              StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+    EXPECT_EQ(machine.host_trap_code(), 42U);
+  }
+}
+
+TEST(Rv32MachineYieldApi, startResumeMatchesRunForSameHost)
+{
+  // Drive one Machine manually via start()/resume_from_ecall and another via
+  // run(Host&) with the SAME host program; assert identical final state.
+  // MemoryHost writes {1,2,3,4} at offset 8 then halts(0) on its first ecall.
+  const auto program = make_program({addi(10, 0, 1), 0x00000073U});
+
+  Machine driven(program, 64, 100);
+  MemoryHost manual_host;
+  StepResult r = driven.start();
+  // Mid-flight state run() hides: start() stops at the first ecall.
+  EXPECT_EQ(r, StepResult::kEcall);
+  ASSERT_TRUE(driven.pending_ecall().has_value());
+  // ecall word is at byte 4; the seam advances pc past it before yielding.
+  EXPECT_EQ(driven.pc(), 8U);
+  while (r == StepResult::kEcall) {
+    r = driven.resume_from_ecall(
+        manual_host.ecall(driven.view(), driven.pending_ecall().value()));
+  }
+
+  Machine ran(program, 64, 100);
+  MemoryHost run_host;
+  const StepResult rr = ran.run(run_host);
+
+  EXPECT_EQ(r, rr);
+  EXPECT_EQ(r, StepResult::kHalted);
+  EXPECT_EQ(driven.pc(), ran.pc());
+  EXPECT_EQ(driven.gas_remaining(), ran.gas_remaining());
+  EXPECT_EQ(driven.halt_code(), ran.halt_code());
+  EXPECT_EQ(driven.halt_code(), 0U); // MemoryHost halts with code 0
+  EXPECT_TRUE(manual_host.wrote);
+  EXPECT_TRUE(run_host.wrote);
+  // MemoryHost writes {1,2,3,4} at offset 8.
+  EXPECT_EQ(driven.memory()[8], ran.memory()[8]);
+  EXPECT_EQ(driven.memory()[8], 1U);
+  EXPECT_EQ(driven.memory()[11], ran.memory()[11]);
+  EXPECT_EQ(driven.memory()[11], 4U);
+}
+
 TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 {
   const auto parsed = parse_artifact(compiled_sha256_return::kArtifact);
