@@ -129,5 +129,97 @@ TEST(Rv32Threaded, runsBasicArithmetic)
   EXPECT_EQ(machine.reg(0), 0U);
 }
 
+TEST(Rv32Threaded, branchTakenSkipsInstruction)
+{
+  using test_program::branch;
+  // x1=1, x2=1; beq x1,x2,+8 (taken) skips an addi that would set x3=99.
+  const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 1),
+                                       branch(0, 1, 2, 8), addi(3, 0, 99)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.reg(3), 0U); // branch skipped the addi
+}
+
+TEST(Rv32Threaded, branchNotTakenFallsThrough)
+{
+  using test_program::branch;
+  // x1=1, x2=2; beq x1,x2,+8 (NOT taken) -> next addi sets x3=99 executes.
+  const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 2),
+                                       branch(0, 1, 2, 8), addi(3, 0, 99)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(3), 99U);
+}
+
+TEST(Rv32Threaded, jalLinksAndJumps)
+{
+  using test_program::j_type;
+  // jal x1,+8 writes link (pc+4=4) to x1 and jumps over the addi at pc=4.
+  // Use x4 for the skipped instruction (avoids x2=sp which is initialised to
+  // the stack pointer by the machine).
+  const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
+                                       addi(3, 0, 9)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(1), 4U);
+  EXPECT_EQ(machine.reg(4), 0U); // skipped
+  EXPECT_EQ(machine.reg(3), 9U); // target executed
+}
+
+TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
+{
+  using test_program::j_type;
+  const std::vector<uint32_t> words = {j_type(0, 4096)}; // target out of range
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
+}
+
+// jalr and auipc are corpus blind spots: the generators exclude jalr (computed
+// target) and auipc/linking-jal (pc-relative register writes the Spike oracle
+// can't model), so the capstone diff never reaches them. Cover them directly.
+TEST(Rv32Threaded, jalrLinksAndJumpsToComputedTarget)
+{
+  using test_program::jalr;
+  // x1=12; jalr x5,x1,0 -> link=pc+4=8 to x5, target=(12)&~1=12 (skips pc=8).
+  const std::vector<uint32_t> words = {addi(1, 0, 12), jalr(5, 1, 0),
+                                       addi(3, 0, 99), addi(4, 0, 9)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs),
+            StepResult::kTrap);  // falls off after target
+  EXPECT_EQ(machine.reg(5), 8U); // link = pc_of_jalr (4) + 4
+  EXPECT_EQ(machine.reg(3), 0U); // pc=8 skipped
+  EXPECT_EQ(machine.reg(4), 9U); // target pc=12 executed
+}
+
+TEST(Rv32Threaded, auipcIsPcRelative)
+{
+  using test_program::u_type;
+  // nop at pc=0; auipc x1, 0 at pc=4 -> x1 = pc(4) + (0 << 12) = 4.
+  const std::vector<uint32_t> words = {addi(0, 0, 0), u_type(0x17U, 1, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  NullObserver obs;
+  EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(1), 4U);
+}
+
 } // namespace
 } // namespace hogd::rv32

@@ -279,6 +279,74 @@ op_auipc(Ctx<Obs> &c)
   HOGD_THREAD_NEXT(c);
 }
 
+// Validate a byte target against the program image. Mirrors
+// Machine::validate_control_target via ThreadedProgram::contains_pc.
+template<class Obs>
+inline bool
+valid_target(Ctx<Obs> &c, uint32_t target)
+{
+  // contains_pc already checks 4-byte alignment and in-range, so delegate to it
+  // wholesale -- same as Machine::validate_control_target.
+  return c.m.program_->contains_pc(target);
+}
+
+template<class Obs>
+StepResult
+op_branch(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  if (!branch_taken(in.op, c.m.regs_[in.rs1], c.m.regs_[in.rs2])) {
+    c.idx += 1;
+    c.m.pc_ = static_cast<uint32_t>(c.idx) * kInstructionBytes;
+    HOGD_THREAD_NEXT(c);
+  }
+  // Taken: pc_ still holds this branch's address (the not-taken path returned
+  // before advancing), so target = this-pc + imm.
+  const uint32_t target = c.m.pc_ + bits_from_i32(in.imm);
+  if (!valid_target(c, target)) {
+    return trap_step(c, Trap::kBadPc);
+  }
+  c.m.pc_ = target;
+  c.idx = target / kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
+template<class Obs>
+StepResult
+op_jal(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  const uint32_t link = c.m.pc_ + kInstructionBytes;
+  const uint32_t target = c.m.pc_ + bits_from_i32(in.imm);
+  if (!valid_target(c, target)) {
+    return trap_step(c, Trap::kBadPc);
+  }
+  c.m.write_reg(in.rd, link);
+  c.m.pc_ = target;
+  c.idx = target / kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
+template<class Obs>
+StepResult
+op_jalr(Ctx<Obs> &c)
+{
+  const Instr &in = c.code[c.idx];
+  HOGD_CHARGE_OR_TRAP(c, in.gas);
+  const uint32_t link = c.m.pc_ + kInstructionBytes;
+  const uint32_t target =
+      (c.m.regs_[in.rs1] + bits_from_i32(in.imm)) & ~uint32_t{1};
+  if (!valid_target(c, target)) {
+    return trap_step(c, Trap::kBadPc);
+  }
+  c.m.write_reg(in.rd, link);
+  c.m.pc_ = target;
+  c.idx = target / kInstructionBytes;
+  HOGD_THREAD_NEXT(c);
+}
+
 // Sentinel: reached only by sequential fall-off past the last instruction.
 // Traps kBadPc with NO gas charged (matches "invalid fetch traps without gas").
 template<class Obs>
@@ -302,6 +370,17 @@ Handler<Obs>
 handler_for(Op op)
 {
   switch (op) {
+  case Op::kJal:
+    return &op_jal<Obs>;
+  case Op::kJalr:
+    return &op_jalr<Obs>;
+  case Op::kBeq:
+  case Op::kBne:
+  case Op::kBlt:
+  case Op::kBge:
+  case Op::kBltu:
+  case Op::kBgeu:
+    return &op_branch<Obs>;
   case Op::kLui:
     return &op_lui<Obs>;
   case Op::kAuipc:
