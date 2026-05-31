@@ -147,13 +147,17 @@ public:
   // out-of-line below, after the handler functions it references.
   void build_exec(bool trace);
 
-  // Re-enter the musttail dispatch chain at pc_, returning the first terminal
-  // StepResult (kEcall/kHalted/kTrap). apply_ecall is the apply-only complete
-  // half of the ecall: it debits host gas and commits the result, but does not
-  // run on. Both are defined out-of-line below (they call enter_run/trap_at).
+private:
+  // Internal seam primitives (not part of the public API; the free-function
+  // handlers below never call these). drive re-enters the musttail dispatch
+  // chain at pc_, returning the first terminal StepResult (kEcall/kHalted/
+  // kTrap). apply_ecall is the apply-only complete half of the ecall: it debits
+  // host gas and commits the result, but does not run on. Both are defined
+  // out-of-line below (they call enter_run/trap_at).
   template<bool Trace> StepResult drive();
   template<bool Trace> StepResult apply_ecall(const HostResult &result);
 
+public:
   // Public so the free-function handlers (below) can manipulate state. This is
   // an experimental, single-translation-unit interpreter; the handlers are
   // effectively part of the machine.
@@ -850,10 +854,11 @@ ThreadedMachine::drive()
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   uint8_t *mem = memory_.data();
   const auto memsize = static_cast<uint32_t>(memory_.size());
-  // store-then-return (NOT a tail call): keeps this frame (owning `c`) alive for
-  // the whole musttail chain. run()/start()/resume_from_ecall() all drive here.
-  const StepResult result = enter_run<Trace>(c, ip, mem, memsize);
-  return result;
+  // Plain call+return, not a musttail: a non-static member function cannot
+  // tail-call the free function enter_run (musttail needs matching signatures,
+  // and the implicit `this` differs). enter_run begins the musttail chain, which
+  // runs in O(1) stack; this is the single non-recursive bridge frame into it.
+  return enter_run<Trace>(c, ip, mem, memsize);
 }
 
 // Apply-only complete half: debit host gas, commit the result, and (on the
@@ -929,14 +934,8 @@ ThreadedMachine::resume_from_ecall(const HostResult &result)
 inline StepResult
 ThreadedMachine::run(Host &host)
 {
-  if (halted_) {
-    return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
-  }
-  if (!exec_built_ || exec_traced_) {
-    build_exec(/*trace=*/false);
-  }
-  obs_ = nullptr;
-  StepResult result = drive<false>();
+  // Thin synchronous wrapper over the untraced yield API.
+  StepResult result = start();
   while (result == StepResult::kEcall) {
     result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
   }
