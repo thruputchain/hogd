@@ -10,10 +10,12 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -94,7 +96,16 @@ constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
     WasmEngine::kWasmtime,
 };
 constexpr std::string_view kRv32SmokeCounterInterface = "Counter";
+// Keep in sync with built_contracts/integration_test_contracts/
+// rv32_smoke_counter/Cargo.toml; dispatch-table asserts below fail loudly on
+// drift.
 constexpr std::string_view kRv32SmokeCounterVersion = "0.2.0";
+
+struct LoadedRv32SmokeArtifact {
+  std::string path;
+  size_t artifact_size;
+  rv32::RuntimeContractImage image;
+};
 
 std::string
 get_lowered_sdk_smoke_artifact_path()
@@ -140,6 +151,41 @@ rv32_smoke_counter_method_id(std::string_view method)
 {
   return sdk_method_id(kRv32SmokeCounterInterface, kRv32SmokeCounterVersion,
                        method);
+}
+
+std::optional<LoadedRv32SmokeArtifact>
+load_lowered_sdk_smoke_artifact(std::string artifact_path)
+{
+  std::ifstream input(artifact_path, std::ios::binary);
+  if (!input.is_open()) {
+    ADD_FAILURE() << "cannot open " << artifact_path;
+    return std::nullopt;
+  }
+  std::vector<uint8_t> artifact_bytes((std::istreambuf_iterator<char>(input)),
+                                      std::istreambuf_iterator<char>());
+  if (artifact_bytes.empty()) {
+    ADD_FAILURE() << "empty artifact at " << artifact_path;
+    return std::nullopt;
+  }
+
+  auto parsed = rv32::parse_artifact(artifact_bytes);
+  if (!parsed.has_value()) {
+    ADD_FAILURE() << "parse_artifact rejected the lowered artifact (error="
+                  << static_cast<int>(parsed.error()) << ")";
+    return std::nullopt;
+  }
+
+  return LoadedRv32SmokeArtifact{
+      .path = std::move(artifact_path),
+      .artifact_size = artifact_bytes.size(),
+      .image =
+          rv32::RuntimeContractImage{
+              .program = parsed->program,
+              .initial_memory = std::move(parsed->initial_memory),
+              .dispatch_table = std::move(parsed->dispatch_table),
+              .memory_bytes = parsed->memory_bytes,
+          },
+  };
 }
 
 void
@@ -1932,46 +1978,32 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
                     "run this end-to-end calldata smoke test";
   }
 
-  std::ifstream input(artifact_path, std::ios::binary);
-  ASSERT_TRUE(input.is_open()) << "cannot open " << artifact_path;
-  std::vector<uint8_t> artifact_bytes((std::istreambuf_iterator<char>(input)),
-                                      std::istreambuf_iterator<char>());
-  ASSERT_GT(artifact_bytes.size(), 0U);
-
-  auto parsed = rv32::parse_artifact(artifact_bytes);
-  ASSERT_TRUE(parsed.has_value())
-      << "parse_artifact rejected the lowered artifact (error="
-      << static_cast<int>(parsed.error()) << ")";
-
-  rv32::RuntimeContractImage image{
-      .program = parsed->program,
-      .initial_memory = std::move(parsed->initial_memory),
-      .dispatch_table = std::move(parsed->dispatch_table),
-      .memory_bytes = parsed->memory_bytes,
-  };
+  auto loaded = load_lowered_sdk_smoke_artifact(artifact_path);
+  ASSERT_TRUE(loaded.has_value());
 
   const Runtime::MethodID increment_method =
       rv32_smoke_counter_method_id("increment");
   const Runtime::MethodID get_method = rv32_smoke_counter_method_id("get");
-  ASSERT_NE(std::ranges::find(image.dispatch_table, increment_method,
+  ASSERT_NE(std::ranges::find(loaded->image.dispatch_table, increment_method,
                               &rv32::DispatchEntry::method_id),
-            image.dispatch_table.end())
+            loaded->image.dispatch_table.end())
       << "lowered counter artifact is missing increment dispatch entry";
-  ASSERT_NE(std::ranges::find(image.dispatch_table, get_method,
+  ASSERT_NE(std::ranges::find(loaded->image.dispatch_table, get_method,
                               &rv32::DispatchEntry::method_id),
-            image.dispatch_table.end())
+            loaded->image.dispatch_table.end())
       << "lowered counter artifact is missing get dispatch entry";
 
   auto rv32_context =
-      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+      rv32::RuntimeContext({{kRv32ContractId, std::move(loaded->image)}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
   constexpr uint64_t kIncrementAmount = 7;
-  // Match the Rust SDK client generator: a single-argument call is encoded as
-  // that scalar value using the contract's CXS serialization format.
+  // Match the client ABI shape: call arguments are encoded as a tuple. A
+  // one-field tuple is byte-identical to the scalar in CXS, but spelling the
+  // tuple keeps this test from teaching the wrong pattern for multi-arg calls.
   auto increment_calldata = Serializer<SerializationFormat::kCxs>::serialize(
-      kIncrementAmount);
+      std::tuple<uint64_t>{kIncrementAmount});
   ASSERT_TRUE(increment_calldata.has_value());
 
   auto increment_handler = make_new_system_call_handler(
@@ -1997,6 +2029,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   EXPECT_EQ(from_xdr(increment_write.delta.nnint().add_value),
             kIncrementAmount);
 
+  // NNInt deltas are visible to a later root transaction after block commit.
   advance_block();
 
   auto get_handler = make_new_system_call_handler(
@@ -2037,41 +2070,27 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
                     "run this end-to-end smoke test";
   }
 
-  std::ifstream input(artifact_path, std::ios::binary);
-  ASSERT_TRUE(input.is_open()) << "cannot open " << artifact_path;
-  std::vector<uint8_t> artifact_bytes((std::istreambuf_iterator<char>(input)),
-                                      std::istreambuf_iterator<char>());
-  ASSERT_GT(artifact_bytes.size(), 0U);
-  std::cerr << "[smoke] loaded artifact: " << artifact_bytes.size()
-            << " bytes from " << artifact_path << "\n";
-
-  auto parsed = rv32::parse_artifact(artifact_bytes);
-  ASSERT_TRUE(parsed.has_value())
-      << "parse_artifact rejected the lowered artifact (error="
-      << static_cast<int>(parsed.error()) << ")";
-  std::cerr << "[smoke] parsed: code_bytes=" << parsed->program->byte_size()
-            << " dispatch_entries=" << parsed->dispatch_table.size()
-            << " memory_bytes=" << parsed->memory_bytes << "\n";
-  ASSERT_FALSE(parsed->dispatch_table.empty());
-
-  rv32::RuntimeContractImage image{
-      .program = parsed->program,
-      .initial_memory = std::move(parsed->initial_memory),
-      .dispatch_table = std::move(parsed->dispatch_table),
-      .memory_bytes = parsed->memory_bytes,
-  };
+  auto loaded = load_lowered_sdk_smoke_artifact(artifact_path);
+  ASSERT_TRUE(loaded.has_value());
+  std::cerr << "[smoke] loaded artifact: " << loaded->artifact_size
+            << " bytes from " << loaded->path << "\n";
+  std::cerr << "[smoke] parsed: code_bytes="
+            << loaded->image.program->byte_size()
+            << " dispatch_entries=" << loaded->image.dispatch_table.size()
+            << " memory_bytes=" << loaded->image.memory_bytes << "\n";
+  ASSERT_FALSE(loaded->image.dispatch_table.empty());
 
   // Pick the smoke target. Default is the lowest-ID dispatch entry; set
   // RV32_SMOKE_METHOD_ID=0x<16-hex> to target a specific method (e.g. a
   // no-arg getter that returns cleanly without calldata). For counter the
   // default lands on whichever of initialize/increment/decrement/get sorts
   // first by ContractEntrypointID hash.
-  auto smoke_entry = image.dispatch_table.front();
+  auto smoke_entry = loaded->image.dispatch_table.front();
   if (const char *want = std::getenv("RV32_SMOKE_METHOD_ID")) {
     const uint64_t target = std::strtoull(want, nullptr, 0);
-    const auto it = std::ranges::find(image.dispatch_table, target,
+    const auto it = std::ranges::find(loaded->image.dispatch_table, target,
                                       &rv32::DispatchEntry::method_id);
-    ASSERT_NE(it, image.dispatch_table.end())
+    ASSERT_NE(it, loaded->image.dispatch_table.end())
         << "RV32_SMOKE_METHOD_ID=0x" << std::hex << target
         << " not in the artifact dispatch table";
     smoke_entry = *it;
@@ -2081,7 +2100,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
             << "\n";
 
   auto rv32_context =
-      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
+      rv32::RuntimeContext({{kRv32ContractId, std::move(loaded->image)}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
