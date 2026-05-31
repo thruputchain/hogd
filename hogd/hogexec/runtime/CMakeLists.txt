@@ -232,11 +232,11 @@ add_custom_command(
   COMMAND
     ${HOGD_RV32_SMOKE_ENV}
     /bin/sh
-    ${CMAKE_SOURCE_DIR}/scripts/rv32_build_itc_smoke_artifact.sh
-    --out "${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}"
-    --metadata "${HOGD_RV32_GENERATED_SMOKE_METADATA}"
+    ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    rv32_smoke_counter
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
   DEPENDS
-    ${CMAKE_SOURCE_DIR}/scripts/rv32_build_itc_smoke_artifact.sh
+    ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
     ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
