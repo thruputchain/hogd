@@ -1906,7 +1906,8 @@ TEST_F(Rv32RuntimeContextTest,
   // gtest's ASSERT_TRUE, and it flags value() and operator* alike.
   if (fingerprint_text.has_value()) {
     EXPECT_EQ(*fingerprint_text, artifact_format_fingerprint_hex());
-  } else {
+  }
+  else {
     ADD_FAILURE() << "artifact_format_fingerprint must be a string";
   }
 }
