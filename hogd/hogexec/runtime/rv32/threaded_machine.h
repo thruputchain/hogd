@@ -137,8 +137,13 @@ public:
   // Public so the free-function handlers (below) can manipulate state. This is
   // an experimental, single-translation-unit interpreter; the handlers are
   // effectively part of the machine.
-  std::shared_ptr<const ThreadedProgram> program_;
+  //
+  // regs_ is deliberately the first member (offset 0): the machine pointer is
+  // then also the register-file base, so hot-path regs_[i] is a single indexed
+  // load with no base adjustment, while every other (cold) field is still
+  // reached through the same pointer at its own offset.
   std::array<uint32_t, kRegisterCount> regs_ = {};
+  std::shared_ptr<const ThreadedProgram> program_;
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_; // size n+1; [n] is the bad-pc sentinel
   Host *host_ = nullptr;   // set for the duration of run(); cold (ecall only)
