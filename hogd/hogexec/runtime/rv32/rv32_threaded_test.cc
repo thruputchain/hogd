@@ -1,12 +1,16 @@
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
+#include "hogd/hogexec/runtime/rv32/host.h"
+#include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/musttail.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_corpus.h"
