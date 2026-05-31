@@ -52,7 +52,7 @@ It also surfaced two staleness/ergonomics problems that motivate this design:
 
 | Component | Repo | Role |
 |---|---|---|
-| `groundhog-rv32-artifact` (lib) | protocol-rs (next to `groundhog-xdr`) | **Single Rust source of truth** for the artifact format: header constants, writer, validator. |
+| `groundhog-rv32-artifact` (lib) | groundhog-rpc (`crates/rv32/artifact`) | **Single Rust source of truth** for the artifact format: header constants, writer, validator. |
 | `groundhog-rv32-lower` (lib + bin `rv32-lower`) | groundhog-rpc (alongside CLI build tooling) | The `wasm-opt` analog: `rv32-lower --elf in --out x.rv32a`. Validate ELF layout → package code+memory → hash → write artifact. Depends on `groundhog-rv32-artifact`. (Crate keeps the `groundhog-` prefix; the binary is the short `rv32-lower`, as `groundhog-cli` → `groundhog`.) |
 | `#[contract]` macro + `rv32-runtime` | sdk_rs | Entry symbols, the guest-side dispatcher (see below), and typed syscall wrappers. `_start` routes to the selected method once the method-id-passing mechanism is chosen (open question below) — the `_start` ABI is not yet settled. |
 | `groundhog build` (rv32 path) | groundhog-rpc | Convenience orchestration: cargo-build the rv32 bin → shell out to `rv32-lower` → emit `.rv32a` + the contract spec it already produces. |
@@ -185,7 +185,7 @@ it lands on `$PATH` the way wasm-opt does.
   first dispatch entry). Still open: running it with real calldata and plumbing a
   CI-built artifact instead of the `RV32_SMOKE_ARTIFACT` env var.
 - **Phase 1 — lowerer ported (2026-05-30):** `groundhog-rv32-lower` (lib + bin
-  `rv32-lower`) landed in groundhog-rpc at `crates/tools/rv32-lower`, **at
+  `rv32-lower`) landed in groundhog-rpc at `crates/rv32/lower`, **at
   byte-for-byte output parity** with `scripts/rv32_lower.py` — verified on
   `counter-rv32` (identical `.rv32a` artifact and JSON metadata sidecar). The
   v3 format lives as the crate's `artifact` module — the single Rust source of
@@ -195,7 +195,7 @@ it lands on `$PATH` the way wasm-opt does.
   posture). Housed in groundhog-rpc for now; self-contained so it can lift to
   its own repo later. **Still open** (the other half of this phase's acceptance
   criterion): splitting the `artifact` module out to a standalone
-  `groundhog-rv32-artifact` crate (protocol-rs) and wiring the build-time digest
+  `groundhog-rv32-artifact` crate (groundhog-rpc `crates/rv32/artifact`) and wiring the build-time digest
   cross-check against hogd's `artifact.h`.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `built_contracts/build_risc.sh`, which wraps

@@ -2,8 +2,8 @@
 
 **Status:** design (2026-05-30). Closes the still-open half of Phase 1 in
 [rv32-author-toolchain.md](rv32-author-toolchain.md): a build-time digest
-cross-check that keeps hogd's `artifact.h` and the Rust lowerer's `artifact.rs`
-honest, ahead of extracting the format into a standalone crate.
+cross-check that keeps hogd's `artifact.h` and the Rust artifact crate's
+`format.rs` honest.
 
 ## Problem
 
@@ -11,7 +11,7 @@ The RV32 **v3 artifact format** is defined twice:
 
 - **C++** — `hogd/hogexec/runtime/rv32/artifact.h`: the constants, field
   offsets, and validation the runtime applies when it parses an artifact.
-- **Rust** — `groundhog-rpc:crates/tools/rv32-lower/src/artifact.rs`: the
+- **Rust** — `groundhog-rpc:crates/rv32/artifact/src/format.rs`: the
   constants and writer the lowerer uses to emit the artifact.
 
 The two are kept in sync **by hand**. Nothing stops them drifting: bump an
@@ -47,7 +47,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest(); // FNV-1a 
 static_assert(kGasScheduleDigest == 0xebe53dceea581d0cULL);
 ```
 
-and `artifact.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0xebe5_3dce_ea58_1d0c`).
+and `format.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0xebe5_3dce_ea58_1d0c`).
 `gas_schedule_digest()` folds **named values** (versions, op costs, name
 strings) via FNV-1a with explicit encoding — it never hashes raw struct bytes.
 We generalize that idiom from "the gas schedule" to "the whole format."
@@ -116,7 +116,7 @@ static_assert(kArtifactFormatFingerprint == 0x<LITERAL>ULL);
 ```
 
 ```rust
-// rv32-lower artifact.rs
+// groundhog-rv32-artifact format.rs
 pub const FORMAT_FINGERPRINT: u64 = 0x<LITERAL>;
 const _: () = assert!(compute_format_fingerprint() == FORMAT_FINGERPRINT);
 ```
@@ -140,17 +140,19 @@ execution smoke.
 
 ## Sequencing
 
-1. **Slice 1 — the cross-check, where the code lives today** (this design).
-   hogd `artifact.h` fingerprint + `static_assert`; `rv32-lower` fingerprint +
-   `--print-format-fingerprint` + metadata stamp; hogd smoke metadata assertion.
+1. **Slice 1 — the cross-check before extraction** (this design).
+   hogd `artifact.h` fingerprint + `static_assert`; Rust fingerprint +
+   `rv32-lower --print-format-fingerprint` + metadata stamp; hogd smoke
+   metadata assertion.
    Touches **hogd** and **groundhog-rpc** only. Front-loads the value; the hogd
    PR still consumes a published `rv32-lower`, so the normal lowerer publish and
    wrapper-version bump happen before the hogd CI path can require the metadata
    field.
 
 2. **Slice 2 — extract `groundhog-rv32-artifact`** (follow-up). Lift the format
-   module out of `rv32-lower` into a standalone crate in protocol-rs (alongside
-   `groundhog-spec`, `hogexec-internal`), repoint `rv32-lower` at it. The
+   module out of `rv32-lower` into a standalone crate in groundhog-rpc under
+   `crates/rv32/` (grouped with `rv32-lower`), not protocol-rs — protocol-rs is the x23c-generated XDR bindings, and the artifact format is a bespoke binary format owned by the
+   rv32 tooling. Repoint `rv32-lower` at it. The
    fingerprint from Slice 1 becomes the **regression guard for the extraction**:
    lift the module, fingerprint stays identical ⇒ proof the refactor preserved
    the format. You already know exactly what the canonical crate must preserve.
@@ -161,10 +163,11 @@ execution smoke.
   constexpr + `kArtifactFormatFingerprint` + `static_assert`; smoke test
   (`rv32_runtime_context_test.cc`) reads the stamped metadata fingerprint and
   asserts equality with the C++ value.
-- **groundhog-rpc** (`crates/tools/rv32-lower`): `compute_format_fingerprint()`
-  + `FORMAT_FINGERPRINT` const + self-assert in `artifact.rs`; explicit Rust
-  field-offset table; `--print-format-fingerprint` flag; stamp the fingerprint
-  into the `.rv32.json` metadata writer.
+- **groundhog-rpc** (`crates/rv32/artifact` + `crates/rv32/lower`):
+  `compute_format_fingerprint()` + `FORMAT_FINGERPRINT` const + self-assert
+  in `artifact/src/format.rs`; explicit Rust field-offset table;
+  `rv32-lower --print-format-fingerprint`; stamp the fingerprint into the
+  `.rv32.json` metadata writer.
 
 ## Testing
 
