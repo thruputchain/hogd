@@ -140,11 +140,12 @@ add_dependencies(build_all_contracts all_wasm_contracts all_riscv_contracts)
 
 ### 4. SDK bump
 
-Re-pin `built_contracts/Cargo.lock` to the updated SDK revision that auto-wires
-`groundhog-rv32-runtime` (the `sdk` / `groundhog-rv32-runtime` git deps resolve
-to that rev). This is a prerequisite for the rv32 link step to succeed. Note:
-the `EXPECTED_VERSION` gate in `build_wasm.sh` checks the groundhog *CLI*
-version and is unrelated to this SDK pin.
+The SDK update that auto-wires `groundhog-rv32-runtime` has landed in `sdk_rs`.
+Re-pin `built_contracts/Cargo.lock` to it by running `cargo update` for the
+`sdk` (and `groundhog-rv32-runtime`) git deps from within `built_contracts/`,
+then committing the updated `Cargo.lock`. This is a prerequisite for the rv32
+link step to succeed. Note: the `EXPECTED_VERSION` gate in `build_wasm.sh`
+checks the groundhog *CLI* version and is unrelated to this SDK pin.
 
 ## Validation gates (driven out during implementation)
 
