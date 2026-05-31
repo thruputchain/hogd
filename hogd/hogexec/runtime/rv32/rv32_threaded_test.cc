@@ -412,5 +412,78 @@ TEST(Rv32Threaded, nullProgramTrapsInvalidInstruction)
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
 }
 
+TEST(Rv32ThreadedYieldApi, startYieldsEcallThenResumeContinues)
+{
+  // a0=1 ; ecall ; a1=5 -> resume_from_ecall(continue_with(9)) writes a0, runs
+  // on.
+  const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
+                                       addi(11, 0, 5)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
+  ASSERT_TRUE(machine.pending_ecall().has_value());
+  EXPECT_EQ(machine.pending_ecall()->a0, 1U);
+
+  const StepResult r = machine.resume_from_ecall(HostResult::continue_with(9));
+  EXPECT_EQ(r, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(10), 9U);
+  EXPECT_EQ(machine.reg(11), 5U);
+}
+
+TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
+{
+  {
+    const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+    auto program = threaded_from_words(words);
+    ThreadedMachine machine(program, 256, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
+              StepResult::kHalted);
+    EXPECT_EQ(machine.halt_code(), 7U);
+  }
+  {
+    const std::vector<uint32_t> words = {0x00000073U};
+    auto program = threaded_from_words(words);
+    ThreadedMachine machine(program, 256, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()),
+              StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+  }
+}
+
+TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)
+{
+  // RecordingHost's default (kHaltWithA0) returns halt(view.reg(10)), so this
+  // program (a0=7 ; ecall) halts with code 7 under both drivers.
+  const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+
+  auto p1 = threaded_from_words(words);
+  ThreadedMachine driven(p1, 256, 100);
+  RecordingHost manual_host;
+  StepResult r = driven.start();
+  // Mid-flight: assert the suspend state run() hides.
+  EXPECT_EQ(r, StepResult::kEcall);
+  ASSERT_TRUE(driven.pending_ecall().has_value());
+  while (r == StepResult::kEcall) {
+    r = driven.resume_from_ecall(
+        manual_host.ecall(driven.view(), driven.pending_ecall().value()));
+  }
+
+  auto p2 = threaded_from_words(words);
+  ThreadedMachine ran(p2, 256, 100);
+  RecordingHost run_host;
+  const StepResult rr = ran.run(run_host);
+
+  EXPECT_EQ(r, rr);
+  EXPECT_EQ(r, StepResult::kHalted); // default host halts with a0=7
+  EXPECT_EQ(driven.halt_code(), ran.halt_code());
+  EXPECT_EQ(driven.halt_code(), 7U);
+  EXPECT_EQ(driven.pc(), ran.pc());
+  EXPECT_EQ(driven.gas_remaining(), ran.gas_remaining());
+}
+
 } // namespace
 } // namespace hogd::rv32
