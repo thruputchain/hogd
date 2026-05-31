@@ -46,10 +46,12 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 // Executable instruction: handler pointer + decoded operands + gas. `gas` is
 // this instruction's own cost (charged by barriers); `gas_to_run` is the total
 // cost of the non-barrier run starting here (charged once by enter_run), 0 for
-// a barrier. The fields total 24 bytes; alignas(32) rounds sizeof up to a power
-// of two so `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a
-// shift instead of a divide/multiply by 24, at the cost of 8 padding
-// bytes/slot.
+// a barrier. Fields total 31 bytes; the 8-byte `rd` pointer makes alignof 8, so
+// sizeof already rounds to 32 (one padding byte) -- a power of two, which is
+// what lets `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a
+// shift rather than a divide/multiply. alignas(32) doesn't change the size; it
+// additionally pins each slot to a 32-byte boundary (cache placement) and
+// documents that the shift lowering depends on the power-of-two size.
 struct alignas(32) Slot {
   Handler handler = nullptr;
   uint32_t *rd = nullptr; // &regs_[rd], or &trash_ when rd==0 (the x0 sink:

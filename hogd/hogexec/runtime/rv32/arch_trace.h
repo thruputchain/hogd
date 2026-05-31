@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -200,7 +201,11 @@ public:
   static constexpr bool kEnabled = true;
 
   // Architectural state before the first instruction -> step[0].state_before.
-  void on_initial(const ArchState &state) { pending_before_ = state; }
+  void on_initial(const ArchState &state)
+  {
+    pending_before_ = state;
+    initialized_ = true;
+  }
 
   // Architectural state after a retired instruction. Chains so that
   // step[i].state_before == step[i-1].state, matching trace_execution. The
@@ -209,6 +214,10 @@ public:
   // terminal final_result), exactly as trace_execution never stores kEcall.
   void on_retire(const ArchState &state, StepResult result)
   {
+    // on_initial() must run first, or state_before would be a zeroed ArchState
+    // for step[0] (silently wrong). The production run() always calls it; this
+    // guards a future caller that wires the observer up out of order.
+    assert(initialized_ && "on_initial() must be called before on_retire()");
     trace_.steps.push_back(TraceStep{.result = result,
                                      .state_before = pending_before_,
                                      .state = state});
@@ -222,6 +231,7 @@ public:
 
 private:
   ArchState pending_before_;
+  bool initialized_ = false; // set by on_initial(); guards on_retire() ordering
   ExecTrace
       trace_; // final_result defaults to kTrap (truncation), as in ExecTrace.
 };
