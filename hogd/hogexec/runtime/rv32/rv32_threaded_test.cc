@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,6 +21,23 @@
 
 namespace hogd::rv32 {
 namespace {
+
+// Writes 4 bytes at a fixed offset through the view, then returns a configurable
+// status. Used to prove host guest-memory writes persist (no per-ecall rollback).
+struct ThreadedMemoryHost : Host {
+  enum class Outcome { kContinue, kOutOfGas };
+  explicit ThreadedMemoryHost(Outcome outcome) : outcome_(outcome) {}
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
+  {
+    (void)args;
+    const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
+    wrote = view.write_memory(4, data);
+    return outcome_ == Outcome::kContinue ? HostResult::continue_with(0)
+                                          : HostResult::out_of_gas();
+  }
+  Outcome outcome_;
+  bool wrote = false;
+};
 
 // Build a byte image (little-endian) from instruction words.
 std::vector<uint8_t>
@@ -483,6 +501,45 @@ TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)
   EXPECT_EQ(driven.halt_code(), 7U);
   EXPECT_EQ(driven.pc(), ran.pc());
   EXPECT_EQ(driven.gas_remaining(), ran.gas_remaining());
+}
+
+TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnContinue)
+{
+  // a0=1 ; ecall ; a1=5. The host writes 4 bytes at offset 4 through view(),
+  // then continues. The writes must be observable in machine.memory() after the
+  // run completes (no per-ecall rollback).
+  const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
+                                       addi(11, 0, 5)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+
+  ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kContinue);
+  const StepResult result = machine.run(host);
+
+  EXPECT_EQ(result, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_TRUE(host.wrote);
+  EXPECT_EQ(machine.memory()[4], 0xaaU);
+  EXPECT_EQ(machine.memory()[7], 0xddU);
+}
+
+TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
+{
+  // ecall as the first instruction. The host writes 4 bytes at offset 4 through
+  // view(), then reports OutOfGas. The headline semantic: the OOG trap fires AND
+  // the host write persists -- there is NO per-ecall rollback.
+  const std::vector<uint32_t> words = {0x00000073U};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+
+  ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kOutOfGas);
+  const StepResult result = machine.run(host);
+
+  EXPECT_EQ(result, StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_TRUE(host.wrote);
+  // The write happened before the OOG trap and is NOT rolled back.
+  EXPECT_EQ(machine.memory()[4], 0xaaU);
+  EXPECT_EQ(machine.memory()[7], 0xddU);
 }
 
 } // namespace
