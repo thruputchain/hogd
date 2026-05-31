@@ -59,4 +59,13 @@ fnv_digest_u64(uint64_t digest, uint64_t value)
   return digest;
 }
 
+constexpr uint64_t
+fnv_digest_name(uint64_t digest, const char *name)
+{
+  for (const char *cursor = name; *cursor != '\0'; ++cursor) {
+    digest = fnv_digest_byte(digest, static_cast<uint8_t>(*cursor));
+  }
+  return fnv_digest_byte(digest, 0);
+}
+
 } // namespace hogd::rv32
