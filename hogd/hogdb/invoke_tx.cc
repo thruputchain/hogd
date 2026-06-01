@@ -661,8 +661,11 @@ InvokeTX::request_new_contract(Contract contract)
   // node (#1775). hash is computed outside make_contract_code_item_key to dodge
   // an observed gcc-CI miscompile.
   auto hash = sha256(contract);
+  // xdr_size computes the serialized length without allocating; it equals the
+  // x23::serialize(contract) byte count NewContractLock writes for the code
+  // row.
   if (!Database::item_fits(make_wasm_code_key(hash).size(),
-                           x23::serialize(contract).size()))
+                           x23::xdr_size(contract)))
     return HogDBError(HogDBCode::kTooBig);
 
   return request_change(make_contract_code_item_key(hash),
