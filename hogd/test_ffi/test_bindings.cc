@@ -642,31 +642,37 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     return kTestFFIErrorCodeDeserializeError;
   }
 
-  // make sure the contract has already been registered with the instantiation
-  // context
-  if (contract.contract_type() == ContractType::kMockTest) {
-    if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
-      error("contract has not been registered with the instantiation context");
-      return kTestFFIErrorCodeCreateNonexistentMockContract;
+  try {
+    // make sure the contract has already been registered with the
+    // instantiation context
+    if (contract.contract_type() == ContractType::kMockTest) {
+      if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
+        error(
+            "contract has not been registered with the instantiation context");
+        return kTestFFIErrorCodeCreateNonexistentMockContract;
+      }
     }
+
+    // Verify wasm contracts before storing — reject contracts that would
+    // fail during instantiation (e.g., memory exceeding limits).
+    if (contract.contract_type() == ContractType::kWasmi) {
+      auto verify_result = (*context_cast)->verify_contract(contract);
+      if (verify_result == InvokeErrorCode::Unrecoverable) {
+        return kTestFFIErrorCodeUnrecoverableError;
+      }
+      if (verify_result != InvokeErrorCode::None) {
+        return kTestFFIErrorCodeContractVerificationFailed;
+      }
+    }
+
+    auto h = sha256(contract);
+
+    db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
+                                                 std::move(contract)));
+  } catch (std::exception const &e) {
+    log_error("error creating contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-
-  // Verify wasm contracts before storing — reject contracts that would
-  // fail during instantiation (e.g., memory exceeding limits).
-  if (contract.contract_type() == ContractType::kWasmi) {
-    auto verify_result = (*context_cast)->verify_contract(contract);
-    if (verify_result == InvokeErrorCode::Unrecoverable) {
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
-    if (verify_result != InvokeErrorCode::None) {
-      return kTestFFIErrorCodeContractVerificationFailed;
-    }
-  }
-
-  auto h = sha256(contract);
-
-  db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
-                                               std::move(contract)));
   return kTestFFIErrorCodeNone;
 }
 
