@@ -628,6 +628,81 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
+// EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
+// ALU op (slot ip+1), collapsed into one handler so the pair costs a single
+// dispatch instead of two. Both are in-run non-barriers (loads are not
+// barriers, and the run's gas was pre-charged by enter_run), so there is no gas
+// work between them. The load's fault checks run first and are terminal -- a
+// faulting load never lets the rr write. In traced mode the handler retires the
+// load as its own step (mirroring op_load's HOGD_THREAD_NEXT) before running
+// the rr, so the observed trace is byte-identical to the two unfused. build_exec
+// installs this only on the load's slot; slot ip+1 keeps its standalone op_rr
+// handler (and gas_to_run), so a branch landing on the rr still executes it via
+// enter_run, and the fused handler -- which jumps straight to ip+2 -- never
+// re-enters ip+1, so its gas is not double-charged.
+template<bool Trace, uint32_t Width, bool SignExtend,
+         uint32_t (*Fn)(uint32_t, uint32_t)>
+StepResult
+op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize, gas);
+  }
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  c.m->regs_[ip->rd] = v;
+  if constexpr (Trace) {
+    // Retire the load as its own step (mirrors op_load's HOGD_THREAD_NEXT) so
+    // the rr observes the same pre-state, and pc/regs, that it would unfused.
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  const Slot *rr = ip + 1;
+  c.m->regs_[rr->rd] = Fn(c.m->regs_[rr->rs1], c.m->regs_[rr->rb.rs2]);
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// EXPERIMENT(fuse): the I-type sibling of op_load_rr -- a load (slot ip)
+// followed by a fusible I-type ALU op (slot ip+1), which takes its second
+// operand from the immediate (the wide imm arm) rather than a register. Same
+// fault/trace/gas reasoning as op_load_rr; the only difference is the tail op
+// reads ri->imm instead of a second register.
+template<bool Trace, uint32_t Width, bool SignExtend,
+         uint32_t (*Fn)(uint32_t, uint32_t)>
+StepResult
+op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize, gas);
+  }
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  c.m->regs_[ip->rd] = v;
+  if constexpr (Trace) {
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  const Slot *ri = ip + 1;
+  c.m->regs_[ri->rd] = Fn(c.m->regs_[ri->rs1], bits_from_i32(ri->imm));
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
 // op_ecall suspends: it advances pc, stashes the args, and yields
 // StepResult::kEcall. The ecall's instruction gas was charged at the run head
 // (enter_run); on resume, execution re-enters at the post-ecall instruction --
@@ -802,6 +877,66 @@ branch_bad_target_handler_for(Op op)
   }
 }
 
+// EXPERIMENT(fuse): pick the fused load+ALU handler for an adjacent
+// (load, alu) pair, or nullptr if the pair is not a fusion candidate. First
+// cut: only lw (Width 4, no sign-extend) feeding a common ALU op, either
+// register-register (op_load_rr) or register-immediate (op_load_ri) -- the
+// dominant load-use shapes. mul/div-after-load and narrow/sign-extended loads
+// stay unfused (rare, and bounding the instantiations keeps the fused handler
+// set small so it does not blow the I-cache).
+template<bool Trace>
+Handler
+fused_load_handler(Op load_op, Op next_op)
+{
+  if (load_op != Op::kLw) {
+    return nullptr;
+  }
+  switch (next_op) {
+  // R-type tail (second operand is a register).
+  case Op::kAdd:
+    return &op_load_rr<Trace, 4, false, add_op>;
+  case Op::kSub:
+    return &op_load_rr<Trace, 4, false, sub_op>;
+  case Op::kSll:
+    return &op_load_rr<Trace, 4, false, sll_op>;
+  case Op::kSlt:
+    return &op_load_rr<Trace, 4, false, slt_op>;
+  case Op::kSltu:
+    return &op_load_rr<Trace, 4, false, sltu_op>;
+  case Op::kXor:
+    return &op_load_rr<Trace, 4, false, xor_op>;
+  case Op::kSrl:
+    return &op_load_rr<Trace, 4, false, srl_op>;
+  case Op::kSra:
+    return &op_load_rr<Trace, 4, false, sra_op>;
+  case Op::kOr:
+    return &op_load_rr<Trace, 4, false, or_op>;
+  case Op::kAnd:
+    return &op_load_rr<Trace, 4, false, and_op>;
+  // I-type tail (second operand is the immediate).
+  case Op::kAddi:
+    return &op_load_ri<Trace, 4, false, add_op>;
+  case Op::kSlti:
+    return &op_load_ri<Trace, 4, false, slt_op>;
+  case Op::kSltiu:
+    return &op_load_ri<Trace, 4, false, sltu_op>;
+  case Op::kXori:
+    return &op_load_ri<Trace, 4, false, xor_op>;
+  case Op::kOri:
+    return &op_load_ri<Trace, 4, false, or_op>;
+  case Op::kAndi:
+    return &op_load_ri<Trace, 4, false, and_op>;
+  case Op::kSlli:
+    return &op_load_ri<Trace, 4, false, sll_op>;
+  case Op::kSrli:
+    return &op_load_ri<Trace, 4, false, srl_op>;
+  case Op::kSrai:
+    return &op_load_ri<Trace, 4, false, sra_op>;
+  default:
+    return nullptr;
+  }
+}
+
 // True for ops whose Slot uses the {imm16, rs2} union arm because the handler
 // reads rs2: R-type ALU, stores, conditional branches. Everyone else uses the
 // wide `imm` arm and never reads rs2.
@@ -943,6 +1078,23 @@ ThreadedMachine::build_exec(bool trace)
     exec_[i].gas_to_run = static_cast<uint16_t>(run_gas);
   }
   gas_overflow_ = overflow;
+  // EXPERIMENT(fuse): collapse each adjacent (lw, fusible ALU) pair into one
+  // fused handler on the load's slot, saving a dispatch. The ALU slot keeps its
+  // standalone handler and gas_to_run (branch-in fallback); the fused handler
+  // skips to i+2 and never re-enters that slot, so nothing is double-charged and
+  // gas bookkeeping is unchanged. Both ops are in-run non-barriers, so an
+  // adjacent (load, alu) is always in the same run. Recomputed from `code` ops,
+  // independent of any target-trap handler swaps above (lw/ALU are never
+  // swapped).
+  for (size_t i = 0; i + 1 < n; ++i) {
+    const Handler fused =
+        trace ? fused_load_handler<true>(code[i].op, code[i + 1].op)
+              : fused_load_handler<false>(code[i].op, code[i + 1].op);
+    if (fused != nullptr) {
+      exec_[i].handler = fused;
+      ++i; // the ALU slot is consumed as this pair's tail
+    }
+  }
   max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
   exec_built_ = true;
   exec_traced_ = trace;
