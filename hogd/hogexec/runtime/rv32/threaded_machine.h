@@ -629,18 +629,27 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 }
 
 // EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
-// ALU op (slot ip+1), collapsed into one handler so the pair costs a single
-// dispatch instead of two. Both are in-run non-barriers (loads are not
-// barriers, and the run's gas was pre-charged by enter_run), so there is no gas
-// work between them. The load's fault checks run first and are terminal -- a
-// faulting load never lets the rr write. In traced mode the handler retires the
-// load as its own step (mirroring op_load's HOGD_THREAD_NEXT) before running
-// the rr, so the observed trace is byte-identical to the two unfused. build_exec
-// installs this only on the load's slot; slot ip+1 keeps its standalone op_rr
-// handler (and gas_to_run), so a branch landing on the rr still executes it via
-// enter_run, and the fused handler -- which jumps straight to ip+2 -- never
-// re-enters ip+1, so its gas is not double-charged.
-template<bool Trace, uint32_t Width, bool SignExtend,
+// ALU op (slot ip+1) that *consumes* the loaded value, collapsed into one
+// handler so the pair costs a single dispatch instead of two. Both are in-run
+// non-barriers (loads are not barriers, and the run's gas was pre-charged by
+// enter_run), so there is no gas work between them. The load's fault checks run
+// first and are terminal -- a faulting load never lets the rr write. In traced
+// mode the handler retires the load as its own step (mirroring op_load's
+// HOGD_THREAD_NEXT) before running the rr, so the observed trace is
+// byte-identical to the two unfused. build_exec installs this only on the
+// load's slot; slot ip+1 keeps its standalone op_rr handler (and gas_to_run),
+// so a branch landing on the rr still executes it via enter_run, and the fused
+// handler -- which jumps straight to ip+2 -- never re-enters ip+1, so its gas is
+// not double-charged.
+//
+// Because fusion is gated on a load->use (build_exec), the loaded register feeds
+// the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v` straight into
+// that operand instead of reading it back out of regs_ -- avoiding the
+// store-to-regs_/reload-from-regs_ round trip and shortening the load-use
+// dependency chain. (rd is still written for architectural visibility / the
+// trace step.) When both sources alias the load dest, LoadedIsRs1 wins and the
+// rs2 read happens to reload the same value -- still correct.
+template<bool Trace, uint32_t Width, bool SignExtend, bool LoadedIsRs1,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
 op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -666,15 +675,21 @@ op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     c.m->obs_->on_retire(capture(c), StepResult::kContinue);
   }
   const Slot *rr = ip + 1;
-  c.m->regs_[rr->rd] = Fn(c.m->regs_[rr->rs1], c.m->regs_[rr->rb.rs2]);
+  if constexpr (LoadedIsRs1) {
+    c.m->regs_[rr->rd] = Fn(v, c.m->regs_[rr->rb.rs2]);
+  }
+  else {
+    c.m->regs_[rr->rd] = Fn(c.m->regs_[rr->rs1], v);
+  }
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
 // EXPERIMENT(fuse): the I-type sibling of op_load_rr -- a load (slot ip)
-// followed by a fusible I-type ALU op (slot ip+1), which takes its second
-// operand from the immediate (the wide imm arm) rather than a register. Same
-// fault/trace/gas reasoning as op_load_rr; the only difference is the tail op
-// reads ri->imm instead of a second register.
+// followed by a fusible I-type ALU op (slot ip+1) that consumes the loaded
+// value. An I-type's only register source is rs1, so a load->use I-type always
+// has rs1 == the load dest; we feed the just-loaded `v` directly as the first
+// operand (no regs_ reload) and the immediate as the second. Same
+// fault/trace/gas reasoning as op_load_rr.
 template<bool Trace, uint32_t Width, bool SignExtend,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
@@ -699,7 +714,7 @@ op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     c.m->obs_->on_retire(capture(c), StepResult::kContinue);
   }
   const Slot *ri = ip + 1;
-  c.m->regs_[ri->rd] = Fn(c.m->regs_[ri->rs1], bits_from_i32(ri->imm));
+  c.m->regs_[ri->rd] = Fn(v, bits_from_i32(ri->imm));
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -878,42 +893,54 @@ branch_bad_target_handler_for(Op op)
 }
 
 // EXPERIMENT(fuse): pick the fused load+ALU handler for an adjacent
-// (load, alu) pair, or nullptr if the pair is not a fusion candidate. First
-// cut: only lw (Width 4, no sign-extend) feeding a common ALU op, either
+// (load, alu) load->use pair, or nullptr if the pair is not a fusion candidate.
+// First cut: only lw (Width 4, no sign-extend) feeding a common ALU op, either
 // register-register (op_load_rr) or register-immediate (op_load_ri) -- the
-// dominant load-use shapes. mul/div-after-load and narrow/sign-extended loads
-// stay unfused (rare, and bounding the instantiations keeps the fused handler
-// set small so it does not blow the I-cache).
+// dominant load-use shapes. `loaded_is_rs1` says whether the loaded register is
+// the rr's rs1 (vs rs2), selecting which operand gets the just-loaded value;
+// it is ignored for the I-type tail (whose only register source is rs1).
+// mul/div-after-load and narrow/sign-extended loads stay unfused (rare, and
+// bounding the instantiations keeps the fused handler set small).
 template<bool Trace>
 Handler
-fused_load_handler(Op load_op, Op next_op)
+fused_load_handler(Op load_op, Op next_op, bool loaded_is_rs1)
 {
   if (load_op != Op::kLw) {
     return nullptr;
   }
   switch (next_op) {
-  // R-type tail (second operand is a register).
+  // R-type tail: feed the loaded value into rs1 or rs2 per loaded_is_rs1.
   case Op::kAdd:
-    return &op_load_rr<Trace, 4, false, add_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, add_op>
+                         : &op_load_rr<Trace, 4, false, false, add_op>;
   case Op::kSub:
-    return &op_load_rr<Trace, 4, false, sub_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sub_op>
+                         : &op_load_rr<Trace, 4, false, false, sub_op>;
   case Op::kSll:
-    return &op_load_rr<Trace, 4, false, sll_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sll_op>
+                         : &op_load_rr<Trace, 4, false, false, sll_op>;
   case Op::kSlt:
-    return &op_load_rr<Trace, 4, false, slt_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, slt_op>
+                         : &op_load_rr<Trace, 4, false, false, slt_op>;
   case Op::kSltu:
-    return &op_load_rr<Trace, 4, false, sltu_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sltu_op>
+                         : &op_load_rr<Trace, 4, false, false, sltu_op>;
   case Op::kXor:
-    return &op_load_rr<Trace, 4, false, xor_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, xor_op>
+                         : &op_load_rr<Trace, 4, false, false, xor_op>;
   case Op::kSrl:
-    return &op_load_rr<Trace, 4, false, srl_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, srl_op>
+                         : &op_load_rr<Trace, 4, false, false, srl_op>;
   case Op::kSra:
-    return &op_load_rr<Trace, 4, false, sra_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sra_op>
+                         : &op_load_rr<Trace, 4, false, false, sra_op>;
   case Op::kOr:
-    return &op_load_rr<Trace, 4, false, or_op>;
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, or_op>
+                         : &op_load_rr<Trace, 4, false, false, or_op>;
   case Op::kAnd:
-    return &op_load_rr<Trace, 4, false, and_op>;
-  // I-type tail (second operand is the immediate).
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, and_op>
+                         : &op_load_rr<Trace, 4, false, false, and_op>;
+  // I-type tail (second operand is the immediate; loaded value is always rs1).
   case Op::kAddi:
     return &op_load_ri<Trace, 4, false, add_op>;
   case Op::kSlti:
@@ -1079,17 +1106,33 @@ ThreadedMachine::build_exec(bool trace)
   }
   gas_overflow_ = overflow;
   // EXPERIMENT(fuse): collapse each adjacent (lw, fusible ALU) pair into one
-  // fused handler on the load's slot, saving a dispatch. The ALU slot keeps its
-  // standalone handler and gas_to_run (branch-in fallback); the fused handler
+  // fused handler on the load's slot, saving a dispatch. Restricted to a genuine
+  // load->use: the load's destination register must feed the ALU op (as rs1, or
+  // rs2 for R-type) -- that is the pattern worth fusing (dependent value, common
+  // in compiled code). An independent adjacent pair only saves a dispatch and
+  // just dilutes the fused handler set, so it is left unfused. The ALU slot keeps
+  // its standalone handler and gas_to_run (branch-in fallback); the fused handler
   // skips to i+2 and never re-enters that slot, so nothing is double-charged and
   // gas bookkeeping is unchanged. Both ops are in-run non-barriers, so an
-  // adjacent (load, alu) is always in the same run. Recomputed from `code` ops,
-  // independent of any target-trap handler swaps above (lw/ALU are never
-  // swapped).
+  // adjacent (load, alu) is always in the same run. Decisions use `code` ops/regs
+  // (architectural indices), independent of any target-trap handler swaps above
+  // (lw/ALU are never swapped).
   for (size_t i = 0; i + 1 < n; ++i) {
+    const Instr &ld = code[i];
+    const Instr &alu = code[i + 1];
+    // Load->use: the load writes a real register (x0 discards) that the ALU op
+    // reads. rs2 only matters for the R-type tail (slot_packs_rs2).
+    const bool rs1_match = alu.rs1 == ld.rd;
+    const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
+    if (ld.rd == 0 || !(rs1_match || rs2_match)) {
+      continue;
+    }
+    // Feed the loaded value into rs1 when it matches (also covers both-match),
+    // otherwise rs2. The fused handler uses the value directly for that operand.
+    const bool loaded_is_rs1 = rs1_match;
     const Handler fused =
-        trace ? fused_load_handler<true>(code[i].op, code[i + 1].op)
-              : fused_load_handler<false>(code[i].op, code[i + 1].op);
+        trace ? fused_load_handler<true>(ld.op, alu.op, loaded_is_rs1)
+              : fused_load_handler<false>(ld.op, alu.op, loaded_is_rs1);
     if (fused != nullptr) {
       exec_[i].handler = fused;
       ++i; // the ALU slot is consumed as this pair's tail

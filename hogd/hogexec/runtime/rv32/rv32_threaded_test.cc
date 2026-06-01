@@ -394,39 +394,87 @@ TEST(Rv32Threaded, fusedLoadFeedsRegArith)
   EXPECT_EQ(machine.reg(5), 0x107U);
 }
 
+TEST(Rv32Threaded, fusedLoadFeedsRs1OfNonCommutativeOp)
+{
+  using test_program::load;
+  using test_program::op;
+  using test_program::store;
+  // Store 0x100 @16; lw x4,16(x1); sub x5,x4,x6 (x6=7) -> x5 = 0x100-7 = 0xf9.
+  // The loaded value is rs1 of a non-commutative op, so operand order matters:
+  // a wrong substitution (v as rs2) would give 7-0x100. funct7=0x20 -> sub.
+  const std::vector<uint32_t> words = {
+      addi(1, 0, 0),         // x1 = 0 (base)
+      addi(3, 0, 0x100),     // x3 = 0x100 (data)
+      addi(6, 0, 7),         // x6 = 7
+      store(1, 3, 16, 2),    // sw x3, 16(x1)
+      load(4, 2, 1, 16),     // lw x4, 16(x1)     <- fused head
+      op(5, 4, 6, 0, 0x20),  // sub x5, x4, x6 (x4 is rs1)  <- fused tail
+  };
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.reg(5), 0xf9U);
+}
+
+TEST(Rv32Threaded, fusedLoadFeedsRs2OfNonCommutativeOp)
+{
+  using test_program::load;
+  using test_program::op;
+  using test_program::store;
+  // Store 0x100 @16; lw x4,16(x1); sub x5,x6,x4 (x6=0x200) -> x5 = 0x200-0x100.
+  // The loaded value is rs2 here (fib's `add a0,a0,t1` shape, non-commutative to
+  // catch operand-order bugs). funct7=0x20 -> sub.
+  const std::vector<uint32_t> words = {
+      addi(1, 0, 0),         // x1 = 0 (base)
+      addi(3, 0, 0x100),     // x3 = 0x100 (data)
+      addi(6, 0, 0x200),     // x6 = 0x200
+      store(1, 3, 16, 2),    // sw x3, 16(x1)
+      load(4, 2, 1, 16),     // lw x4, 16(x1)     <- fused head
+      op(5, 6, 4, 0, 0x20),  // sub x5, x6, x4 (x4 is rs2)  <- fused tail
+  };
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.reg(5), 0x100U);
+}
+
 TEST(Rv32Threaded, branchOntoFusedRrSlotExecutesStandalone)
 {
   using test_program::branch;
   using test_program::load;
   using test_program::op;
   // beq x0,x0,+8 jumps over the lw and lands directly on the add (the fused
-  // pair's tail). The add must still run -- slot i+1 keeps a standalone handler.
-  // x4 stays 0 (lw skipped); add x5,x6,x6 (x6=5) -> x5=10.
+  // pair's tail). The pair is a load->use (add reads x4, the load's dest) so it
+  // fuses; the add must still run standalone via the slot's own handler. x4
+  // stays 0 (lw skipped); add x5,x4,x6 (x4=0, x6=5) -> x5=5.
   const std::vector<uint32_t> words = {
       addi(6, 0, 5),      // x6 = 5
       branch(0, 0, 0, 8), // beq x0,x0,+8 -> skip lw, land on add
       load(4, 2, 6, 0),   // lw x4, 0(x6)   (skipped)         <- fused head
-      op(5, 6, 6, 0, 0),  // add x5, x6, x6 (branch target)   <- fused tail
+      op(5, 4, 6, 0, 0),  // add x5, x4, x6 (branch target)   <- fused tail
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end after add
-  EXPECT_EQ(machine.reg(4), 0U);  // lw was skipped
-  EXPECT_EQ(machine.reg(5), 10U); // add ran standalone
+  EXPECT_EQ(machine.reg(4), 0U); // lw was skipped
+  EXPECT_EQ(machine.reg(5), 5U); // add ran standalone (x4=0 + x6=5)
 }
 
 TEST(Rv32Threaded, fusedLoadFaultSuppressesRegArith)
 {
   using test_program::load;
   using test_program::op;
-  // Misaligned lw (addr 1) fused with add x5,x6,x6. The load faults
-  // (kMisalignedAccess) and the add must NOT execute -> x5 stays 0.
+  // Misaligned lw (addr 1) fused with a load->use add x5,x4,x6 (reads x4, the
+  // load's dest). The load faults (kMisalignedAccess) and the add must NOT
+  // execute -> x5 stays 0.
   const std::vector<uint32_t> words = {
       addi(1, 0, 1),     // x1 = 1 (misaligned base)
       addi(6, 0, 5),     // x6 = 5
       load(4, 2, 1, 0),  // lw x4, 0(x1) -> addr 1, misaligned  <- fused head
-      op(5, 6, 6, 0, 0), // add x5, x6, x6                      <- fused tail
+      op(5, 4, 6, 0, 0), // add x5, x4, x6 (uses x4)            <- fused tail
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
