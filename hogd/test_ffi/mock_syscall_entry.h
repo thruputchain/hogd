@@ -39,7 +39,8 @@ log_mock_syscall_escape(uint64_t syscall, const char *what) noexcept
     if (what != nullptr) {
       error("Unrecoverable: exception escaped mock syscall {}: {}", syscall,
             what);
-    } else {
+    }
+    else {
       error("Unrecoverable: unknown exception escaped mock syscall {}",
             syscall);
     }
