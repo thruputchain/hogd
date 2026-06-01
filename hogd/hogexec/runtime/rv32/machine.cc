@@ -51,7 +51,6 @@ Machine::reset(uint64_t gas)
   halted_ = false;
   halt_code_ = 0;
   pending_ecall_.reset();
-  ecall_memory_snapshot_.clear();
   if (construction_trap_ != Trap::kNone) {
     // A machine that failed construction must remain trapped after reset; do
     // not allow benchmark/test reset paths to re-enter execution with no valid
@@ -227,86 +226,76 @@ Machine::step()
 StepResult
 Machine::complete_ecall(const HostResult &result)
 {
-  if (!pending_ecall_.has_value()) {
-    set_host_trap(HostTrapPayload{});
-    return StepResult::kTrap;
-  }
+  // Misuse to complete an ecall that was never pending: programmer error.
+  assert(pending_ecall_.has_value());
   pending_ecall_.reset();
 
-  // ECALL instruction gas has already been charged by step(). Debit host gas
-  // before committing the host result so an over-budget syscall cannot mutate
-  // a0, halt state, or final trap state. The production syscall bridge caps
-  // host gas to the MachineView budget; this path is defensive for direct Host
-  // implementations.
+  // ECALL instruction gas was charged by step(). Debit host gas before
+  // committing so an over-budget syscall cannot mutate a0/halt/trap state.
+  // consume_gas sets Trap::kOutOfGas on failure.
   if (!consume_gas(result.gas_consumed)) {
-    memory_ = ecall_memory_snapshot_;
-    ecall_memory_snapshot_.clear();
-    set_trap(Trap::kOutOfGas);
     return StepResult::kTrap;
   }
 
   switch (result.status) {
   case HostStatus::kContinue:
-    // Host memory writes happen during Host::ecall through MachineView. The
-    // only VM register mutation on a continuing ecall is the returned a0 value.
-    ecall_memory_snapshot_.clear();
+    // Host memory writes happened during Host::ecall through MachineView; the
+    // only VM register mutation on a continuing ecall is the returned a0.
     write_reg(10, result.continue_value());
     return StepResult::kContinue;
   case HostStatus::kHalt:
-    ecall_memory_snapshot_.clear();
     halt_code_ = result.halt_code();
     halted_ = true;
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
-    // Host OOG rolls back host memory effects. ECALL and reported host gas stay
-    // charged, and pc remains advanced past the ECALL.
-    memory_ = ecall_memory_snapshot_;
-    ecall_memory_snapshot_.clear();
+    // Host OOG keeps ECALL + reported host gas charged and pc advanced; host
+    // memory writes persist (no per-ecall rollback).
     set_trap(Trap::kOutOfGas);
     return StepResult::kTrap;
   case HostStatus::kTrap:
-    ecall_memory_snapshot_.clear();
     set_host_trap(result.trap_payload());
     return StepResult::kTrap;
   default:
     assert(false && "invalid host status");
-    ecall_memory_snapshot_.clear();
     set_host_trap(HostTrapPayload{});
     return StepResult::kTrap;
   }
 }
 
 StepResult
+Machine::start()
+{
+  // start() begins a fresh drive; an outstanding ecall must be completed via
+  // resume_from_ecall() first. Mirrors ThreadedMachine::start()'s precondition.
+  assert(!pending_ecall_.has_value());
+  // Drive from the current pc to the next yield. step() returns kEcall when an
+  // ecall is pending, so calling start() with an outstanding ecall re-yields
+  // kEcall rather than mis-stepping.
+  StepResult result = step();
+  while (result == StepResult::kContinue) {
+    result = step();
+  }
+  return result;
+}
+
+StepResult
+Machine::resume_from_ecall(const HostResult &result)
+{
+  const StepResult applied = complete_ecall(result);
+  return applied == StepResult::kContinue ? start() : applied;
+}
+
+StepResult
 Machine::run(Host &host)
 {
-  for (;;) {
-    const StepResult result = step();
-    switch (result) {
-    case StepResult::kContinue:
-      continue;
-    case StepResult::kEcall:
-    {
-      if (!pending_ecall_.has_value()) {
-        set_host_trap(HostTrapPayload{});
-        return StepResult::kTrap;
-      }
-      const EcallArgs pending_ecall = pending_ecall_.value();
-      const HostResult host_result = host.ecall(view(), pending_ecall);
-      const StepResult completed = complete_ecall(host_result);
-      if (completed == StepResult::kContinue) {
-        continue;
-      }
-      return completed;
-    }
-    case StepResult::kHalted:
-    case StepResult::kTrap:
-      return result;
-    default:
-      assert(false && "invalid step result");
-      set_host_trap(HostTrapPayload{});
-      return StepResult::kTrap;
-    }
+  StepResult result = start();
+  while (result == StepResult::kEcall) {
+    assert(pending_ecall_.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
+  return result;
 }
 
 StepResult
@@ -590,11 +579,11 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kEcall:
-    // Advance PC and snapshot guest-visible state before yielding to the host.
-    // complete_ecall owns post-host mutation, trap, and host-OOG rollback
-    // ordering for both Machine::run and manual step/complete callers.
+    // Advance PC and stash args before yielding to the host. complete_ecall
+    // owns post-host register/trap mutation for both Machine::run and manual
+    // step/complete callers; host memory writes are not rolled back (the
+    // runtime layer owns transaction-level abort).
     pc_ = pc_next;
-    ecall_memory_snapshot_ = memory_;
     pending_ecall_ = EcallArgs{
         .a0 = registers_[10],
         .a1 = registers_[11],

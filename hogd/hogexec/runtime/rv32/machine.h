@@ -27,7 +27,9 @@ public:
   void reset(uint64_t gas);
 
   [[nodiscard]] StepResult step();
+  [[nodiscard]] StepResult start();
   [[nodiscard]] StepResult complete_ecall(const HostResult &result);
+  [[nodiscard]] StepResult resume_from_ecall(const HostResult &result);
   [[nodiscard]] StepResult run(Host &host);
 
   [[nodiscard]] uint32_t pc() const { return pc_; }
@@ -87,7 +89,6 @@ private:
   bool halted_ = false;
   uint32_t halt_code_ = 0;
   std::optional<EcallArgs> pending_ecall_;
-  std::vector<uint8_t> ecall_memory_snapshot_;
 };
 
 } // namespace hogd::rv32

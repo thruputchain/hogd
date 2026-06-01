@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -21,6 +22,24 @@
 namespace hogd::rv32 {
 namespace {
 
+// Writes 4 bytes at a fixed offset through the view, then returns a
+// configurable status. Used to prove host guest-memory writes persist (no
+// per-ecall rollback).
+struct ThreadedMemoryHost : Host {
+  enum class Outcome { kContinue, kOutOfGas };
+  explicit ThreadedMemoryHost(Outcome outcome) : outcome_(outcome) {}
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
+  {
+    (void)args;
+    const std::array<uint8_t, 4> data = {0xaa, 0xbb, 0xcc, 0xdd};
+    wrote = view.write_memory(4, data);
+    return outcome_ == Outcome::kContinue ? HostResult::continue_with(0)
+                                          : HostResult::out_of_gas();
+  }
+  Outcome outcome_;
+  bool wrote = false;
+};
+
 // Build a byte image (little-endian) from instruction words.
 std::vector<uint8_t>
 words_to_bytes(std::span<const uint32_t> words)
@@ -31,6 +50,8 @@ words_to_bytes(std::span<const uint32_t> words)
   }
   return bytes;
 }
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 TEST(Rv32Threaded, decodeMatchesCanonicalOverCorpus)
 {
@@ -411,6 +432,119 @@ TEST(Rv32Threaded, nullProgramTrapsInvalidInstruction)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
 }
+
+TEST(Rv32ThreadedYieldApi, startYieldsEcallThenResumeContinues)
+{
+  // a0=1 ; ecall ; a1=5 -> resume_from_ecall(continue_with(9)) writes a0, runs
+  // on.
+  const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
+                                       addi(11, 0, 5)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
+  ASSERT_TRUE(machine.pending_ecall().has_value());
+  EXPECT_EQ(machine.pending_ecall()->a0, 1U);
+
+  const StepResult r = machine.resume_from_ecall(HostResult::continue_with(9));
+  EXPECT_EQ(r, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(10), 9U);
+  EXPECT_EQ(machine.reg(11), 5U);
+}
+
+TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
+{
+  {
+    const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+    auto program = threaded_from_words(words);
+    ThreadedMachine machine(program, 256, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
+              StepResult::kHalted);
+    EXPECT_EQ(machine.halt_code(), 7U);
+  }
+  {
+    const std::vector<uint32_t> words = {0x00000073U};
+    auto program = threaded_from_words(words);
+    ThreadedMachine machine(program, 256, 100);
+    EXPECT_EQ(machine.start(), StepResult::kEcall);
+    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kHostTrap);
+  }
+}
+
+TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)
+{
+  // RecordingHost's default (kHaltWithA0) returns halt(view.reg(10)), so this
+  // program (a0=7 ; ecall) halts with code 7 under both drivers.
+  const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+
+  auto p1 = threaded_from_words(words);
+  ThreadedMachine driven(p1, 256, 100);
+  RecordingHost manual_host;
+  StepResult r = driven.start();
+  // Mid-flight: assert the suspend state run() hides.
+  EXPECT_EQ(r, StepResult::kEcall);
+  ASSERT_TRUE(driven.pending_ecall().has_value());
+  while (r == StepResult::kEcall) {
+    r = driven.resume_from_ecall(
+        manual_host.ecall(driven.view(), driven.pending_ecall().value()));
+  }
+
+  auto p2 = threaded_from_words(words);
+  ThreadedMachine ran(p2, 256, 100);
+  RecordingHost run_host;
+  const StepResult rr = ran.run(run_host);
+
+  EXPECT_EQ(r, rr);
+  EXPECT_EQ(r, StepResult::kHalted); // default host halts with a0=7
+  EXPECT_EQ(driven.halt_code(), ran.halt_code());
+  EXPECT_EQ(driven.halt_code(), 7U);
+  EXPECT_EQ(driven.pc(), ran.pc());
+  EXPECT_EQ(driven.gas_remaining(), ran.gas_remaining());
+}
+
+TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnContinue)
+{
+  // a0=1 ; ecall ; a1=5. The host writes 4 bytes at offset 4 through view(),
+  // then continues. The writes must be observable in machine.memory() after the
+  // run completes (no per-ecall rollback).
+  const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
+                                       addi(11, 0, 5)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+
+  ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kContinue);
+  const StepResult result = machine.run(host);
+
+  EXPECT_EQ(result, StepResult::kTrap); // falls off the end after addi a1
+  EXPECT_TRUE(host.wrote);
+  EXPECT_EQ(machine.memory()[4], 0xaaU);
+  EXPECT_EQ(machine.memory()[7], 0xddU);
+}
+
+TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
+{
+  // ecall as the first instruction. The host writes 4 bytes at offset 4 through
+  // view(), then reports OutOfGas. The headline semantic: the OOG trap fires
+  // AND the host write persists -- there is NO per-ecall rollback.
+  const std::vector<uint32_t> words = {0x00000073U};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+
+  ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kOutOfGas);
+  const StepResult result = machine.run(host);
+
+  EXPECT_EQ(result, StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_TRUE(host.wrote);
+  // The write happened before the OOG trap and is NOT rolled back.
+  EXPECT_EQ(machine.memory()[4], 0xaaU);
+  EXPECT_EQ(machine.memory()[7], 0xddU);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
 } // namespace hogd::rv32

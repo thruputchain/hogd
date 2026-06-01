@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -103,6 +105,7 @@ public:
     trap_ = Trap::kNone;
     halted_ = false;
     halt_code_ = 0;
+    pending_ecall_.reset();
     if (construction_trap_ != Trap::kNone) {
       trap_ = construction_trap_;
       halted_ = true;
@@ -117,6 +120,16 @@ public:
   StepResult run(Host &host);
   // Differential/tracing path: records each retired step into `obs`.
   StepResult run(Host &host, TraceObserver &obs);
+  // Yield-based seam: drive the machine without a Host in the dispatch loop.
+  // start() runs until the first kEcall/halt/trap; resume_from_ecall() applies
+  // the host result and continues. pending_ecall() exposes the stashed args.
+  [[nodiscard]] StepResult start();
+  [[nodiscard]] StepResult resume_from_ecall(const HostResult &result);
+  [[nodiscard]] std::optional<EcallArgs> pending_ecall() const
+  {
+    return pending_ecall_;
+  }
+  [[nodiscard]] MachineView view();
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
@@ -134,6 +147,17 @@ public:
   // out-of-line below, after the handler functions it references.
   void build_exec(bool trace);
 
+private:
+  // Internal seam primitives (not part of the public API; the free-function
+  // handlers below never call these). drive re-enters the musttail dispatch
+  // chain at pc_, returning the first terminal StepResult (kEcall/kHalted/
+  // kTrap). apply_ecall is the apply-only complete half of the ecall: it debits
+  // host gas and commits the result, but does not run on. Both are defined
+  // out-of-line below (they call enter_run/trap_at).
+  template<bool Trace> StepResult drive();
+  template<bool Trace> StepResult apply_ecall(const HostResult &result);
+
+public:
   // Public so the free-function handlers (below) can manipulate state. This is
   // an experimental, single-translation-unit interpreter; the handlers are
   // effectively part of the machine.
@@ -145,9 +169,10 @@ public:
   std::array<uint32_t, kRegisterCount> regs_ = {};
   std::shared_ptr<const ThreadedProgram> program_;
   std::vector<uint8_t> memory_;
-  std::vector<Slot> exec_; // size n+1; [n] is the bad-pc sentinel
-  Host *host_ = nullptr;   // set for the duration of run(); cold (ecall only)
+  std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
+  std::optional<EcallArgs>
+      pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
   uint32_t pc_ = 0;
   uint64_t gas_remaining_ = 0;
@@ -602,14 +627,16 @@ op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip, mem, memsize);
 }
 
-// op_ecall resolves the host call inline (the threaded machine runs to
-// completion without a kEcall yield). The HostResult is evaluated in an inner
-// scope so that the memory snapshot and host result -- both non-trivially
-// destructible -- are destroyed before the musttail in the kContinue path,
-// which the compiler requires.
+// op_ecall suspends: it charges ecall gas, advances pc, stashes the args, and
+// yields StepResult::kEcall. Because the dispatch chain is musttail, returning
+// kEcall unwinds straight back to the drive<Trace>() frame. The host call and
+// result handling live in apply_ecall<Trace> (the complete half), so the
+// threaded machine is drivable from an external scheduler with no Host in the
+// dispatch loop.
 template<bool Trace>
 StepResult
-op_ecall(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
+         [[maybe_unused]] uint32_t memsize)
 {
   // ECALL instruction gas (canonical charges it in step(), before execute()).
   // On OOG here, pc stays at the ecall.
@@ -617,64 +644,16 @@ op_ecall(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 
   // pc advances past the ecall before the host call (canonical ordering).
   const Slot *next = ip + 1;
-  const uint32_t pc_after = pc_of(c, next);
-
-  uint32_t continue_value = 0;
-  {
-    // Snapshot memory for host-OOG rollback; destroyed before the musttail.
-    const std::vector<uint8_t> snapshot = c.m->memory_;
-    const EcallArgs args{.a0 = c.m->regs_[10],
-                         .a1 = c.m->regs_[11],
-                         .a2 = c.m->regs_[12],
-                         .a3 = c.m->regs_[13],
-                         .a4 = c.m->regs_[14],
-                         .a5 = c.m->regs_[15],
-                         .a6 = c.m->regs_[16],
-                         .a7 = c.m->regs_[17]};
-    // view reflects the already-advanced pc, matching canonical.
-    MachineView view(pc_after, c.m->gas_remaining_,
-                     std::span<const uint32_t, kRegisterCount>(c.m->regs_),
-                     c.m->memory_);
-    const HostResult hr = c.m->host_->ecall(view, args);
-
-    // Debit host gas before committing; over-budget host cannot mutate state.
-    if (c.m->gas_remaining_ < hr.gas_consumed) {
-      c.m->memory_ = snapshot;
-      return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
-    }
-    c.m->gas_remaining_ -= hr.gas_consumed;
-
-    switch (hr.status) {
-    case HostStatus::kContinue:
-      continue_value = hr.continue_value();
-      break;
-    case HostStatus::kHalt:
-      c.m->pc_ = pc_after;
-      c.m->halt_code_ = hr.halt_code();
-      c.m->halted_ = true;
-      if constexpr (Trace) {
-        c.m->obs_->on_retire(capture(c), StepResult::kHalted);
-      }
-      return StepResult::kHalted;
-    case HostStatus::kOutOfGas:
-      c.m->memory_ = snapshot;
-      return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
-    case HostStatus::kTrap:
-    default:
-      // Canonical set_host_trap also records a HostTrapPayload; ThreadedMachine
-      // has no payload field (ArchState carries only the Trap, which is what
-      // the differential test compares), so just set the trap class.
-      return trap_at<Trace, Trap::kHostTrap>(c, next, mem, memsize);
-    }
-  } // snapshot and hr destroyed here
-
-  // kContinue: write a0 and start the next run. Reload the pinned memory base
-  // and size: the host wrote through a fixed-size view (so they are unchanged
-  // in practice), but reloading keeps this correct without relying on that.
-  c.m->regs_[10] = continue_value;
-  mem = c.m->memory_.data();
-  memsize = static_cast<uint32_t>(c.m->memory_.size());
-  HOGD_ENTER_RUN(c, next);
+  c.m->pc_ = pc_of(c, next);
+  c.m->pending_ecall_ = EcallArgs{.a0 = c.m->regs_[10],
+                                  .a1 = c.m->regs_[11],
+                                  .a2 = c.m->regs_[12],
+                                  .a3 = c.m->regs_[13],
+                                  .a4 = c.m->regs_[14],
+                                  .a5 = c.m->regs_[15],
+                                  .a6 = c.m->regs_[16],
+                                  .a7 = c.m->regs_[17]};
+  return StepResult::kEcall;
 }
 
 // Sentinel: reached only by sequential fall-off past the last instruction. Its
@@ -860,24 +839,110 @@ ThreadedMachine::build_exec(bool trace)
   exec_traced_ = trace;
 }
 
-inline StepResult
-ThreadedMachine::run(Host &host)
+inline MachineView
+ThreadedMachine::view()
 {
-  if (halted_) {
-    return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
-  }
-  if (!exec_built_ || exec_traced_) {
-    build_exec(/*trace=*/false);
-  }
-  host_ = &host;
-  obs_ = nullptr;
+  return MachineView(pc_, gas_remaining_,
+                     std::span<const uint32_t, kRegisterCount>(regs_), memory_);
+}
+
+template<bool Trace>
+StepResult
+ThreadedMachine::drive()
+{
   Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   uint8_t *mem = memory_.data();
   const auto memsize = static_cast<uint32_t>(memory_.size());
-  // store-then-return (NOT a tail call): keeps this frame (owning `c`) alive
-  // for the whole musttail chain.
-  const StepResult result = enter_run<false>(c, ip, mem, memsize);
+  // Plain call+return, not a musttail: a non-static member function cannot
+  // tail-call the free function enter_run (musttail needs matching signatures,
+  // and the implicit `this` differs). enter_run begins the musttail chain,
+  // which runs in O(1) stack; this is the single non-recursive bridge frame
+  // into it.
+  return enter_run<Trace>(c, ip, mem, memsize);
+}
+
+// Apply-only complete half: debit host gas, commit the result, and (on the
+// traced path) emit the ecall's retirement exactly as the inline op_ecall did.
+// Does NOT run on -- the caller continues via drive<Trace>().
+template<bool Trace>
+StepResult
+ThreadedMachine::apply_ecall(const HostResult &result)
+{
+  assert(pending_ecall_.has_value());
+  pending_ecall_.reset();
+
+  // pc_ is already pc_after (set in op_ecall); rebuild Ctx/next for trap_at and
+  // capture(). next's pc == pc_after, matching the inline trap_at(..., next).
+  Ctx c{.m = this, .base = exec_.data()};
+  const Slot *next = c.base + (pc_ / kInstructionBytes);
+  uint8_t *mem = memory_.data();
+  const auto memsize = static_cast<uint32_t>(memory_.size());
+
+  // Debit host gas before committing; over-budget host cannot mutate state.
+  // Host memory writes persist on OOG (no per-ecall rollback).
+  if (gas_remaining_ < result.gas_consumed) {
+    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
+  }
+  gas_remaining_ -= result.gas_consumed;
+
+  switch (result.status) {
+  case HostStatus::kContinue:
+    regs_[10] = result.continue_value();
+    if constexpr (Trace) {
+      // The ecall's retirement (inline path records it via HOGD_ENTER_RUN).
+      obs_->on_retire(capture(c), StepResult::kContinue);
+    }
+    return StepResult::kContinue;
+  case HostStatus::kHalt:
+    halt_code_ = result.halt_code();
+    halted_ = true;
+    if constexpr (Trace) {
+      obs_->on_retire(capture(c), StepResult::kHalted);
+    }
+    return StepResult::kHalted;
+  case HostStatus::kOutOfGas:
+    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
+  case HostStatus::kTrap:
+  default:
+    return trap_at<Trace, Trap::kHostTrap>(c, next, mem, memsize);
+  }
+}
+
+inline StepResult
+ThreadedMachine::start()
+{
+  if (halted_) {
+    return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
+  }
+  // Misuse to start with an outstanding ecall: drive<false> would execute past
+  // the ecall without applying the host result.
+  assert(!pending_ecall_.has_value());
+  if (!exec_built_ || exec_traced_) {
+    build_exec(/*trace=*/false);
+  }
+  obs_ = nullptr;
+  return drive<false>();
+}
+
+inline StepResult
+ThreadedMachine::resume_from_ecall(const HostResult &result)
+{
+  const StepResult applied = apply_ecall<false>(result);
+  return applied == StepResult::kContinue ? drive<false>() : applied;
+}
+
+inline StepResult
+ThreadedMachine::run(Host &host)
+{
+  // Thin synchronous wrapper over the untraced yield API.
+  StepResult result = start();
+  while (result == StepResult::kEcall) {
+    assert(pending_ecall_.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
+    // NOLINTEND(bugprone-unchecked-optional-access)
+  }
   return result;
 }
 
@@ -887,17 +952,29 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
   if (halted_) {
     return trap_ == Trap::kNone ? StepResult::kHalted : StepResult::kTrap;
   }
+  // Same precondition as start(): a fresh run must not begin with an
+  // outstanding ecall (drive<true> would execute past it without applying the
+  // host result). run(Host&) gets this via start(); the traced path asserts it
+  // directly since it drives the chain itself.
+  assert(!pending_ecall_.has_value());
   if (!exec_built_ || !exec_traced_) {
     build_exec(/*trace=*/true);
   }
-  host_ = &host;
   obs_ = &obs;
-  Ctx c{.m = this, .base = exec_.data()};
-  const Slot *ip = c.base + (pc_ / kInstructionBytes);
-  uint8_t *mem = memory_.data();
-  const auto memsize = static_cast<uint32_t>(memory_.size());
-  obs.on_initial(capture(c));
-  const StepResult result = enter_run<true>(c, ip, mem, memsize);
+  obs.on_initial(capture(Ctx{.m = this, .base = exec_.data()}));
+  StepResult result = drive<true>();
+  while (result == StepResult::kEcall) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    assert(pending_ecall_.has_value());
+    const StepResult applied =
+        apply_ecall<true>(host.ecall(view(), pending_ecall_.value()));
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    if (applied != StepResult::kContinue) {
+      result = applied;
+      break;
+    }
+    result = drive<true>();
+  }
   return result;
 }
 
