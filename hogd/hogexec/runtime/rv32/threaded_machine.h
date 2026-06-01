@@ -178,37 +178,30 @@ public:
   // garbage during execution; architectural x0 (==0) is restored in
   // reg()/capture()/view(). regs_[kRegisterCount] is never written.
   std::array<uint32_t, kRegisterCount + 1> regs_ = {}; // offset 0: register base
-  // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
-  // at every run head (the enter_run gas check) -- the hottest mutable datum in
-  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept
-  // off this line.)
-  uint64_t gas_remaining_ = 0; // checked/debited at every run head
-  uint32_t pc_ = 0;            // written per step on the traced path
-  // --- cold below ---
-  Trap trap_ = Trap::kNone;
+  // Read-only / read-mostly data grouped right after regs_ (regs_[kRegisterCount]
+  // is the always-0 x0 read source). max_pc_ (read in op_jalr's valid_target)
+  // and the cold pointers go here; the read/WRITE hot scalar gas_remaining_ is
+  // pushed to its own cache line below so its per-run-head store doesn't disturb
+  // this read-mostly region.
+  uint32_t max_pc_ = 0; // program size in bytes; op_jalr bounds-check (build_exec)
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
+  // Read/write hot scalar on its own cache line, isolated from the read-mostly
+  // data above and from the regs_ reads.
+  alignas(64) uint64_t gas_remaining_ = 0; // checked/debited at every run head
+  uint32_t pc_ = 0;                        // written per step on the traced path
+  // --- cold below ---
+  Trap trap_ = Trap::kNone;
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
-  // Program size in bytes (code.size() * kInstructionBytes), precomputed in
-  // build_exec. The hot path (op_jalr's valid_target, hit on every guest
-  // return) bounds-checks a target with one scalar load of this instead of
-  // dereferencing program_ into the separate ThreadedProgram object. That
-  // program_ pointer-chase, with its load sharing a cache line with the
-  // gas_remaining_ store, set-conflicted and cost ~7% on recursive fib (#2456).
-  // alignas(64) keeps this read-only datum on its own line, off the read/write
-  // hot line.
-  alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool gas_overflow_ = false; // a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
-  // Cold now: only construction and build_exec touch program_ (the hot bounds
-  // check uses max_pc_ above), so it lives at the tail.
   std::shared_ptr<const ThreadedProgram> program_;
 };
 
