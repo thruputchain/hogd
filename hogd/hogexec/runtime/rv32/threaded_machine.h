@@ -52,8 +52,11 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // shift, and the exec_ array is half the size of the old 32-byte slot). Layout:
 //   handler (8) | gas_to_run (2) | rd (1) | rs1 (1) | union{imm;
 //   {imm16,rs2}}(4)
-// rd/rs1/rs2 are register indices; rd==0 maps to a trash slot at
-// regs_[kRegisterCount] so the write is unconditional (no x0 special-case).
+// rd/rs1/rs2 are register indices. x0 writes are made unconditional by a trash
+// sink: rd==0 stays 0 and writes land harmlessly in regs_[0] (observable state
+// forces regs_[0] back to 0). x0 reads come from an always-zero register at
+// regs_[kRegisterCount], so build_exec remaps rs1/rs2 0 -> kRegisterCount. No
+// per-op x0 branch either way.
 // The union exploits that no instruction needs rs2 together with a >16-bit imm:
 // only lui/auipc/jal carry a wide imm and none of them use rs2, while the
 // rs2-users (R-type/store/branch) need at most an int16 imm (store offset /
@@ -1170,8 +1173,11 @@ template<bool Trace>
 StepResult
 ThreadedMachine::drive()
 {
-  // Reject a program whose run gas overflowed uint16 (set in build_exec).
-  // TODO(gramseyer): split overflowing runs instead of rejecting.
+  // Reject a program whose run gas overflowed uint16 (set in build_exec). This
+  // is an interpreter-side encoding limit (gas_to_run is uint16), not a bad
+  // opcode; kInvalidInstruction is a stand-in for "this interpreter can't run
+  // this program" until runs are split. TODO(gramseyer): split overflowing runs
+  // instead of rejecting (then this whole branch goes away).
   if (gas_overflow_) {
     trap_ = Trap::kInvalidInstruction;
     halted_ = true;

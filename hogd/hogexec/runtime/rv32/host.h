@@ -21,14 +21,17 @@ memory_range_in_bounds(size_t memory_size, uint32_t address, size_t width)
 }
 
 // Compile-time-width overload for the guest hot path: load/store Width is a
-// constant 1/2/4 and address is uint32_t, so addr + Width can't overflow 64
-// bits -- the predicate is a single compare (one cmp+branch) instead of the
-// runtime form's two. Equivalent to the 3-arg version for these widths.
+// constant 1/2/4 and address is uint32_t. Widening address to uint64_t makes
+// `address + Width` a 64-bit add that cannot overflow for these widths
+// regardless of size_t (a 32-bit size_t would otherwise wrap 0xFFFFFFFC+4 to 0
+// and pass an out-of-bounds address). The predicate is then a single compare
+// (one cmp+branch) instead of the runtime form's two, and on 64-bit platforms
+// the widen is a no-op. Equivalent to the 3-arg version for these widths.
 template<size_t Width>
 [[nodiscard]] constexpr bool
 memory_range_in_bounds(size_t memory_size, uint32_t address)
 {
-  return address + Width <= memory_size;
+  return uint64_t{address} + Width <= memory_size;
 }
 
 enum class Trap {
