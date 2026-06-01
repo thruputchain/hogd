@@ -3131,4 +3131,86 @@ TEST(TestBindingsTest, NegativeStorageTokenGrantRejected)
             kTestFFIErrorCodeNone);
 }
 
+namespace {
+struct DuplicateMockContext {
+  int calls = 0;
+  uint64_t method_number = 0;
+};
+
+ForeignInvokeResult
+duplicate_mock_callback(void *ctx, uint64_t method_number)
+{
+  auto *context = reinterpret_cast<DuplicateMockContext *>(ctx);
+  context->calls += 1;
+  context->method_number = method_number;
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
+}
+} // namespace
+
+// Regression test for #2469: re-registering the same mock contract id must
+// replace the stale callback/context pair, not silently keep the first one.
+// Otherwise an honest C API caller can free the old context after a successful
+// replacement and later hit stale-callback use-after-free.
+TEST(TestBindingsTest, DuplicateMockRegistrationReplacesCallback)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  DuplicateMockContext first_context;
+  DuplicateMockContext second_context;
+  ASSERT_EQ(register_new_contract(rc, 7, duplicate_mock_callback,
+                                  &first_context),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 7, duplicate_mock_callback,
+                                  &second_context),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 7;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  // The second registration wins; the first context is never touched.
+  EXPECT_EQ(second_context.calls, 1);
+  EXPECT_EQ(second_context.method_number, 0x1234);
+  EXPECT_EQ(first_context.calls, 0);
+}
+
 } // namespace hogd
