@@ -2,11 +2,13 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -207,7 +209,7 @@ public:
   x23::Defer<> force_commit_ = SystemCallHandler::force_commit_or_abort();
 };
 
-TEST_F(ViewGatewayRefreshTest, RequestRefreshReplacesStaleViewState)
+TEST_F(ViewGatewayRefreshTest, ViewRefreshesAfterCommittedBlock)
 {
   commit_bytestring("old-value");
   framework_.advance_block();
@@ -228,18 +230,31 @@ TEST_F(ViewGatewayRefreshTest, RequestRefreshReplacesStaleViewState)
   commit_bytestring("new-value");
   framework_.advance_block();
 
-  // Without refresh: the stale ViewState serves at the old height.
-  ViewGatewayResult r2 = gateway.viewgateway_view(make_read_query())();
-  ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
-  EXPECT_EQ(r2.payload().height, h1);
+  // The refresh worker should notice the committed tip and refresh the next
+  // snapshot without every view polling HogDB.
+  ViewGatewayResult r2 =
+      ViewGatewayResult(ViewGatewayOutcome::ViewGatewayInternalError);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    r2 = gateway.viewgateway_view(make_read_query())();
+    ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(r2.payload().output.status_code(),
+              InvocationFrameStatusCode::Return);
+    if (r2.payload().height > h1) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_GT(r2.payload().height, h1);
+  auto h2 = r2.payload().height;
 
-  // After request_refresh(): the ViewState is replaced — height advances.
+  // Explicit refresh remains harmless when there is no newer block.
   gateway.request_refresh();
   ViewGatewayResult r3 = gateway.viewgateway_view(make_read_query())();
   ASSERT_EQ(r3.outcome(), ViewGatewayOutcome::ViewGatewayOk);
   EXPECT_EQ(r3.payload().output.status_code(),
             InvocationFrameStatusCode::Return);
-  EXPECT_GT(r3.payload().height, h1);
+  EXPECT_EQ(r3.payload().height, h2);
 
   gateway.shut_down();
 }
