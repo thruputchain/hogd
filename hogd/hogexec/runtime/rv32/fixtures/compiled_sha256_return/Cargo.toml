@@ -1,0 +1,15 @@
+[package]
+name = "rv32-compiled-sha256-return"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+codegen-units = 1
+debug = false
+incremental = false
+lto = false
+opt-level = "s"
+overflow-checks = false
+panic = "abort"
+strip = "none"

@@ -144,7 +144,7 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_MintAuthToken_inner(
-    SystemCallHandler &syscall_handler, BlockHeight input_expiry_height,
+    SystemCallHandler &syscall_handler, const BlockHeight &input_expiry_height,
     std::span<const std::byte> input_serialized_auth_token,
     uint32_t &output_token_id) noexcept
 {

@@ -142,5 +142,34 @@ target_link_libraries(
 add_dependencies(
   test_ffi_test
   test_large_memory_wasm
+  test_param_entrypoint_wasm
 )
 gtest_discover_tests(test_ffi_test)
+
+# Separate binary for coverage that must run before logging is initialized.
+# It links GTest::gtest_main (the default main) instead of the custom main()
+# in mock_syscall_test.cc, which calls hogd_init() before tests run and would
+# otherwise mask the uninitialized-logger path exercised here.
+add_executable(
+  test_ffi_first_call_test
+  test_bindings_first_call_test.cc
+)
+
+target_include_directories(
+  test_ffi_first_call_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(
+  test_ffi_first_call_test
+  test_ffi_objects
+  auth_claim
+  precompiles
+  runtime
+  auth
+  runtime_test_util
+  GTest::gtest
+  GTest::gtest_main
+)
+gtest_discover_tests(test_ffi_first_call_test)

@@ -474,11 +474,18 @@ open_mock_invocation_frame(void *syscall_handler,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  auto res = context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
-  if (res != kTestFFIErrorCodeNone) {
-    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  try {
+    auto res =
+        context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
+    if (res != kTestFFIErrorCodeNone) {
+      error("failed to start mock invocation frame: {}",
+            std::to_underlying(res));
+    }
+    return res;
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during start_mock_invocation_frame: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-  return res;
 }
 
 ForeignTracedInvokeResult
@@ -492,8 +499,15 @@ finish_mock_invocation_frame(void *syscall_handler,
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
-  return context->finish_mock_invocation_frame(
-      static_cast<InvokeErrorCode>(invoke_error_code));
+  try {
+    return context->finish_mock_invocation_frame(
+        static_cast<InvokeErrorCode>(invoke_error_code));
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during finish_mock_invocation_frame: {}",
+              e);
+    return make_ffi_result_type<ForeignTracedInvokeResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
 }
 
 TestFFIErrorCode
@@ -588,6 +602,12 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   if (db == nullptr || contract_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
+  if (tokens < 0) {
+    error("setup_grant_contract_storage_tokens: tokens must be nonnegative, "
+          "got {}",
+          tokens);
+    return kTestFFIErrorCodeInvalidArgument;
+  }
   auto *db_cast = static_cast<DBContext *>(db);
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), contract_addr, addr.size());
@@ -622,31 +642,37 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     return kTestFFIErrorCodeDeserializeError;
   }
 
-  // make sure the contract has already been registered with the instantiation
-  // context
-  if (contract.contract_type() == ContractType::kMockTest) {
-    if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
-      error("contract has not been registered with the instantiation context");
-      return kTestFFIErrorCodeCreateNonexistentMockContract;
+  try {
+    // make sure the contract has already been registered with the
+    // instantiation context
+    if (contract.contract_type() == ContractType::kMockTest) {
+      if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
+        error(
+            "contract has not been registered with the instantiation context");
+        return kTestFFIErrorCodeCreateNonexistentMockContract;
+      }
     }
+
+    // Verify wasm contracts before storing — reject contracts that would
+    // fail during instantiation (e.g., memory exceeding limits).
+    if (contract.contract_type() == ContractType::kWasmi) {
+      auto verify_result = (*context_cast)->verify_contract(contract);
+      if (verify_result == InvokeErrorCode::Unrecoverable) {
+        return kTestFFIErrorCodeUnrecoverableError;
+      }
+      if (verify_result != InvokeErrorCode::None) {
+        return kTestFFIErrorCodeContractVerificationFailed;
+      }
+    }
+
+    auto h = sha256(contract);
+
+    db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
+                                                 std::move(contract)));
+  } catch (std::exception const &e) {
+    log_error("error creating contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-
-  // Verify wasm contracts before storing — reject contracts that would
-  // fail during instantiation (e.g., memory exceeding limits).
-  if (contract.contract_type() == ContractType::kWasmi) {
-    auto verify_result = (*context_cast)->verify_contract(contract);
-    if (verify_result == InvokeErrorCode::Unrecoverable) {
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
-    if (verify_result != InvokeErrorCode::None) {
-      return kTestFFIErrorCodeContractVerificationFailed;
-    }
-  }
-
-  auto h = sha256(contract);
-
-  db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
-                                               std::move(contract)));
   return kTestFFIErrorCodeNone;
 }
 
@@ -1181,6 +1207,10 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
       "source_auth_data={})",
       signed_tx, source_auth_data);
+  // Install a logger before entering auth verification: an invalid signature
+  // logs a debug-build trace() that would otherwise dereference a null logger
+  // when this is the first test_ffi call in the process (issue #2464).
+  hogd::lazy_init();
   auto result =
       hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "

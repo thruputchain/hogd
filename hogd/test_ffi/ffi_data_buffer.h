@@ -47,13 +47,18 @@ template<x23::is_xdr_type T>
 std::expected<FFIDataBuffer, TestFFIErrorCode>
 serialize_to_ffi_data_buffer(T const &value) noexcept
 {
-  auto serialized = x23::serialize(value);
-  auto buffer = make_new_data_buffer(serialized.size());
-  if (!buffer.has_value()) {
-    return std::unexpected(buffer.error());
+  try {
+    auto serialized = x23::serialize(value);
+    auto buffer = make_new_data_buffer(serialized.size());
+    if (!buffer.has_value()) {
+      return std::unexpected(buffer.error());
+    }
+    std::memcpy(buffer.value().data, serialized.data(), serialized.size());
+    return buffer.value();
+  } catch (std::exception const &e) {
+    log_error("error serializing to ffi data buffer: {}", e);
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
   }
-  std::memcpy(buffer.value().data, serialized.data(), serialized.size());
-  return buffer.value();
 }
 
 } // namespace hogd

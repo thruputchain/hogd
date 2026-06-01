@@ -27,6 +27,7 @@ members = [
     "integration_test_contracts/payment_channel",
     "integration_test_contracts/read_only_test",
     "integration_test_contracts/return_fault_test",
+    "integration_test_contracts/rv32_smoke_counter",
     "integration_test_contracts/sha256_raw",
     "integration_test_contracts/sha256_wrapper",
     "integration_test_contracts/simple_wallet",
@@ -52,7 +53,8 @@ edition = "2024"
 [workspace.dependencies]
 # groundhog dependencies
 sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-xdr = { registry = "groundhog", version = "0.14", features = ["xdrs", "syscalls"] }
+groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+groundhog-xdr = { registry = "groundhog", version = "0.15", features = ["xdrs", "syscalls"] }
 xdrs = { registry = "groundhog", version = "0.7.1", features = ["int128", "heapless"] }
 sha2 = { version = "0.10.8", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }

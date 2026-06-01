@@ -71,8 +71,13 @@ public:
   // change must be non-null.
   // Returns an error if the exclusive commit path re-validates against a
   // live DAO that was mutated by a sibling block commit.
+  //
+  // noexcept: an allocation failure mid-commit can leave the lock partially
+  // mutated (see issue #2266).  Such failures are caught internally and
+  // surfaced as kInternal so the caller halts the node rather than acting on a
+  // half-committed lock; nothing is allowed to escape.
   HogDBStatus<int128_t> commit_change(ItemChange change,
-                                      const LockContext &ctx);
+                                      const LockContext &ctx) noexcept;
 
   void add_committed_balance_credit(int128_t delta);
 

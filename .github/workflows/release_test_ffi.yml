@@ -188,8 +188,8 @@ jobs:
 
       - name: Configure Environment
         run: |
-          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
-          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'GCC_CC=gcc-15' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-15' >> ./scripts/conf.sh
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
