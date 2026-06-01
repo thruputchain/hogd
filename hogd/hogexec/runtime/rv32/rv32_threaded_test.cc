@@ -403,12 +403,12 @@ TEST(Rv32Threaded, fusedLoadFeedsRs1OfNonCommutativeOp)
   // The loaded value is rs1 of a non-commutative op, so operand order matters:
   // a wrong substitution (v as rs2) would give 7-0x100. funct7=0x20 -> sub.
   const std::vector<uint32_t> words = {
-      addi(1, 0, 0),         // x1 = 0 (base)
-      addi(3, 0, 0x100),     // x3 = 0x100 (data)
-      addi(6, 0, 7),         // x6 = 7
-      store(1, 3, 16, 2),    // sw x3, 16(x1)
-      load(4, 2, 1, 16),     // lw x4, 16(x1)     <- fused head
-      op(5, 4, 6, 0, 0x20),  // sub x5, x4, x6 (x4 is rs1)  <- fused tail
+      addi(1, 0, 0),        // x1 = 0 (base)
+      addi(3, 0, 0x100),    // x3 = 0x100 (data)
+      addi(6, 0, 7),        // x6 = 7
+      store(1, 3, 16, 2),   // sw x3, 16(x1)
+      load(4, 2, 1, 16),    // lw x4, 16(x1)     <- fused head
+      op(5, 4, 6, 0, 0x20), // sub x5, x4, x6 (x4 is rs1)  <- fused tail
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
@@ -423,15 +423,15 @@ TEST(Rv32Threaded, fusedLoadFeedsRs2OfNonCommutativeOp)
   using test_program::op;
   using test_program::store;
   // Store 0x100 @16; lw x4,16(x1); sub x5,x6,x4 (x6=0x200) -> x5 = 0x200-0x100.
-  // The loaded value is rs2 here (fib's `add a0,a0,t1` shape, non-commutative to
-  // catch operand-order bugs). funct7=0x20 -> sub.
+  // The loaded value is rs2 here (fib's `add a0,a0,t1` shape, non-commutative
+  // to catch operand-order bugs). funct7=0x20 -> sub.
   const std::vector<uint32_t> words = {
-      addi(1, 0, 0),         // x1 = 0 (base)
-      addi(3, 0, 0x100),     // x3 = 0x100 (data)
-      addi(6, 0, 0x200),     // x6 = 0x200
-      store(1, 3, 16, 2),    // sw x3, 16(x1)
-      load(4, 2, 1, 16),     // lw x4, 16(x1)     <- fused head
-      op(5, 6, 4, 0, 0x20),  // sub x5, x6, x4 (x4 is rs2)  <- fused tail
+      addi(1, 0, 0),        // x1 = 0 (base)
+      addi(3, 0, 0x100),    // x3 = 0x100 (data)
+      addi(6, 0, 0x200),    // x6 = 0x200
+      store(1, 3, 16, 2),   // sw x3, 16(x1)
+      load(4, 2, 1, 16),    // lw x4, 16(x1)     <- fused head
+      op(5, 6, 4, 0, 0x20), // sub x5, x6, x4 (x4 is rs2)  <- fused tail
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, 100);
@@ -459,7 +459,7 @@ TEST(Rv32Threaded, branchOntoFusedRrSlotExecutesStandalone)
   ThreadedMachine machine(program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end after add
-  EXPECT_EQ(machine.reg(4), 0U); // lw was skipped
+  EXPECT_EQ(machine.reg(4), 0U);                   // lw was skipped
   EXPECT_EQ(machine.reg(5), 5U); // add ran standalone (x4=0 + x6=5)
 }
 
