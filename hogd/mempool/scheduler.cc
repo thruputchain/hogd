@@ -661,24 +661,8 @@ Scheduler::process_transfers_helper(const Delta &delta,
         from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
     uint128_t to_schedule_hogs =
         from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
-    // The account's cached hog-age buckets cannot absorb this deduction. This
-    // happens on a validating node that skipped this account's hog-age update
-    // (it lacked the account's prior state), leaving the buckets empty/stale.
-    // Skip the update rather than aborting, mirroring the tx-driven
-    // apply_committed_block_hog_ages path which skips such accounts; hog-age is
-    // a best-effort scheduling heuristic that reconciles once state is present.
-    if (num_received_abs >
-        to_schedule_hogs + already_scheduled_hogs + received_hogs) {
-      // This replaces a former CHECK_LE abort. The skip is expected on a
-      // validating node with stale/empty buckets, but an oversized deduction on
-      // a fully-initialised node would signal a hog-accounting bug. Log it so
-      // the deviation is observable rather than silent.
-      debug("process_transfers_helper: hog-age deduction exceeds cached "
-            "buckets for address {}; skipping update (stale/empty state on a "
-            "validating node, or a hog-accounting discrepancy)",
-            show_byte_array(account));
-      return;
-    }
+    CHECK_LE(num_received_abs,
+             to_schedule_hogs + already_scheduled_hogs + received_hogs);
 
     uint128_t to_deduct = std::min(num_received_abs, received_hogs);
     num_received_abs -= to_deduct;
