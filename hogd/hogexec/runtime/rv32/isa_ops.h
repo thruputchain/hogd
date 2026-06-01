@@ -41,6 +41,14 @@ sign_extend(uint32_t value, uint32_t bits_count)
   return (value ^ sign_bit) - sign_bit;
 }
 
+template<uint32_t Bits>
+constexpr uint32_t
+sign_extend(uint32_t value)
+{
+  constexpr static uint32_t kSignBit = uint32_t{1} << ((Bits) - 1);
+  return (value ^ kSignBit) - kSignBit;
+}
+
 constexpr uint32_t
 opcode(uint32_t word)
 {

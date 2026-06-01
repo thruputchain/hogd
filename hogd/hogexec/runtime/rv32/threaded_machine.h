@@ -606,7 +606,7 @@ op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   }
   uint32_t v = le_load<Width>(mem, addr);
   if constexpr (SignExtend) {
-    v = sign_extend(v, Width * 8);
+    v = sign_extend<Width * 8>(v);
   }
   c.m->regs_[ip->rd] = v;
   HOGD_THREAD_NEXT(c, ip + 1);
