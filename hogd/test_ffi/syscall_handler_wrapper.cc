@@ -73,7 +73,21 @@ SyscallHandlerContext::root_invoke()
     if (!serialized_output.has_value()) {
       return kMakeFFIError(serialized_output.error());
     }
+
+    // serialized_output now owns a heap buffer. A later serialization failure
+    // returns an FFI error with null buffers, so the caller cannot reclaim it;
+    // free the already-allocated buffers on those error paths.
     FFIDataBuffer serialized_trace = kNullBuffer;
+    FFIDataBuffer serialized_events = kNullBuffer;
+    bool buffers_handed_off = false;
+    x23::Defer free_buffers_on_error([&]() {
+      if (!buffers_handed_off) {
+        hogd::free_ffi_data_buffer(serialized_output.value());
+        hogd::free_ffi_data_buffer(serialized_trace);
+        hogd::free_ffi_data_buffer(serialized_events);
+      }
+    });
+
     auto const *trace = handler_.get_trace();
     if (trace) {
       auto s = serialize_to_ffi_data_buffer(*trace);
@@ -85,7 +99,6 @@ SyscallHandlerContext::root_invoke()
 
     // Only return events when the invocation succeeded and the root frame
     // returned normally (not aborted/faulted).
-    FFIDataBuffer serialized_events = kNullBuffer;
     if (res.result_.has_value() && root_invocation_output.status_code() ==
                                        InvocationFrameStatusCode::Return) {
       auto frame_events = handler_.copy_last_frame_events();
@@ -98,6 +111,7 @@ SyscallHandlerContext::root_invoke()
       }
     }
 
+    buffers_handed_off = true;
     return ForeignTracedInvokeResult{
         .serialized_output = serialized_output.value(),
         .gas_consumed = res.gas_consumed_,
@@ -273,7 +287,20 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     return kMakeFFIError(serialized_output.error());
   }
 
+  // serialized_output now owns a heap buffer. A later serialization failure
+  // returns an FFI error with null buffers, so the caller cannot reclaim it;
+  // free the already-allocated buffers on those error paths.
   FFIDataBuffer serialized_trace = kNullBuffer;
+  FFIDataBuffer serialized_events = kNullBuffer;
+  bool buffers_handed_off = false;
+  x23::Defer free_buffers_on_error([&]() {
+    if (!buffers_handed_off) {
+      hogd::free_ffi_data_buffer(serialized_output.value());
+      hogd::free_ffi_data_buffer(serialized_trace);
+      hogd::free_ffi_data_buffer(serialized_events);
+    }
+  });
+
   auto const *trace = handler_.get_trace();
   if (trace) {
     auto s = serialize_to_ffi_data_buffer(*trace);
@@ -287,7 +314,6 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   // frames discard their events.
   bool frame_succeeded =
       invoke_error_code == InvokeErrorCode::None && !manually_reverted;
-  FFIDataBuffer serialized_events = kNullBuffer;
   if (frame_succeeded && !frame_events.empty()) {
     auto s = serialize_to_ffi_data_buffer(frame_events);
     if (!s.has_value()) {
@@ -296,6 +322,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     serialized_events = s.value();
   }
 
+  buffers_handed_off = true;
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
       .gas_consumed = total_gas_consumed,
