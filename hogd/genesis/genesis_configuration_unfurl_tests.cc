@@ -59,22 +59,17 @@ protected:
   }
 
   static int128_t
-  genesis_deployer_storage_costs(StorageCostModel const &cost_model,
-                                 int128_t num_unfurl_txns)
+  genesis_deployer_storage_costs(StorageCostModel const &cost_model)
   {
     AddressAuthData deployer_auth_data{};
     deployer_auth_data.required_weight = 0;
     deployer_auth_data.last_written_height = 0;
     StorageItemWrapper deployer_auth_item(deployer_auth_data, &cost_model);
-    // Each unfurl transaction is invoked on the genesis deploy contract and
-    // consumes a replay-cache entry charged to it at commit. The unfurls commit
-    // in one block, so each is priced against the empty committed snapshot;
-    // reserve one entry's cost per unfurl in the genesis allocation so the
-    // deploy contract can pay (rather than topping it up after init, which
-    // would overwrite committed DB state incoherently).
+    // The unfurl transactions are invoked on the initial token claim
+    // precompile, which is exempt from the replay cache, so they consume no
+    // replay-cache entry and incur no extra cost here.
     return deployer_auth_item.storage_cost(&cost_model) +
-           cost_model.get_balance_cost() +
-           (cost_model.get_replay_cache_cost(1) * num_unfurl_txns);
+           cost_model.get_balance_cost();
   }
 
   std::set<Uniquifier> uniquifiers_;
@@ -309,8 +304,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
       caller_contract, caller_nonce, caller_meta_t::entrypoint<"initialize">(),
       caller_meta_t::make_calldata<"initialize">(expected_fibonacci_address),
       GenesisConfigurationLoader::initial_hog_token_supply() -
-          int128_t{1'000'000'000} -
-          genesis_deployer_storage_costs(cost_model, /*num_unfurl_txns=*/2));
+          int128_t{1'000'000'000} - genesis_deployer_storage_costs(cost_model));
   auto block = builder.build(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
@@ -369,7 +363,7 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
       fibonacci_meta_t::entrypoint<"fibonacci">(),
       fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
       GenesisConfigurationLoader::initial_hog_token_supply() -
-          genesis_deployer_storage_costs(cost_model, /*num_unfurl_txns=*/1));
+          genesis_deployer_storage_costs(cost_model));
   auto genesis_configuration = builder.build(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
