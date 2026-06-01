@@ -602,6 +602,12 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   if (db == nullptr || contract_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
+  if (tokens < 0) {
+    error("setup_grant_contract_storage_tokens: tokens must be nonnegative, "
+          "got {}",
+          tokens);
+    return kTestFFIErrorCodeInvalidArgument;
+  }
   auto *db_cast = static_cast<DBContext *>(db);
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), contract_addr, addr.size());
