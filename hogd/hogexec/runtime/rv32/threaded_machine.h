@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -45,25 +46,25 @@ struct Ctx;
 struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 
-// Executable instruction: handler pointer + decoded operands + gas. `gas` is
-// this instruction's own cost (charged by barriers); `gas_to_run` is the total
-// cost of the non-barrier run starting here (charged once by enter_run), 0 for
-// a barrier. Fields total 31 bytes; the 8-byte `rd` pointer makes alignof 8, so
-// sizeof already rounds to 32 (one padding byte) -- a power of two, which is
-// what lets `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a
-// shift rather than a divide/multiply. alignas(32) doesn't change the size; it
-// additionally pins each slot to a 32-byte boundary (cache placement) and
-// documents that the shift lowering depends on the power-of-two size.
+// Executable instruction: handler pointer + decoded operands + run gas. Only the
+// fields a handler reads on the hot path are stored; the per-instruction op and
+// gas cost are build-time inputs (read from `code` in build_exec) and are not
+// kept here. `gas_to_run` is the total cost of the run starting here -- its
+// non-barrier body through and including the terminating barrier -- charged once
+// by enter_run. Fields total 26 bytes; the 8-byte `rd` pointer makes alignof 8,
+// so sizeof rounds up to 32 -- a power of two, which is what lets `ip - base`
+// (pc_of) and `ip + imm` (branch/jump targets) lower to a shift rather than a
+// divide/multiply. alignas(32) doesn't change the size; it additionally pins
+// each slot to a 32-byte boundary (cache placement) and documents that the
+// shift lowering depends on the power-of-two size.
 struct alignas(32) Slot {
   Handler handler = nullptr;
   uint32_t *rd = nullptr; // &regs_[rd], or &trash_ when rd==0 (the x0 sink:
                           // writes to x0 land in trash, so regs_[0] stays 0 and
                           // no separate sink store is needed). 8-byte aligned,
                           // so it sits right after handler.
-  uint32_t gas = static_cast<uint32_t>(kBaseInstructionGas);
   uint32_t gas_to_run = 0;
   int32_t imm = 0;
-  Op op = Op::kAdd; // read by op_branch_bad_target (cold) and build_exec
   uint8_t rs1 = 0;
   uint8_t rs2 = 0;
 };
@@ -489,12 +490,13 @@ op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 
 // Baked in place of op_branch when the (static) taken target is out of range. A
 // not-taken branch still falls through normally; only a taken one traps kBadPc
-// (at the branch's own pc, after its gas is charged).
-template<bool Trace>
+// at the branch's own pc. Cmp is baked per branch kind at decode, exactly as in
+// op_branch, so the comparison is one direct call, not a runtime switch on op.
+template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
 op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
@@ -767,6 +769,34 @@ handler_for(Op op)
   }
 }
 
+// Selects the out-of-range branch handler with the same Cmp handler_for bakes
+// for the in-range case. Build-time only (cold); build_exec calls it solely for
+// is_conditional_branch ops, so a non-branch op is a build_exec bug -- assert
+// and abort rather than mislabel it as a guest-visible invalid instruction.
+template<bool Trace>
+Handler
+branch_bad_target_handler_for(Op op)
+{
+  switch (op) {
+  case Op::kBeq:
+    return &op_branch_bad_target<Trace, beq_cmp>;
+  case Op::kBne:
+    return &op_branch_bad_target<Trace, bne_cmp>;
+  case Op::kBlt:
+    return &op_branch_bad_target<Trace, blt_cmp>;
+  case Op::kBge:
+    return &op_branch_bad_target<Trace, bge_cmp>;
+  case Op::kBltu:
+    return &op_branch_bad_target<Trace, bltu_cmp>;
+  case Op::kBgeu:
+    return &op_branch_bad_target<Trace, bgeu_cmp>;
+  default:
+    assert(false && "branch_bad_target_handler_for: op is not a conditional "
+                    "branch");
+    std::abort();
+  }
+}
+
 inline void
 ThreadedMachine::build_exec(bool trace)
 {
@@ -778,10 +808,8 @@ ThreadedMachine::build_exec(bool trace)
     exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
                                      : handler_for<false>(d.op),
                     .rd = (d.rd == 0) ? &trash_ : &regs_[d.rd],
-                    .gas = static_cast<uint32_t>(d.gas),
                     .gas_to_run = 0, // filled by the backward pass below
                     .imm = d.imm,
-                    .op = d.op,
                     .rs1 = d.rs1,
                     .rs2 = d.rs2};
     // Resolve the PC-relative target of jal and the conditional branches once,
@@ -800,8 +828,8 @@ ThreadedMachine::build_exec(bool trace)
             trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
       }
       else {
-        exec_[i].handler =
-            trace ? &op_branch_bad_target<true> : &op_branch_bad_target<false>;
+        exec_[i].handler = trace ? branch_bad_target_handler_for<true>(d.op)
+                                 : branch_bad_target_handler_for<false>(d.op);
       }
     }
   }
@@ -814,14 +842,17 @@ ThreadedMachine::build_exec(bool trace)
   // its own gas (charged when a jump/branch lands directly on it); a non-barrier
   // always continues into its successor, and the sum stops naturally at the
   // barrier (whose gas_to_run excludes its own successor). The i+1<n guard keeps
-  // the run from absorbing the fall-off sentinel (exec_[n], gas 0).
+  // the run from absorbing the fall-off sentinel (exec_[n], gas 0). The
+  // per-instruction op and gas come straight from `code` -- they are build-time
+  // inputs, not stored in the Slot.
   for (size_t i = n; i-- > 0;) {
-    if (is_barrier(exec_[i].op)) {
-      exec_[i].gas_to_run = exec_[i].gas;
+    const auto self_gas = static_cast<uint32_t>(code[i].gas);
+    if (is_barrier(code[i].op)) {
+      exec_[i].gas_to_run = self_gas;
     }
     else {
       exec_[i].gas_to_run =
-          exec_[i].gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
+          self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
     }
   }
   exec_built_ = true;

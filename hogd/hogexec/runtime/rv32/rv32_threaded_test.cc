@@ -209,6 +209,35 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
 }
 
+TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
+{
+  using test_program::branch;
+  // beq x0,x0,+4096: target is out of range, so op_branch_bad_target (baked
+  // with beq_cmp) handles it; the comparison is equal, so the taken path traps
+  // kBadPc rather than falling through.
+  const std::vector<uint32_t> words = {branch(0, 0, 0, 4096)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+}
+
+TEST(Rv32Threaded, branchBadTargetNotTakenFallsThrough)
+{
+  using test_program::branch;
+  // x1=1, x2=2; beq x1,x2,+4096 has an out-of-range target (bad_target handler,
+  // beq_cmp), but 1 != 2 so the branch is not taken: it falls through to the
+  // addi, which runs (x3=99). Exercises the not-taken path's baked Cmp.
+  const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 2),
+                                       branch(0, 1, 2, 4096), addi(3, 0, 99)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end after addi
+  EXPECT_EQ(machine.reg(3), 99U);                  // fall-through executed
+}
+
 TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
 {
   using test_program::branch;
