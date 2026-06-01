@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include "hogd/base/perthread_arc.h"
@@ -40,10 +42,8 @@ public:
 
   // Signal that the current ViewState should be replaced with a fresh
   // snapshot before the next view attempt.  This is a no-op if there is
-  // no current ViewState.  Thread-safe; retained as an explicit hint for
-  // tests and future refresh drivers.  View requests also compare the
-  // latest committed tip height before reuse, so public reads do not remain
-  // pinned to an old block.
+  // no current ViewState.  Thread-safe; used by tests and by the background
+  // refresh worker when it observes a newer committed tip.
   void request_refresh()
   {
     refresh_flag_.store(true, std::memory_order_release);
@@ -80,6 +80,9 @@ private:
 
   void gc_view_state(BlockID block_id);
 
+  void refresh_worker(std::stop_token const &stoken);
+  void probe_refresh_tip();
+
   std::atomic<bool> shutdown_flag_ = false;
   std::atomic<bool> refresh_flag_ = false;
   DatabaseProxy db_proxy_;
@@ -88,6 +91,7 @@ private:
   std::mutex view_state_mutex_;
   BlockID current_view_block_id_ = 0;
   std::unordered_map<BlockID, PerThreadARC<ViewState>> view_states_;
+  std::jthread refresh_thread_;
 
   // worker_pool_ must be declared last so it is destroyed (joined) before
   // view_states_, preventing use-after-destroy of in-flight ViewState refs.

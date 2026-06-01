@@ -2,11 +2,13 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -228,11 +230,21 @@ TEST_F(ViewGatewayRefreshTest, ViewRefreshesAfterCommittedBlock)
   commit_bytestring("new-value");
   framework_.advance_block();
 
-  // The next public view refreshes its snapshot before executing.
-  ViewGatewayResult r2 = gateway.viewgateway_view(make_read_query())();
-  ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
-  EXPECT_EQ(r2.payload().output.status_code(),
-            InvocationFrameStatusCode::Return);
+  // The refresh worker should notice the committed tip and refresh the next
+  // snapshot without every view polling HogDB.
+  ViewGatewayResult r2 =
+      ViewGatewayResult(ViewGatewayOutcome::ViewGatewayInternalError);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    r2 = gateway.viewgateway_view(make_read_query())();
+    ASSERT_EQ(r2.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(r2.payload().output.status_code(),
+              InvocationFrameStatusCode::Return);
+    if (r2.payload().height > h1) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
   EXPECT_GT(r2.payload().height, h1);
   auto h2 = r2.payload().height;
 
