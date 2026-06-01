@@ -138,7 +138,8 @@ public:
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
-    return i < kRegisterCount ? regs_[i] : 0; // [kRegisterCount] is the trash sink
+    // regs_[0] is the trash sink (x0 writes); architectural x0 reads as 0.
+    return (i != 0 && i < kRegisterCount) ? regs_[i] : 0;
   }
   [[nodiscard]] uint32_t pc() const { return pc_; }
   [[nodiscard]] uint64_t gas_remaining() const { return gas_remaining_; }
@@ -171,9 +172,11 @@ public:
   // then also the register-file base, so hot-path regs_[i] is a single indexed
   // load with no base adjustment, while every other (cold) field is still
   // reached through the same pointer at its own offset.
-  // One extra register: regs_[kRegisterCount] is the x0 write-sink. Instructions
-  // targeting x0 get rd == kRegisterCount at decode, so the register write is
-  // unconditional (no per-instruction x0 special-case) and regs_[0] stays 0.
+  // One extra register. EXPERIMENT(flip): regs_[0] is the x0 write-sink (trash)
+  // and regs_[kRegisterCount] is the always-zero register that x0 *reads* remap
+  // to, so register writes stay unconditional (no x0 special-case). regs_[0] is
+  // garbage during execution; architectural x0 (==0) is restored in
+  // reg()/capture()/view(). regs_[kRegisterCount] is never written.
   std::array<uint32_t, kRegisterCount + 1> regs_ = {}; // offset 0: register base
   // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
   // at every run head (the enter_run gas check) -- the hottest mutable datum in
@@ -231,7 +234,8 @@ capture(const Ctx c)
 {
   ArchState s;
   s.pc = c.m->pc_;
-  std::copy_n(c.m->regs_.begin(), kRegisterCount, s.regs.begin()); // skip trash slot
+  std::copy_n(c.m->regs_.begin(), kRegisterCount, s.regs.begin());
+  s.regs[0] = 0; // regs_[0] is the trash sink; architectural x0 is 0
   s.memory.assign(c.m->memory_.begin(), c.m->memory_.end());
   s.gas_remaining = c.m->gas_remaining_;
   s.trap = c.m->trap_;
@@ -882,15 +886,18 @@ ThreadedMachine::build_exec(bool trace)
     slot.handler =
         trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
     slot.gas_to_run = 0; // filled by the backward pass below
-    // x0-targeting writes redirect to the trash register at kRegisterCount.
-    slot.rd = (d.rd == 0) ? static_cast<uint8_t>(kRegisterCount)
-                          : static_cast<uint8_t>(d.rd);
-    slot.rs1 = d.rs1;
+    // EXPERIMENT(flip): x0 writes land in the trash at regs_[0] (rd unmapped),
+    // x0 reads come from the always-zero register at regs_[kRegisterCount] (rs
+    // remapped). Observable state forces x0 (regs_[0]) back to 0.
+    slot.rd = static_cast<uint8_t>(d.rd);
+    slot.rs1 = (d.rs1 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                            : static_cast<uint8_t>(d.rs1);
     // Pick the union arm: rs2-users get {imm16, rs2}; everyone else the wide
     // imm. (imm16 is the store offset here; for branches it's overwritten with
     // the slot delta below; R-type ignores it.)
     if (slot_packs_rs2(d.op)) {
-      slot.rb.rs2 = d.rs2;
+      slot.rb.rs2 = (d.rs2 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                                 : static_cast<uint8_t>(d.rs2);
       assert(fits_int16(d.imm) && "store immediate must fit imm16");
       slot.rb.imm16 = static_cast<int16_t>(d.imm);
     }
@@ -962,6 +969,7 @@ ThreadedMachine::build_exec(bool trace)
 inline MachineView
 ThreadedMachine::view()
 {
+  regs_[0] = 0; // regs_[0] is the x0 trash sink; present architectural 0
   return MachineView(
       pc_, gas_remaining_,
       std::span<const uint32_t, kRegisterCount>(regs_.data(), kRegisterCount),
