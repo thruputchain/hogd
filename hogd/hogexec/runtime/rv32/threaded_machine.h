@@ -73,7 +73,7 @@ class ThreadedMachine {
 public:
   ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
                   uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
-    : program_(std::move(program)), initial_pc_(initial_pc)
+    : initial_pc_(initial_pc), program_(std::move(program))
   {
     if (!program_) {
       construction_trap_ = Trap::kInvalidInstruction;
@@ -168,14 +168,10 @@ public:
   // load with no base adjustment, while every other (cold) field is still
   // reached through the same pointer at its own offset.
   std::array<uint32_t, kRegisterCount> regs_ = {}; // offset 0: register base
-  // HOT SCALARS -- keep these immediately after regs_, ahead of every cold
-  // field. gas_remaining_ is read+written at every run head (the enter_run gas
-  // check) and is one of the hottest accesses in the dispatch loop. Its byte
-  // OFFSET in this struct materially affects throughput: #2456 inserted a cold
-  // field (the pending_ecall_ optional) ahead of it, pushing it 0xd8 -> 0xf8 and
-  // regressing recursive-fibonacci ~7% with no other change (confirmed by a
-  // controlled offset-only experiment). Do NOT insert cold members above this
-  // group.
+  // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
+  // at every run head (the enter_run gas check) -- the hottest mutable datum in
+  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept off
+  // this line.)
   uint64_t gas_remaining_ = 0; // checked/debited at every run head
   uint32_t pc_ = 0;            // written per step on the traced path
   uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
@@ -187,12 +183,21 @@ public:
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
+  // Program size in bytes (code.size() * kInstructionBytes), precomputed in
+  // build_exec. The hot path (op_jalr's valid_target, hit on every guest return)
+  // bounds-checks a target with one scalar load of this instead of dereferencing
+  // program_ into the separate ThreadedProgram object. That program_
+  // pointer-chase, with its load sharing a cache line with the gas_remaining_
+  // store, set-conflicted and cost ~7% on recursive fib (#2456). alignas(64)
+  // keeps this read-only datum on its own line, off the read/write hot line.
   alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
+  // Cold now: only construction and build_exec touch program_ (the hot bounds
+  // check uses max_pc_ above), so it lives at the tail.
   std::shared_ptr<const ThreadedProgram> program_;
 };
 
