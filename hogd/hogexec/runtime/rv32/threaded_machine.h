@@ -969,7 +969,7 @@ ThreadedMachine::run(Host &host)
   while (result == StepResult::kEcall) {
     assert(pending_ecall_.has_value());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
+    result = resume_from_ecall(host.ecall(view(), *pending_ecall_));
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
   return result;
@@ -996,7 +996,7 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     assert(pending_ecall_.has_value());
     const StepResult applied =
-        apply_ecall<true>(host.ecall(view(), pending_ecall_.value()));
+        apply_ecall<true>(host.ecall(view(), *pending_ecall_));
     // NOLINTEND(bugprone-unchecked-optional-access)
     if (applied != StepResult::kContinue) {
       result = applied;
