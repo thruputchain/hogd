@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -45,13 +46,15 @@ struct Ctx;
 struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 
-// Executable instruction: handler pointer + decoded operands + gas. `gas` is
-// this instruction's own cost (charged by barriers); `gas_to_run` is the total
-// cost of the non-barrier run starting here (charged once by enter_run), 0 for
-// a barrier. Fields total 31 bytes; the 8-byte `rd` pointer makes alignof 8, so
-// sizeof already rounds to 32 (one padding byte) -- a power of two, which is
-// what lets `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a
-// shift rather than a divide/multiply. alignas(32) doesn't change the size; it
+// Executable instruction: handler pointer + decoded operands + run gas. Only
+// the fields a handler reads on the hot path are stored; the per-instruction op
+// and gas cost are build-time inputs (read from `code` in build_exec) and are
+// not kept here. `gas_to_run` is the total cost of the run starting here -- its
+// non-barrier body through and including the terminating barrier -- charged
+// once by enter_run. Fields total 26 bytes; the 8-byte `rd` pointer makes
+// alignof 8, so sizeof rounds up to 32 -- a power of two, which is what lets
+// `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a shift
+// rather than a divide/multiply. alignas(32) doesn't change the size; it
 // additionally pins each slot to a 32-byte boundary (cache placement) and
 // documents that the shift lowering depends on the power-of-two size.
 struct alignas(32) Slot {
@@ -60,10 +63,8 @@ struct alignas(32) Slot {
                           // writes to x0 land in trash, so regs_[0] stays 0 and
                           // no separate sink store is needed). 8-byte aligned,
                           // so it sits right after handler.
-  uint32_t gas = static_cast<uint32_t>(kBaseInstructionGas);
   uint32_t gas_to_run = 0;
   int32_t imm = 0;
-  Op op = Op::kAdd; // read by op_branch_bad_target (cold) and build_exec
   uint8_t rs1 = 0;
   uint8_t rs2 = 0;
 };
@@ -72,7 +73,7 @@ class ThreadedMachine {
 public:
   ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
                   uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
-    : program_(std::move(program)), initial_pc_(initial_pc)
+    : initial_pc_(initial_pc), program_(std::move(program))
   {
     if (!program_) {
       construction_trap_ = Trap::kInvalidInstruction;
@@ -166,23 +167,39 @@ public:
   // then also the register-file base, so hot-path regs_[i] is a single indexed
   // load with no base adjustment, while every other (cold) field is still
   // reached through the same pointer at its own offset.
-  std::array<uint32_t, kRegisterCount> regs_ = {};
-  std::shared_ptr<const ThreadedProgram> program_;
+  std::array<uint32_t, kRegisterCount> regs_ = {}; // offset 0: register base
+  // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
+  // at every run head (the enter_run gas check) -- the hottest mutable datum in
+  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept
+  // off this line.)
+  uint64_t gas_remaining_ = 0; // checked/debited at every run head
+  uint32_t pc_ = 0;            // written per step on the traced path
+  uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
+  // --- cold below ---
+  Trap trap_ = Trap::kNone;
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
-  uint32_t pc_ = 0;
-  uint64_t gas_remaining_ = 0;
-  Trap trap_ = Trap::kNone;
+  // Program size in bytes (code.size() * kInstructionBytes), precomputed in
+  // build_exec. The hot path (op_jalr's valid_target, hit on every guest
+  // return) bounds-checks a target with one scalar load of this instead of
+  // dereferencing program_ into the separate ThreadedProgram object. That
+  // program_ pointer-chase, with its load sharing a cache line with the
+  // gas_remaining_ store, set-conflicted and cost ~7% on recursive fib (#2456).
+  // alignas(64) keeps this read-only datum on its own line, off the read/write
+  // hot line.
+  alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
-  uint32_t trash_ = 0; // x0 write sink: Slot::rd points here when rd==0
+  // Cold now: only construction and build_exec touch program_ (the hot bounds
+  // check uses max_pc_ above), so it lives at the tail.
+  std::shared_ptr<const ThreadedProgram> program_;
 };
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
@@ -279,16 +296,6 @@ is_barrier(Op op)
   }                                                                            \
   HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize)
 
-// Charge a single instruction's gas (barriers); on failure set kOutOfGas at
-// `ip`'s pc, observe a terminal step, return kTrap. `amount` is evaluated
-// twice; pass a side-effect-free expression.
-#define HOGD_CHARGE_OR_TRAP(c, ip, amount)                                     \
-  if ((c).m->gas_remaining_ < (amount)) {                                      \
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>((c), (ip), mem,       \
-                                                         memsize);             \
-  }                                                                            \
-  (c).m->gas_remaining_ -= (amount)
-
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
 // a template parameter (it is a compile-time literal at every call site), so
 // the signature is StepResult(Ctx, const Slot*) -- identical to a handler's, so
@@ -309,11 +316,12 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kTrap;
 }
 
-// Charge the gas for the whole non-barrier run starting at `ip`, then dispatch
-// to it. Called at every run head: program start, every jump/branch target, and
-// the instruction after each barrier. Block-granular OOG: if the run does not
-// fit, abort at its head (total gas to the next barrier is what persists). For
-// a barrier, gas_to_run is 0 and the barrier self-charges.
+// Charge the gas for the whole run starting at `ip` -- its body through and
+// including its terminating barrier -- then dispatch to it. Called at every run
+// head: program start, every jump/branch target, and the instruction after each
+// barrier. This is the only place gas is charged; no instruction self-charges.
+// Block-granular OOG: if the run does not fit, abort at its head with nothing
+// debited (total gas to the next barrier is what persists).
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
@@ -442,7 +450,7 @@ op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 inline bool
 valid_target(Ctx c, uint32_t target)
 {
-  return c.m->program_->contains_pc(target);
+  return (target % kInstructionBytes) == 0 && target < c.m->max_pc_;
 }
 
 // Branch comparison predicates. Baked into op_branch as a template parameter so
@@ -489,7 +497,6 @@ template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
 op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
@@ -499,13 +506,13 @@ op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 
 // Baked in place of op_branch when the (static) taken target is out of range. A
 // not-taken branch still falls through normally; only a taken one traps kBadPc
-// (at the branch's own pc, after its gas is charged).
-template<bool Trace>
+// at the branch's own pc. Cmp is baked per branch kind at decode, exactly as in
+// op_branch, so the comparison is one direct call, not a runtime switch on op.
+template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
 op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-  if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
@@ -520,20 +527,18 @@ template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   *ip->rd = pc_of(c, ip) + kInstructionBytes;
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
 
 // Baked by build_exec in place of op_jal when the jal's (static) target is out
-// of range. Charges the jal's gas first (matching the in-range ordering), then
-// traps kBadPc at the jal's own pc.
+// of range. The jal's gas was already charged at the run head (enter_run), so
+// this just traps kBadPc at the jal's own pc.
 template<bool Trace>
 StepResult
 op_jal_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
 }
 
@@ -541,7 +546,6 @@ template<bool Trace>
 StepResult
 op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   const uint32_t pc = pc_of(c, ip);
   const uint32_t target =
       (c.m->regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
@@ -623,25 +627,23 @@ template<bool Trace>
 StepResult
 op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas); // ebreak charges gas, then traps
+  // ebreak's gas was charged at the run head (enter_run); just trap.
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip, mem, memsize);
 }
 
-// op_ecall suspends: it charges ecall gas, advances pc, stashes the args, and
-// yields StepResult::kEcall. Because the dispatch chain is musttail, returning
-// kEcall unwinds straight back to the drive<Trace>() frame. The host call and
-// result handling live in apply_ecall<Trace> (the complete half), so the
-// threaded machine is drivable from an external scheduler with no Host in the
-// dispatch loop.
+// op_ecall suspends: it advances pc, stashes the args, and yields
+// StepResult::kEcall. The ecall's instruction gas was charged at the run head
+// (enter_run); on resume, execution re-enters at the post-ecall instruction --
+// a fresh run head -- so the ecall's gas is charged exactly once. Because the
+// dispatch chain is musttail, returning kEcall unwinds straight back to the
+// drive<Trace>() frame. The host call and result handling live in
+// apply_ecall<Trace> (the complete half), so the threaded machine is drivable
+// from an external scheduler with no Host in the dispatch loop.
 template<bool Trace>
 StepResult
 op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
          [[maybe_unused]] uint32_t memsize)
 {
-  // ECALL instruction gas (canonical charges it in step(), before execute()).
-  // On OOG here, pc stays at the ecall.
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-
   // pc advances past the ecall before the host call (canonical ordering).
   const Slot *next = ip + 1;
   c.m->pc_ = pc_of(c, next);
@@ -783,6 +785,34 @@ handler_for(Op op)
   }
 }
 
+// Selects the out-of-range branch handler with the same Cmp handler_for bakes
+// for the in-range case. Build-time only (cold); build_exec calls it solely for
+// is_conditional_branch ops, so a non-branch op is a build_exec bug -- assert
+// and abort rather than mislabel it as a guest-visible invalid instruction.
+template<bool Trace>
+Handler
+branch_bad_target_handler_for(Op op)
+{
+  switch (op) {
+  case Op::kBeq:
+    return &op_branch_bad_target<Trace, beq_cmp>;
+  case Op::kBne:
+    return &op_branch_bad_target<Trace, bne_cmp>;
+  case Op::kBlt:
+    return &op_branch_bad_target<Trace, blt_cmp>;
+  case Op::kBge:
+    return &op_branch_bad_target<Trace, bge_cmp>;
+  case Op::kBltu:
+    return &op_branch_bad_target<Trace, bltu_cmp>;
+  case Op::kBgeu:
+    return &op_branch_bad_target<Trace, bgeu_cmp>;
+  default:
+    assert(false && "branch_bad_target_handler_for: op is not a conditional "
+                    "branch");
+    std::abort();
+  }
+}
+
 inline void
 ThreadedMachine::build_exec(bool trace)
 {
@@ -794,10 +824,8 @@ ThreadedMachine::build_exec(bool trace)
     exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
                                      : handler_for<false>(d.op),
                     .rd = (d.rd == 0) ? &trash_ : &regs_[d.rd],
-                    .gas = static_cast<uint32_t>(d.gas),
                     .gas_to_run = 0, // filled by the backward pass below
                     .imm = d.imm,
-                    .op = d.op,
                     .rs1 = d.rs1,
                     .rs2 = d.rs2};
     // Resolve the PC-relative target of jal and the conditional branches once,
@@ -816,25 +844,34 @@ ThreadedMachine::build_exec(bool trace)
             trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
       }
       else {
-        exec_[i].handler =
-            trace ? &op_branch_bad_target<true> : &op_branch_bad_target<false>;
+        exec_[i].handler = trace ? branch_bad_target_handler_for<true>(d.op)
+                                 : branch_bad_target_handler_for<false>(d.op);
       }
     }
   }
   // Sentinel for sequential fall-off past the last instruction.
   exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
-  // gas_to_run[i] = gas of the maximal non-barrier run starting at i (0 for a
-  // barrier); backward so each entry sees its successor's already-computed sum.
+  // gas_to_run[i] = gas of the run starting at i, through and including its
+  // terminating barrier; backward so each entry sees its successor's
+  // already-computed sum. enter_run pre-charges this at every run head, so no
+  // instruction self-charges. A barrier ends its run, so its gas_to_run is just
+  // its own gas (charged when a jump/branch lands directly on it); a
+  // non-barrier always continues into its successor, and the sum stops
+  // naturally at the barrier (whose gas_to_run excludes its own successor). The
+  // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
+  // gas 0). The per-instruction op and gas come straight from `code` -- they
+  // are build-time inputs, not stored in the Slot.
   for (size_t i = n; i-- > 0;) {
-    if (is_barrier(exec_[i].op)) {
-      exec_[i].gas_to_run = 0;
+    const auto self_gas = static_cast<uint32_t>(code[i].gas);
+    if (is_barrier(code[i].op)) {
+      exec_[i].gas_to_run = self_gas;
     }
     else {
-      const bool next_in_run = (i + 1 < n) && !is_barrier(exec_[i + 1].op);
       exec_[i].gas_to_run =
-          exec_[i].gas + (next_in_run ? exec_[i + 1].gas_to_run : 0);
+          self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
     }
   }
+  max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
   exec_built_ = true;
   exec_traced_ = trace;
 }
@@ -940,7 +977,7 @@ ThreadedMachine::run(Host &host)
   while (result == StepResult::kEcall) {
     assert(pending_ecall_.has_value());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
+    result = resume_from_ecall(host.ecall(view(), *pending_ecall_));
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
   return result;
@@ -967,7 +1004,7 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     assert(pending_ecall_.has_value());
     const StepResult applied =
-        apply_ecall<true>(host.ecall(view(), pending_ecall_.value()));
+        apply_ecall<true>(host.ecall(view(), *pending_ecall_));
     // NOLINTEND(bugprone-unchecked-optional-access)
     if (applied != StepResult::kContinue) {
       result = applied;
