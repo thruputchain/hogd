@@ -1153,7 +1153,8 @@ TEST_F(BalanceCostTrackingTest,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();

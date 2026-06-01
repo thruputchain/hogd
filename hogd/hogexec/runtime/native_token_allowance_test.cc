@@ -1084,7 +1084,17 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_GT(kTransferAmount, balance_cost);
   const int128_t expected_zero_balance = kTransferAmount - balance_cost;
 
-  setup_grant_storage_token(kOwnerAddr, kInitialOwnerBalance);
+  // The owner is the root invoked address of the allowance-grant transaction,
+  // which consumes one replay-cache entry. The owner-balance assertion below is
+  // checked after that transaction (and the spender's transfer_from) but before
+  // the owner's later view-check transaction, so cover exactly one entry here
+  // so the assertion (which expects only the transfer to be debited) still
+  // holds; the owner's remaining balance covers the second entry's reservation.
+  // The spender is the root invoked address of transfer_from and pays for its
+  // one replay-cache entry.
+  setup_grant_storage_token(kOwnerAddr, kInitialOwnerBalance +
+                                            replay_cache_cost_charged(1));
+  setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       cost_model->get_nnint_cost() * 4);
@@ -1188,7 +1198,8 @@ TEST_F(NativeTokenAllowanceTest,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -1207,7 +1218,8 @@ TEST_F(NativeTokenAllowanceTest,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context, &spend_tx_id);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -1259,7 +1271,8 @@ TEST_F(NativeTokenAllowanceTest,
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
