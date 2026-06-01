@@ -35,8 +35,21 @@ mock_syscall_entrypoint(uint64_t syscall, uint64_t arg1, uint64_t arg2,
   if (syscall < kMockSyscallTable.size()) {
     mock_syscall_func = kMockSyscallTable[syscall];
   }
-  return mock_syscall_func(static_cast<SyscallNo>(syscall), arg1, arg2, arg3,
-                           arg4, arg5, arg6, arg7);
+  // The parser path can allocate (e.g. appending a record when syscall tracing
+  // is enabled). An honest C API caller must never see an allocation failure
+  // (or any other exception) escape this noexcept boundary and abort the
+  // process; translate it into a structured unrecoverable FFI error instead.
+  try {
+    return mock_syscall_func(static_cast<SyscallNo>(syscall), arg1, arg2, arg3,
+                             arg4, arg5, arg6, arg7);
+  } catch (std::exception const &e) {
+    error("Unrecoverable: exception escaped mock syscall {}: {}", syscall,
+          e.what());
+    return unrecoverable_error();
+  } catch (...) {
+    error("Unrecoverable: unknown exception escaped mock syscall {}", syscall);
+    return unrecoverable_error();
+  }
 }
 
 } // namespace hogd
