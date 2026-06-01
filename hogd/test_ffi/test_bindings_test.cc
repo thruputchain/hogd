@@ -3,6 +3,8 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -20,6 +22,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -3008,6 +3011,75 @@ TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
   // contract would fail later with an Unrecoverable error during instantiation.
   auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
+}
+
+namespace {
+
+// Append an unsigned LEB128-encoded u32 to a wasm byte buffer.
+void
+append_wasm_u32_leb128(auto &out, uint32_t value)
+{
+  do {
+    uint8_t byte = value & 0x7fU;
+    value >>= 7U;
+    if (value != 0) {
+      byte |= 0x80U;
+    }
+    out.push_back(byte);
+  } while (value != 0);
+}
+
+// Append a well-formed, verifier-allowed "name" custom section padded with
+// `custom_bytes` of filler so the serialized contract can be pushed past
+// RAMDB's single-item size limit while staying a valid module.
+void
+append_name_custom_section(auto &wasm, uint32_t custom_bytes)
+{
+  constexpr std::string_view kSectionName = "name";
+
+  wasm.push_back(0); // custom section id
+  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(1 + kSectionName.size() +
+                                                     custom_bytes));
+  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(kSectionName.size()));
+  wasm.append_range(kSectionName);
+  wasm.append_range(std::string(custom_bytes, 'x'));
+}
+
+} // namespace
+
+// Regression test for #2462: an honest caller can pass a well-formed,
+// verifier-accepted Wasm contract whose serialized bytes exceed RAMDB's
+// single-item limit. The deterministic write rejection must surface as a
+// structured TestFFIErrorCode rather than throwing std::runtime_error through
+// the noexcept setup helper and terminating the process.
+TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasm)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_param_entrypoint.wasm");
+  append_name_custom_section(contract.wasmi_contract().wasm, 96_KiB);
+
+  auto bytes = x23::serialize(contract);
+  // Precondition: the contract is large enough to be rejected by the DB write
+  // but the module stays under the meter's 2 MiB cap, so verification passes.
+  ASSERT_GT(bytes.size(), kBigItemThreshold);
+  ASSERT_LT(contract.wasmi_contract().wasm.size(), 2_MiB);
+
+  auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
+  ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_EQ(verify_result.success, 1);
+
+  // The oversized write must be reported as an unrecoverable error, not crash.
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeUnrecoverableError);
 }
 
 // Test that do_verify_contract returns failure for wasm with large memory.
