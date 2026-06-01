@@ -291,7 +291,9 @@ Machine::run(Host &host)
   StepResult result = start();
   while (result == StepResult::kEcall) {
     assert(pending_ecall_.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     result = resume_from_ecall(host.ecall(view(), pending_ecall_.value()));
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
   return result;
 }
