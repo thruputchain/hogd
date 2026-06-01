@@ -102,6 +102,14 @@ public:
   // get_type returns the type of the item (if it exists).
   DBStatus<uint8_t> get_type(std::span<const std::byte> key);
 
+  // item_fits reports whether an item with the given key and value lengths is
+  // within the storage limits put() enforces (otherwise put() returns
+  // DBCode::kTooBig). Lets callers pre-validate a write before it lands.
+  static constexpr bool item_fits(size_t key_len, size_t value_len)
+  {
+    return ScalableMap::item_fits(key_len, value_len);
+  }
+
   // put inserts an item.
   //
   // Concurrent put()/remove() calls are safe, but a put() must never overlap a

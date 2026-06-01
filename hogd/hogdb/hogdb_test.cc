@@ -51,6 +51,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/serialize.h"
@@ -1120,6 +1121,29 @@ TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_new_contract(contract));
   });
+}
+
+// Regression for #1775: a contract whose serialized code row exceeds RAMDB's
+// item-size limit must be rejected when its transaction stages it (kTooBig),
+// not at block write-back, where apply() would leave earlier writes visible and
+// the commit error would abort the node.
+TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract().wasm.resize_uninitialized(kBigItemThreshold);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  auto ret = invoke_tx.request_new_contract(contract);
+  ASSERT_FALSE(ret);
+  EXPECT_EQ(HogDBCode::kTooBig, ret.error().code());
+
+  invoke_tx.abort();
+  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
