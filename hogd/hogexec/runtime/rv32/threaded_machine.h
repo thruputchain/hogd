@@ -279,16 +279,6 @@ is_barrier(Op op)
   }                                                                            \
   HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize)
 
-// Charge a single instruction's gas (barriers); on failure set kOutOfGas at
-// `ip`'s pc, observe a terminal step, return kTrap. `amount` is evaluated
-// twice; pass a side-effect-free expression.
-#define HOGD_CHARGE_OR_TRAP(c, ip, amount)                                     \
-  if ((c).m->gas_remaining_ < (amount)) {                                      \
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>((c), (ip), mem,       \
-                                                         memsize);             \
-  }                                                                            \
-  (c).m->gas_remaining_ -= (amount)
-
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
 // a template parameter (it is a compile-time literal at every call site), so
 // the signature is StepResult(Ctx, const Slot*) -- identical to a handler's, so
@@ -309,11 +299,12 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kTrap;
 }
 
-// Charge the gas for the whole non-barrier run starting at `ip`, then dispatch
-// to it. Called at every run head: program start, every jump/branch target, and
-// the instruction after each barrier. Block-granular OOG: if the run does not
-// fit, abort at its head (total gas to the next barrier is what persists). For
-// a barrier, gas_to_run is 0 and the barrier self-charges.
+// Charge the gas for the whole run starting at `ip` -- its body through and
+// including its terminating barrier -- then dispatch to it. Called at every run
+// head: program start, every jump/branch target, and the instruction after each
+// barrier. This is the only place gas is charged; no instruction self-charges.
+// Block-granular OOG: if the run does not fit, abort at its head with nothing
+// debited (total gas to the next barrier is what persists).
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
@@ -489,7 +480,6 @@ template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
 op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
@@ -504,7 +494,6 @@ template<bool Trace>
 StepResult
 op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   if (!branch_taken(ip->op, c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
@@ -520,20 +509,18 @@ template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   *ip->rd = pc_of(c, ip) + kInstructionBytes;
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
 
 // Baked by build_exec in place of op_jal when the jal's (static) target is out
-// of range. Charges the jal's gas first (matching the in-range ordering), then
-// traps kBadPc at the jal's own pc.
+// of range. The jal's gas was already charged at the run head (enter_run), so
+// this just traps kBadPc at the jal's own pc.
 template<bool Trace>
 StepResult
 op_jal_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
 }
 
@@ -541,7 +528,6 @@ template<bool Trace>
 StepResult
 op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
   const uint32_t pc = pc_of(c, ip);
   const uint32_t target =
       (c.m->regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
@@ -623,25 +609,23 @@ template<bool Trace>
 StepResult
 op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 {
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas); // ebreak charges gas, then traps
+  // ebreak's gas was charged at the run head (enter_run); just trap.
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip, mem, memsize);
 }
 
-// op_ecall suspends: it charges ecall gas, advances pc, stashes the args, and
-// yields StepResult::kEcall. Because the dispatch chain is musttail, returning
-// kEcall unwinds straight back to the drive<Trace>() frame. The host call and
-// result handling live in apply_ecall<Trace> (the complete half), so the
-// threaded machine is drivable from an external scheduler with no Host in the
-// dispatch loop.
+// op_ecall suspends: it advances pc, stashes the args, and yields
+// StepResult::kEcall. The ecall's instruction gas was charged at the run head
+// (enter_run); on resume, execution re-enters at the post-ecall instruction --
+// a fresh run head -- so the ecall's gas is charged exactly once. Because the
+// dispatch chain is musttail, returning kEcall unwinds straight back to the
+// drive<Trace>() frame. The host call and result handling live in
+// apply_ecall<Trace> (the complete half), so the threaded machine is drivable
+// from an external scheduler with no Host in the dispatch loop.
 template<bool Trace>
 StepResult
 op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
          [[maybe_unused]] uint32_t memsize)
 {
-  // ECALL instruction gas (canonical charges it in step(), before execute()).
-  // On OOG here, pc stays at the ecall.
-  HOGD_CHARGE_OR_TRAP(c, ip, ip->gas);
-
   // pc advances past the ecall before the host call (canonical ordering).
   const Slot *next = ip + 1;
   c.m->pc_ = pc_of(c, next);
@@ -823,16 +807,21 @@ ThreadedMachine::build_exec(bool trace)
   }
   // Sentinel for sequential fall-off past the last instruction.
   exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
-  // gas_to_run[i] = gas of the maximal non-barrier run starting at i (0 for a
-  // barrier); backward so each entry sees its successor's already-computed sum.
+  // gas_to_run[i] = gas of the run starting at i, through and including its
+  // terminating barrier; backward so each entry sees its successor's
+  // already-computed sum. enter_run pre-charges this at every run head, so no
+  // instruction self-charges. A barrier ends its run, so its gas_to_run is just
+  // its own gas (charged when a jump/branch lands directly on it); a non-barrier
+  // always continues into its successor, and the sum stops naturally at the
+  // barrier (whose gas_to_run excludes its own successor). The i+1<n guard keeps
+  // the run from absorbing the fall-off sentinel (exec_[n], gas 0).
   for (size_t i = n; i-- > 0;) {
     if (is_barrier(exec_[i].op)) {
-      exec_[i].gas_to_run = 0;
+      exec_[i].gas_to_run = exec_[i].gas;
     }
     else {
-      const bool next_in_run = (i + 1 < n) && !is_barrier(exec_[i + 1].op);
       exec_[i].gas_to_run =
-          exec_[i].gas + (next_in_run ? exec_[i + 1].gas_to_run : 0);
+          exec_[i].gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
     }
   }
   exec_built_ = true;

@@ -209,6 +209,42 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
 }
 
+TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
+{
+  using test_program::branch;
+  // Run head at pc=0: [addi x5 (body), beq x0,x0,+8 (barrier)] -> target pc=12.
+  // Every instruction costs 1 gas, so the run (body + barrier) costs 2. With a
+  // budget of 1 the body alone would fit, but the barrier's gas is folded into
+  // the run-head charge, so enter_run aborts the whole run at its head: OOG at
+  // pc=0, nothing charged, and the body never executes.
+  const std::vector<uint32_t> words = {addi(5, 0, 1), branch(0, 0, 0, 8),
+                                       addi(6, 0, 99), addi(7, 0, 42)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, /*gas=*/1);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.pc(), 0U);            // aborted at the run head, not the beq
+  EXPECT_EQ(machine.gas_remaining(), 1U); // the run did not fit -> nothing debited
+  EXPECT_EQ(machine.reg(5), 0U);          // body did not execute
+}
+
+TEST(Rv32Threaded, tightSelfLoopRunsOutOfGas)
+{
+  using test_program::branch;
+  // beq x0,x0,0 branches to itself: an empty-body loop whose only gas is the
+  // branch's own. The branch is its own run head, so enter_run charges its gas
+  // every iteration and the loop terminates with kOutOfGas (rather than spinning
+  // forever once the per-barrier self-charge is gone).
+  const std::vector<uint32_t> words = {branch(0, 0, 0, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(program, 256, /*gas=*/8);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.gas_remaining(), 0U); // all 8 gas consumed, one per iteration
+}
+
 // jalr and auipc are corpus blind spots: the generators exclude jalr (computed
 // target) and auipc/linking-jal (pc-relative register writes the Spike oracle
 // can't model), so the capstone diff never reaches them. Cover them directly.
