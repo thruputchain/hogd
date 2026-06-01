@@ -39,15 +39,16 @@ mock_syscall_entrypoint(uint64_t syscall, uint64_t arg1, uint64_t arg2,
   // is enabled). An honest C API caller must never see an allocation failure
   // (or any other exception) escape this noexcept boundary and abort the
   // process; translate it into a structured unrecoverable FFI error instead.
+  //
+  // Deliberately no logging in the catch path: the exception we most expect
+  // here is std::bad_alloc, and the logger formats into a std::string, so it
+  // can allocate and throw again under the very memory pressure that triggered
+  // this path. A second throw would re-cross this noexcept boundary and
+  // terminate the caller anyway, so the handler must stay allocation-free.
   try {
     return mock_syscall_func(static_cast<SyscallNo>(syscall), arg1, arg2, arg3,
                              arg4, arg5, arg6, arg7);
-  } catch (std::exception const &e) {
-    error("Unrecoverable: exception escaped mock syscall {}: {}", syscall,
-          e.what());
-    return unrecoverable_error();
   } catch (...) {
-    error("Unrecoverable: unknown exception escaped mock syscall {}", syscall);
     return unrecoverable_error();
   }
 }
