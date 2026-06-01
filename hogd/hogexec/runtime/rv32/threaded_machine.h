@@ -180,19 +180,20 @@ public:
   uint32_t pc_ = 0;            // written per step on the traced path
   uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
   // --- cold below ---
-  std::shared_ptr<const ThreadedProgram> program_;
+  Trap trap_ = Trap::kNone;
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
-  Trap trap_ = Trap::kNone;
+  alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
+  std::shared_ptr<const ThreadedProgram> program_;
 };
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
@@ -443,7 +444,8 @@ op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 inline bool
 valid_target(Ctx c, uint32_t target)
 {
-  return c.m->program_->contains_pc(target);
+  return (target % kInstructionBytes) == 0 && 
+    target < c.m->max_pc_;
 }
 
 // Branch comparison predicates. Baked into op_branch as a template parameter so
@@ -864,6 +866,7 @@ ThreadedMachine::build_exec(bool trace)
           self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
     }
   }
+  max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
   exec_built_ = true;
   exec_traced_ = trace;
 }
