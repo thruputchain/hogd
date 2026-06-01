@@ -46,17 +46,17 @@ struct Ctx;
 struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
 
-// Executable instruction: handler pointer + decoded operands + run gas. Only the
-// fields a handler reads on the hot path are stored; the per-instruction op and
-// gas cost are build-time inputs (read from `code` in build_exec) and are not
-// kept here. `gas_to_run` is the total cost of the run starting here -- its
-// non-barrier body through and including the terminating barrier -- charged once
-// by enter_run. Fields total 26 bytes; the 8-byte `rd` pointer makes alignof 8,
-// so sizeof rounds up to 32 -- a power of two, which is what lets `ip - base`
-// (pc_of) and `ip + imm` (branch/jump targets) lower to a shift rather than a
-// divide/multiply. alignas(32) doesn't change the size; it additionally pins
-// each slot to a 32-byte boundary (cache placement) and documents that the
-// shift lowering depends on the power-of-two size.
+// Executable instruction: handler pointer + decoded operands + run gas. Only
+// the fields a handler reads on the hot path are stored; the per-instruction op
+// and gas cost are build-time inputs (read from `code` in build_exec) and are
+// not kept here. `gas_to_run` is the total cost of the run starting here -- its
+// non-barrier body through and including the terminating barrier -- charged
+// once by enter_run. Fields total 26 bytes; the 8-byte `rd` pointer makes
+// alignof 8, so sizeof rounds up to 32 -- a power of two, which is what lets
+// `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a shift
+// rather than a divide/multiply. alignas(32) doesn't change the size; it
+// additionally pins each slot to a 32-byte boundary (cache placement) and
+// documents that the shift lowering depends on the power-of-two size.
 struct alignas(32) Slot {
   Handler handler = nullptr;
   uint32_t *rd = nullptr; // &regs_[rd], or &trash_ when rd==0 (the x0 sink:
@@ -170,8 +170,8 @@ public:
   std::array<uint32_t, kRegisterCount> regs_ = {}; // offset 0: register base
   // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
   // at every run head (the enter_run gas check) -- the hottest mutable datum in
-  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept off
-  // this line.)
+  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept
+  // off this line.)
   uint64_t gas_remaining_ = 0; // checked/debited at every run head
   uint32_t pc_ = 0;            // written per step on the traced path
   uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
@@ -184,12 +184,13 @@ public:
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
   // Program size in bytes (code.size() * kInstructionBytes), precomputed in
-  // build_exec. The hot path (op_jalr's valid_target, hit on every guest return)
-  // bounds-checks a target with one scalar load of this instead of dereferencing
-  // program_ into the separate ThreadedProgram object. That program_
-  // pointer-chase, with its load sharing a cache line with the gas_remaining_
-  // store, set-conflicted and cost ~7% on recursive fib (#2456). alignas(64)
-  // keeps this read-only datum on its own line, off the read/write hot line.
+  // build_exec. The hot path (op_jalr's valid_target, hit on every guest
+  // return) bounds-checks a target with one scalar load of this instead of
+  // dereferencing program_ into the separate ThreadedProgram object. That
+  // program_ pointer-chase, with its load sharing a cache line with the
+  // gas_remaining_ store, set-conflicted and cost ~7% on recursive fib (#2456).
+  // alignas(64) keeps this read-only datum on its own line, off the read/write
+  // hot line.
   alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
@@ -449,8 +450,7 @@ op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 inline bool
 valid_target(Ctx c, uint32_t target)
 {
-  return (target % kInstructionBytes) == 0 && 
-    target < c.m->max_pc_;
+  return (target % kInstructionBytes) == 0 && target < c.m->max_pc_;
 }
 
 // Branch comparison predicates. Baked into op_branch as a template parameter so
@@ -855,12 +855,12 @@ ThreadedMachine::build_exec(bool trace)
   // terminating barrier; backward so each entry sees its successor's
   // already-computed sum. enter_run pre-charges this at every run head, so no
   // instruction self-charges. A barrier ends its run, so its gas_to_run is just
-  // its own gas (charged when a jump/branch lands directly on it); a non-barrier
-  // always continues into its successor, and the sum stops naturally at the
-  // barrier (whose gas_to_run excludes its own successor). The i+1<n guard keeps
-  // the run from absorbing the fall-off sentinel (exec_[n], gas 0). The
-  // per-instruction op and gas come straight from `code` -- they are build-time
-  // inputs, not stored in the Slot.
+  // its own gas (charged when a jump/branch lands directly on it); a
+  // non-barrier always continues into its successor, and the sum stops
+  // naturally at the barrier (whose gas_to_run excludes its own successor). The
+  // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
+  // gas 0). The per-instruction op and gas come straight from `code` -- they
+  // are build-time inputs, not stored in the Slot.
   for (size_t i = n; i-- > 0;) {
     const auto self_gas = static_cast<uint32_t>(code[i].gas);
     if (is_barrier(code[i].op)) {

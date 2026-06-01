@@ -253,9 +253,10 @@ TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
-  EXPECT_EQ(machine.pc(), 0U);            // aborted at the run head, not the beq
-  EXPECT_EQ(machine.gas_remaining(), 1U); // the run did not fit -> nothing debited
-  EXPECT_EQ(machine.reg(5), 0U);          // body did not execute
+  EXPECT_EQ(machine.pc(), 0U); // aborted at the run head, not the beq
+  EXPECT_EQ(machine.gas_remaining(),
+            1U);                 // the run did not fit -> nothing debited
+  EXPECT_EQ(machine.reg(5), 0U); // body did not execute
 }
 
 TEST(Rv32Threaded, tightSelfLoopRunsOutOfGas)
@@ -263,15 +264,16 @@ TEST(Rv32Threaded, tightSelfLoopRunsOutOfGas)
   using test_program::branch;
   // beq x0,x0,0 branches to itself: an empty-body loop whose only gas is the
   // branch's own. The branch is its own run head, so enter_run charges its gas
-  // every iteration and the loop terminates with kOutOfGas (rather than spinning
-  // forever once the per-barrier self-charge is gone).
+  // every iteration and the loop terminates with kOutOfGas (rather than
+  // spinning forever once the per-barrier self-charge is gone).
   const std::vector<uint32_t> words = {branch(0, 0, 0, 0)};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(program, 256, /*gas=*/8);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
-  EXPECT_EQ(machine.gas_remaining(), 0U); // all 8 gas consumed, one per iteration
+  EXPECT_EQ(machine.gas_remaining(),
+            0U); // all 8 gas consumed, one per iteration
 }
 
 // jalr and auipc are corpus blind spots: the generators exclude jalr (computed
