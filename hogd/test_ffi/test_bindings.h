@@ -27,6 +27,9 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeUnrecoverableError = 5,
   // Contract failed wasm verification (e.g., memory exceeds limits)
   kTestFFIErrorCodeContractVerificationFailed = 6,
+  // A scalar argument violated a documented precondition (e.g. a negative
+  // storage-token grant, which would persist an invalid native-token balance).
+  kTestFFIErrorCodeInvalidArgument = 7,
 };
 
 enum TestFFILogLevel {
@@ -175,6 +178,9 @@ enum TestFFIErrorCode setup_deploy_contract(void *db,
                                             const uint8_t *contract_hash,
                                             uint32_t contract_size);
 
+// tokens must be nonnegative: native-token balances are an always-nonnegative
+// invariant, so a negative grant is rejected with
+// kTestFFIErrorCodeInvalidArgument rather than persisting an invalid balance.
 enum TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens);

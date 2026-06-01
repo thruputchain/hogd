@@ -3040,4 +3040,23 @@ TEST(TestBindingsTest, MakeNewDataBufferUint32Max)
   EXPECT_EQ(free_ffi_data_buffer(buffer), kTestFFIErrorCodeNone);
 }
 
+// Regression test for #2455: a negative storage-token grant must be rejected
+// with a structured error rather than persisting an invalid native-token
+// balance row that later balance reads assert on. A zero grant is allowed.
+TEST(TestBindingsTest, NegativeStorageTokenGrantRejected)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  constexpr ContractAddress kAddr{0x42};
+
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), -1),
+            kTestFFIErrorCodeInvalidArgument);
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), 0),
+            kTestFFIErrorCodeNone);
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), 1),
+            kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd
