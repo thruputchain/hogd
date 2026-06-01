@@ -536,8 +536,8 @@ op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint
 // jal's target is PC-relative and known at decode time, so build_exec resolves
 // it: for an in-range target, `imm` is rewritten to the *slot delta* to the
 // target (target_slot - this_slot), and the byte target / alignment / range
-// check is hoisted out of the hot path. An out-of-range target instead gets the
-// op_jal_bad_target handler below, so this fast path has no validity check.
+// check is hoisted out of the hot path. An out-of-range target instead bakes
+// trap_at<kBadPc> directly (build_exec), so this fast path has no validity check.
 template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -545,16 +545,6 @@ op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   c.m->regs_[ip->rd] = pc_of(c, ip) + kInstructionBytes;
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
-}
-
-// Baked by build_exec in place of op_jal when the jal's (static) target is out
-// of range. The jal's gas was already charged at the run head (enter_run), so
-// this just traps kBadPc at the jal's own pc.
-template<bool Trace>
-StepResult
-op_jal_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
 }
 
 template<bool Trace>
@@ -611,7 +601,7 @@ op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
                                                                  memsize, gas);
   }
-  if (!memory_range_in_bounds(memsize, addr, Width)) {
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize, gas);
   }
   uint32_t v = le_load<Width>(mem, addr);
@@ -631,19 +621,11 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
                                                                  memsize, gas);
   }
-  if (!memory_range_in_bounds(memsize, addr, Width)) {
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize, gas);
   }
   le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
-}
-
-template<bool Trace>
-StepResult
-op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
-{
-  // ebreak's gas was charged at the run head (enter_run); just trap.
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip, mem, memsize, gas);
 }
 
 // op_ecall suspends: it advances pc, stashes the args, and yields
@@ -677,26 +659,10 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kEcall;
 }
 
-// Sentinel: reached only by sequential fall-off past the last instruction. Its
-// pc is (ip - base) * 4 == the out-of-range pc. Traps kBadPc with NO gas
-// charged (matches "invalid fetch traps without gas").
-template<bool Trace>
-StepResult
-op_bad_pc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
-}
-
-// Defensive default for handler_for; unreachable by construction, since
-// ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
-// carries an unhandled Op. Charges no gas.
-template<bool Trace>
-StepResult
-op_invalid(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kInvalidInstruction>(c, ip, mem,
-                                                                 memsize, gas);
-}
+// Sequential fall-off past the last instruction (the exec_[n] sentinel) and
+// out-of-range jal/jalr both trap kBadPc; the unsupported-op default traps
+// kInvalidInstruction. All three bake trap_at<...> directly into the Slot
+// rather than going through a forwarding handler (see handler_for/build_exec).
 
 template<bool Trace>
 Handler
@@ -796,11 +762,15 @@ handler_for(Op op)
   case Op::kFence:
     return &op_fence<Trace>;
   case Op::kEbreak:
-    return &op_ebreak<Trace>;
+    // ebreak's gas is charged at the run head; the handler is a pure trap, so
+    // dispatch straight to trap_at (it has the handler signature).
+    return &trap_at<Trace, Trap::kBreakpoint>;
   case Op::kEcall:
     return &op_ecall<Trace>;
   default:
-    return &op_invalid<Trace>;
+    // Unreachable by construction (ThreadedProgram::create rejects unsupported
+    // ops); the defensive default traps kInvalidInstruction directly.
+    return &trap_at<Trace, Trap::kInvalidInstruction>;
   }
 }
 
@@ -932,8 +902,10 @@ ThreadedMachine::build_exec(bool trace)
         }
       }
       else if (d.op == Op::kJal) {
-        slot.handler =
-            trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
+        // Out-of-range jal: a taken jal always traps, so bake trap_at directly
+        // (gas was charged at the run head, matching the in-range ordering).
+        slot.handler = trace ? &trap_at<true, Trap::kBadPc>
+                             : &trap_at<false, Trap::kBadPc>;
       }
       else {
         slot.handler = trace ? branch_bad_target_handler_for<true>(d.op)
@@ -941,8 +913,10 @@ ThreadedMachine::build_exec(bool trace)
       }
     }
   }
-  // Sentinel for sequential fall-off past the last instruction.
-  exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
+  // Sentinel for sequential fall-off past the last instruction: trap kBadPc at
+  // the out-of-range pc (its pc is (ip - base) * 4). No gas is charged.
+  exec_[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
+                                   : &trap_at<false, Trap::kBadPc>};
   // gas_to_run[i] = gas of the run starting at i, through and including its
   // terminating barrier; backward so each entry sees its successor's
   // already-computed sum. enter_run pre-charges this at every run head, so no

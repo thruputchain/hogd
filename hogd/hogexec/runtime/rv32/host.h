@@ -20,6 +20,17 @@ memory_range_in_bounds(size_t memory_size, uint32_t address, size_t width)
   return addr <= memory_size && width <= memory_size - addr;
 }
 
+// Compile-time-width overload for the guest hot path: load/store Width is a
+// constant 1/2/4 and address is uint32_t, so addr + Width can't overflow 64
+// bits -- the predicate is a single compare (one cmp+branch) instead of the
+// runtime form's two. Equivalent to the 3-arg version for these widths.
+template<size_t Width>
+[[nodiscard]] constexpr bool
+memory_range_in_bounds(size_t memory_size, uint32_t address)
+{
+  return address + Width <= memory_size;
+}
+
 enum class Trap {
   kNone,
   kInvalidInstruction,
