@@ -11,7 +11,6 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -25,7 +24,6 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -174,10 +172,7 @@ DBStatus<void>
 ScalableMap::put(std::span<const std::byte> key, uint8_t type,
                  std::span<const std::byte> val)
 {
-  if (key.size() > std::numeric_limits<uint16_t>::max() ||
-      val.size() > std::numeric_limits<uint32_t>::max() ||
-      sizeof(ItemHeader) + key.size() + val.size() > kBigItemThreshold)
-      [[unlikely]] {
+  if (!item_fits(key.size(), val.size())) [[unlikely]] {
     return DBError(DBCode::kTooBig);
   }
 

@@ -57,6 +57,10 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
+  case HogDBCode::kTooBig:
+    // A staged item exceeds RAMDB's size limit (e.g. an oversized contract
+    // code row); fail this transaction rather than the whole block.
+    return RPCError::kRPCTransactionFailed;
   case HogDBCode::kStaleBlock:
     return RPCError::kRPCBadBlockID;
   case HogDBCode::kInvalidExecutorBehavior:
@@ -140,10 +144,12 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
   };
 
   for (auto &contract : new_contracts) {
-    // write contract should only fail if a sibling block commits and this block
-    // is abandoned.
+    // write_contract fails if a sibling block commits and this block is
+    // abandoned (kStaleBlock), or if the contract's code row exceeds RAMDB's
+    // size limit (kTooBig, #1775). Either way, abort just this transaction.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
-      CHECK(r.error().code() == HogDBCode::kStaleBlock);
+      CHECK(r.error().code() == HogDBCode::kStaleBlock ||
+            r.error().code() == HogDBCode::kTooBig);
       itx->abort();
       ctx_.close_invoke_tx(block, tx, itx);
       return to_rpc_error(r.error());

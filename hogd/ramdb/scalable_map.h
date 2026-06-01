@@ -7,7 +7,9 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -18,6 +20,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -67,6 +70,17 @@ public:
 
   // get_type returns the type of the item (if it exists).
   DBStatus<uint8_t> get_type(std::span<const std::byte> key);
+
+  // item_fits reports whether an item with the given key and value lengths is
+  // within RAMDB's storage limits — exactly the predicate put() enforces with
+  // DBCode::kTooBig. Exposed so callers staging a write can reject an oversized
+  // item up front (per transaction) instead of failing at write-back.
+  static constexpr bool item_fits(size_t key_len, size_t value_len)
+  {
+    return key_len <= std::numeric_limits<uint16_t>::max() &&
+           value_len <= std::numeric_limits<uint32_t>::max() &&
+           sizeof(ItemHeader) + key_len + value_len <= kBigItemThreshold;
+  }
 
   // put inserts an item. If the item's key already exists, the item will be
   // replaced.

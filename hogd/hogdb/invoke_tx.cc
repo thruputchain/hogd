@@ -13,21 +13,25 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/ramdb/db.h"
 #include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -645,6 +649,24 @@ InvokeTX::assert_is_valid() const noexcept
       }
     }
   }
+}
+
+HogDBStatus<void>
+InvokeTX::request_new_contract(Contract contract)
+{
+  // Reject an oversized contract here, per transaction: the wasm code row (the
+  // serialized contract) is written to RAMDB verbatim, so an item exceeding
+  // the size limit must fail this tx rather than the whole block at write-back,
+  // where apply() leaves earlier writes visible and the commit error aborts the
+  // node (#1775). hash is computed outside make_contract_code_item_key to dodge
+  // an observed gcc-CI miscompile.
+  auto hash = sha256(contract);
+  if (!Database::item_fits(make_wasm_code_key(hash).size(),
+                           x23::serialize(contract).size()))
+    return HogDBError(HogDBCode::kTooBig);
+
+  return request_change(make_contract_code_item_key(hash),
+                        NewContractData(std::move(contract)));
 }
 
 } // namespace hogd
