@@ -167,7 +167,19 @@ public:
   // then also the register-file base, so hot-path regs_[i] is a single indexed
   // load with no base adjustment, while every other (cold) field is still
   // reached through the same pointer at its own offset.
-  std::array<uint32_t, kRegisterCount> regs_ = {};
+  std::array<uint32_t, kRegisterCount> regs_ = {}; // offset 0: register base
+  // HOT SCALARS -- keep these immediately after regs_, ahead of every cold
+  // field. gas_remaining_ is read+written at every run head (the enter_run gas
+  // check) and is one of the hottest accesses in the dispatch loop. Its byte
+  // OFFSET in this struct materially affects throughput: #2456 inserted a cold
+  // field (the pending_ecall_ optional) ahead of it, pushing it 0xd8 -> 0xf8 and
+  // regressing recursive-fibonacci ~7% with no other change (confirmed by a
+  // controlled offset-only experiment). Do NOT insert cold members above this
+  // group.
+  uint64_t gas_remaining_ = 0; // checked/debited at every run head
+  uint32_t pc_ = 0;            // written per step on the traced path
+  uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
+  // --- cold below ---
   std::shared_ptr<const ThreadedProgram> program_;
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
@@ -175,15 +187,12 @@ public:
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
-  uint32_t pc_ = 0;
-  uint64_t gas_remaining_ = 0;
   Trap trap_ = Trap::kNone;
   Trap construction_trap_ = Trap::kNone;
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
-  uint32_t trash_ = 0; // x0 write sink: Slot::rd points here when rd==0
 };
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
