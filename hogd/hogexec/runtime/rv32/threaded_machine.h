@@ -73,7 +73,14 @@ struct alignas(16) Slot {
   };
 };
 
-class ThreadedMachine {
+// alignas(64): pin the base to a cache-line boundary so member offsets map
+// deterministically to cache lines. This is load-bearing for *consistent*
+// benchmarking (without it base-mod-64 varies per allocation and the same
+// layout measures differently run to run) and for the read-mostly / read-write
+// field split below to mean anything. Stated explicitly on the class rather
+// than relying on the alignas(64) on gas_remaining_ to bump alignof as a side
+// effect.
+class alignas(64) ThreadedMachine {
 public:
   ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
                   uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
