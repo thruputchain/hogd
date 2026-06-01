@@ -40,8 +40,10 @@ public:
 
   // Signal that the current ViewState should be replaced with a fresh
   // snapshot before the next view attempt.  This is a no-op if there is
-  // no current ViewState.  Thread-safe; intended to be called from a
-  // timer thread in production and explicitly from tests.
+  // no current ViewState.  Thread-safe; retained as an explicit hint for
+  // tests and future refresh drivers.  View requests also compare the
+  // latest committed tip height before reuse, so public reads do not remain
+  // pinned to an old block.
   void request_refresh()
   {
     refresh_flag_.store(true, std::memory_order_release);

@@ -137,31 +137,48 @@ ViewGatewayRpc::get_current_view_state()
 {
   std::scoped_lock g(view_state_mutex_);
 
-  if (current_view_block_id_ != 0 &&
-      refresh_flag_.exchange(false, std::memory_order_acquire)) {
-    auto res = db_proxy_.open_viewing_snapshot();
-    if (res.has_value()) {
-      CHECK(res.value().block_id != current_view_block_id_);
-
-      BlockID old_block_id = current_view_block_id_;
-      bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
-
-      auto &snapshot = res.value();
-      view_states_.try_emplace(snapshot.block_id, snapshot.block_id,
-                               snapshot.tip, db_proxy_);
-      current_view_block_id_ = snapshot.block_id;
-
-      if (can_gc) {
-        auto close_res = db_proxy_.close_viewing_snapshot(old_block_id);
-        if (!close_res.has_value()) {
-          warn("viewgateway: failed to close refreshed-out viewing snapshot {}",
-               old_block_id);
-        }
-        view_states_.erase(old_block_id);
-      }
+  if (current_view_block_id_ != 0) {
+    // Public views must observe committed state.  The dev-node block driver
+    // commits blocks outside hogd, so no in-process caller can reliably set
+    // refresh_flag_ after every commit.  Check the current committed tip height
+    // before opening a replacement snapshot; snapshot ids are per-open and are
+    // not a reliable freshness signal on their own.
+    bool should_refresh = refresh_flag_.exchange(false,
+                                                 std::memory_order_acquire);
+    ViewState const &current_state =
+        view_states_.at(current_view_block_id_).get();
+    auto tip_res = db_proxy_.get_db_tip(current_state.block_id);
+    if (tip_res.has_value()) {
+      should_refresh = should_refresh
+          || tip_res.value().height > current_state.tip.height;
     }
     else {
-      warn("viewgateway: failed to open refreshed viewing snapshot");
+      should_refresh = true;
+    }
+
+    if (should_refresh) {
+      auto res = db_proxy_.open_viewing_snapshot();
+      if (res.has_value() && res.value().block_id != current_view_block_id_) {
+        BlockID old_block_id = current_view_block_id_;
+        bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
+
+        auto &snapshot = res.value();
+        view_states_.try_emplace(snapshot.block_id, snapshot.block_id,
+                                 snapshot.tip, db_proxy_);
+        current_view_block_id_ = snapshot.block_id;
+
+        if (can_gc) {
+          auto close_res = db_proxy_.close_viewing_snapshot(old_block_id);
+          if (!close_res.has_value()) {
+            warn("viewgateway: failed to close refreshed-out viewing snapshot {}",
+                 old_block_id);
+          }
+          view_states_.erase(old_block_id);
+        }
+      }
+      else if (!res.has_value()) {
+        warn("viewgateway: failed to open refreshed viewing snapshot");
+      }
     }
   }
 
