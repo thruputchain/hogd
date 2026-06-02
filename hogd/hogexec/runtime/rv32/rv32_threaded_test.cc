@@ -103,15 +103,14 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
                 .error(),
             ProgramError::kCodeSizeNotAligned);
   const std::vector<uint8_t> compressed = {0x01, 0x00, 0x00, 0x00};
-  EXPECT_EQ(
-      ThreadedMachinePreInstantiation::create(compressed, /*trace=*/false)
-          .error(),
-      ProgramError::kUnsupportedCompressedInstruction);
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(compressed, /*trace=*/false)
+                .error(),
+            ProgramError::kUnsupportedCompressedInstruction);
   std::vector<uint8_t> csr(4);
   store_u32_le(csr, 0, 0x00001073U);
-  EXPECT_EQ(ThreadedMachinePreInstantiation::create(csr, /*trace=*/false)
-                .error(),
-            ProgramError::kUnsupportedSystemInstruction);
+  EXPECT_EQ(
+      ThreadedMachinePreInstantiation::create(csr, /*trace=*/false).error(),
+      ProgramError::kUnsupportedSystemInstruction);
 }
 
 TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
@@ -127,7 +126,7 @@ TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
   ASSERT_TRUE(prog.has_value());
   EXPECT_TRUE(prog->contains_pc(0));
   EXPECT_TRUE(prog->contains_pc(4));
-  EXPECT_FALSE(prog->contains_pc(8));  // first pc past the last instruction
+  EXPECT_FALSE(prog->contains_pc(8)); // first pc past the last instruction
   EXPECT_FALSE(prog->contains_pc(12));
   EXPECT_FALSE(prog->contains_pc(28)); // < byte-count*4, the buggy upper bound
   EXPECT_FALSE(prog->contains_pc(6));  // misaligned
@@ -158,9 +157,11 @@ using test_program::op;
 std::shared_ptr<const ThreadedMachinePreInstantiation>
 threaded_from_words(std::span<const uint32_t> words, bool trace = false)
 {
-  auto pre_instantiation = ThreadedMachinePreInstantiation::create(words_to_bytes(words), trace);
+  auto pre_instantiation =
+      ThreadedMachinePreInstantiation::create(words_to_bytes(words), trace);
   EXPECT_TRUE(pre_instantiation.has_value());
-  return std::make_shared<const ThreadedMachinePreInstantiation>(std::move(pre_instantiation.value()));
+  return std::make_shared<const ThreadedMachinePreInstantiation>(
+      std::move(pre_instantiation.value()));
 }
 
 TEST(Rv32Threaded, runsBasicArithmetic)

@@ -79,20 +79,24 @@ struct alignas(16) Slot {
 
 class ThreadedMachinePreInstantiation {
 public:
-
-  [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation, ProgramError>
+  [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
+                                     ProgramError>
   create(std::span<const uint8_t> code, bool trace);
 
-  ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation&&) noexcept = default;
-  ThreadedMachinePreInstantiation& operator=(ThreadedMachinePreInstantiation&&) noexcept = default;
-  ThreadedMachinePreInstantiation(const ThreadedMachinePreInstantiation&) = delete;
-  ThreadedMachinePreInstantiation& operator=(const ThreadedMachinePreInstantiation&) = delete;
+  ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
+      default;
+  ThreadedMachinePreInstantiation &
+  operator=(ThreadedMachinePreInstantiation &&) noexcept = default;
+  ThreadedMachinePreInstantiation(const ThreadedMachinePreInstantiation &) =
+      delete;
+  ThreadedMachinePreInstantiation &
+  operator=(const ThreadedMachinePreInstantiation &) = delete;
 
 private:
-  ThreadedMachinePreInstantiation(std::vector<Slot> exec, bool trace, bool gas_overflow)
+  ThreadedMachinePreInstantiation(std::vector<Slot> exec, bool trace,
+                                  bool gas_overflow)
     : exec_(std::move(exec)), trace_(trace), gas_overflow_(gas_overflow)
-  {
-  }
+  {}
 
   std::vector<Slot> exec_;
   bool trace_ = false;
@@ -100,8 +104,6 @@ private:
 
   friend class ThreadedMachine;
 };
-
-
 
 // alignas(64): pin the base to a cache-line boundary so member offsets map
 // deterministically to cache lines. This is load-bearing for *consistent*
@@ -112,8 +114,10 @@ private:
 // effect.
 class alignas(64) ThreadedMachine {
 public:
-  ThreadedMachine(ThreadedMachinePreInstantiation const& pre_instantiation, uint32_t memory_bytes, uint64_t gas)
-  : gas_overflow_(pre_instantiation.gas_overflow_), exec_traced_(pre_instantiation.trace_)
+  ThreadedMachine(ThreadedMachinePreInstantiation const &pre_instantiation,
+                  uint32_t memory_bytes, uint64_t gas)
+    : gas_overflow_(pre_instantiation.gas_overflow_),
+      exec_traced_(pre_instantiation.trace_)
   {
     if (memory_bytes > kMaxMemoryBytes) {
       construction_trap_ = Trap::kBadMemory;
@@ -133,9 +137,7 @@ public:
     set_gas(gas);
   }
 
-  void set_gas(uint64_t gas) {
-    gas_remaining_ = gas;
-  }
+  void set_gas(uint64_t gas) { gas_remaining_ = gas; }
 
   void reset(uint64_t gas)
   {
@@ -218,7 +220,7 @@ public:
   uint32_t max_pc_ =
       0; // program size in bytes; op_jalr bounds-check (build_exec)
   std::vector<uint8_t> memory_;
-  std::span<const Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
+  std::span<const Slot> exec_;   // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   // Read/write hot scalar on its own cache line, isolated from the read-mostly
   // data above and from the regs_ reads.
@@ -226,10 +228,11 @@ public:
   uint32_t pc_ = 0; // written per step on the traced path
   // --- cold below ---
   Trap trap_ = Trap::kNone;
-  std::optional<EcallArgs>
-      pending_ecall_ = std::nullopt; // set while suspended at an ecall; cold
+  std::optional<EcallArgs> pending_ecall_ =
+      std::nullopt; // set while suspended at an ecall; cold
   Trap construction_trap_ = Trap::kNone;
-  const bool gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
+  const bool
+      gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
   const bool exec_traced_;
   uint32_t halt_code_ = 0;
@@ -1176,9 +1179,9 @@ ThreadedMachine::build_exec(bool trace)
   exec_traced_ = trace;
 } */
 
-
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
-ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trace)
+ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
+                                        bool trace)
 {
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
@@ -1192,7 +1195,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
   // Sentinel for sequential fall-off past the last instruction: trap kBadPc at
   // the out-of-range pc (its pc is (ip - base) * 4). No gas is charged.
   exec[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
-    : &trap_at<false, Trap::kBadPc>};
+                                  : &trap_at<false, Trap::kBadPc>};
 
   bool gas_overflow = false;
 
@@ -1213,7 +1216,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
     slot.handler = trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
 
     // x0 reads come from the always zero register at regs_[kRegisterCount].
-    // writes go to trash at regs_[0].  This keeps the write-heavy actions within 2 cache lines, instead of 3.
+    // writes go to trash at regs_[0].  This keeps the write-heavy actions
+    // within 2 cache lines, instead of 3.
     slot.rd = static_cast<uint8_t>(d.rd);
     slot.rs1 = (d.rs1 == 0) ? static_cast<uint8_t>(kRegisterCount)
                             : static_cast<uint8_t>(d.rs1);
@@ -1254,11 +1258,11 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
         // Out-of-range jal: a taken jal always traps, so bake trap_at directly
         // (gas was charged at the run head, matching the in-range ordering).
         slot.handler = trace ? &trap_at<true, Trap::kBadPc>
-                            : &trap_at<false, Trap::kBadPc>;
+                             : &trap_at<false, Trap::kBadPc>;
       }
       else {
         slot.handler = trace ? branch_bad_target_handler_for<true>(d.op)
-                            : branch_bad_target_handler_for<false>(d.op);
+                             : branch_bad_target_handler_for<false>(d.op);
       }
     }
 
@@ -1266,18 +1270,19 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
     // gas_to_run[i] = gas of the run starting at i, through and including its
     // terminating barrier; backward so each entry sees its successor's
     // already-computed sum. enter_run pre-charges this at every run head, so no
-    // instruction self-charges. A barrier ends its run, so its gas_to_run is just
-    // its own gas (charged when a jump/branch lands directly on it); a
+    // instruction self-charges. A barrier ends its run, so its gas_to_run is
+    // just its own gas (charged when a jump/branch lands directly on it); a
     // non-barrier always continues into its successor, and the sum stops
-    // naturally at the barrier (whose gas_to_run excludes its own successor). The
-    // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
-    // gas 0). The per-instruction op and gas come straight from `code` -- they
-    // are build-time inputs, not stored in the Slot.
+    // naturally at the barrier (whose gas_to_run excludes its own successor).
+    // The i+1<n guard keeps the run from absorbing the fall-off sentinel
+    // (exec_[n], gas 0). The per-instruction op and gas come straight from
+    // `code` -- they are build-time inputs, not stored in the Slot.
     //
-    // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only reachable
-    // by a pathologically long straight-line run -- up to 16384 instrs * 8 gas
-    // for div) is rejected: gas_overflow_ makes drive() trap. TODO: instead split
-    // the run, charging 65535 at a synthetic mid-run recharge handler.
+    // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only
+    // reachable by a pathologically long straight-line run -- up to 16384
+    // instrs * 8 gas for div) is rejected: gas_overflow_ makes drive() trap.
+    // TODO: instead split the run, charging 65535 at a synthetic mid-run
+    // recharge handler.
     const auto self_gas = static_cast<uint32_t>(d.gas);
     const uint32_t run_gas =
         is_barrier(d.op)
@@ -1289,14 +1294,15 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
     // EXPERIMENT(fuse): collapse an adjacent (lw, fusible ALU) load->use pair
     // into one fused handler on the load's slot, saving a dispatch. Building
     // backward, slot i is the load candidate and `next_op` (slot i+1) is the
-    // ALU. We only fuse when i+1 is a real instruction (i+1<n, not the sentinel)
-    // and was not itself consumed as a fused load (`next_fused`) -- a slot can
-    // belong to only one pair, the backward analogue of the forward pass's ++i.
-    // The ALU slot keeps its standalone handler and gas_to_run as the branch-in
-    // fallback; fusion is behavior-preserving and never changes gas.
+    // ALU. We only fuse when i+1 is a real instruction (i+1<n, not the
+    // sentinel) and was not itself consumed as a fused load (`next_fused`) -- a
+    // slot can belong to only one pair, the backward analogue of the forward
+    // pass's ++i. The ALU slot keeps its standalone handler and gas_to_run as
+    // the branch-in fallback; fusion is behavior-preserving and never changes
+    // gas.
     bool fused_here = false;
     if (i + 1 < n && !next_fused) {
-      const Instr &ld = d;        // slot i: the load (writes ld.rd; x0 discards)
+      const Instr &ld = d; // slot i: the load (writes ld.rd; x0 discards)
       const Instr &alu = next_op; // slot i+1: the ALU that reads it
       const bool rs1_match = alu.rs1 == ld.rd;
       const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
@@ -1319,7 +1325,6 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trac
 
   return ThreadedMachinePreInstantiation(std::move(exec), trace, gas_overflow);
 }
-
 
 inline MachineView
 ThreadedMachine::view()

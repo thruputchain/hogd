@@ -445,7 +445,8 @@ make_recursive_fibonacci_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false).value();
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 // A compute-bound counterpart to recursive fibonacci: a tight loop of
@@ -499,7 +500,8 @@ make_compute_loop_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false).value();
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 constexpr uint32_t kComputeLoopResult = 536887296; // sum(1..32768)
@@ -567,7 +569,8 @@ make_compute_loop_independent_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false).value();
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 int64_t

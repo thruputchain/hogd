@@ -26,7 +26,6 @@ struct Instr {
 
 class ThreadedProgram {
 public:
-
   static std::expected<ThreadedProgram, ProgramError>
   create(std::span<const uint8_t> code)
   {
@@ -41,7 +40,10 @@ public:
     return program;
   }
 
-  [[nodiscard]] size_t instruction_count() const { return code_.size() / kInstructionBytes; }
+  [[nodiscard]] size_t instruction_count() const
+  {
+    return code_.size() / kInstructionBytes;
+  }
   [[nodiscard]] bool contains_pc(uint32_t pc) const
   {
     return (pc % kInstructionBytes) == 0 &&
