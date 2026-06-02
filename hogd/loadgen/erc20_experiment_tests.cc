@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <tuple>
 
 #include "exec_result.hh"
 #include "hogd/base/xdr_util.h"
@@ -16,6 +18,7 @@
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -36,6 +39,17 @@ protected:
   void check_uniquifier(const Uniquifier &uniquifier)
   {
     EXPECT_TRUE(uniquifiers_.insert(uniquifier).second);
+  }
+
+  void check_replay_cache_height_pressure(auto const &init_block)
+  {
+    std::map<std::tuple<ContractAddress, BlockHeight>, size_t> counts;
+    for (auto const &tx : init_block) {
+      auto key = std::make_tuple(tx.tx.invocation.invoked_address,
+                                 tx.tx.uniquifier.block_expiry_height);
+      auto count = ++counts[key];
+      ASSERT_LE(count, kReplayCacheNoncesMaxLen);
+    }
   }
 
   void check_initial_balance()
@@ -103,6 +117,21 @@ TEST_F(ERC20ExperimentTest, Basic)
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
     ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
   }
+
+  work_txs_raw = state->extend_experiment(100, 10)();
+  ASSERT_TRUE(work_txs_raw.has_value());
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  ASSERT_EQ(work_txs.size(), 100);
+  for (auto &tx : work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
+    auto handler = make_new_system_call_handler(tx, *runtime_context_);
+    auto invoke_res = handler.root_invoke();
+    ASSERT_TRUE(invoke_res.is_root_success());
+    auto res = handler.try_commit_transaction();
+    ASSERT_TRUE(res == ExecResult::ExecResultOK);
+    ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  }
 }
 
 TEST_F(ERC20ExperimentTest, BasicAuth)
@@ -153,6 +182,21 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
     ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
   }
+
+  work_txs_raw = state->extend_experiment(100, 10)();
+  ASSERT_TRUE(work_txs_raw.has_value());
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  ASSERT_EQ(work_txs.size(), 100);
+  for (auto &tx : work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
+    auto handler = make_new_system_call_handler(tx, *runtime_context_);
+    auto invoke_res = handler.root_invoke();
+    ASSERT_TRUE(invoke_res.is_root_success());
+    auto res = handler.try_commit_transaction();
+    ASSERT_TRUE(res == ExecResult::ExecResultOK);
+    ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  }
 }
 
 TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
@@ -171,6 +215,46 @@ TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
             result2.value().genesis_configuration);
   EXPECT_EQ(result1.value().initialization_txs,
             result2.value().initialization_txs);
+}
+
+TEST_F(ERC20ExperimentTest, BasicAuthLargeInitFitsReplayCacheHeightCap)
+{
+  auto state =
+      std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
+          .num_addresses = 10'000,
+      });
+  auto result = state->generate_experiment()();
+  ASSERT_TRUE(result.has_value());
+
+  for (auto const &init_block : result.value().initialization_txs) {
+    for (auto const &tx : init_block) {
+      check_uniquifier(tx.tx.uniquifier);
+    }
+  }
+  ASSERT_GE(result.value().initialization_txs.size(), 2);
+  check_replay_cache_height_pressure(result.value().initialization_txs[1]);
+}
+
+TEST_F(ERC20ExperimentTest, BasicAuthLargeWorkBatchFitsReplayCacheHeightCap)
+{
+  auto state =
+      std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
+          .num_addresses = 10'000,
+      });
+  auto result = state->generate_experiment()();
+  ASSERT_TRUE(result.has_value());
+
+  LoadgenStatus<LoadgenExtension> work_txs_raw =
+      state->extend_experiment(1'000'000, 10'000)();
+  ASSERT_TRUE(work_txs_raw.has_value());
+
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  ASSERT_EQ(work_txs.size(), 1'000'000);
+  check_replay_cache_height_pressure(work_txs);
+  for (auto const &tx : work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
+  }
 }
 
 TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
