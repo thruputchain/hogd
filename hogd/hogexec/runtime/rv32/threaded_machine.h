@@ -88,18 +88,12 @@ struct alignas(16) Slot {
 class alignas(64) ThreadedMachine {
 public:
   ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
-                  uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
-    : initial_pc_(initial_pc), program_(std::move(program))
+                  uint32_t memory_bytes, uint64_t gas)
+    : program_(std::move(program))
   {
     if (!program_) {
       construction_trap_ = Trap::kInvalidInstruction;
       trap_ = Trap::kInvalidInstruction;
-      halted_ = true;
-      return;
-    }
-    if (!program_->contains_pc(initial_pc_)) {
-      construction_trap_ = Trap::kBadPc;
-      trap_ = Trap::kBadPc;
       halted_ = true;
       return;
     }
@@ -117,7 +111,7 @@ public:
   {
     regs_.fill(0);
     std::ranges::fill(memory_, uint8_t{0});
-    pc_ = initial_pc_;
+    pc_ = 0;
     gas_remaining_ = gas;
     trap_ = Trap::kNone;
     halted_ = false;
@@ -209,7 +203,6 @@ public:
   Trap trap_ = Trap::kNone;
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
-  uint32_t initial_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
   bool gas_overflow_ =
       false; // a run's gas exceeded uint16 -> reject (drive traps)
