@@ -580,6 +580,13 @@ pop_context()
     error("pop_context error: no context!");
     return kTestFFIErrorCodeUnrecoverableError;
   }
+  // The thread-local context installed for a running root_invoke() is owned by
+  // that call; a mock contract callback must not pop it, or root_invoke()'s
+  // own deferred pop would CHECK-fail on the now-empty slot (issue #2510).
+  if (context->root_invoke_owns_context()) {
+    error("pop_context error: context is owned by the running root invocation");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   context->pop_context();
   return kTestFFIErrorCodeNone;
 }

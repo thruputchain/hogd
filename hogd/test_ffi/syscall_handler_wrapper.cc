@@ -63,7 +63,14 @@ SyscallHandlerContext::root_invoke()
   if (!push_context()) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
-  x23::Defer _([this]() { pop_context(); });
+  // Claim ownership of the TLS context for the duration of the root call so a
+  // mock contract callback can't pop it via the exported pop_context() helper
+  // and trip the deferred pop's CHECK (issue #2510).
+  set_root_invoke_owns_context(true);
+  x23::Defer _([this]() {
+    set_root_invoke_owns_context(false);
+    pop_context();
+  });
 
   auto res = handler_.root_invoke();
 
