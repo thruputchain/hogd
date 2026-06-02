@@ -3,6 +3,7 @@ add_library(contract_tests_objects OBJECT
     payment_channel_integration_test.cc
     htlc_integration_test.cc
     tuple_return_wasm_test.cc
+    native_wasm_token_event_parity_test.cc
 )
 
 target_link_libraries(

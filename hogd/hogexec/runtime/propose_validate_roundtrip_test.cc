@@ -132,14 +132,15 @@ protected:
   }
 
   // Build a transaction targeting contract A's only method.
-  static Transaction make_invoke_a_tx(Runtime::MethodID method)
+  Transaction make_invoke_a_tx(Runtime::MethodID method)
   {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = kAddrA,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = {}}};
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kAddrA,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {}},
+                       .uniquifier = make_new_uniquifier()};
   }
 
   // Propose a TX: invoke, assert success, return proposal data.
@@ -239,23 +240,24 @@ protected:
     return std::make_unique<NativeContext>(std::move(contract_map));
   }
 
-  static Transaction make_rcq_tx(uint32_t method,
-                                 std::vector<uint8_t> const &calldata = {})
+  Transaction make_rcq_tx(uint32_t method,
+                          std::vector<uint8_t> const &calldata = {})
   {
     return Transaction{
         .invocation =
             Invocation{.invoked_address = kAddrA,
                        .entrypoint = entrypoint_from_method_id(method),
                        .gas_limit = UINT64_MAX,
-                       .calldata = Calldata(calldata.begin(), calldata.end())}};
+                       .calldata = Calldata(calldata.begin(), calldata.end())},
+        .uniquifier = make_new_uniquifier()};
   }
 
-  static Transaction make_rcq_insert_tx(std::vector<uint8_t> const &values)
+  Transaction make_rcq_insert_tx(std::vector<uint8_t> const &values)
   {
     return make_rcq_tx(0, values);
   }
 
-  static Transaction make_rcq_consume_tx(uint8_t count)
+  Transaction make_rcq_consume_tx(uint8_t count)
   {
     return make_rcq_tx(1, {count});
   }
@@ -526,15 +528,13 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
-  DbTip proposal_tip;
-  if (GetParam() == TestDB::kHogDB) {
-    advance_block();
-    proposal_tip = get_db_tip();
-    discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
-  }
-  else {
-    discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
-  }
+  // Capture the proposal block's resulting trie root, then reset to the
+  // pre-proposal state. discard_block closes the block (finalizing its hash)
+  // and abandons it WITHOUT committing, so the committed tip is unchanged and
+  // validation replays against the same pre-state -- consuming the same replay
+  // nonces fresh rather than colliding with a committed proposal block.
+  DbHash proposal_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // === Validation: replay with captured proposal data ===
   {
@@ -549,12 +549,14 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
+  // Validation must reproduce the proposal's resulting state exactly: closing
+  // the validation block yields its trie root for comparison. Both blocks were
+  // built from the same pre-state with the same transactions and replay nonces,
+  // so the roots must match. (Only HogDB computes real trie roots.)
+  DbHash validation_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
   if (GetParam() == TestDB::kHogDB) {
-    advance_block();
-    // Note: this test pairs a consume and an insert in the same block, so
-    // block-to-block the db hash shouldn't change regardless of execution order
-    // of the two operations.
-    EXPECT_EQ(proposal_tip.db_hash, get_db_tip().db_hash)
+    EXPECT_EQ(proposal_hash, validation_hash)
         << "Proposal and validation trie root hashes must match";
   }
 }
@@ -2299,11 +2301,13 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
                                     std::move(insert_contract_b));
 
   // TX_insert targets B to insert {10} at kAddrB.
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
 
   NondeterministicProposalData insert_p;
   {
@@ -2468,11 +2472,13 @@ TEST_P(ProposeValidateRoundtripTest,
   insert_cmap.emplace(1, std::move(b_insert_contract));
   auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
 
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
 
   auto tx = make_invoke_a_tx(0);
@@ -2570,11 +2576,13 @@ TEST_P(ProposeValidateRoundtripTest,
   auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
 
   // TX_insert: insert {10} at kAddrB — same block, so it's a concurrent entry.
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
 
   // Same block: propose the A→B.0(fault)→B.1(bytestring) TX.
@@ -2593,6 +2601,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto doctored = proposal;
   doctored.nondeterministic_bits[0] |= (1 << 1);
 
+  // Re-propose the insert to recapture its proposal data. This is a second
+  // commit of the insert in the same proposal block, so it needs its own
+  // uniquifier (the replay cache rejects a duplicate within a block).
+  tx_insert.uniquifier = make_new_uniquifier();
   auto insert_p = propose(tx_insert, *insert_ctx);
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -2666,11 +2678,13 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
   insert_cmap.emplace(1, std::move(b_insert_contract));
   auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
 
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
 
   // Same block: A try_invokes B (peek succeeds).
@@ -2758,11 +2772,13 @@ TEST_P(ProposeValidateRoundtripTest,
   insert_cmap.emplace(1, std::move(b_insert_contract));
   auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
 
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
 
   auto tx = make_invoke_a_tx(0);
@@ -2840,11 +2856,13 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
   insert_cmap.emplace(1, std::move(b_insert_contract));
   auto insert_ctx = std::make_unique<NativeContext>(std::move(insert_cmap));
 
-  auto tx_insert = Transaction{
-      .invocation = Invocation{.invoked_address = kAddrB,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}}};
+  auto tx_insert =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrB,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
 
   auto tx = make_invoke_a_tx(0);

@@ -49,13 +49,22 @@ public:
 protected:
   void SetUp() override
   {
+    // kAddrA / kAddrB are the root invoked addresses; every committed
+    // transaction consumes a replay-cache entry charged to the invoked
+    // address. The worst case in any single test commits 6 transactions
+    // against one address (RevertedDoubleConsumePlusHonestConsumePeekIsValid
+    // commits 6 against kAddrB), each priced as a single consume since blocks
+    // reset the committed snapshot. Top up both grants by that worst-case
+    // amount (0 on MockInMemory; this suite always runs HogDB).
     write_contract(native_contract_a_xdr_);
     write_deployment(kAddrA, native_contract_a_xdr_);
-    setup_grant_storage_token(kAddrA, 1'000'000'000);
+    setup_grant_storage_token(kAddrA, 1'000'000'000 +
+                                          (replay_cache_cost_charged(1) * 6));
 
     write_contract(native_contract_b_xdr_);
     write_deployment(kAddrB, native_contract_b_xdr_);
-    setup_grant_storage_token(kAddrB, 1'000'000'000);
+    setup_grant_storage_token(kAddrB, 1'000'000'000 +
+                                          (replay_cache_cost_charged(1) * 6));
   }
 
   static constexpr ContractAddress kAddrA = make_contract_address(0);
@@ -114,34 +123,37 @@ protected:
     return std::make_unique<NativeContext>(std::move(cmap));
   }
 
-  static Transaction make_insert_tx(std::vector<uint8_t> const &values)
+  Transaction make_insert_tx(std::vector<uint8_t> const &values)
   {
     return Transaction{
         .invocation =
             Invocation{.invoked_address = kAddrB,
                        .entrypoint = entrypoint_from_method_id(0),
                        .gas_limit = UINT64_MAX,
-                       .calldata = Calldata(values.begin(), values.end())}};
+                       .calldata = Calldata(values.begin(), values.end())},
+        .uniquifier = make_new_uniquifier()};
   }
 
-  static Transaction make_invoke_a_tx(Runtime::MethodID method)
+  Transaction make_invoke_a_tx(Runtime::MethodID method)
   {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = kAddrA,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = {}}};
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kAddrA,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {}},
+                       .uniquifier = make_new_uniquifier()};
   }
 
-  static Transaction make_invoke_b_tx(Runtime::MethodID method)
+  Transaction make_invoke_b_tx(Runtime::MethodID method)
   {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = kAddrB,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = {}}};
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kAddrB,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {}},
+                       .uniquifier = make_new_uniquifier()};
   }
 };
 
@@ -584,8 +596,13 @@ TEST_F(RcqDoctoredProposalDataTest,
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
   }
+  // Discard (rather than commit) the honest validation block: the doctored
+  // replay below reuses the same tx_excl/tx_obs, so committing the honest block
+  // would persist their replay nonces and make the doctored re-run fail as a
+  // duplicate instead of for the intended (forged-observation) reason. Closing
+  // it still verifies the honest case closes cleanly without throwing.
   ASSERT_NO_THROW(
-      advance_block(BlockExecutionMode::kBlockExecutionModeValidation));
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation));
 
   // Doctor the proposal: claim peek found {10} (both bits true).
   // The delta at root commit is observation-only (no insert) on a

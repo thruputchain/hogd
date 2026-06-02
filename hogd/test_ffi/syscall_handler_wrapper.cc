@@ -27,27 +27,31 @@
 
 namespace hogd {
 
-SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
-                                             SignedTransaction const &stx,
-                                             DBContext &db)
+SyscallHandlerContext::SyscallHandlerContext(
+    std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
+    DBContext &db)
   : identifier_(db.allocate_identifier()), db_(db),
+    runtime_context_owner_(std::move(context)),
     handler_(stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *context),
+             *runtime_context_owner_),
     is_mocked_handler_(false)
+{
+  db_.register_open_handler();
+}
 
-{}
-
-SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
-                                             DBContext &db,
-                                             AuthClaim const &auth_claim,
-                                             SHA256Hash const &source_tx_hash)
+SyscallHandlerContext::SyscallHandlerContext(
+    std::shared_ptr<MockRuntimeContext> context, DBContext &db,
+    AuthClaim const &auth_claim, SHA256Hash const &source_tx_hash)
   : identifier_(db.allocate_identifier()), db_(db),
+    runtime_context_owner_(std::move(context)),
     handler_(db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *context, auth_claim, source_tx_hash),
+             *runtime_context_owner_, auth_claim, source_tx_hash),
     is_mocked_handler_(true)
-{}
+{
+  db_.register_open_handler();
+}
 
 ForeignTracedInvokeResult
 SyscallHandlerContext::root_invoke()
@@ -73,7 +77,21 @@ SyscallHandlerContext::root_invoke()
     if (!serialized_output.has_value()) {
       return kMakeFFIError(serialized_output.error());
     }
+
+    // serialized_output now owns a heap buffer. A later serialization failure
+    // returns an FFI error with null buffers, so the caller cannot reclaim it;
+    // free the already-allocated buffers on those error paths.
     FFIDataBuffer serialized_trace = kNullBuffer;
+    FFIDataBuffer serialized_events = kNullBuffer;
+    bool buffers_handed_off = false;
+    x23::Defer free_buffers_on_error([&]() {
+      if (!buffers_handed_off) {
+        hogd::free_ffi_data_buffer(serialized_output.value());
+        hogd::free_ffi_data_buffer(serialized_trace);
+        hogd::free_ffi_data_buffer(serialized_events);
+      }
+    });
+
     auto const *trace = handler_.get_trace();
     if (trace) {
       auto s = serialize_to_ffi_data_buffer(*trace);
@@ -85,7 +103,6 @@ SyscallHandlerContext::root_invoke()
 
     // Only return events when the invocation succeeded and the root frame
     // returned normally (not aborted/faulted).
-    FFIDataBuffer serialized_events = kNullBuffer;
     if (res.result_.has_value() && root_invocation_output.status_code() ==
                                        InvocationFrameStatusCode::Return) {
       auto frame_events = handler_.copy_last_frame_events();
@@ -98,6 +115,7 @@ SyscallHandlerContext::root_invoke()
       }
     }
 
+    buffers_handed_off = true;
     return ForeignTracedInvokeResult{
         .serialized_output = serialized_output.value(),
         .gas_consumed = res.gas_consumed_,
@@ -264,6 +282,19 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   if (handler_.last_frame_finished()) {
     handler_.mock_set_cumulative_invoke_result(result);
     handler_.finalize_after_root_frame();
+
+    // Mirror root_invoke(): a root-level system error (Unrecoverable,
+    // ValidationFailure, Abandon) must surface as an FFI error, not a
+    // serialized Fault that silently hides the cumulative root system result
+    // from the caller until a later try_commit_transaction(). Deterministic
+    // and OutOfGas classify as Fault, so they keep flowing through as ordinary
+    // serialized Fault outputs.
+    if (!result.to_frame_status().first.has_value()) {
+      error("Unrecoverable: finish_mock_invocation_frame got root system "
+            "error: {}",
+            result.result_.error().code());
+      return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+    }
   }
 
   auto frame_output = handler_.get_most_recent_frame_output();
@@ -273,7 +304,20 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     return kMakeFFIError(serialized_output.error());
   }
 
+  // serialized_output now owns a heap buffer. A later serialization failure
+  // returns an FFI error with null buffers, so the caller cannot reclaim it;
+  // free the already-allocated buffers on those error paths.
   FFIDataBuffer serialized_trace = kNullBuffer;
+  FFIDataBuffer serialized_events = kNullBuffer;
+  bool buffers_handed_off = false;
+  x23::Defer free_buffers_on_error([&]() {
+    if (!buffers_handed_off) {
+      hogd::free_ffi_data_buffer(serialized_output.value());
+      hogd::free_ffi_data_buffer(serialized_trace);
+      hogd::free_ffi_data_buffer(serialized_events);
+    }
+  });
+
   auto const *trace = handler_.get_trace();
   if (trace) {
     auto s = serialize_to_ffi_data_buffer(*trace);
@@ -287,7 +331,6 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   // frames discard their events.
   bool frame_succeeded =
       invoke_error_code == InvokeErrorCode::None && !manually_reverted;
-  FFIDataBuffer serialized_events = kNullBuffer;
   if (frame_succeeded && !frame_events.empty()) {
     auto s = serialize_to_ffi_data_buffer(frame_events);
     if (!s.has_value()) {
@@ -296,6 +339,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     serialized_events = s.value();
   }
 
+  buffers_handed_off = true;
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
       .gas_consumed = total_gas_consumed,

@@ -107,7 +107,8 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
                                 Invocation{.invoked_address = contract_addr_,
                                            .entrypoint = entrypoint,
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto res = handler.root_invoke();

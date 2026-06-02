@@ -99,8 +99,8 @@ jobs:
 
       - name: Configure Environment
         run: |
-          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
-          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'GCC_CC=gcc-15' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-15' >> ./scripts/conf.sh
           echo 'NPROC=18' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 

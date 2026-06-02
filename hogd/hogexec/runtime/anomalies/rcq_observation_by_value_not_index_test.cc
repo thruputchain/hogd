@@ -86,15 +86,16 @@ public:
     return std::make_unique<NativeContract>(std::move(map));
   }
 
-  static Transaction make_tx(uint32_t method,
-                             std::vector<uint8_t> const &calldata = {})
+  Transaction make_tx(uint32_t method,
+                      std::vector<uint8_t> const &calldata = {})
   {
     return Transaction{
         .invocation =
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
                        .gas_limit = UINT64_MAX,
-                       .calldata = Calldata(calldata.begin(), calldata.end())}};
+                       .calldata = Calldata(calldata.begin(), calldata.end())},
+        .uniquifier = make_new_uniquifier()};
   }
 };
 

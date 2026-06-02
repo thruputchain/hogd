@@ -2602,6 +2602,7 @@ protected:
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = x23::serialize(args...)},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
 
@@ -2626,6 +2627,7 @@ protected:
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = x23::serialize(args...)},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
     handler.hack_dont_use_test_bypass_allow_reentrance();
@@ -3745,14 +3747,15 @@ TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
 
 TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
 {
-  auto make_tx = [](Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = kContractAddress,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kContractAddress,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   auto tx_insert = make_tx(0, uint32_t{42});
@@ -3800,14 +3803,15 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
 
 TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   auto tx_insert_a = make_tx(kContractAddress, 0, uint32_t{42});
@@ -3855,14 +3859,15 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
 
 TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   // Insert two concurrent entries on each address.
@@ -3910,14 +3915,15 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
 
 TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   // Insert two concurrent entries on each address.
@@ -3966,14 +3972,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
 
 TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   // Insert two concurrent entries on each address.
@@ -4022,14 +4029,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
 
 TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   // Block 1: insert past-block entries on both addresses.
@@ -4087,14 +4095,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 
 TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
 {
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
@@ -4142,14 +4151,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
     GTEST_SKIP() << "Block record check requires HogDB DAO access";
   }
 
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
@@ -4211,14 +4221,15 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
     GTEST_SKIP() << "Block record check requires HogDB DAO access";
   }
 
-  auto make_tx = [](ContractAddress const &addr, Runtime::MethodID method,
-                    auto const &...args) -> Transaction {
-    return Transaction{
-        .invocation =
-            Invocation{.invoked_address = addr,
-                       .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
-                       .calldata = x23::serialize(args...)}};
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
   };
 
   for (auto const &addr : {kContractAddress, kContractAddress2}) {

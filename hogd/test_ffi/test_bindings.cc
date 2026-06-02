@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -77,7 +78,14 @@ do_ffi_trace(std::format_string<Args...> fmt, Args &&...args) noexcept
   try {
     ffi_trace(fmt, std::forward<Args>(args)...);
   } catch (std::exception const &e) {
-    log_error("error tracing ffi: {}", e);
+    // FFI tracing is best-effort diagnostics, and the start-of-call trace in
+    // each exported wrapper runs before the first-use helper reaches
+    // lazy_init(). Routing this through error() would dereference the still-
+    // null process logger and terminate an honest caller (issue #2478), so
+    // report the failure straight to stderr without allocating.
+    std::fputs("error tracing ffi: ", stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
   }
 }
 
@@ -243,6 +251,14 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
+  // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
+  // freeing it while a handler is still open would dangle those references on a
+  // later close/invoke. Reject the free instead of crashing (issue #2433).
+  if (ptr != nullptr && ptr->has_open_handlers()) {
+    error("free_db called while syscall handlers derived from this DB are "
+          "still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   try {
     delete ptr;
   } catch (std::exception const &e) {
@@ -258,6 +274,16 @@ advance_new_block(void *db) noexcept
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
     return kTestFFIErrorCodeInvalidPointer;
+
+  // Advancing the block replaces the snapshot cache that open handlers still
+  // reference; reject it while any handler derived from this DB is open so a
+  // later root_invoke() doesn't read freed snapshot state (issue #2436).
+  if (ptr->has_open_handlers()) {
+    error(
+        "advance_new_block called while syscall handlers derived from this DB "
+        "are still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   try {
     ptr->advance_new_block();
@@ -310,7 +336,15 @@ register_new_contract(void *context, int32_t mock_contract_id,
     return kTestFFIErrorCodeInvalidPointer;
   CHECK(*c != nullptr);
 
-  (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  try {
+    // set_trampoline() inserts into a heap-allocating std::map, which can throw
+    // std::bad_alloc. Without this boundary the exception would cross the
+    // noexcept FFI helper and terminate an honest caller (issue #2489).
+    (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  } catch (std::exception const &e) {
+    log_error("error registering mock contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   return kTestFFIErrorCodeNone;
 }
 
@@ -340,7 +374,7 @@ open_syscall_handler(void *db, void *rc,
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
-        new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
+        new SyscallHandlerContext(*runtime_context, stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
@@ -383,9 +417,8 @@ open_mocked_syscall_handler(void *db, void *rc,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
-    auto *handler =
-        new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_xdr, source_hash);
+    auto *handler = new SyscallHandlerContext(*runtime_context, *db_context,
+                                              auth_claim_xdr, source_hash);
     if (enable_tracing) {
       handler->to_handler().enable_tracing();
     }
@@ -474,11 +507,18 @@ open_mock_invocation_frame(void *syscall_handler,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  auto res = context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
-  if (res != kTestFFIErrorCodeNone) {
-    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  try {
+    auto res =
+        context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
+    if (res != kTestFFIErrorCodeNone) {
+      error("failed to start mock invocation frame: {}",
+            std::to_underlying(res));
+    }
+    return res;
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during start_mock_invocation_frame: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-  return res;
 }
 
 ForeignTracedInvokeResult
@@ -492,8 +532,15 @@ finish_mock_invocation_frame(void *syscall_handler,
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
-  return context->finish_mock_invocation_frame(
-      static_cast<InvokeErrorCode>(invoke_error_code));
+  try {
+    return context->finish_mock_invocation_frame(
+        static_cast<InvokeErrorCode>(invoke_error_code));
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error during finish_mock_invocation_frame: {}",
+              e);
+    return make_ffi_result_type<ForeignTracedInvokeResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
 }
 
 TestFFIErrorCode
@@ -588,6 +635,12 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   if (db == nullptr || contract_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
+  if (tokens < 0) {
+    error("setup_grant_contract_storage_tokens: tokens must be nonnegative, "
+          "got {}",
+          tokens);
+    return kTestFFIErrorCodeInvalidArgument;
+  }
   auto *db_cast = static_cast<DBContext *>(db);
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), contract_addr, addr.size());
@@ -620,33 +673,45 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   } catch (x23::XdrException &e) {
     log_error("error deserializing contract: {}", e);
     return kTestFFIErrorCodeDeserializeError;
+  } catch (std::exception const &e) {
+    // Deserializing a well-formed contract still allocates (e.g. resizing the
+    // ContractBlob::wasm vector), so std::bad_alloc can be thrown here on valid
+    // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
+    log_error("unrecoverable: error deserializing contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // make sure the contract has already been registered with the instantiation
-  // context
-  if (contract.contract_type() == ContractType::kMockTest) {
-    if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
-      error("contract has not been registered with the instantiation context");
-      return kTestFFIErrorCodeCreateNonexistentMockContract;
+  try {
+    // make sure the contract has already been registered with the
+    // instantiation context
+    if (contract.contract_type() == ContractType::kMockTest) {
+      if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
+        error(
+            "contract has not been registered with the instantiation context");
+        return kTestFFIErrorCodeCreateNonexistentMockContract;
+      }
     }
+
+    // Verify wasm contracts before storing — reject contracts that would
+    // fail during instantiation (e.g., memory exceeding limits).
+    if (contract.contract_type() == ContractType::kWasmi) {
+      auto verify_result = (*context_cast)->verify_contract(contract);
+      if (verify_result == InvokeErrorCode::Unrecoverable) {
+        return kTestFFIErrorCodeUnrecoverableError;
+      }
+      if (verify_result != InvokeErrorCode::None) {
+        return kTestFFIErrorCodeContractVerificationFailed;
+      }
+    }
+
+    auto h = sha256(contract);
+
+    db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
+                                                 std::move(contract)));
+  } catch (std::exception const &e) {
+    log_error("error creating contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-
-  // Verify wasm contracts before storing — reject contracts that would
-  // fail during instantiation (e.g., memory exceeding limits).
-  if (contract.contract_type() == ContractType::kWasmi) {
-    auto verify_result = (*context_cast)->verify_contract(contract);
-    if (verify_result == InvokeErrorCode::Unrecoverable) {
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
-    if (verify_result != InvokeErrorCode::None) {
-      return kTestFFIErrorCodeContractVerificationFailed;
-    }
-  }
-
-  auto h = sha256(contract);
-
-  db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
-                                               std::move(contract)));
   return kTestFFIErrorCodeNone;
 }
 
@@ -1181,6 +1246,10 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
       "source_auth_data={})",
       signed_tx, source_auth_data);
+  // Install a logger before entering auth verification: an invalid signature
+  // logs a debug-build trace() that would otherwise dereference a null logger
+  // when this is the first test_ffi call in the process (issue #2464).
+  hogd::lazy_init();
   auto result =
       hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "

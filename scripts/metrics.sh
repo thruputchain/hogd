@@ -56,6 +56,10 @@ BUILD_DIR=$1
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR >metrics_history/metrics/fibonacci-wasmonly/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
+## rv32 vm benchmarks (canonical + direct-threaded interpreter: fibonacci, compute loops, wasmi/artifact comparisons)
+./metrics_history/scripts/make_metric_file.sh rv32-vm-bench $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/rv32_vm_bench.sh $BUILD_DIR >metrics_history/metrics/rv32-vm-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
 ## payments_bench 10 accounts
 ./metrics_history/scripts/make_metric_file.sh payments-bench-10 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-10/$GIT_branch/${GIT_commit_time}_$GIT_commit

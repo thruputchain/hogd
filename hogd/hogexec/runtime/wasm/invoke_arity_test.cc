@@ -42,7 +42,7 @@ arity0(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 }
 
 extern "C" TrampolineResult
-arity1(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0)
+arity1(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0)
 {
   if (arg0 != 1) {
     return unexpected();
@@ -51,8 +51,8 @@ arity1(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0)
 }
 
 extern "C" TrampolineResult
-arity2(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1)
+arity2(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
     return unexpected();
@@ -61,8 +61,8 @@ arity2(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity3(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2)
+arity3(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     return unexpected();
@@ -71,8 +71,8 @@ arity3(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity4(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2, uint64_t arg3)
+arity4(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2, uint32_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     return unexpected();
@@ -81,8 +81,8 @@ arity4(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity5(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
+arity5(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     return unexpected();
@@ -91,9 +91,9 @@ arity5(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity6(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-       uint64_t arg5)
+arity6(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4,
+       uint32_t arg5)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6) {
@@ -103,9 +103,9 @@ arity6(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity7(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-       uint64_t arg5, uint64_t arg6)
+arity7(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4,
+       uint32_t arg5, uint32_t arg6)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7) {
@@ -115,9 +115,9 @@ arity7(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
 }
 
 extern "C" TrampolineResult
-arity8(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint64_t arg0,
-       uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-       uint64_t arg5, uint64_t arg6, uint64_t arg7)
+arity8(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t arg0,
+       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4,
+       uint32_t arg5, uint32_t arg6, uint32_t arg7)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7 || arg7 != 8) {

@@ -1,12 +1,16 @@
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <mutex>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -32,6 +36,8 @@
 namespace hogd {
 
 namespace {
+
+constexpr auto kRefreshProbeInterval = std::chrono::milliseconds(100);
 
 ViewGatewayResult
 make_view_gateway_result(ViewGatewayOutcome outcome)
@@ -74,7 +80,10 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
   : db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(x23::HostPort{event_host, event_exec_port}),
     worker_pool_(static_cast<int>(nthreads))
-{}
+{
+  refresh_thread_ = std::jthread(
+      [this](std::stop_token const &stoken) { refresh_worker(stoken); });
+}
 
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(Protocol const &protocol)
@@ -103,6 +112,7 @@ ViewGatewayRpc::shut_down()
 {
   shutdown_flag_ = true;
   shutdown_flag_.notify_all();
+  refresh_thread_.request_stop();
 
   std::scoped_lock g(view_state_mutex_);
   for (auto it = view_states_.begin(); it != view_states_.end();) {
@@ -132,6 +142,60 @@ ViewGatewayRpc::gc_view_state(BlockID block_id)
   view_states_.erase(block_id);
 }
 
+void
+ViewGatewayRpc::refresh_worker(std::stop_token const &stoken)
+{
+  std::mutex cv_mutex;
+  std::condition_variable_any cv;
+
+  while (!stoken.stop_requested()) {
+    std::unique_lock g(cv_mutex);
+    cv.wait_for(g, stoken, kRefreshProbeInterval, [] { return false; });
+
+    if (stoken.stop_requested() ||
+        shutdown_flag_.load(std::memory_order_relaxed)) {
+      break;
+    }
+    probe_refresh_tip();
+  }
+}
+
+void
+ViewGatewayRpc::probe_refresh_tip()
+{
+  BlockID block_id = 0;
+  BlockHeight view_height = 0;
+  {
+    std::scoped_lock g(view_state_mutex_);
+    if (current_view_block_id_ == 0 ||
+        shutdown_flag_.load(std::memory_order_relaxed)) {
+      return;
+    }
+    ViewState const &current_state =
+        view_states_.at(current_view_block_id_).get();
+    block_id = current_state.block_id;
+    view_height = current_state.tip.height;
+  }
+
+  auto tip_res = db_proxy_.get_db_tip(block_id);
+  bool should_refresh =
+      !tip_res.has_value() || tip_res.value().height > view_height;
+  if (!should_refresh) {
+    return;
+  }
+
+  std::scoped_lock g(view_state_mutex_);
+  if (current_view_block_id_ != block_id ||
+      shutdown_flag_.load(std::memory_order_relaxed)) {
+    return;
+  }
+  ViewState const &current_state = view_states_.at(block_id).get();
+  if (!tip_res.has_value() ||
+      tip_res.value().height > current_state.tip.height) {
+    refresh_flag_.store(true, std::memory_order_release);
+  }
+}
+
 PerThreadARC<ViewGatewayRpc::ViewState> *
 ViewGatewayRpc::get_current_view_state()
 {
@@ -139,10 +203,12 @@ ViewGatewayRpc::get_current_view_state()
 
   if (current_view_block_id_ != 0 &&
       refresh_flag_.exchange(false, std::memory_order_acquire)) {
+    // The background refresh worker probes HogDB at a bounded cadence and sets
+    // refresh_flag_ when the cached viewing snapshot falls behind the committed
+    // tip.  The hot view path only consumes that flag so repeated views can
+    // keep reusing the snapshot without polling HogDB on every request.
     auto res = db_proxy_.open_viewing_snapshot();
-    if (res.has_value()) {
-      CHECK(res.value().block_id != current_view_block_id_);
-
+    if (res.has_value() && res.value().block_id != current_view_block_id_) {
       BlockID old_block_id = current_view_block_id_;
       bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
 
@@ -160,7 +226,7 @@ ViewGatewayRpc::get_current_view_state()
         view_states_.erase(old_block_id);
       }
     }
-    else {
+    else if (!res.has_value()) {
       warn("viewgateway: failed to open refreshed viewing snapshot");
     }
   }

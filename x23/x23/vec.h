@@ -750,6 +750,45 @@ protected:
     terminate();
   }
 
+  // Bridge a freshly-allocated block to a live value_type[] array before it
+  // is ever used as a value_type*.  For scalar value_type, detail::
+  // merged_allocator rebinds the allocator to AlignedStorage (so that e.g.
+  // char and uint8_t Vecs share one allocator type), so a_.allocate() starts
+  // an AlignedStorage[] lifetime, not a value_type[] one -- treating the
+  // result directly as value_type* and doing pointer arithmetic / writes
+  // through it is then UB: no value_type[] object exists yet (issue #2043).
+  // Must NOT be collapsed back into a plain reinterpret_cast; that is the
+  // exact lifetime/provenance defect this guards against.  When the allocator
+  // already yields value_type (e.g. recursive Vec<struct>), allocate() made
+  // the array, so the pointer passes through unchanged.
+  static value_type *start_array_lifetime(auto *p, [[maybe_unused]] size_type n)
+  {
+    using alloc_value =
+        typename std::allocator_traits<allocator_type>::value_type;
+    if constexpr (std::is_same_v<alloc_value, value_type>)
+      return p; // allocate() already created the value_type[] array
+#ifdef __cpp_lib_start_lifetime_as
+    else
+      return std::start_lifetime_as_array<value_type>(p, n);
+#else
+    // start_lifetime_as_array (P0593R6) isn't shipped in our libc++/libstdc++
+    // yet; placement array-new of the trivial, implicit-lifetime scalar is the
+    // portable, cookie-free equivalent (same idiom as ramdb/loglet.cc and
+    // container/merkle/allocator.h).
+    else {
+      // Cookie-freedom (so the returned pointer == p) needs trivial
+      // destructibility; absence of side-effecting init needs trivial default
+      // construction.  Both hold for the scalar value_type this branch is
+      // reached with; a future non-trivial rebind must use the primitive above.
+      static_assert(std::is_trivially_default_constructible_v<value_type> &&
+                        std::is_trivially_destructible_v<value_type>,
+                    "placement new[] is cookie-free and side-effect-free only "
+                    "for trivial types; use std::start_lifetime_as_array");
+      return ::new (static_cast<void *>(p)) value_type[n];
+    }
+#endif
+  }
+
   constexpr void realloc(size_type n)
   {
     check_size(n);
@@ -763,12 +802,12 @@ protected:
     if (n) {
       if constexpr (requires { a_.allocate_at_least(n); }) {
         auto ar = a_.allocate_at_least(n + ExtraAlloc);
-        newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
+        newb.end = newb.begin = start_array_lifetime(ar.ptr, ar.count);
         newb.bufend = newb.begin + ar.count - ExtraAlloc;
       }
       else {
         newb.end = newb.begin =
-            reinterpret_cast<value_type *>(a_.allocate(n + ExtraAlloc));
+            start_array_lifetime(a_.allocate(n + ExtraAlloc), n + ExtraAlloc);
         newb.bufend = newb.begin + n;
       }
     }

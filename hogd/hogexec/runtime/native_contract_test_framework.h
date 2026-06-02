@@ -286,8 +286,10 @@ public:
     TransactionID tx_id;
   };
 
-  // Commits the current block and creates a new one.
-  void advance_block(
+  // Commits the current block and creates a new one. Returns the committed
+  // block's resulting trie root hash (captured at close), so callers can
+  // compare committed-block state (mirrors discard_block).
+  DbHash advance_block(
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       DbSchedResult expected_dbsched_commit_snapshot_result =
           DbSchedResult::DbSchedResultOK);
@@ -298,9 +300,13 @@ public:
   void reject_block(BlockExecutionMode mode =
                         BlockExecutionMode::kBlockExecutionModeProposal);
 
-  // Discards the current block and creates a new one.
-  void discard_block(BlockExecutionMode mode =
-                         BlockExecutionMode::kBlockExecutionModeProposal);
+  // Discards the current block and creates a new one. Returns the discarded
+  // block's resulting trie root hash (captured at close, before abandoning),
+  // so callers can compare what state the block would have produced -- e.g. a
+  // proposal block against its validation-mode replay -- without committing it,
+  // leaving the next block to replay against the same pre-block state.
+  DbHash discard_block(BlockExecutionMode mode =
+                           BlockExecutionMode::kBlockExecutionModeProposal);
 
   [[deprecated("use the Transaction version instead")]] SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
@@ -437,6 +443,30 @@ public:
   {
     return AddressAndKey{.address = address,
                          .key = StorageKey(StorageKeyType::ReplayCache)};
+  }
+
+  // Returns a fresh uniquifier with a unique nonce and (by default) a
+  // non-expiring height. Every committed transaction consumes its uniquifier
+  // into the replay cache, so tests that drive the normal tx path should give
+  // each transaction a distinct, unexpired uniquifier from here.
+  Uniquifier make_new_uniquifier(
+      BlockHeight expiry_height = std::numeric_limits<BlockHeight>::max())
+  {
+    return Uniquifier{.block_expiry_height = expiry_height,
+                      .nonce = next_uniquifier_nonce_++};
+  }
+
+  // The native-token storage cost actually charged by THIS backend for
+  // consuming `count` uniquifiers into the replay cache. MockInMemory drops
+  // ConsumeUniquifier deltas (charging nothing); HogDB charges the real cost.
+  // Use this to top up a grant so an exact invoked-address balance assertion
+  // holds unchanged on both backends.
+  int128_t replay_cache_cost_charged(uint32_t count) const
+  {
+    if (std::holds_alternative<MockDBWrapper>(db_wrapper_)) {
+      return 0;
+    }
+    return get_default_cost_model()->get_replay_cache_cost(count);
   }
 
   constexpr static AddressAndKey
@@ -657,6 +687,7 @@ private:
   TransactionID allocate_txid() { return next_tx_id_++; }
 
   TransactionID next_tx_id_ = 0;
+  uint64_t next_uniquifier_nonce_ = 0;
   BlockID block_number_ = 0;
   BlockID dbtip_block_id_ = 0;
 

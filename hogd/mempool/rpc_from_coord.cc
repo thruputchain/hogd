@@ -729,6 +729,10 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
   cache.failed_txs.clear();
   size_t num_tx_outcomes_processed = 0;
+  // We need to remove failed txs from [cache.txs], so we use [tx_write_idx] to
+  // track where to overwrite successful txs to in [cache.txs]. We do a single
+  // overwrite per tx, so removing the failed txs is efficient.
+  size_t tx_write_idx = 0;
   CHECK(cache.result_tx_nominations.empty());
   for (size_t handle_idx = 0; handle_idx < handles.size(); handle_idx++) {
     co_await handles[handle_idx];
@@ -740,13 +744,18 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
          tx_idx < handle_end_indices[handle_idx]; tx_idx++) {
       if (cache.statuses[tx_idx]) {
         cache.result_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
+        if (tx_write_idx != tx_idx) {
+          cache.txs[tx_write_idx] = std::move(cache.txs[tx_idx]);
+        }
+        tx_write_idx++;
       }
       else {
-        cache.failed_txs.push_back(cache.txs[tx_idx]);
+        cache.failed_txs.push_back(std::move(cache.txs[tx_idx]));
       }
     }
     num_tx_outcomes_processed = handle_end_indices[handle_idx];
   }
+  cache.txs.resize(tx_write_idx);
   CHECK_EQ(num_tx_outcomes_processed, cache.tx_hashes.size());
   CHECK_EQ(cache.result_tx_hashes.size(), cache.result_tx_nominations.size());
   record_stage(stage_await_batches);

@@ -212,6 +212,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -392,6 +393,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -572,6 +574,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -639,6 +642,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *verify_context);
 

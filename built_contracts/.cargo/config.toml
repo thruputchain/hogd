@@ -15,6 +15,18 @@ rustflags = [
     "--deny", "warnings",
     ]
 
+[target.riscv32im-unknown-none-elf]
+rustflags = [
+    "-C", "link-arg=-Tgroundhog-rv32.ld",
+    "-C", "link-arg=-static",
+    "-C", "link-arg=--no-dynamic-linker",
+    "-C", "link-arg=--gc-sections",
+    "-C", "panic=abort",
+    "-C", "relocation-model=static",
+    "-Z", "trap-unreachable=false",
+    "--deny", "warnings",
+    ]
+
 [profile.release]
 opt-level = 3
 overflow-checks = false

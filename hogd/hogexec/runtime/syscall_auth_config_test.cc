@@ -75,7 +75,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   // Invoke the contract method which calls the syscall
@@ -156,7 +157,8 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   // Invoke the contract method which calls both syscalls
@@ -223,7 +225,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto root_res = handler.root_invoke();
@@ -277,7 +280,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto root_res = handler.root_invoke();
@@ -349,7 +353,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto root_res = handler.root_invoke();
@@ -378,7 +383,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
-                                             .calldata = {}}}},
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *context);
 
     auto root_res = handler.root_invoke();

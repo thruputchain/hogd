@@ -21,8 +21,8 @@ MockRuntimeContext::set_trampoline(int32_t contract,
                                    ForeignEntryPoint entry_point,
                                    void *foreign_context)
 {
-  mocked_contracts_.emplace(contract,
-                            MockContract(entry_point, foreign_context));
+  mocked_contracts_.insert_or_assign(contract, MockContract(entry_point,
+                                                            foreign_context));
 }
 
 std::pair<InvokeStatus<void>, GasAmount>

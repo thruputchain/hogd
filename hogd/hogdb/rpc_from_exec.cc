@@ -34,6 +34,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
@@ -57,6 +58,10 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
+  case HogDBCode::kTooBig:
+    // A staged item exceeds RAMDB's size limit (e.g. an oversized contract
+    // code row); fail this transaction rather than the whole block.
+    return RPCError::kRPCTransactionFailed;
   case HogDBCode::kStaleBlock:
     return RPCError::kRPCBadBlockID;
   case HogDBCode::kInvalidExecutorBehavior:
@@ -114,6 +119,13 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     CHECK(addrkey.key.key_type() == StorageKeyType::ReplayCache);
+    // The initial token claim precompile is exempt from the replay cache (it
+    // provides its own replay protection via exclusive deletes). The executor
+    // consumes no uniquifier for it, so a uniquifier-consume delta keyed here
+    // can only come from a buggy executor: reject it as invalid behavior.
+    if (addrkey.address == kInitialTokenClaimPrecompileAddress) {
+      return to_rpc_error(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+    }
     return to_rpc_error(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
@@ -140,10 +152,12 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
   };
 
   for (auto &contract : new_contracts) {
-    // write contract should only fail if a sibling block commits and this block
-    // is abandoned.
+    // write_contract fails if a sibling block commits and this block is
+    // abandoned (kStaleBlock), or if the contract's code row exceeds RAMDB's
+    // size limit (kTooBig, #1775). Either way, abort just this transaction.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
-      CHECK(r.error().code() == HogDBCode::kStaleBlock);
+      CHECK(r.error().code() == HogDBCode::kStaleBlock ||
+            r.error().code() == HogDBCode::kTooBig);
       itx->abort();
       ctx_.close_invoke_tx(block, tx, itx);
       return to_rpc_error(r.error());

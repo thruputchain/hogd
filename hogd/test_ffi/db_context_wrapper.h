@@ -68,6 +68,20 @@ public:
 
   BlockID get_current_block_id() const { return current_block_id_; }
 
+  // Test FFI handler lifetime tracking. A SyscallHandlerContext borrows this
+  // DBContext, along with the snapshot cache and DB/event proxies derived from
+  // it, by reference. Freeing the DB or advancing it to a new block while a
+  // handler is still open would dangle those references, so the test FFI layer
+  // rejects those operations while open_handler_count_ > 0 (issues #2433,
+  // #2436).
+  void register_open_handler() { ++open_handler_count_; }
+  void unregister_open_handler()
+  {
+    assert(open_handler_count_ > 0);
+    --open_handler_count_;
+  }
+  bool has_open_handlers() const { return open_handler_count_ > 0; }
+
   x23::Async<std::optional<TxEventLog>>
   get_tx_event_log(EphemeralTxIdentifier identifier)
   {
@@ -112,6 +126,10 @@ private:
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;
+  // Number of SyscallHandlerContexts currently borrowing this DBContext.
+  // Atomic to match current_tx_id_ and stay race-free if handlers are created
+  // or closed from different threads on the same DBContext.
+  std::atomic<int> open_handler_count_ = 0;
 };
 
 } // namespace hogd

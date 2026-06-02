@@ -41,11 +41,11 @@ namespace hogd {
 // that the test harness does not need to maintain that context externally).
 class SyscallHandlerContext {
 public:
-  SyscallHandlerContext(MockRuntimeContext *context,
+  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
                         SignedTransaction const &stx, DBContext &db);
 
-  SyscallHandlerContext(MockRuntimeContext *context, DBContext &db,
-                        AuthClaim const &auth_claim,
+  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
+                        DBContext &db, AuthClaim const &auth_claim,
                         SHA256Hash const &source_tx_hash);
 
   ~SyscallHandlerContext()
@@ -63,6 +63,8 @@ public:
       }
     }
     CHECK(mock_runtime_stack_.empty());
+    // This handler no longer borrows the DB; allow it to be freed/advanced.
+    db_.unregister_open_handler();
   }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
@@ -154,6 +156,13 @@ private:
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
 
+  // Keep the MockRuntimeContext alive for the handler's whole lifetime: the
+  // embedded SystemCallHandler stores a RuntimeContext& into it, so closing the
+  // test FFI runtime-context handle must not free it out from under an open
+  // handler (issue #2432). Declared before handler_ so it is destroyed after
+  // it.
+  std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
+
   SystemCallHandler handler_;
   std::vector<Runtime *> mock_runtime_stack_;
   std::vector<std::unique_ptr<InvocationFrameTrace>>
@@ -212,6 +221,26 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   CHECK(mock_runtime != nullptr);
   auto *gas_runtime = dynamic_cast<MockGasRuntime *>(mock_runtime);
   CHECK(gas_runtime != nullptr);
+
+  // A *value* argument slot (a by-value integral/enum, as opposed to a memory
+  // offset) whose value does not fit a 32-bit slot could never have been
+  // produced by the real wasm32 runtime, which delivers 32-bit value slots.
+  // Such a value means the test harness leaked an out-of-range value into the
+  // syscall -- an FFI usage error, surfaced here as an unrecoverable (FFI)
+  // error rather than a contract-observable syscall fault. Offset slots (spans,
+  // references, optional pointers) legitimately carry full 64-bit host pointers
+  // and the all-ones null sentinel, so they are excluded from this check.
+  const bool value_slot_overflow =
+      [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) -> bool {
+    return (((std::integral<typename syscall_t::template arg_i<Is>> ||
+              std::is_enum_v<typename syscall_t::template arg_i<Is>>) &&
+             std::get<syscall_t::template offset_i<Is>()>(input_args) >
+                 std::numeric_limits<uint32_t>::max()) ||
+            ... || false);
+  }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+  if (value_slot_overflow) {
+    return unrecoverable_error();
+  }
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context

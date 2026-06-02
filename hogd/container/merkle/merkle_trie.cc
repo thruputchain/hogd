@@ -538,7 +538,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
     else {
       // The key does not map to an existing node. We must next check the branch
       // to see if it has any children on the path corresponding to the key. If
-      // so, we need to handle the children, such as by splitting part an
+      // so, we need to handle the children, such as by splitting apart an
       // extension node. If there are no children, we can create a leaf node for
       // the key and add it as a child of the branch.
       auto branch_idx = std::to_integer<size_t>(k.get(idx));

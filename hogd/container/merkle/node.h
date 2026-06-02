@@ -43,7 +43,7 @@ public:
   //
   // This [Raw] type is identical to [Node] apart from the children, which are
   // hashes in the [Raw] type and pointers in the [Node] type. We typically only
-  // read node encodings when verifying a Merkle Trie Proof, and for branches in
+  // read node encodings when verifying a Merkle Trie Proof, and for branches
   // and extensions in particular, their corresponding node encodings in the
   // proof directly include the hashes of their children. We write these hashes
   // to [child_hashes] in the [Raw] type.
