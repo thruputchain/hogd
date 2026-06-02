@@ -23,8 +23,9 @@ add_subdirectory(auth)
 # Define the custom command in the same directory scope as the hogd target so
 # CMake recognizes the source as generated during a clean configure in CI.
 set(HOGD_VERSION_C "${CMAKE_BINARY_DIR}/hogd/version.c")
-add_custom_command(
-  OUTPUT ${HOGD_VERSION_C}
+add_custom_target(
+  hogd_version_c
+  BYPRODUCTS ${HOGD_VERSION_C}
   COMMAND
     ${CMAKE_COMMAND}
     -DPROJECT_VERSION=${PROJECT_VERSION}
@@ -46,6 +47,7 @@ add_library(
   init.cc
   ${HOGD_VERSION_C}
 )
+add_dependencies(hogd hogd_version_c)
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
   hogd_interface INTERFACE
