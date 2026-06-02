@@ -997,9 +997,8 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
                            .prev_block_hash = nomination.prev_block_hash});
   }
 
-  // Submit the same tx again so validation can look it up. Since the first
-  // block was committed, this tx now fails execution with a duplicate
-  // uniquifier.
+  // Submit the same tx again so that hogdb detects the duplicate tx and hogexec
+  // fails the tx.
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
