@@ -452,6 +452,9 @@ MempoolCoordinatorRpc::propose_batch(
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
     ret_chunk[i] = tx_succeeded(result.result());
+    if (!ret_chunk[i]) {
+      info("tx failed with status {}", result.result());
+    }
     if (ret_chunk[i]) {
       transaction_nominations.push_back(result.proposal_data());
     }
