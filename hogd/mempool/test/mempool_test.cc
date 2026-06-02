@@ -20,7 +20,6 @@
 #include "discovery.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -32,7 +31,6 @@
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -64,26 +62,6 @@ std::tuple<uint64_t, uint64_t>
 make_amount(uint128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
-}
-
-void
-set_cached_hog_age_to_zero(MempoolTestInfra &server,
-                           const ContractAddress &account)
-{
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
-
-  auto scheduler = server.mempool_coord_rpc().scheduler();
-  auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
-  hog_age->num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-  hog_age->average_ages[kHogAgeGroupToSchedule] = 0;
-  hog_age->num_hogs[kHogAgeGroupAlreadyScheduled] =
-      to_xdr(static_cast<uint128_t>(0));
-  hog_age->average_ages[kHogAgeGroupAlreadyScheduled] = 0;
-  hog_age->num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(0));
-  hog_age->average_ages[kHogAgeGroupReceived] = 0;
 }
 
 } // namespace
