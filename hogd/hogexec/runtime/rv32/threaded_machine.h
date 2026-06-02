@@ -44,32 +44,48 @@ namespace hogd::rv32 {
 
 struct Ctx;
 struct Slot;
-using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t);
+using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
+                               uint64_t);
 
-// Executable instruction: handler pointer + decoded operands + run gas. Only
-// the fields a handler reads on the hot path are stored; the per-instruction op
-// and gas cost are build-time inputs (read from `code` in build_exec) and are
-// not kept here. `gas_to_run` is the total cost of the run starting here -- its
-// non-barrier body through and including the terminating barrier -- charged
-// once by enter_run. Fields total 26 bytes; the 8-byte `rd` pointer makes
-// alignof 8, so sizeof rounds up to 32 -- a power of two, which is what lets
-// `ip - base` (pc_of) and `ip + imm` (branch/jump targets) lower to a shift
-// rather than a divide/multiply. alignas(32) doesn't change the size; it
-// additionally pins each slot to a 32-byte boundary (cache placement) and
-// documents that the shift lowering depends on the power-of-two size.
-struct alignas(32) Slot {
-  Handler handler = nullptr;
-  uint32_t *rd = nullptr; // &regs_[rd], or &trash_ when rd==0 (the x0 sink:
-                          // writes to x0 land in trash, so regs_[0] stays 0 and
-                          // no separate sink store is needed). 8-byte aligned,
-                          // so it sits right after handler.
-  uint32_t gas_to_run = 0;
-  int32_t imm = 0;
-  uint8_t rs1 = 0;
-  uint8_t rs2 = 0;
+// Executable instruction, packed to 16 bytes (alignas(16) -- a power of two, so
+// `ip - base` (pc_of) and `ip + imm` (branch/jump targets) still lower to a
+// shift, and the exec_ array is half the size of the old 32-byte slot). Layout:
+//   handler (8) | gas_to_run (2) | rd (1) | rs1 (1) | union{imm;
+//   {imm16,rs2}}(4)
+// rd/rs1/rs2 are register indices. x0 writes are made unconditional by a trash
+// sink: rd==0 stays 0 and writes land harmlessly in regs_[0] (observable state
+// forces regs_[0] back to 0). x0 reads come from an always-zero register at
+// regs_[kRegisterCount], so build_exec remaps rs1/rs2 0 -> kRegisterCount. No
+// per-op x0 branch either way.
+// The union exploits that no instruction needs rs2 together with a >16-bit imm:
+// only lui/auipc/jal carry a wide imm and none of them use rs2, while the
+// rs2-users (R-type/store/branch) need at most an int16 imm (store offset /
+// branch slot-delta). So rs2 shares the imm word with a narrow imm16.
+// `gas_to_run` is the run's total gas (body through terminating barrier),
+// charged once by enter_run; uint16 -- build_exec rejects a program whose run
+// gas would overflow (TODO: split the run / charge in chunks instead).
+struct alignas(16) Slot {
+  Handler handler = nullptr; // offset 0
+  uint16_t gas_to_run = 0;   // offset 8
+  uint8_t rd = 0;            // offset 10: dest reg index (0 -> kTrashReg)
+  uint8_t rs1 = 0;           // offset 11
+  union {                    // offset 12
+    int32_t imm = 0; //   lui/auipc/jal (wide) + I-type/load/jalr (12-bit)
+    struct {
+      int16_t imm16; //   store offset / branch slot-delta (fits int16)
+      uint8_t rs2;   //   R-type / store / branch
+    } rb;
+  };
 };
 
-class ThreadedMachine {
+// alignas(64): pin the base to a cache-line boundary so member offsets map
+// deterministically to cache lines. This is load-bearing for *consistent*
+// benchmarking (without it base-mod-64 varies per allocation and the same
+// layout measures differently run to run) and for the read-mostly / read-write
+// field split below to mean anything. Stated explicitly on the class rather
+// than relying on the alignas(64) on gas_remaining_ to bump alignof as a side
+// effect.
+class alignas(64) ThreadedMachine {
 public:
   ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
                   uint32_t memory_bytes, uint64_t gas, uint32_t initial_pc = 0)
@@ -134,7 +150,8 @@ public:
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
-    return i < regs_.size() ? regs_[i] : 0;
+    // regs_[0] is the trash sink (x0 writes); architectural x0 reads as 0.
+    return (i != 0 && i < kRegisterCount) ? regs_[i] : 0;
   }
   [[nodiscard]] uint32_t pc() const { return pc_; }
   [[nodiscard]] uint64_t gas_remaining() const { return gas_remaining_; }
@@ -167,38 +184,39 @@ public:
   // then also the register-file base, so hot-path regs_[i] is a single indexed
   // load with no base adjustment, while every other (cold) field is still
   // reached through the same pointer at its own offset.
-  std::array<uint32_t, kRegisterCount> regs_ = {}; // offset 0: register base
-  // Hot read/write scalars, kept next to regs_. gas_remaining_ is read+written
-  // at every run head (the enter_run gas check) -- the hottest mutable datum in
-  // the dispatch loop. (See max_pc_ below for why read-only hot data is kept
-  // off this line.)
-  uint64_t gas_remaining_ = 0; // checked/debited at every run head
-  uint32_t pc_ = 0;            // written per step on the traced path
-  uint32_t trash_ = 0;         // x0 write sink: Slot::rd points here when rd==0
-  // --- cold below ---
-  Trap trap_ = Trap::kNone;
+  // One extra register. EXPERIMENT(flip): regs_[0] is the x0 write-sink (trash)
+  // and regs_[kRegisterCount] is the always-zero register that x0 *reads* remap
+  // to, so register writes stay unconditional (no x0 special-case). regs_[0] is
+  // garbage during execution; architectural x0 (==0) is restored in
+  // reg()/capture()/view(). regs_[kRegisterCount] is never written.
+  std::array<uint32_t, kRegisterCount + 1> regs_ =
+      {}; // offset 0: register base
+  // Read-only / read-mostly data grouped right after regs_
+  // (regs_[kRegisterCount] is the always-0 x0 read source). max_pc_ (read in
+  // op_jalr's valid_target) and the cold pointers go here; the read/WRITE hot
+  // scalar gas_remaining_ is pushed to its own cache line below so its
+  // per-run-head store doesn't disturb this read-mostly region.
+  uint32_t max_pc_ =
+      0; // program size in bytes; op_jalr bounds-check (build_exec)
   std::vector<uint8_t> memory_;
   std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
+  // Read/write hot scalar on its own cache line, isolated from the read-mostly
+  // data above and from the regs_ reads.
+  alignas(64) uint64_t gas_remaining_ = 0; // checked/debited at every run head
+  uint32_t pc_ = 0; // written per step on the traced path
+  // --- cold below ---
+  Trap trap_ = Trap::kNone;
   std::optional<EcallArgs>
       pending_ecall_; // set while suspended at an ecall; cold
   uint32_t initial_pc_ = 0;
-  // Program size in bytes (code.size() * kInstructionBytes), precomputed in
-  // build_exec. The hot path (op_jalr's valid_target, hit on every guest
-  // return) bounds-checks a target with one scalar load of this instead of
-  // dereferencing program_ into the separate ThreadedProgram object. That
-  // program_ pointer-chase, with its load sharing a cache line with the
-  // gas_remaining_ store, set-conflicted and cost ~7% on recursive fib (#2456).
-  // alignas(64) keeps this read-only datum on its own line, off the read/write
-  // hot line.
-  alignas(64) uint32_t max_pc_ = 0;
   Trap construction_trap_ = Trap::kNone;
+  bool gas_overflow_ =
+      false; // a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
   bool exec_built_ = false;
   bool exec_traced_ = false;
   uint32_t halt_code_ = 0;
-  // Cold now: only construction and build_exec touch program_ (the hot bounds
-  // check uses max_pc_ above), so it lives at the tail.
   std::shared_ptr<const ThreadedProgram> program_;
 };
 
@@ -224,7 +242,8 @@ capture(const Ctx c)
 {
   ArchState s;
   s.pc = c.m->pc_;
-  s.regs = c.m->regs_;
+  std::copy_n(c.m->regs_.begin(), kRegisterCount, s.regs.begin());
+  s.regs[0] = 0; // regs_[0] is the trash sink; architectural x0 is 0
   s.memory.assign(c.m->memory_.begin(), c.m->memory_.end());
   s.gas_remaining = c.m->gas_remaining_;
   s.trap = c.m->trap_;
@@ -282,31 +301,35 @@ is_barrier(Op op)
 // parameter.
 #define HOGD_THREAD_NEXT(c, next)                                              \
   if constexpr (Trace) {                                                       \
+    (c).m->gas_remaining_ = gas;                                               \
     (c).m->pc_ = pc_of((c), (next));                                           \
     (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
   }                                                                            \
-  HOGD_MUSTTAIL return (next)->handler((c), (next), mem, memsize)
+  HOGD_MUSTTAIL return (next)->handler((c), (next), mem, memsize, gas)
 
 // Tail-dispatch that *starts a new run* at `next` (after a barrier): record the
 // retired step (traced), then enter_run charges the new run's gas.
 #define HOGD_ENTER_RUN(c, next)                                                \
   if constexpr (Trace) {                                                       \
+    (c).m->gas_remaining_ = gas;                                               \
     (c).m->pc_ = pc_of((c), (next));                                           \
     (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
   }                                                                            \
-  HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize)
+  HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize, gas)
 
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
-// a template parameter (it is a compile-time literal at every call site), so
-// the signature is StepResult(Ctx, const Slot*) -- identical to a handler's, so
-// fault sites can HOGD_MUSTTAIL into it (a single tail-branch, no frame).
+// a template parameter (compile-time literal at every call site). Its signature
+// matches a handler's, so fault sites HOGD_MUSTTAIL into it (a single
+// tail-branch, no frame). Spills the register-carried `gas` back to
+// gas_remaining_ first, so observable state at the trap is correct.
 // cold+noinline: faults are off the hot path, and out-of-lining keeps the pc_of
 // divide and the pc_/trap_/halted_ stores out of every handler body.
 template<bool Trace, Trap T>
 [[gnu::noinline, gnu::cold]] StepResult
 trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
-        [[maybe_unused]] uint32_t memsize)
+        [[maybe_unused]] uint32_t memsize, uint64_t gas)
 {
+  c.m->gas_remaining_ = gas;
   c.m->pc_ = pc_of(c, ip);
   c.m->trap_ = T;
   c.m->halted_ = true;
@@ -324,14 +347,15 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // debited (total gas to the next barrier is what persists).
 template<bool Trace>
 StepResult
-enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t run_gas = ip->gas_to_run;
-  if (c.m->gas_remaining_ < run_gas) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize);
+  if (gas < run_gas) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         gas);
   }
-  c.m->gas_remaining_ -= run_gas;
-  HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize);
+  gas -= run_gas;
+  HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, gas);
 }
 
 // Pure ALU operations, shared by R-type and I-type handlers.
@@ -405,39 +429,39 @@ remu_op(uint32_t a, uint32_t b)
 
 template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  *ip->rd = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2]);
+  c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  *ip->rd = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
+  c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  *ip->rd = bits_from_i32(ip->imm);
+  c.m->regs_[ip->rd] = bits_from_i32(ip->imm);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  *ip->rd = pc_of(c, ip) + bits_from_i32(ip->imm);
+  c.m->regs_[ip->rd] = pc_of(c, ip) + bits_from_i32(ip->imm);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace>
 StepResult
-op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   HOGD_THREAD_NEXT(c, ip + 1);
 }
@@ -495,12 +519,13 @@ bgeu_cmp(uint32_t a, uint32_t b)
 // hot path is charge -> one compare -> dispatch, with no op-kind switch.
 template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
-op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
-  const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
+  const Slot *next =
+      ip + ip->rb.imm16; // imm16 == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
 
@@ -510,49 +535,41 @@ op_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 // op_branch, so the comparison is one direct call, not a runtime switch on op.
 template<bool Trace, bool (*Cmp)(uint32_t, uint32_t)>
 StepResult
-op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+                     uint64_t gas)
 {
-  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rs2])) {
+  if (!Cmp(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2])) {
     HOGD_ENTER_RUN(c, ip + 1);
   }
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
 }
 
 // jal's target is PC-relative and known at decode time, so build_exec resolves
 // it: for an in-range target, `imm` is rewritten to the *slot delta* to the
 // target (target_slot - this_slot), and the byte target / alignment / range
-// check is hoisted out of the hot path. An out-of-range target instead gets the
-// op_jal_bad_target handler below, so this fast path has no validity check.
+// check is hoisted out of the hot path. An out-of-range target instead bakes
+// trap_at<kBadPc> directly (build_exec), so this fast path has no validity
+// check.
 template<bool Trace>
 StepResult
-op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  *ip->rd = pc_of(c, ip) + kInstructionBytes;
+  c.m->regs_[ip->rd] = pc_of(c, ip) + kInstructionBytes;
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
 
-// Baked by build_exec in place of op_jal when the jal's (static) target is out
-// of range. The jal's gas was already charged at the run head (enter_run), so
-// this just traps kBadPc at the jal's own pc.
 template<bool Trace>
 StepResult
-op_jal_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
-}
-
-template<bool Trace>
-StepResult
-op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t pc = pc_of(c, ip);
   const uint32_t target =
       (c.m->regs_[ip->rs1] + bits_from_i32(ip->imm)) & ~uint32_t{1};
   if (!valid_target(c, target)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
   }
-  *ip->rd = pc + kInstructionBytes;
+  c.m->regs_[ip->rd] = pc + kInstructionBytes;
   const Slot *next = c.base + (target / kInstructionBytes);
   HOGD_ENTER_RUN(c, next);
 }
@@ -589,46 +606,132 @@ le_store(uint8_t *mem, uint32_t addr, uint32_t v)
 // still fault (misaligned/oob), which is terminal.
 template<bool Trace, uint32_t Width, bool SignExtend>
 StepResult
-op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize);
+                                                                 memsize, gas);
   }
-  if (!memory_range_in_bounds(memsize, addr, Width)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize);
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
   }
   uint32_t v = le_load<Width>(mem, addr);
   if constexpr (SignExtend) {
-    v = sign_extend(v, Width * 8);
+    v = sign_extend<Width * 8>(v);
   }
-  *ip->rd = v;
+  c.m->regs_[ip->rd] = v;
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
 template<bool Trace, uint32_t Width>
 StepResult
-op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
+  }
+  le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
+  HOGD_THREAD_NEXT(c, ip + 1);
+}
+
+// EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
+// ALU op (slot ip+1) that *consumes* the loaded value, collapsed into one
+// handler so the pair costs a single dispatch instead of two. Both are in-run
+// non-barriers (loads are not barriers, and the run's gas was pre-charged by
+// enter_run), so there is no gas work between them. The load's fault checks run
+// first and are terminal -- a faulting load never lets the rr write. In traced
+// mode the handler retires the load as its own step (mirroring op_load's
+// HOGD_THREAD_NEXT) before running the rr, so the observed trace is
+// byte-identical to the two unfused. build_exec installs this only on the
+// load's slot; slot ip+1 keeps its standalone op_rr handler (and gas_to_run),
+// so a branch landing on the rr still executes it via enter_run, and the fused
+// handler -- which jumps straight to ip+2 -- never re-enters ip+1, so its gas
+// is not double-charged.
+//
+// Because fusion is gated on a load->use (build_exec), the loaded register
+// feeds the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v` straight
+// into that operand instead of reading it back out of regs_ -- avoiding the
+// store-to-regs_/reload-from-regs_ round trip and shortening the load-use
+// dependency chain. (rd is still written for architectural visibility / the
+// trace step.) When both sources alias the load dest, LoadedIsRs1 wins and the
+// rs2 read happens to reload the same value -- still correct.
+template<bool Trace, uint32_t Width, bool SignExtend, bool LoadedIsRs1,
+         uint32_t (*Fn)(uint32_t, uint32_t)>
+StepResult
+op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   if ((addr % Width) != 0) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize);
+                                                                 memsize, gas);
   }
-  if (!memory_range_in_bounds(memsize, addr, Width)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize);
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
   }
-  le_store<Width>(mem, addr, c.m->regs_[ip->rs2]);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  c.m->regs_[ip->rd] = v;
+  if constexpr (Trace) {
+    // Retire the load as its own step (mirrors op_load's HOGD_THREAD_NEXT) so
+    // the rr observes the same pre-state, and pc/regs, that it would unfused.
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  const Slot *rr = ip + 1;
+  if constexpr (LoadedIsRs1) {
+    c.m->regs_[rr->rd] = Fn(v, c.m->regs_[rr->rb.rs2]);
+  }
+  else {
+    c.m->regs_[rr->rd] = Fn(c.m->regs_[rr->rs1], v);
+  }
+  HOGD_THREAD_NEXT(c, ip + 2);
 }
 
-template<bool Trace>
+// EXPERIMENT(fuse): the I-type sibling of op_load_rr -- a load (slot ip)
+// followed by a fusible I-type ALU op (slot ip+1) that consumes the loaded
+// value. An I-type's only register source is rs1, so a load->use I-type always
+// has rs1 == the load dest; we feed the just-loaded `v` directly as the first
+// operand (no regs_ reload) and the immediate as the second. Same
+// fault/trace/gas reasoning as op_load_rr.
+template<bool Trace, uint32_t Width, bool SignExtend,
+         uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
-op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
+op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  // ebreak's gas was charged at the run head (enter_run); just trap.
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBreakpoint>(c, ip, mem, memsize);
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
+  }
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  c.m->regs_[ip->rd] = v;
+  if constexpr (Trace) {
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  const Slot *ri = ip + 1;
+  c.m->regs_[ri->rd] = Fn(v, bits_from_i32(ri->imm));
+  HOGD_THREAD_NEXT(c, ip + 2);
 }
 
 // op_ecall suspends: it advances pc, stashes the args, and yields
@@ -642,8 +745,12 @@ op_ebreak(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
 template<bool Trace>
 StepResult
 op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
-         [[maybe_unused]] uint32_t memsize)
+         [[maybe_unused]] uint32_t memsize, uint64_t gas)
 {
+  // Spill the register-carried gas back to the struct: the host sees it via
+  // view(), and apply_ecall debits host gas from gas_remaining_. On resume,
+  // drive() reloads it into the register.
+  c.m->gas_remaining_ = gas;
   // pc advances past the ecall before the host call (canonical ordering).
   const Slot *next = ip + 1;
   c.m->pc_ = pc_of(c, next);
@@ -658,26 +765,10 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kEcall;
 }
 
-// Sentinel: reached only by sequential fall-off past the last instruction. Its
-// pc is (ip - base) * 4 == the out-of-range pc. Traps kBadPc with NO gas
-// charged (matches "invalid fetch traps without gas").
-template<bool Trace>
-StepResult
-op_bad_pc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize);
-}
-
-// Defensive default for handler_for; unreachable by construction, since
-// ThreadedProgram::create rejects every unsupported encoding, so no Instr ever
-// carries an unhandled Op. Charges no gas.
-template<bool Trace>
-StepResult
-op_invalid(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize)
-{
-  HOGD_MUSTTAIL return trap_at<Trace, Trap::kInvalidInstruction>(c, ip, mem,
-                                                                 memsize);
-}
+// Sequential fall-off past the last instruction (the exec_[n] sentinel) and
+// out-of-range jal/jalr both trap kBadPc; the unsupported-op default traps
+// kInvalidInstruction. All three bake trap_at<...> directly into the Slot
+// rather than going through a forwarding handler (see handler_for/build_exec).
 
 template<bool Trace>
 Handler
@@ -777,11 +868,15 @@ handler_for(Op op)
   case Op::kFence:
     return &op_fence<Trace>;
   case Op::kEbreak:
-    return &op_ebreak<Trace>;
+    // ebreak's gas is charged at the run head; the handler is a pure trap, so
+    // dispatch straight to trap_at (it has the handler signature).
+    return &trap_at<Trace, Trap::kBreakpoint>;
   case Op::kEcall:
     return &op_ecall<Trace>;
   default:
-    return &op_invalid<Trace>;
+    // Unreachable by construction (ThreadedProgram::create rejects unsupported
+    // ops); the defensive default traps kInvalidInstruction directly.
+    return &trap_at<Trace, Trap::kInvalidInstruction>;
   }
 }
 
@@ -813,6 +908,128 @@ branch_bad_target_handler_for(Op op)
   }
 }
 
+// EXPERIMENT(fuse): pick the fused load+ALU handler for an adjacent
+// (load, alu) load->use pair, or nullptr if the pair is not a fusion candidate.
+// First cut: only lw (Width 4, no sign-extend) feeding a common ALU op, either
+// register-register (op_load_rr) or register-immediate (op_load_ri) -- the
+// dominant load-use shapes. `loaded_is_rs1` says whether the loaded register is
+// the rr's rs1 (vs rs2), selecting which operand gets the just-loaded value;
+// it is ignored for the I-type tail (whose only register source is rs1).
+// mul/div-after-load and narrow/sign-extended loads stay unfused (rare, and
+// bounding the instantiations keeps the fused handler set small).
+template<bool Trace>
+Handler
+fused_load_handler(Op load_op, Op next_op, bool loaded_is_rs1)
+{
+  if (load_op != Op::kLw) {
+    return nullptr;
+  }
+  switch (next_op) {
+  // R-type tail: feed the loaded value into rs1 or rs2 per loaded_is_rs1.
+  case Op::kAdd:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, add_op>
+                         : &op_load_rr<Trace, 4, false, false, add_op>;
+  case Op::kSub:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sub_op>
+                         : &op_load_rr<Trace, 4, false, false, sub_op>;
+  case Op::kSll:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sll_op>
+                         : &op_load_rr<Trace, 4, false, false, sll_op>;
+  case Op::kSlt:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, slt_op>
+                         : &op_load_rr<Trace, 4, false, false, slt_op>;
+  case Op::kSltu:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sltu_op>
+                         : &op_load_rr<Trace, 4, false, false, sltu_op>;
+  case Op::kXor:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, xor_op>
+                         : &op_load_rr<Trace, 4, false, false, xor_op>;
+  case Op::kSrl:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, srl_op>
+                         : &op_load_rr<Trace, 4, false, false, srl_op>;
+  case Op::kSra:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, sra_op>
+                         : &op_load_rr<Trace, 4, false, false, sra_op>;
+  case Op::kOr:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, or_op>
+                         : &op_load_rr<Trace, 4, false, false, or_op>;
+  case Op::kAnd:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, and_op>
+                         : &op_load_rr<Trace, 4, false, false, and_op>;
+  // I-type tail (second operand is the immediate; loaded value is always rs1).
+  case Op::kAddi:
+    return &op_load_ri<Trace, 4, false, add_op>;
+  case Op::kSlti:
+    return &op_load_ri<Trace, 4, false, slt_op>;
+  case Op::kSltiu:
+    return &op_load_ri<Trace, 4, false, sltu_op>;
+  case Op::kXori:
+    return &op_load_ri<Trace, 4, false, xor_op>;
+  case Op::kOri:
+    return &op_load_ri<Trace, 4, false, or_op>;
+  case Op::kAndi:
+    return &op_load_ri<Trace, 4, false, and_op>;
+  case Op::kSlli:
+    return &op_load_ri<Trace, 4, false, sll_op>;
+  case Op::kSrli:
+    return &op_load_ri<Trace, 4, false, srl_op>;
+  case Op::kSrai:
+    return &op_load_ri<Trace, 4, false, sra_op>;
+  default:
+    return nullptr;
+  }
+}
+
+// True for ops whose Slot uses the {imm16, rs2} union arm because the handler
+// reads rs2: R-type ALU, stores, conditional branches. Everyone else uses the
+// wide `imm` arm and never reads rs2.
+inline bool
+slot_packs_rs2(Op op)
+{
+  switch (op) {
+  case Op::kBeq:
+  case Op::kBne:
+  case Op::kBlt:
+  case Op::kBge:
+  case Op::kBltu:
+  case Op::kBgeu:
+  case Op::kSb:
+  case Op::kSh:
+  case Op::kSw:
+  case Op::kAdd:
+  case Op::kSub:
+  case Op::kSll:
+  case Op::kSlt:
+  case Op::kSltu:
+  case Op::kXor:
+  case Op::kSrl:
+  case Op::kSra:
+  case Op::kOr:
+  case Op::kAnd:
+  case Op::kMul:
+  case Op::kMulh:
+  case Op::kMulhsu:
+  case Op::kMulhu:
+  case Op::kDiv:
+  case Op::kDivu:
+  case Op::kRem:
+  case Op::kRemu:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Guards the "this immediate fits the 16-bit imm16 arm" assumption (debug
+// only). True for every store offset (12-bit) and in-range branch slot-delta
+// (byte offset / 4, <= +/-1024); a violation means a decoder/packing bug.
+constexpr bool
+fits_int16(int32_t v)
+{
+  return v >= std::numeric_limits<int16_t>::min() &&
+         v <= std::numeric_limits<int16_t>::max();
+}
+
 inline void
 ThreadedMachine::build_exec(bool trace)
 {
@@ -821,36 +1038,62 @@ ThreadedMachine::build_exec(bool trace)
   exec_.resize(n + 1);
   for (size_t i = 0; i < n; ++i) {
     const Instr &d = code[i];
-    exec_[i] = Slot{.handler = trace ? handler_for<true>(d.op)
-                                     : handler_for<false>(d.op),
-                    .rd = (d.rd == 0) ? &trash_ : &regs_[d.rd],
-                    .gas_to_run = 0, // filled by the backward pass below
-                    .imm = d.imm,
-                    .rs1 = d.rs1,
-                    .rs2 = d.rs2};
+    Slot &slot = exec_[i];
+    slot.handler = trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
+    slot.gas_to_run = 0; // filled by the backward pass below
+    // EXPERIMENT(flip): x0 writes land in the trash at regs_[0] (rd unmapped),
+    // x0 reads come from the always-zero register at regs_[kRegisterCount] (rs
+    // remapped). Observable state forces x0 (regs_[0]) back to 0.
+    slot.rd = static_cast<uint8_t>(d.rd);
+    slot.rs1 = (d.rs1 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                            : static_cast<uint8_t>(d.rs1);
+    // Pick the union arm: rs2-users get {imm16, rs2}; everyone else the wide
+    // imm. (imm16 is the store offset here; for branches it's overwritten with
+    // the slot delta below; R-type ignores it.)
+    if (slot_packs_rs2(d.op)) {
+      slot.rb.rs2 = (d.rs2 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                                 : static_cast<uint8_t>(d.rs2);
+      assert(fits_int16(d.imm) && "store immediate must fit imm16");
+      slot.rb.imm16 = static_cast<int16_t>(d.imm);
+    }
+    else {
+      slot.imm = d.imm;
+    }
     // Resolve the PC-relative target of jal and the conditional branches once,
     // here, so their handlers need no per-execution alignment/range check. In
     // range: rewrite imm to the target slot delta (exact -- a valid target is
-    // 4-aligned, so the byte imm is a multiple of kInstructionBytes). Out of
-    // range: swap in the op-specific trapping handler.
+    // 4-aligned, so the byte imm is a multiple of kInstructionBytes). jal keeps
+    // the wide imm arm (its slot delta can exceed int16); a branch's fits
+    // int16. Out of range: swap in the op-specific trapping handler.
     if (d.op == Op::kJal || is_conditional_branch(d.op)) {
       const uint32_t pc = static_cast<uint32_t>(i) * kInstructionBytes;
       const uint32_t target = pc + bits_from_i32(d.imm);
       if (program_->contains_pc(target)) {
-        exec_[i].imm = d.imm / static_cast<int32_t>(kInstructionBytes);
+        const int32_t delta = d.imm / static_cast<int32_t>(kInstructionBytes);
+        if (d.op == Op::kJal) {
+          slot.imm = delta;
+        }
+        else {
+          assert(fits_int16(delta) && "branch slot-delta must fit imm16");
+          slot.rb.imm16 = static_cast<int16_t>(delta);
+        }
       }
       else if (d.op == Op::kJal) {
-        exec_[i].handler =
-            trace ? &op_jal_bad_target<true> : &op_jal_bad_target<false>;
+        // Out-of-range jal: a taken jal always traps, so bake trap_at directly
+        // (gas was charged at the run head, matching the in-range ordering).
+        slot.handler = trace ? &trap_at<true, Trap::kBadPc>
+                             : &trap_at<false, Trap::kBadPc>;
       }
       else {
-        exec_[i].handler = trace ? branch_bad_target_handler_for<true>(d.op)
-                                 : branch_bad_target_handler_for<false>(d.op);
+        slot.handler = trace ? branch_bad_target_handler_for<true>(d.op)
+                             : branch_bad_target_handler_for<false>(d.op);
       }
     }
   }
-  // Sentinel for sequential fall-off past the last instruction.
-  exec_[n] = Slot{.handler = trace ? &op_bad_pc<true> : &op_bad_pc<false>};
+  // Sentinel for sequential fall-off past the last instruction: trap kBadPc at
+  // the out-of-range pc (its pc is (ip - base) * 4). No gas is charged.
+  exec_[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
+                                   : &trap_at<false, Trap::kBadPc>};
   // gas_to_run[i] = gas of the run starting at i, through and including its
   // terminating barrier; backward so each entry sees its successor's
   // already-computed sum. enter_run pre-charges this at every run head, so no
@@ -861,14 +1104,54 @@ ThreadedMachine::build_exec(bool trace)
   // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
   // gas 0). The per-instruction op and gas come straight from `code` -- they
   // are build-time inputs, not stored in the Slot.
+  //
+  // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only reachable
+  // by a pathologically long straight-line run -- up to 16384 instrs * 8 gas
+  // for div) is rejected: gas_overflow_ makes drive() trap. TODO: instead split
+  // the run, charging 65535 at a synthetic mid-run recharge handler.
+  bool overflow = false;
   for (size_t i = n; i-- > 0;) {
     const auto self_gas = static_cast<uint32_t>(code[i].gas);
-    if (is_barrier(code[i].op)) {
-      exec_[i].gas_to_run = self_gas;
+    const uint32_t run_gas =
+        is_barrier(code[i].op)
+            ? self_gas
+            : self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0U);
+    overflow = overflow || run_gas > 0xFFFFU;
+    exec_[i].gas_to_run = static_cast<uint16_t>(run_gas);
+  }
+  gas_overflow_ = overflow;
+  // EXPERIMENT(fuse): collapse each adjacent (lw, fusible ALU) pair into one
+  // fused handler on the load's slot, saving a dispatch. Restricted to a
+  // genuine load->use: the load's destination register must feed the ALU op (as
+  // rs1, or rs2 for R-type) -- that is the pattern worth fusing (dependent
+  // value, common in compiled code). An independent adjacent pair only saves a
+  // dispatch and just dilutes the fused handler set, so it is left unfused. The
+  // ALU slot keeps its standalone handler and gas_to_run (branch-in fallback);
+  // the fused handler skips to i+2 and never re-enters that slot, so nothing is
+  // double-charged and gas bookkeeping is unchanged. Both ops are in-run
+  // non-barriers, so an adjacent (load, alu) is always in the same run.
+  // Decisions use `code` ops/regs (architectural indices), independent of any
+  // target-trap handler swaps above (lw/ALU are never swapped).
+  for (size_t i = 0; i + 1 < n; ++i) {
+    const Instr &ld = code[i];
+    const Instr &alu = code[i + 1];
+    // Load->use: the load writes a real register (x0 discards) that the ALU op
+    // reads. rs2 only matters for the R-type tail (slot_packs_rs2).
+    const bool rs1_match = alu.rs1 == ld.rd;
+    const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
+    if (ld.rd == 0 || !(rs1_match || rs2_match)) {
+      continue;
     }
-    else {
-      exec_[i].gas_to_run =
-          self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0);
+    // Feed the loaded value into rs1 when it matches (also covers both-match),
+    // otherwise rs2. The fused handler uses the value directly for that
+    // operand.
+    const bool loaded_is_rs1 = rs1_match;
+    const Handler fused =
+        trace ? fused_load_handler<true>(ld.op, alu.op, loaded_is_rs1)
+              : fused_load_handler<false>(ld.op, alu.op, loaded_is_rs1);
+    if (fused != nullptr) {
+      exec_[i].handler = fused;
+      ++i; // the ALU slot is consumed as this pair's tail
     }
   }
   max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
@@ -879,14 +1162,27 @@ ThreadedMachine::build_exec(bool trace)
 inline MachineView
 ThreadedMachine::view()
 {
+  regs_[0] = 0; // regs_[0] is the x0 trash sink; present architectural 0
   return MachineView(pc_, gas_remaining_,
-                     std::span<const uint32_t, kRegisterCount>(regs_), memory_);
+                     std::span<const uint32_t, kRegisterCount>(regs_.data(),
+                                                               kRegisterCount),
+                     memory_);
 }
 
 template<bool Trace>
 StepResult
 ThreadedMachine::drive()
 {
+  // Reject a program whose run gas overflowed uint16 (set in build_exec). This
+  // is an interpreter-side encoding limit (gas_to_run is uint16), not a bad
+  // opcode; kInvalidInstruction is a stand-in for "this interpreter can't run
+  // this program" until runs are split. TODO(gramseyer): split overflowing runs
+  // instead of rejecting (then this whole branch goes away).
+  if (gas_overflow_) {
+    trap_ = Trap::kInvalidInstruction;
+    halted_ = true;
+    return StepResult::kTrap;
+  }
   Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   uint8_t *mem = memory_.data();
@@ -895,8 +1191,9 @@ ThreadedMachine::drive()
   // tail-call the free function enter_run (musttail needs matching signatures,
   // and the implicit `this` differs). enter_run begins the musttail chain,
   // which runs in O(1) stack; this is the single non-recursive bridge frame
-  // into it.
-  return enter_run<Trace>(c, ip, mem, memsize);
+  // into it. Seed the register-carried gas from the struct; the dispatch chain
+  // carries it onward and spills it back at terminal/observe/ecall points.
+  return enter_run<Trace>(c, ip, mem, memsize, gas_remaining_);
 }
 
 // Apply-only complete half: debit host gas, commit the result, and (on the
@@ -919,7 +1216,8 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   // Debit host gas before committing; over-budget host cannot mutate state.
   // Host memory writes persist on OOG (no per-ecall rollback).
   if (gas_remaining_ < result.gas_consumed) {
-    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
+    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,
+                                           gas_remaining_);
   }
   gas_remaining_ -= result.gas_consumed;
 
@@ -939,10 +1237,12 @@ ThreadedMachine::apply_ecall(const HostResult &result)
     }
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
-    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize);
+    return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,
+                                           gas_remaining_);
   case HostStatus::kTrap:
   default:
-    return trap_at<Trace, Trap::kHostTrap>(c, next, mem, memsize);
+    return trap_at<Trace, Trap::kHostTrap>(c, next, mem, memsize,
+                                           gas_remaining_);
   }
 }
 
