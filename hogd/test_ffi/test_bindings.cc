@@ -1280,7 +1280,18 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
-  hogd::lazy_init();
+  // First-use init allocates and can throw; this exported wrapper is the C ABI
+  // boundary (not noexcept) and runs before the impl's catch boundary, so
+  // translate a failed init into a structured error rather than letting the
+  // exception escape the wrapper (issue #2514). The logger may not exist yet,
+  // so don't try to log here.
+  try {
+    hogd::lazy_init();
+  } catch (std::exception const &) {
+    return VerifyAuthResult{.auth_error_code = 0,
+                            .ffi_error_code =
+                                kTestFFIErrorCodeUnrecoverableError};
+  }
   auto result =
       hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
