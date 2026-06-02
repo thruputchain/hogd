@@ -768,12 +768,21 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  db_cast->get_base_db().write_deployment(
-      addr,
-      DeployedContractHash{.hash = h,
-                           .contract_size = contract_size,
-                           .contract_type = contract.contract_type()},
-      &kCostModel);
+  try {
+    // write_deployment() throws (e.g. std::runtime_error) when the underlying
+    // metadata write fails, such as RAMDB kNoMemory. Convert that to a
+    // structured error instead of letting it cross the noexcept FFI boundary
+    // and terminate the process (issue #2480).
+    db_cast->get_base_db().write_deployment(
+        addr,
+        DeployedContractHash{.hash = h,
+                             .contract_size = contract_size,
+                             .contract_type = contract.contract_type()},
+        &kCostModel);
+  } catch (std::exception const &e) {
+    log_error("error writing contract deployment: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   return kTestFFIErrorCodeNone;
 }
