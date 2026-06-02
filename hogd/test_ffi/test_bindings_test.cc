@@ -3308,4 +3308,67 @@ TEST(TestBindingsTest, DuplicateMockRegistrationReplacesCallback)
   EXPECT_EQ(first_context.calls, 0);
 }
 
+// Finishing a mocked *root* frame with a root-level system error
+// (Unrecoverable, ValidationFailure, Abandon) must surface as an FFI error,
+// mirroring root_invoke(). Returning kTestFFIErrorCodeNone with a serialized
+// Fault would hide the cumulative root system result from an honest caller,
+// who would only discover it on a later try_commit_transaction(). Deterministic
+// and OutOfGas remain ordinary serialized Fault outputs (covered elsewhere).
+TEST(TestBindingsTest, MockRootSystemFrameErrorsReturnFFIError)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  struct TestCase {
+    InvokeErrorCode error_code;
+    ContractAddress invoked_address;
+  };
+
+  std::vector<TestCase> cases = {
+      {.error_code = InvokeErrorCode::Unrecoverable,
+       .invoked_address = ContractAddress{0x11}},
+      {.error_code = InvokeErrorCode::ValidationFailure,
+       .invoked_address = ContractAddress{0x12}},
+      {.error_code = InvokeErrorCode::Abandon,
+       .invoked_address = ContractAddress{0x13}},
+  };
+
+  for (auto const &test_case : cases) {
+    auto handler = make_mocked_handler(db, rc);
+    ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+    ASSERT_NE(handler.syscall_handler, nullptr);
+    x23::Defer dh([syscall_handler = handler.syscall_handler] {
+      close_syscall_handler(syscall_handler);
+    });
+
+    Invocation invocation = {
+        .invoked_address = test_case.invoked_address,
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+              kTestFFIErrorCodeNone);
+
+    auto finish_res =
+        finish_mock_invocation_frame(handler.syscall_handler,
+                                     std::to_underlying(test_case.error_code));
+    x23::Defer df([&] {
+      free_ffi_data_buffer(finish_res.serialized_output);
+      free_ffi_data_buffer(finish_res.serialized_trace);
+      free_ffi_data_buffer(finish_res.serialized_events);
+    });
+
+    EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+    EXPECT_EQ(finish_res.serialized_output.data, nullptr);
+    EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
+    EXPECT_EQ(finish_res.serialized_events.data, nullptr);
+  }
+}
+
 } // namespace hogd

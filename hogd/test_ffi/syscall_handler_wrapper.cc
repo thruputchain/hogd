@@ -278,6 +278,19 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   if (handler_.last_frame_finished()) {
     handler_.mock_set_cumulative_invoke_result(result);
     handler_.finalize_after_root_frame();
+
+    // Mirror root_invoke(): a root-level system error (Unrecoverable,
+    // ValidationFailure, Abandon) must surface as an FFI error, not a
+    // serialized Fault that silently hides the cumulative root system result
+    // from the caller until a later try_commit_transaction(). Deterministic
+    // and OutOfGas classify as Fault, so they keep flowing through as ordinary
+    // serialized Fault outputs.
+    if (!result.to_frame_status().first.has_value()) {
+      error("Unrecoverable: finish_mock_invocation_frame got root system "
+            "error: {}",
+            result.result_.error().code());
+      return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+    }
   }
 
   auto frame_output = handler_.get_most_recent_frame_output();
