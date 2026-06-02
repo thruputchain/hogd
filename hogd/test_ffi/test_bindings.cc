@@ -1275,7 +1275,19 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
       "FFI (start): mock_syscall_entrypoint(syscall={}, arg1={}, arg2={}, "
       "arg3={}, arg4={}, arg5={}, arg6={}, arg7={})",
       syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-  hogd::lazy_init();
+  // First-use init allocates and can throw; this exported wrapper is the C ABI
+  // boundary (not noexcept), so translate a failed init into an unrecoverable
+  // host-function result rather than letting the exception escape. lazy_init()
+  // installs the process logger, so report via fputs (no allocation).
+  try {
+    hogd::lazy_init();
+  } catch (std::exception const &e) {
+    std::fputs("error initializing logging for mock_syscall_entrypoint: ",
+               stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return hogd::unrecoverable_error();
+  }
   auto result = hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4,
                                               arg5, arg6, arg7);
   hogd::do_ffi_trace("FFI (end): mock_syscall_entrypoint(syscall={}) -> {}",
@@ -1302,7 +1314,24 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
-  hogd::lazy_init();
+  // First-use init allocates and can throw; this exported wrapper is the C ABI
+  // boundary (not noexcept) and runs before the impl's catch boundary, so
+  // translate a failed init into a structured error rather than letting the
+  // exception escape the wrapper (issue #2514).
+  try {
+    hogd::lazy_init();
+  } catch (std::exception const &e) {
+    // lazy_init() is what installs the process logger, so it may not exist
+    // yet; report via fputs (no allocation) rather than error().
+    std::fputs(
+        "error initializing logging for verify_signed_transaction_auth: ",
+        stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return VerifyAuthResult{.auth_error_code = 0,
+                            .ffi_error_code =
+                                kTestFFIErrorCodeUnrecoverableError};
+  }
   auto result =
       hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
