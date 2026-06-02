@@ -313,6 +313,12 @@ SystemCallHandler::get_most_recent_frame_events() const
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return last_frame_.value().get_events();
   }
+  // No frame finished and none is active (invoke rejected before any frame
+  // started): there are no frame events to report. Kept symmetric with
+  // get_most_recent_frame_output() so both handle the pre-frame state.
+  if (invocation_frame_stack_.empty()) {
+    return x23::Vec<TxEmittedEvent>();
+  }
   return invocation_frame_stack_.copy_active_frame_events();
 }
 
