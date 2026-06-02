@@ -703,7 +703,15 @@ SystemCallHandler::start_frame(
     try {
       invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
     } catch (std::exception &e) {
-      panic("Failed to create new invocation frame trace: {}", e.what());
+      // Trace data is best-effort diagnostics. Under memory pressure, drop this
+      // frame's trace and continue as an untraced frame rather than calling
+      // panic(): start_frame() is noexcept and reachable from the test FFI mock
+      // frame path, where terminating would crash an honest caller (#2473). The
+      // parent trace is still restored by finish_frame() (which tolerates a
+      // null child trace) once stashed_parent_trace is handed back.
+      warn("dropping invocation frame trace after allocation failure: {}",
+           e.what());
+      invocation_frame_trace_ = nullptr;
     }
   }
   try {
@@ -711,7 +719,8 @@ SystemCallHandler::start_frame(
       invocation_frame_trace_->invocation = invocation;
     }
   } catch (std::exception &e) {
-    panic("Failed to set invocation: {}", e.what());
+    warn("dropping invocation frame trace after setup failure: {}", e.what());
+    invocation_frame_trace_ = nullptr;
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
                                       std::move(invocation.calldata), flags,
@@ -739,16 +748,21 @@ SystemCallHandler::finish_frame(
   if (stashed_parent_trace) {
     auto child_trace = std::move(invocation_frame_trace_);
     invocation_frame_trace_ = std::move(stashed_parent_trace);
-    // Attach child_trace to parent's last syscall (the Invoke entry)
-    assert(!invocation_frame_trace_->system_calls.empty());
-    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
-    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
-    try {
-      auto &out = invoke_body.invoke();
-      out.outputs.emplace(SyscallInvokeOutputs());
-      out.outputs->child_trace = std::move(*child_trace);
-    } catch (std::exception &e) {
-      panic("Failed to attach child trace to parent: {}", e.what());
+    // child_trace can be null when start_frame() dropped this frame's trace
+    // after an allocation failure (#2473); in that case there is nothing to
+    // attach and the parent's Invoke entry simply records no child trace.
+    if (child_trace) {
+      // Attach child_trace to parent's last syscall (the Invoke entry)
+      assert(!invocation_frame_trace_->system_calls.empty());
+      auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
+      CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
+      try {
+        auto &out = invoke_body.invoke();
+        out.outputs.emplace(SyscallInvokeOutputs());
+        out.outputs->child_trace = std::move(*child_trace);
+      } catch (std::exception &e) {
+        panic("Failed to attach child trace to parent: {}", e.what());
+      }
     }
   }
 
