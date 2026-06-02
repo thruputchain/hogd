@@ -127,18 +127,17 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
+  const int128_t wallet_initial_hogs =
+      int128_t{500'000} * config_.num_addresses;
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
                              erc20_meta::entrypoint<"initialize">(),
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
-                             int128_t{500'000} * config_.num_addresses);
+                             wallet_initial_hogs);
   erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
       sha256(*erc20_contract), make_nonce(0));
-
-  const int128_t wallet_initial_hogs =
-      int128_t{500'000} * config_.num_addresses;
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
