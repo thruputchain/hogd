@@ -84,9 +84,6 @@ TEST(Mempool, SubmitUnvetted)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -97,6 +94,133 @@ TEST(Mempool, SubmitUnvetted)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// This submits duplicate txs at the same block height, which tests that the
+// mempool scheduler can detect and discard duplicate txs. This does *not* test
+// that hogdb detects duplicate uniquifiers.
+TEST(Mempool, SubmitUnvettedDuplicateRejectedByMempool)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// This submits duplicate txs each at a *different* block height, which tests
+// that hogdb can detect and discard duplicate txs. This does *not* test that
+// the mempool scheduler detects duplicate txs.
+TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  constexpr size_t kNumBlocks = 5;
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    // We submit each duplicate tx at a different block height so that hogdb is
+    // forced to reject duplicate uniquifiers rather than the mempool scheduler
+    // identifying duplicate txs.
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+    EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, i);
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    const Nomination &nomination = res_nominate.nominated_block().nomination;
+    EXPECT_EQ(nomination.block_height, i + 1);
+
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
+    EXPECT_TRUE(
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nondeterministic_data)());
+
+    if (i == 0) {
+      // The tx should be included in the nominated block on the first iteration
+      // as the tx has never been executed before.
+      EXPECT_EQ(parsed_txs.size(), 1UL);
+      EXPECT_EQ(parsed_txs[0], txs[0]);
+
+      EXPECT_EQ(tx_hashes.size(), 1UL);
+      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+
+      EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
+    }
+    else {
+      // The tx should not be included in the nominated block on all iterations
+      // after the first because it is a duplicate tx. Thus, hogdb should reject
+      // the tx's uniquifier as a duplicate, so hogexec should fail the tx with
+      // error code [ExecResultTxNonDeterministicError]. The mempool should then
+      // discard the tx and not include it in the nominated block.
+      EXPECT_TRUE(parsed_txs.empty());
+      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(tx_nondeterministic_data.empty());
+    }
+
+    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+        res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  }
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().height, kNumBlocks);
 }
 
 TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
@@ -118,9 +242,6 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
 
@@ -161,6 +282,104 @@ TEST(Mempool, SubmitVetted)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// This submits duplicate txs at the same block height, which tests that the
+// mempool scheduler can detect and discard duplicate txs. This does *not* test
+// that hogdb detects duplicate uniquifiers.
+TEST(Mempool, SubmitVettedDuplicateRejectedByMempool)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id,
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// This submits duplicate txs each at a *different* block height, which tests
+// that hogdb can detect and discard duplicate txs. This does *not* test that
+// the mempool scheduler detects duplicate txs.
+TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+
+  constexpr size_t kNumBlocks = 5;
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    // We submit each duplicate tx at a different block height so that hogdb is
+    // forced to reject duplicate uniquifiers rather than the mempool scheduler
+    // identifying duplicate txs.
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(
+        validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+    EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, i);
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    const Nomination &nomination = res_nominate.nominated_block().nomination;
+    EXPECT_EQ(nomination.block_height, i + 1);
+
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
+    EXPECT_TRUE(
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nondeterministic_data)());
+
+    if (i == 0) {
+      // The tx should be included in the nominated block on the first iteration
+      // as the tx has never been executed before.
+      EXPECT_EQ(parsed_txs.size(), 1UL);
+      EXPECT_EQ(parsed_txs[0], txs[0]);
+
+      EXPECT_EQ(tx_hashes.size(), 1UL);
+      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+
+      EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
+    }
+    else {
+      // The tx should not be included in the nominated block on all iterations
+      // after the first because it is a duplicate tx. Thus, hogdb should reject
+      // the tx's uniquifier as a duplicate, so hogexec should fail the tx with
+      // error code [ExecResultTxNonDeterministicError]. The mempool should then
+      // discard the tx and not include it in the nominated block.
+      EXPECT_TRUE(parsed_txs.empty());
+      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(tx_nondeterministic_data.empty());
+    }
+
+    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+        res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  }
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().height, kNumBlocks);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
@@ -307,6 +526,98 @@ TEST(Mempool, NominateEmpty)
     EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
     EXPECT_TRUE(parsed_txs.empty());
   }
+}
+
+TEST(Mempool, NominateTxWithError)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  constexpr size_t kNumBlocks = 2;
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    // We submit each duplicate tx at a different block height so that hogdb is
+    // forced to reject duplicate uniquifiers rather than the mempool scheduler
+    // identifying duplicate txs. This is necessary to cause the tx to fail with
+    // [ExecResultTxNonDeterministicError].
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+    EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, i);
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    const Nomination &nomination = res_nominate.nominated_block().nomination;
+    EXPECT_EQ(nomination.block_height, i + 1);
+
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
+    EXPECT_TRUE(
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nondeterministic_data)());
+
+    if (i == 0) {
+      // The tx should be included in the nominated block on the first iteration
+      // as the tx has never been executed before.
+      EXPECT_EQ(parsed_txs.size(), 1UL);
+      EXPECT_EQ(parsed_txs[0], txs[0]);
+
+      EXPECT_EQ(tx_hashes.size(), 1UL);
+      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+
+      EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
+    }
+    else {
+      // The tx should not be included in the nominated block on all iterations
+      // after the first because it is a duplicate tx. Thus, hogdb should reject
+      // the tx's uniquifier as a duplicate, so hogexec should fail the tx with
+      // error code [ExecResultTxNonDeterministicError]. The mempool should then
+      // discard the tx and not include it in the nominated block.
+      EXPECT_TRUE(parsed_txs.empty());
+      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(tx_nondeterministic_data.empty());
+    }
+
+    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+        res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  }
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().height, kNumBlocks);
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -622,6 +933,64 @@ TEST(Mempool, ValidateBatch)
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+}
+
+TEST(Mempool, ValidateRejectsBlockWithFailedTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  SchedulerNominationResult res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(
+          res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    ASSERT_EQ(db_tip.height, 1);
+
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = db_tip.events_hash,
+                           .prev_block_hash = nomination.prev_block_hash});
+  }
+
+  // Submit the same tx again so that hogdb detects the duplicate tx and hogexec
+  // fails the tx.
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerValidationResult res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
 TEST(Mempool, ValidateEmpty)
