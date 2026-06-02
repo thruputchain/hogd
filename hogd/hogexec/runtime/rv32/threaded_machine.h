@@ -62,7 +62,7 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // the imm word with a narrow imm16. `gas_to_run` is the run's total gas (body
 // through terminating barrier), charged once by enter_run; uint16 --
 // PreInstantiation::create rejects a program whose run gas would overflow
-// (TODO: split the run / charge in chunks instead).
+// (TODO(geoff): split the run / charge in chunks instead).
 struct alignas(16) Slot {
   Handler handler = nullptr; // offset 0
   uint16_t gas_to_run = 0;   // offset 8
@@ -1156,7 +1156,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only
     // reachable by a pathologically long straight-line run -- up to 16384
     // instrs * 8 gas for div) is rejected: gas_overflow_ makes drive() trap.
-    // TODO: instead split the run, charging 65535 at a synthetic mid-run
+    // TODO(geoff): instead split the run, charging 65535 at a synthetic mid-run
     // recharge handler.
     const auto self_gas = static_cast<uint32_t>(d.gas);
     const uint32_t run_gas =
