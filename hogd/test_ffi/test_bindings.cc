@@ -560,6 +560,14 @@ try_commit_transaction(void *syscall_handler) noexcept
 
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    // try_commit_transaction() requires the root invocation (or, for a mocked
+    // handler, the root mock frame) to have finished first; otherwise the
+    // internal commit path asserts last_frame_.has_value() and aborts. Reject
+    // commit-before-root with a structured FFI error instead (issue #2437).
+    if (!context->to_handler().last_frame_finished()) {
+      error("try_commit_transaction called before root invocation finished");
+      return kUnrecoverableError;
+    }
     auto res = context->to_handler().try_commit_transaction();
     context->mark_committed_or_aborted();
     if (res == ExecResult::ExecResultOK) {
