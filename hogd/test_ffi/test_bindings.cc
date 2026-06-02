@@ -205,9 +205,12 @@ get_cost_model(void *db) noexcept
             .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
   }
 
-  auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
-
   try {
+    // Reading the cost model copies the persisted RAMDB row, which allocates
+    // and can throw std::bad_alloc. Keep it inside the catch boundary so it is
+    // converted to a structured FFI error instead of crossing the noexcept
+    // helper and terminating the process (issue #2513).
+    auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
     auto serialized = x23::serialize(cost_model);
 
     auto buffer = make_new_data_buffer(serialized.size());
