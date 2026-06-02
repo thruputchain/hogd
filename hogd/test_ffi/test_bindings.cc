@@ -626,6 +626,20 @@ abort_transaction(void *syscall_handler) noexcept
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  // Reject abort while an invocation frame is still executing. The handler is
+  // either mid root_invoke -- possibly reentrantly, from a mock contract
+  // callback that holds the handler pointer (issue #2511) -- or has an open
+  // mock invocation frame (issue #2509). Finalizing the transaction underneath
+  // a running frame corrupts the handler (a later successful root frame then
+  // trips try_commit_transaction's assert) and leaves mock-frame state that
+  // blocks close. Surface a structured error and leave the handler untouched so
+  // the caller can finish its frames first.
+  if (context->to_handler().is_running()) {
+    error("abort_transaction called while an invocation frame is still active");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
   try {
     auto res = context->to_handler().abort_transaction();
     // SystemCallHandler::abort_transaction() marks its transaction aborted
