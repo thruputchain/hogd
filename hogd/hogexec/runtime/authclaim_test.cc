@@ -53,6 +53,7 @@ protected:
     SignedTransaction stx;
     stx.tx.invocation = std::move(invocation);
     stx.tx.auth_claim = std::move(auth_claim);
+    stx.tx.uniquifier = make_new_uniquifier();
 
     auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();

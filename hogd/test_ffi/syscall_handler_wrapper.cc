@@ -27,27 +27,31 @@
 
 namespace hogd {
 
-SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
-                                             SignedTransaction const &stx,
-                                             DBContext &db)
+SyscallHandlerContext::SyscallHandlerContext(
+    std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
+    DBContext &db)
   : identifier_(db.allocate_identifier()), db_(db),
+    runtime_context_owner_(std::move(context)),
     handler_(stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *context),
+             *runtime_context_owner_),
     is_mocked_handler_(false)
+{
+  db_.register_open_handler();
+}
 
-{}
-
-SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
-                                             DBContext &db,
-                                             AuthClaim const &auth_claim,
-                                             SHA256Hash const &source_tx_hash)
+SyscallHandlerContext::SyscallHandlerContext(
+    std::shared_ptr<MockRuntimeContext> context, DBContext &db,
+    AuthClaim const &auth_claim, SHA256Hash const &source_tx_hash)
   : identifier_(db.allocate_identifier()), db_(db),
+    runtime_context_owner_(std::move(context)),
     handler_(db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *context, auth_claim, source_tx_hash),
+             *runtime_context_owner_, auth_claim, source_tx_hash),
     is_mocked_handler_(true)
-{}
+{
+  db_.register_open_handler();
+}
 
 ForeignTracedInvokeResult
 SyscallHandlerContext::root_invoke()
