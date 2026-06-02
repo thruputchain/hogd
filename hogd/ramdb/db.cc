@@ -224,7 +224,7 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   // determine how much heap is needed to store the items, including
   // fragmentation at the end of each loglet.
   size_t heap_size = align_up(n * item_size, kLogletRegionSize);
-  heap_size += (heap_size / kLogletRegionSize + 1) * kBigItemThreshold;
+  heap_size += ((heap_size / kLogletRegionSize) + 1) * kBigItemThreshold;
   heap_size = align_up(heap_size, kLogletRegionSize);
 
   // round up to include per-thread and disk buffering overheads.
@@ -310,7 +310,11 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     // sync() at end of snapshotting writes a commit record for end_lsn - 1.
     snap_writer.init(end_lsn - 1, tmp_path, kMaxFileSize);
 
+    // Atomic: the mutation callback runs on concurrent put()/remove() threads.
+    std::atomic<bool> copy_failed{false};
+
     auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
+                                 &copy_failed,
                                  &stats = perthread_stats](ItemHeader *item) {
       if (item->lsn < begin_lsn || item->lsn >= end_lsn)
         return;
@@ -319,8 +323,10 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
       ScopedDiskWrite record = snap_writer.write_record(kHash);
       // add item to snapshot file using the lsn indicated by item->lsn.
       DBStatus<uint64_t> ret = record.modify(item, true);
-      if (!ret) [[unlikely]]
+      if (!ret) [[unlikely]] {
+        copy_failed.store(true, std::memory_order_release);
         return;
+      }
       // ret LSN ignored; it is meaningless outside of redo log.
 
       record.reset();
@@ -346,6 +352,15 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
 
     // snapshot is done, so we don't care about future put()/remove ops.
     map_.register_mutation_cb(nullptr);
+
+    // A failed pre-mutation copy leaves the snapshot missing a committed row;
+    // abort before publishing rather than advertise an incomplete snapshot.
+    // Live data is safe -- still in the WAL (#2198).
+    if (copy_failed.load(std::memory_order_acquire)) [[unlikely]] {
+      warn("snapshot aborted: a pre-mutation item copy failed (out of memory)");
+      promise->set_value(DBError(DBCode::kNoMemory));
+      return;
+    }
 
     Stats stats{};
     {
