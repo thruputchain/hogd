@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -77,7 +78,14 @@ do_ffi_trace(std::format_string<Args...> fmt, Args &&...args) noexcept
   try {
     ffi_trace(fmt, std::forward<Args>(args)...);
   } catch (std::exception const &e) {
-    log_error("error tracing ffi: {}", e);
+    // FFI tracing is best-effort diagnostics, and the start-of-call trace in
+    // each exported wrapper runs before the first-use helper reaches
+    // lazy_init(). Routing this through error() would dereference the still-
+    // null process logger and terminate an honest caller (issue #2478), so
+    // report the failure straight to stderr without allocating.
+    std::fputs("error tracing ffi: ", stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
   }
 }
 
