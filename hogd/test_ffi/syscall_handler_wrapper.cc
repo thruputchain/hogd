@@ -191,13 +191,27 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
+  //
+  // start_frame() pushes a frame onto the handler's invocation stack. The
+  // trace-stack and mock-runtime bookkeeping that pairs with it must not be
+  // able to throw afterward, or the handler would be left with an active frame
+  // that has no backing mock runtime and can be neither finished nor closed
+  // (issue #2507). Perform the throwing allocations -- the EmptyRuntime and the
+  // two stacks' capacity -- before start_frame() so the publish step below is
+  // non-throwing.
+  auto mock_runtime = std::make_unique<EmptyRuntime>(invocation);
+  invocation_frame_trace_stack_.reserve(invocation_frame_trace_stack_.size() +
+                                        1);
+  mock_runtime_stack_.reserve(mock_runtime_stack_.size() + 1);
+
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
                                                    std::span<uint32_t const>{});
   if (stashed_parent_trace) {
     invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
   }
 
-  push_mock_runtime(new EmptyRuntime(invocation));
+  // Capacity was reserved above, so this push_back cannot reallocate or throw.
+  push_mock_runtime(mock_runtime.release());
   return kTestFFIErrorCodeNone;
 }
 
