@@ -648,6 +648,12 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   } catch (x23::XdrException &e) {
     log_error("error deserializing contract: {}", e);
     return kTestFFIErrorCodeDeserializeError;
+  } catch (std::exception const &e) {
+    // Deserializing a well-formed contract still allocates (e.g. resizing the
+    // ContractBlob::wasm vector), so std::bad_alloc can be thrown here on valid
+    // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
+    log_error("unrecoverable: error deserializing contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
 
   try {
