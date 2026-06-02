@@ -40,7 +40,11 @@ make_nonce(uint64_t value)
 BlockHeight
 make_init_mint_expiry_height(size_t mint_index)
 {
-  constexpr size_t kInitMintUniquifiersPerHeight = kReplayCacheNoncesMaxLen / 2;
+  // We cannot have more than [kReplayCacheNoncesMaxLen] uniquifiers per wallet
+  // for a given expiry height. In other words, for all txs that expire at some
+  // height x, no more than [kReplayCacheNoncesMaxLen] txs can be from the same
+  // wallet. Any excess txs will fail with [ExecResultTxNonDeterministicError].
+  constexpr size_t kInitMintUniquifiersPerHeight = kReplayCacheNoncesMaxLen;
   return BlockHeight{1'000'000'000} +
          static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
 }
