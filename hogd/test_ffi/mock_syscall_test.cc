@@ -80,6 +80,15 @@ signed_i32_type_test(int32_t input_value) noexcept
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+unsigned_u32_type_test(uint32_t input_value) noexcept
+{
+  // The inner syscall is only reached when the (by-value, non-pointer) slot
+  // narrows cleanly to a u32; the test passes the largest valid u32.
+  EXPECT_EQ(input_value, UINT32_MAX);
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 gas_metering_test() noexcept
 {
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
@@ -138,6 +147,17 @@ struct SignedI32TypeTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &signed_i32_type_test;
+  constexpr static std::array<std::string_view, 1> kInputNames = {
+      "input_value"};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+struct UnsignedU32TypeTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &unsigned_u32_type_test;
   constexpr static std::array<std::string_view, 1> kInputNames = {
       "input_value"};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -272,29 +292,70 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
 
-  auto res_canonical =
-      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                        UINT64_MAX, 0, 0, 0, 0,
-                                                        0, 0);
-  ASSERT_EQ(res_canonical.panic, 0);
-  ASSERT_EQ(res_canonical.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
-
-  auto res_noncanonical =
+  // Under the wasm32 ABI a value slot is a bare 32-bit word, so int32_t -1 is
+  // encoded as 0xFFFFFFFF in the low 32 bits. Verify the mock decodes that bare
+  // slot back to int32_t -1 (signed_i32_type_test asserts the decoded value is
+  // -1). Every 32-bit pattern is a valid i32, so there is no "non-canonical"
+  // (improperly sign-extended) encoding for the mock to reject here -- a value
+  // that does not fit a 32-bit slot is a harness/FFI error, covered separately
+  // by ParseMockUnsignedSlotOverflow.
+  auto res =
       mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
                                                         0x00000000FFFFFFFFULL,
                                                         0, 0, 0, 0, 0, 0);
-  ASSERT_EQ(res_noncanonical.panic, 0);
-  ASSERT_EQ(res_noncanonical.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+  ASSERT_EQ(res.panic, 0);
+  ASSERT_EQ(res.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
+  context.pop_mock_runtime();
+  context.pop_context();
+}
+
+// A value-typed (non-pointer/offset) slot whose value does not fit a 32-bit
+// slot can never have come from the real wasm32 runtime, so it signifies the
+// test harness leaking an out-of-range value into the syscall. The mock reports
+// that as an FFI error (a host-level panic), NOT a contract-observable syscall
+// fault. (Offset slots keep the full u64 to carry host pointers and sentinels.)
+TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+
+  // The largest valid u32 fits a 32-bit slot and reaches the inner syscall
+  // (unsigned_u32_type_test asserts the decoded value == UINT32_MAX).
+  auto res_max =
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          0x00000000FFFFFFFFULL,
+                                                          0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_max.panic, 0);
+  ASSERT_EQ(res_max.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+
+  // Exactly one past UINT32_MAX cannot fit a 32-bit slot -> FFI error (panic),
+  // not a syscall error code.
   auto res_overflow =
-      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
-                                                        0x0000000080000000ULL,
-                                                        0, 0, 0, 0, 0, 0);
-  ASSERT_EQ(res_overflow.panic, 0);
-  ASSERT_EQ(res_overflow.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          0x0000000100000000ULL,
+                                                          0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_overflow.result_code, 0);
+  ASSERT_EQ(res_overflow.panic,
+            std::to_underlying(HostFnErrorCode::Unrecoverable));
+
+  // A fully out-of-range value is likewise an FFI error, not a syscall fault.
+  auto res_max_u64 =
+      mock_syscall_parser<UnsignedU32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                          UINT64_MAX, 0, 0, 0,
+                                                          0, 0, 0);
+  ASSERT_EQ(res_max_u64.result_code, 0);
+  ASSERT_EQ(res_max_u64.panic,
+            std::to_underlying(HostFnErrorCode::Unrecoverable));
 
   context.pop_mock_runtime();
   context.pop_context();

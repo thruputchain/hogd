@@ -47,6 +47,21 @@ nonce_++` on its transactions, and `bench/payments_bench.cc` carries a TODO that
      included, and
    - a **system / unrecoverable / validation** error (transport failure, stale
      block, forged proposal data) — the transaction is not included.
+
+   **Exemption — initial token claim precompile.** Transactions whose root
+   invoked address is the initial token claim precompile
+   (`kInitialTokenClaimPrecompileAddress`, derived from the genesis precompile
+   enum in `storage_item/replay_cache.h`) consume **no** uniquifier, regardless
+   of outcome. That precompile provides its own replay protection via the
+   exclusive deletes of its stored claim entries, so a replay-cache entry there
+   is redundant; it is also a DoS vector, since anyone could fill the contract's
+   replay cache with failing transactions, which the contract cannot prevent.
+   Two enforcement points, both pure functions of the address (so proposal and
+   validation agree): the executor skips the consume in `add_replay_nonce_delta`,
+   and HogDB **rejects** any `ConsumeUniquifier` delta keyed at that address as
+   `kInvalidExecutorBehavior` (defense-in-depth against a buggy executor). The
+   genesis unfurl transactions are invoked on this precompile and so consume no
+   nonce.
 3. Close a pre-existing gap surfaced by this work: path **C** must also push its
    **RCQ observation deltas** in validation mode. Today it calls
    `abort_transaction()`, so a transaction that observes a retrocausal-queue
@@ -63,7 +78,8 @@ nonce_++` on its transactions, and `bench/payments_bench.cc` carries a TODO that
 ## Non-goals
 
 - No protocol-version or config gate — the wiring is **unconditional** (the XDR
-  field already exists and is part of the transaction).
+  field already exists and is part of the transaction), save for the
+  address-based initial-token-claim exemption above.
 - No change to gas / fee accounting for failed transactions.
 - No `MockInMemory` replay-cache support (it is being removed).
 - No change to *which* transactions the scheduler/coordinator chooses to include;

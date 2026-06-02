@@ -25,6 +25,14 @@ enum class TestSignedEnum : int32_t {
 
 } // namespace
 
+// These tests cover the wasm32 `parse()` path, where every value slot is a bare
+// 32-bit word (uint32_t). Narrowing therefore only rejects values for types
+// *narrower* than the slot (sub-32-bit ints, bool, sub-32-bit enums); a
+// uint32_t/int32_t fills the slot, so every bit pattern is valid and there is
+// no u64->narrower sign-extension or overflow to reject. The native mock
+// (parse_mock) path -- including its handling of values that do not fit a
+// 32-bit slot -- is covered in test_ffi/mock_syscall_test.cc.
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(SyscallParseTests, ParsePrimitiveTypes)
 {
@@ -112,67 +120,6 @@ TEST(SyscallParseTests, ParseMisalignedData)
                8);
 }
 
-TEST(SyscallParseTests, ParseUnsignedNarrowRejectsOverflow)
-{
-  AliasGuard guard;
-  std::vector<uint8_t> memory = {0, 1, 2, 3};
-  auto contract_memory = std::as_writable_bytes(std::span(memory));
-
-  auto parsed_u32 = SyscallArgParams<uint32_t>::parse(guard, contract_memory,
-                                                      uint64_t{1} << 32);
-  EXPECT_FALSE(parsed_u32.has_value());
-  EXPECT_FALSE(SyscallArgParams<uint32_t>::validate(parsed_u32));
-}
-
-TEST(SyscallParseTests, ParseSignedNarrowRejectsNonSignExtended)
-{
-  AliasGuard guard;
-  std::vector<uint8_t> memory = {0, 1, 2, 3};
-  auto contract_memory = std::as_writable_bytes(std::span(memory));
-
-  // Sign-extended -1 is valid.
-  auto parsed_neg1 = SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                                      0xFFFFFFFFFFFFFFFFULL);
-  ASSERT_TRUE(parsed_neg1.has_value());
-  EXPECT_EQ(*parsed_neg1, -1);
-
-  // Sign-extended INT32_MIN is valid.
-  auto parsed_min = SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                                     0xFFFFFFFF80000000ULL);
-  ASSERT_TRUE(parsed_min.has_value());
-  EXPECT_EQ(*parsed_min, std::numeric_limits<int32_t>::min());
-
-  // INT32_MAX is valid.
-  auto parsed_max = SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                                     0x000000007FFFFFFFULL);
-  ASSERT_TRUE(parsed_max.has_value());
-  EXPECT_EQ(*parsed_max, std::numeric_limits<int32_t>::max());
-
-  // Zero is valid.
-  auto parsed_zero =
-      SyscallArgParams<int32_t>::parse(guard, contract_memory, 0);
-  ASSERT_TRUE(parsed_zero.has_value());
-  EXPECT_EQ(*parsed_zero, 0);
-
-  // Non-sign-extended -1 is rejected (0x00000000FFFFFFFF).
-  auto parsed_bad = SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                                     0x00000000FFFFFFFFULL);
-  EXPECT_FALSE(parsed_bad.has_value());
-  EXPECT_FALSE(SyscallArgParams<int32_t>::validate(parsed_bad));
-
-  // INT32_MAX + 1 (0x0000000080000000) is rejected.
-  auto parsed_overflow =
-      SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                       0x0000000080000000ULL);
-  EXPECT_FALSE(parsed_overflow.has_value());
-
-  // Below INT32_MIN is rejected.
-  auto parsed_underflow =
-      SyscallArgParams<int32_t>::parse(guard, contract_memory,
-                                       0xFFFFFFFF7FFFFFFFULL);
-  EXPECT_FALSE(parsed_underflow.has_value());
-}
-
 TEST(SyscallParseTests, ParseBoolRejectsNonCanonicalValues)
 {
   std::vector<uint8_t> memory = {0, 1, 2, 3};
@@ -186,18 +133,22 @@ TEST(SyscallParseTests, ParseBoolRejectsNonCanonicalValues)
   ASSERT_TRUE(parsed_true.has_value());
   EXPECT_TRUE(parsed_true.value());
 
+  // Any value other than 0 or 1 in the slot is not a valid bool encoding.
   auto parsed_bad =
       SyscallArgParams<bool>::parse(guard, contract_memory,
-                                    std::numeric_limits<uint64_t>::max());
+                                    std::numeric_limits<uint32_t>::max());
   EXPECT_FALSE(parsed_bad.has_value());
   EXPECT_FALSE(SyscallArgParams<bool>::validate(parsed_bad));
 }
 
-TEST(SyscallParseTests, ParseEnumRejectsOutOfRangeUnderlyingValues)
+TEST(SyscallParseTests, ParseEnumNarrowsViaUnderlyingType)
 {
   std::vector<uint8_t> memory = {0, 1, 2, 3};
   auto contract_memory = std::as_writable_bytes(std::span(memory));
   AliasGuard guard;
+
+  // A uint8_t-backed enum narrows like its underlying type: the value must fit
+  // in 8 bits. 0xFF fits; 0x100 does not.
   auto parsed_u8_ok = SyscallArgParams<TestUnsignedEnum>::parse(
       guard, contract_memory, std::numeric_limits<uint8_t>::max());
   ASSERT_TRUE(parsed_u8_ok.has_value());
@@ -208,49 +159,17 @@ TEST(SyscallParseTests, ParseEnumRejectsOutOfRangeUnderlyingValues)
   EXPECT_FALSE(parsed_u8_bad.has_value());
   EXPECT_FALSE(SyscallArgParams<TestUnsignedEnum>::validate(parsed_u8_bad));
 
-  auto parsed_i32_ok = SyscallArgParams<TestSignedEnum>::parse(
+  // An int32_t-backed enum fills the 32-bit slot, so every bit pattern is a
+  // valid (in-range) underlying value -- including ones that are negative when
+  // interpreted as int32_t.
+  auto parsed_i32_max = SyscallArgParams<TestSignedEnum>::parse(
       guard, contract_memory,
-      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()));
-  ASSERT_TRUE(parsed_i32_ok.has_value());
+      static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  ASSERT_TRUE(parsed_i32_max.has_value());
 
-  auto parsed_i32_bad = SyscallArgParams<TestSignedEnum>::parse(
-      guard, contract_memory,
-      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1);
-  EXPECT_FALSE(parsed_i32_bad.has_value());
-  EXPECT_FALSE(SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad));
-
-  int64_t below_min_i32 =
-      static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1;
-  auto parsed_i32_bad_low = SyscallArgParams<TestSignedEnum>::parse(
-      guard, contract_memory, static_cast<uint64_t>(below_min_i32));
-  EXPECT_FALSE(parsed_i32_bad_low.has_value());
-  EXPECT_FALSE(SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad_low));
-
-  auto parsed_i32_low_ok = SyscallArgParams<TestSignedEnum>::parse(
-      guard, contract_memory,
-      static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
-  ASSERT_TRUE(parsed_i32_low_ok.has_value());
-
-  // Non-sign-extended negative encodings are rejected.
-  auto parsed_i32_bad_nonsignext =
-      SyscallArgParams<TestSignedEnum>::parse(guard, contract_memory,
-                                              0x00000000FFFFFFFFULL);
-  EXPECT_FALSE(parsed_i32_bad_nonsignext.has_value());
-  EXPECT_FALSE(
-      SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad_nonsignext));
-
-  auto parsed_i32_low_ok_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
-      guard, static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
-  ASSERT_TRUE(parsed_i32_low_ok_mock.has_value());
-
-  auto parsed_i32_bad_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
-      guard, static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1);
-  EXPECT_FALSE(parsed_i32_bad_mock.has_value());
-
-  auto parsed_i32_sign_extended_neg1_mock =
-      SyscallArgParams<TestSignedEnum>::parse_mock(
-          guard, std::numeric_limits<uint64_t>::max());
-  ASSERT_TRUE(parsed_i32_sign_extended_neg1_mock.has_value());
+  auto parsed_i32_neg = SyscallArgParams<TestSignedEnum>::parse(
+      guard, contract_memory, 0x80000000); // INT32_MIN bit pattern
+  ASSERT_TRUE(parsed_i32_neg.has_value());
 }
 
 TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
@@ -264,8 +183,9 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(valid_arg));
   ASSERT_NE(SyscallArgParams<const uint32_t *>::deref(valid_arg), nullptr);
 
+  // On the wasm32 path the null sentinel is the all-ones 32-bit slot value.
   auto null_arg = SyscallArgParams<const uint32_t *>::parse(
-      guard, contract_memory, std::numeric_limits<uint64_t>::max());
+      guard, contract_memory, std::numeric_limits<uint32_t>::max());
   ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(null_arg));
   ASSERT_EQ(SyscallArgParams<const uint32_t *>::deref(null_arg), nullptr);
 

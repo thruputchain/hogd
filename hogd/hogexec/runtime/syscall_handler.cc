@@ -40,6 +40,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -496,6 +497,15 @@ SystemCallHandler::add_replay_nonce_delta()
   // Transaction constructor; a uniquifier without a root address would make the
   // access below undefined. Make that invariant explicit.
   assert(root_invoked_address_.has_value());
+  // The replay cache is disabled for the initial token claim precompile (it
+  // provides its own replay protection and a replay cache there is a DoS
+  // vector); consume no uniquifier for transactions rooted at it. HogDB rejects
+  // a replay-cache delta keyed here (kInvalidExecutorBehavior), so this skip is
+  // load-bearing, not an optimization. See kInitialTokenClaimPrecompileAddress.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  if (root_invoked_address_.value() == kInitialTokenClaimPrecompileAddress) {
+    return;
+  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
                                     .key = StorageKey(

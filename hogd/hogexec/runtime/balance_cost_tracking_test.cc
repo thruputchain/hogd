@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -13,6 +14,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/event/utilities.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
@@ -26,6 +28,7 @@
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
+#include "standard_asset_events.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -1063,6 +1066,134 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   ASSERT_TRUE(hogs_transferred.contains(kSenderAddr));
   EXPECT_EQ(hogs_transferred.at(kSenderAddr),
             -kTransferAmount - replay_cache_cost_charged(1));
+}
+
+// Characterization test (issue #2135): the native HOG precompile treats the
+// all-zero address as an ordinary balance key, so transfer(ContractAddress{},
+// amount) credits the zero address rather than burning. The native token has
+// no burn semantics --- burn() is disabled and total_supply() is a fixed
+// constant --- so the zero-recipient transfer leaves total_supply() unchanged
+// and emits a standard Transfer(sender, zero, amount) event. This is working
+// as intended: it locks in that the native HOG token does NOT special-case the
+// zero address as a supply-reducing burn.
+TEST_F(BalanceCostTrackingTest,
+       NativeHogZeroRecipientTransferCreditsZeroAddressWithoutReducingSupply)
+{
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  constexpr static ContractAddress kSenderAddr = make_contract_address(170);
+  constexpr static ContractAddress kZeroAddr{};
+  static int128_t kTransferAmount = 0;
+  kTransferAmount = balance_cost + 10;
+  setup_grant_storage_token(kSenderAddr, kTransferAmount + 1'000'000);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+    auto const expected_total_supply =
+        make_amount(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility});
+
+    // total_supply() before the transfer is the fixed native HOG supply.
+    auto ts_before = client.invoke_opt<"total_supply">(ctx);
+    if (!ts_before.has_value() || !ts_before.value().has_value() ||
+        !ts_before.value().value().has_value() ||
+        !ts_before.value().value().value().is_ok() ||
+        ts_before.value().value().value().ok() != expected_total_supply) {
+      ADD_FAILURE() << "total_supply before transfer was not the fixed supply";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    // Transfer to the all-zero address. This is accepted, not rejected.
+    auto r_transfer = client.invoke_opt<"transfer">(
+        ctx, kZeroAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
+    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+        !r_transfer.value().value().has_value() ||
+        !r_transfer.value().value().value().is_ok()) {
+      ADD_FAILURE() << "transfer(zero, amount) did not return Ok";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    // total_supply() is unchanged: the native token does not burn.
+    auto ts_after = client.invoke_opt<"total_supply">(ctx);
+    if (!ts_after.has_value() || !ts_after.value().has_value() ||
+        !ts_after.value().value().has_value() ||
+        !ts_after.value().value().value().is_ok() ||
+        ts_after.value().value().value().ok() != expected_total_supply) {
+      ADD_FAILURE() << "total_supply changed after zero-recipient transfer";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 14;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  EphemeralTxIdentifier tx_id;
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  // The zero address is a fresh balance row, credited the transferred amount
+  // minus the one-time balance-creation cost --- exactly like any other new
+  // receiver.
+  auto zero_balance_addrkey = make_free_native_token_balance_addrkey(kZeroAddr);
+  auto zero_balance_opt = lookup_storage_item_from_db(zero_balance_addrkey);
+  ASSERT_TRUE(zero_balance_opt.has_value());
+  int128_t zero_balance = from_xdr(zero_balance_opt.value().nnint());
+  EXPECT_EQ(zero_balance, kTransferAmount - balance_cost);
+
+  // A standard Transfer(sender, zero, amount) event was emitted by the preset
+  // native token contract --- the same shape as any transfer, with no
+  // burn-specific handling.
+  auto tx_event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log.value().events.size(), 1);
+
+  auto const &event = tx_event_log.value().events[0];
+  EXPECT_EQ(event.contract_address,
+            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+  EXPECT_EQ(event.num_topics, 3U);
+  auto expected_event = make_event_from_xdr_struct(TransferEvent{
+      .from_address = kSenderAddr,
+      .to_address = kZeroAddr,
+      .amount = to_xdr(kTransferAmount),
+  });
+  ASSERT_EQ(event.serialized_event.size(), expected_event.size());
+  EXPECT_TRUE(std::equal(event.serialized_event.begin(),
+                         event.serialized_event.end(), expected_event.begin()));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

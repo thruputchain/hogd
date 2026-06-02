@@ -34,7 +34,7 @@ fn check_memory_limit(module: &Module) -> bool {
 
 /// Structurally validate every import declared by `module` against the
 /// host manifest. Returns `true` iff every import is a function with
-/// the registered arity, all i64 params, and a single i32 result.
+/// the registered arity, all i32 params, and a single i32 result.
 ///
 /// This replaces wasmtime's stringly-typed incompatible-import-type
 /// classification (see issue #1533): all rejections here are
@@ -83,9 +83,9 @@ fn validate_imports(module: &Module, imports: &[common::LinkEntry]) -> bool {
             );
             return false;
         }
-        if !params.iter().all(|p| p.is_i64()) {
+        if !params.iter().all(|p| p.is_i32()) {
             eprintln!(
-                "wasmtime: rejecting contract — import {}::{} param-type mismatch: contract types {params:?}, host requires all-i64",
+                "wasmtime: rejecting contract — import {}::{} param-type mismatch: contract types {params:?}, host requires all-i32",
                 import.module(),
                 import.name()
             );

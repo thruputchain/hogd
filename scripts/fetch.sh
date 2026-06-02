@@ -5,10 +5,15 @@ ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
 
 cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
 cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target wasm32-unknown-unknown
+cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target riscv32im-unknown-none-elf
 cd "${ROOT_DIR}/hogd/rust" && cargo fetch
 
 set -ex
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo install --registry groundhog groundhog-cli@0.3.4
+  cargo install --registry groundhog groundhog-cli@0.4.3
+
+echo "Installing groundhog-rv32-lower..."
+CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
+  cargo install --registry groundhog groundhog-rv32-lower@0.4.5
