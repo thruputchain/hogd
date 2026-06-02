@@ -217,9 +217,16 @@ DiskWriter::print_stats()
   }
   out = bytes_out_.load(std::memory_order_relaxed);
 
-  time_point now = std::chrono::high_resolution_clock::now();
+  time_point now = std::chrono::steady_clock::now();
   std::chrono::nanoseconds ns = now - prev_stats_time_;
-  double rate = (out - prev_bytes_out_) * 1e9 / ns.count();
+  // Guard against a zero/non-positive interval: dividing by it yields a
+  // non-finite double, and converting that to size_t for print_iec_bytes is
+  // undefined behavior (#1523). bytes_out_ only grows, so the numerator is >=
+  // 0.
+  size_t rate = ns.count() > 0
+                    ? static_cast<size_t>((out - prev_bytes_out_) * 1e9 /
+                                          static_cast<double>(ns.count()))
+                    : 0;
 
   info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
        print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));

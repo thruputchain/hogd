@@ -158,8 +158,11 @@ ItemAllocator::compact(float utilization_thresh)
   auto seconds = timer.elapsed();
   info("finished compaction in {:.3f} seconds", seconds);
   if (stats.items > 0) {
-    info("scanned {:.0f} items/sec ({}% live)",
-         static_cast<double>(stats.items) / seconds,
+    // A fast pass can measure zero elapsed time even on a steady clock; guard
+    // the division so the rate is never non-finite.
+    double items_per_sec =
+        seconds > 0.0 ? static_cast<double>(stats.items) / seconds : 0.0;
+    info("scanned {:.0f} items/sec ({}% live)", items_per_sec,
          stats.live_items * 100 / stats.items);
   }
   else {
