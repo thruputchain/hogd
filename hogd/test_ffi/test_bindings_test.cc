@@ -3371,4 +3371,48 @@ TEST(TestBindingsTest, MockRootSystemFrameErrorsReturnFFIError)
   }
 }
 
+// Regression test for #2435: a second root_invoke() on the same open handler
+// used to hit the internal CHECK(root_invocation_.has_value()) and abort the
+// process. It must now return a structured FFI error.
+TEST(TestBindingsTest, SecondRootInvokeReturnsErrorInsteadOfAborting)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ContractAddress deployment_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_return, nullptr);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  ASSERT_NE(syscall_handler, nullptr);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto first = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(first.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(first.serialized_output);
+  free_ffi_data_buffer(first.serialized_trace);
+  free_ffi_data_buffer(first.serialized_events);
+
+  auto second = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(second.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(second.serialized_output.data, nullptr);
+  EXPECT_EQ(second.serialized_trace.data, nullptr);
+  EXPECT_EQ(second.serialized_events.data, nullptr);
+}
+
 } // namespace hogd

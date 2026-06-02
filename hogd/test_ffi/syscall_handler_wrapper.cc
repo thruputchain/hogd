@@ -56,6 +56,15 @@ SyscallHandlerContext::root_invoke()
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
+  // root_invoke() is one-shot: a successful first call consumes
+  // root_invocation_ and finishes the root frame. A second call would hit the
+  // internal CHECK(root_invocation_.has_value()) and abort the process, so
+  // reject it with a structured FFI error instead (issue #2435).
+  if (handler_.last_frame_finished()) {
+    error("root_invoke called more than once on the same handler");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+  }
+
   if (!push_context()) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
