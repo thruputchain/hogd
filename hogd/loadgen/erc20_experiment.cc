@@ -21,6 +21,7 @@
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -34,6 +35,14 @@ SHA256Hash
 make_nonce(uint64_t value)
 {
   return sha256(value);
+}
+
+BlockHeight
+make_init_mint_expiry_height(size_t mint_index)
+{
+  constexpr size_t kInitMintUniquifiersPerHeight = kReplayCacheNoncesMaxLen / 2;
+  return BlockHeight{1'000'000'000} +
+         static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
 }
 
 std::tuple<uint64_t, uint64_t>
@@ -147,7 +156,7 @@ ERC20ExperimentState::generate_experiment()
                     },
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
-                                   std::numeric_limits<BlockHeight>::max(),
+                                   make_init_mint_expiry_height(i - 1),
                                .nonce = unfurl_txs.size() + i},
             },
     };
