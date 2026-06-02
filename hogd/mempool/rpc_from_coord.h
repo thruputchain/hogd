@@ -70,7 +70,7 @@ public:
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         uint64_t network_id, size_t mempool_tx_size_limit)
     : db_rpc_(db_rpc), auth_rpc_(auth_rpc), network_id_(network_id),
-      mempool_tx_size_limit_(mempool_tx_size_limit)
+      mempool_tx_size_limit_(static_cast<ssize_t>(mempool_tx_size_limit))
   {}
 
   ~MempoolCoordinatorRpc()
@@ -584,7 +584,7 @@ private:
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const uint64_t network_id_;
-  const size_t mempool_tx_size_limit_;
+  const ssize_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

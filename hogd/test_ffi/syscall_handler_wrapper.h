@@ -41,11 +41,11 @@ namespace hogd {
 // that the test harness does not need to maintain that context externally).
 class SyscallHandlerContext {
 public:
-  SyscallHandlerContext(MockRuntimeContext *context,
+  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
                         SignedTransaction const &stx, DBContext &db);
 
-  SyscallHandlerContext(MockRuntimeContext *context, DBContext &db,
-                        AuthClaim const &auth_claim,
+  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
+                        DBContext &db, AuthClaim const &auth_claim,
                         SHA256Hash const &source_tx_hash);
 
   ~SyscallHandlerContext()
@@ -63,6 +63,8 @@ public:
       }
     }
     CHECK(mock_runtime_stack_.empty());
+    // This handler no longer borrows the DB; allow it to be freed/advanced.
+    db_.unregister_open_handler();
   }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
@@ -153,6 +155,13 @@ private:
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
+
+  // Keep the MockRuntimeContext alive for the handler's whole lifetime: the
+  // embedded SystemCallHandler stores a RuntimeContext& into it, so closing the
+  // test FFI runtime-context handle must not free it out from under an open
+  // handler (issue #2432). Declared before handler_ so it is destroyed after
+  // it.
+  std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
 
   SystemCallHandler handler_;
   std::vector<Runtime *> mock_runtime_stack_;
