@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -50,18 +49,14 @@ public:
 
   ~SyscallHandlerContext()
   {
-    if (!transaction_committed_or_aborted_) {
-      warn("SyscallHandlerContext closed without committing: aborting "
-           "transaction");
-      auto res = handler_.abort_transaction();
-      if (!res.has_value()) {
-        try {
-          warn("Failed to abort transaction: {}", res.error());
-        } catch (std::exception const &e) {
-          panic("failed to print error message: {}", e.what());
-        }
-      }
-    }
+    // The transaction must have been explicitly committed or aborted before the
+    // handler is destroyed. We deliberately do NOT abort here: the abort path
+    // issues a DB RPC that can throw, and the destructor runs at an implicit
+    // noexcept boundary, so a throwing abort would terminate the process
+    // instead of surfacing a structured error (issue #2488). close_syscall_
+    // handler() aborts any still-open transaction before deleting the handler,
+    // so reaching this point uncommitted is a programming error.
+    CHECK(transaction_committed_or_aborted_);
     CHECK(mock_runtime_stack_.empty());
     // This handler no longer borrows the DB; allow it to be freed/advanced.
     db_.unregister_open_handler();
@@ -137,6 +132,11 @@ public:
   }
 
   void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
+
+  [[nodiscard]] bool is_committed_or_aborted() const
+  {
+    return transaction_committed_or_aborted_;
+  }
 
 private:
   constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};

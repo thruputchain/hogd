@@ -461,7 +461,26 @@ close_syscall_handler(void *syscall_handler) noexcept
       return kTestFFIErrorCodeUnrecoverableError;
     }
 
-    delete static_cast<SyscallHandlerContext *>(syscall_handler);
+    // Take ownership so the handler is freed on every path below, including
+    // when the abort reports an error or throws.
+    std::unique_ptr<SyscallHandlerContext> owned(context);
+
+    // The handler destructor requires the transaction to have been committed or
+    // aborted. Abort any still-open transaction here, inside this try/catch, so
+    // a throwing abort RPC becomes kTestFFIErrorCodeUnrecoverableError rather
+    // than terminating the process from the destructor's noexcept boundary
+    // (issue #2488). Mark aborted before issuing the RPC: the handler also
+    // marks itself aborted up front, so a retry after a thrown abort must not
+    // attempt a second abort.
+    if (!owned->is_committed_or_aborted()) {
+      owned->mark_committed_or_aborted();
+      auto res = owned->to_handler().abort_transaction();
+      if (!res.has_value()) {
+        error("error aborting transaction during close: {}", res.error());
+        return kTestFFIErrorCodeUnrecoverableError;
+      }
+    }
+
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
     log_error("error closing syscall handler: {}", e);
