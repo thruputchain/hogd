@@ -612,18 +612,26 @@ abort_transaction(void *syscall_handler) noexcept
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto res = context->to_handler().abort_transaction();
-  context->mark_committed_or_aborted();
-  if (!res.has_value()) {
-    try {
+  try {
+    auto res = context->to_handler().abort_transaction();
+    // SystemCallHandler::abort_transaction() marks its transaction aborted
+    // before issuing the abort RPC, so the context must record the abort even
+    // when the RPC reports or throws an error; otherwise the destructor in
+    // close_syscall_handler() would attempt a second abort.
+    context->mark_committed_or_aborted();
+    if (!res.has_value()) {
       error("failed to abort transaction: {}", res.error());
       return kTestFFIErrorCodeUnrecoverableError;
-    } catch (std::exception const &e) {
-      log_error("error during abort_transaction: {}", e);
-      return kTestFFIErrorCodeUnrecoverableError;
     }
+    return kTestFFIErrorCodeNone;
+  } catch (std::exception const &e) {
+    // The abort RPC can throw (e.g. an SRPC XdrBadInput/XdrCallFailed on a bad
+    // reply); convert it to a structured error instead of letting it cross the
+    // noexcept FFI boundary and terminate the process (issue #2443).
+    context->mark_committed_or_aborted();
+    log_error("error during abort_transaction: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-  return kTestFFIErrorCodeNone;
 }
 
 constexpr StorageCostModel kCostModel(12000, 1, 5, 5, 1234);
