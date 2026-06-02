@@ -138,6 +138,20 @@ public:
 
   void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
 
+  // Set when finish_mock_invocation_frame() finalized the root frame but then
+  // failed to hand the result buffers back to the caller (e.g. allocation
+  // failure during FFI serialization). The finalized result was never returned
+  // to the caller, so try_commit_transaction() must not commit it (issue
+  // #2508).
+  void mark_finish_result_handoff_failed()
+  {
+    finish_result_handoff_failed_ = true;
+  }
+  [[nodiscard]] bool finish_result_handoff_failed() const
+  {
+    return finish_result_handoff_failed_;
+  }
+
 private:
   constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
   constexpr static auto kMakeFFIError =
@@ -169,6 +183,7 @@ private:
       invocation_frame_trace_stack_;
   bool transaction_committed_or_aborted_ = false;
   bool is_mocked_handler_;
+  bool finish_result_handoff_failed_ = false;
 };
 
 constexpr ForeignHostFnResult

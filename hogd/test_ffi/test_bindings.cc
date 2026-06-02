@@ -599,6 +599,14 @@ try_commit_transaction(void *syscall_handler) noexcept
 
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    // A prior finish_mock_invocation_frame() may have finalized the root frame
+    // but then failed to hand its result back to the caller (e.g. allocation
+    // failure during FFI serialization). Committing now would commit a result
+    // the caller never received, so reject it (issue #2508).
+    if (context->finish_result_handoff_failed()) {
+      error("try_commit_transaction after a failed finish-result handoff");
+      return kUnrecoverableError;
+    }
     auto res = context->to_handler().try_commit_transaction();
     context->mark_committed_or_aborted();
     if (res == ExecResult::ExecResultOK) {
