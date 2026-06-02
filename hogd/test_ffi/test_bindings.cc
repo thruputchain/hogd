@@ -251,6 +251,14 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
+  // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
+  // freeing it while a handler is still open would dangle those references on a
+  // later close/invoke. Reject the free instead of crashing (issue #2433).
+  if (ptr != nullptr && ptr->has_open_handlers()) {
+    error("free_db called while syscall handlers derived from this DB are "
+          "still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   try {
     delete ptr;
   } catch (std::exception const &e) {
@@ -266,6 +274,16 @@ advance_new_block(void *db) noexcept
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
     return kTestFFIErrorCodeInvalidPointer;
+
+  // Advancing the block replaces the snapshot cache that open handlers still
+  // reference; reject it while any handler derived from this DB is open so a
+  // later root_invoke() doesn't read freed snapshot state (issue #2436).
+  if (ptr->has_open_handlers()) {
+    error(
+        "advance_new_block called while syscall handlers derived from this DB "
+        "are still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   try {
     ptr->advance_new_block();
@@ -356,7 +374,7 @@ open_syscall_handler(void *db, void *rc,
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
-        new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
+        new SyscallHandlerContext(*runtime_context, stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
@@ -399,9 +417,8 @@ open_mocked_syscall_handler(void *db, void *rc,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
-    auto *handler =
-        new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_xdr, source_hash);
+    auto *handler = new SyscallHandlerContext(*runtime_context, *db_context,
+                                              auth_claim_xdr, source_hash);
     if (enable_tracing) {
       handler->to_handler().enable_tracing();
     }
