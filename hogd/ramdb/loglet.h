@@ -65,6 +65,17 @@ struct ItemHeader {
   {}
   ~ItemHeader() = default;
 
+  // clear_next zeroes the next-link slot's bytes. Persisted headers use this
+  // instead of `next = nullptr` so the on-disk representation is a canonical
+  // all-zero pattern rather than the implementation's null-pointer bits, which
+  // recovery validates (#1530). sizeof on the field (not the pointee) is
+  // intentional here.
+  void clear_next()
+  {
+    std::memset(static_cast<void *>(&next), 0,
+                sizeof(next)); // NOLINT(bugprone-sizeof-expression)
+  }
+
   // kv_bytes returns the size of the item in bytes (not including the
   // header).
   size_t kv_bytes() const
