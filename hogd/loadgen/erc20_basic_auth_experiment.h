@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cassert>
 #include <vector>
 
@@ -53,7 +52,6 @@ private:
   // Owner wallet is wallet 0
   std::vector<WalletInfo> wallets_;
   ContractAddress erc20_address_;
-  mutable std::atomic<uint64_t> next_work_nonce_ = 0;
 };
 
 } // namespace hogd

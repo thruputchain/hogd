@@ -2,16 +2,13 @@
 
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <future>
+#include <limits>
 #include <random>
 #include <span>
-#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#include <unistd.h>
 
 #include "auth_claim.hh"
 #include "built_contracts/itc_erc20.h"
@@ -25,7 +22,6 @@
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -40,50 +36,6 @@ make_nonce(uint64_t value)
 {
   return sha256(value);
 }
-
-uint64_t
-mix64(uint64_t value)
-{
-  value += 0x9e3779b97f4a7c15ULL;
-  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
-  return value ^ (value >> 31);
-}
-
-uint64_t
-make_work_nonce_start()
-{
-  char hostname[256] = {};
-  static_cast<void>(gethostname(hostname, sizeof(hostname) - 1));
-
-  uint64_t host_hash = 14695981039346656037ULL;
-  for (char c : std::string_view(hostname)) {
-    host_hash ^= static_cast<unsigned char>(c);
-    host_hash *= 1099511628211ULL;
-  }
-
-  std::random_device rd;
-  uint64_t entropy =
-      (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd());
-  uint64_t now = static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::system_clock::now().time_since_epoch())
-          .count());
-  uint64_t pid = static_cast<uint64_t>(getpid());
-
-  return mix64(entropy ^ mix64(now) ^ mix64(pid) ^ mix64(host_hash)) |
-         (1ULL << 63);
-}
-
-BlockHeight
-make_init_mint_expiry_height(size_t mint_index)
-{
-  constexpr size_t kInitMintUniquifiersPerHeight =
-      kReplayCacheNoncesMaxLen / 2;
-  return BlockHeight{1'000'000'000} +
-         static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
-}
-
 std::tuple<uint64_t, uint64_t>
 make_amount(uint128_t amount)
 {
@@ -218,7 +170,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                     },
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
-                                   make_init_mint_expiry_height(i - 1),
+                                   std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
                 .auth_claim = self_auth_claim,
             },
@@ -231,7 +183,6 @@ ERC20BasicAuthExperimentState::generate_experiment()
   initialization_txs.reserve(2);
   initialization_txs.emplace_back(std::move(unfurl_txs));
   initialization_txs.emplace_back(std::move(mint_txs));
-  next_work_nonce_.store(make_work_nonce_start(), std::memory_order_relaxed);
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
@@ -257,8 +208,6 @@ ERC20BasicAuthExperimentState::extend_experiment(
 
   x23::Vec<SignedTransaction> work_txs;
   work_txs.resize(num_txs);
-  uint64_t base_nonce =
-      next_work_nonce_.fetch_add(num_txs, std::memory_order_relaxed);
 
   size_t nthread = WorkerPool::get_default_pool().worker_count();
 
@@ -276,59 +225,64 @@ ERC20BasicAuthExperimentState::extend_experiment(
       assert(end == num_txs);
     }
 
-    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs,
-                                                                start, end,
-                                                                expiry_height,
-                                                                base_nonce]() {
-      std::random_device rd;
-      std::mt19937 gen(rd());
+    futures.emplace_back(WorkerPool::get_default_pool().submit(
+        [this, &work_txs, start, end, expiry_height]() {
+          std::random_device rd;
+          std::mt19937 gen(rd());
 
-      std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
+          std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
 
-      auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
-        auto sender = dist(gen);
-        auto receiver = sender;
-        while (receiver == sender) {
-          receiver = dist(gen);
-        }
-        return std::make_pair(sender, receiver);
-      };
+          uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
+              0, std::numeric_limits<uint64_t>::max())(gen);
 
-      using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-      using wallet_meta =
-          ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
+            auto sender = dist(gen);
+            auto receiver = sender;
+            while (receiver == sender) {
+              receiver = dist(gen);
+            }
+            return std::make_pair(sender, receiver);
+          };
 
-      for (size_t j = start; j < end; ++j) {
-        auto [sender, receiver] = make_account_pair();
-        uint128_t amount = 10;
+          using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+          using wallet_meta =
+              ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
-        // has to match the deserialized objects in simple_wallet::do_action
-        static auto entrypoint_transfer = erc20_meta::entrypoint<"transfer">();
-        Calldata internal_calldata = x23::serialize(
-            erc20_address_, entrypoint_transfer, GasAmount{1'000'000},
-            erc20_meta::make_calldata<"transfer">(wallets_[receiver].address,
-                                                  make_amount(amount)));
+          for (size_t j = start; j < end; ++j) {
+            auto [sender, receiver] = make_account_pair();
+            uint128_t amount = 10;
 
-        static auto entrypoint_do_action =
-            wallet_meta::entrypoint<"do_action">();
-        Invocation invocation = {
-            .invoked_address = wallets_[sender].address,
-            .entrypoint = entrypoint_do_action,
-            .gas_limit = GasAmount{20'000},
-            .calldata =
-                wallet_meta::make_calldata<"do_action">(internal_calldata),
-        };
+            // has to match the deserialized objects in simple_wallet::do_action
+            static auto entrypoint_transfer =
+                erc20_meta::entrypoint<"transfer">();
+            Calldata internal_calldata =
+                x23::serialize(erc20_address_, entrypoint_transfer,
+                               GasAmount{1'000'000},
+                               erc20_meta::make_calldata<"transfer">(
+                                   wallets_[receiver].address,
+                                   make_amount(amount)));
 
-        work_txs[j] = SignedTransaction{
-            .tx = Transaction{.invocation = std::move(invocation),
-                              .uniquifier = Uniquifier{.block_expiry_height =
-                                                           expiry_height,
-                                                       .nonce = base_nonce + j},
-                              .auth_claim = self_auth_claim},
-        };
-        add_signature(work_txs[j], sender);
-      }
-    }));
+            static auto entrypoint_do_action =
+                wallet_meta::entrypoint<"do_action">();
+            Invocation invocation = {
+                .invoked_address = wallets_[sender].address,
+                .entrypoint = entrypoint_do_action,
+                .gas_limit = GasAmount{20'000},
+                .calldata =
+                    wallet_meta::make_calldata<"do_action">(internal_calldata),
+            };
+
+            work_txs[j] = SignedTransaction{
+                .tx = Transaction{.invocation = std::move(invocation),
+                                  .uniquifier =
+                                      Uniquifier{.block_expiry_height =
+                                                     expiry_height,
+                                                 .nonce = base_nonce + j},
+                                  .auth_claim = self_auth_claim},
+            };
+            add_signature(work_txs[j], sender);
+          }
+        }));
   }
 
   for (auto &future : futures) {
