@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -78,6 +77,32 @@ struct alignas(16) Slot {
   };
 };
 
+class ThreadedMachinePreInstantiation {
+public:
+
+  [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation, ProgramError>
+  create(std::span<const uint8_t> code, bool trace);
+
+  ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation&&) noexcept = default;
+  ThreadedMachinePreInstantiation& operator=(ThreadedMachinePreInstantiation&&) noexcept = default;
+  ThreadedMachinePreInstantiation(const ThreadedMachinePreInstantiation&) = delete;
+  ThreadedMachinePreInstantiation& operator=(const ThreadedMachinePreInstantiation&) = delete;
+
+private:
+  ThreadedMachinePreInstantiation(std::vector<Slot> exec, bool trace, bool gas_overflow)
+    : exec_(std::move(exec)), trace_(trace), gas_overflow_(gas_overflow)
+  {
+  }
+
+  std::vector<Slot> exec_;
+  bool trace_ = false;
+  bool gas_overflow_ = false;
+
+  friend class ThreadedMachine;
+};
+
+
+
 // alignas(64): pin the base to a cache-line boundary so member offsets map
 // deterministically to cache lines. This is load-bearing for *consistent*
 // benchmarking (without it base-mod-64 varies per allocation and the same
@@ -87,16 +112,9 @@ struct alignas(16) Slot {
 // effect.
 class alignas(64) ThreadedMachine {
 public:
-  ThreadedMachine(std::shared_ptr<const ThreadedProgram> program,
-                  uint32_t memory_bytes, uint64_t gas)
-    : program_(std::move(program))
+  ThreadedMachine(ThreadedMachinePreInstantiation const& pre_instantiation, uint32_t memory_bytes, uint64_t gas)
+  : gas_overflow_(pre_instantiation.gas_overflow_), exec_traced_(pre_instantiation.trace_)
   {
-    if (!program_) {
-      construction_trap_ = Trap::kInvalidInstruction;
-      trap_ = Trap::kInvalidInstruction;
-      halted_ = true;
-      return;
-    }
     if (memory_bytes > kMaxMemoryBytes) {
       construction_trap_ = Trap::kBadMemory;
       trap_ = Trap::kBadMemory;
@@ -104,7 +122,19 @@ public:
       return;
     }
     memory_.resize(memory_bytes);
-    reset(gas);
+    std::ranges::fill(memory_, 0);
+    regs_.fill(0);
+    // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
+    // matches canonical Machine::reset and the old reset() path.
+    regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+
+    exec_ = std::span(pre_instantiation.exec_);
+    max_pc_ = (exec_.size() - 1) * kInstructionBytes;
+    set_gas(gas);
+  }
+
+  void set_gas(uint64_t gas) {
+    gas_remaining_ = gas;
   }
 
   void reset(uint64_t gas)
@@ -154,11 +184,6 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<const uint8_t> memory() const { return memory_; }
 
-  // Build (once, then cached) the executable Slot array from the decoded
-  // program, baking the traced or untraced handler set per `trace`. Defined
-  // out-of-line below, after the handler functions it references.
-  void build_exec(bool trace);
-
 private:
   // Internal seam primitives (not part of the public API; the free-function
   // handlers below never call these). drive re-enters the musttail dispatch
@@ -193,7 +218,7 @@ public:
   uint32_t max_pc_ =
       0; // program size in bytes; op_jalr bounds-check (build_exec)
   std::vector<uint8_t> memory_;
-  std::vector<Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
+  std::span<const Slot> exec_;       // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   // Read/write hot scalar on its own cache line, isolated from the read-mostly
   // data above and from the regs_ reads.
@@ -202,15 +227,12 @@ public:
   // --- cold below ---
   Trap trap_ = Trap::kNone;
   std::optional<EcallArgs>
-      pending_ecall_; // set while suspended at an ecall; cold
+      pending_ecall_ = std::nullopt; // set while suspended at an ecall; cold
   Trap construction_trap_ = Trap::kNone;
-  bool gas_overflow_ =
-      false; // a run's gas exceeded uint16 -> reject (drive traps)
+  const bool gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
-  bool exec_built_ = false;
-  bool exec_traced_ = false;
+  const bool exec_traced_;
   uint32_t halt_code_ = 0;
-  std::shared_ptr<const ThreadedProgram> program_;
 };
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
@@ -1023,6 +1045,8 @@ fits_int16(int32_t v)
          v <= std::numeric_limits<int16_t>::max();
 }
 
+/*
+
 inline void
 ThreadedMachine::build_exec(bool trace)
 {
@@ -1150,7 +1174,152 @@ ThreadedMachine::build_exec(bool trace)
   max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
   exec_built_ = true;
   exec_traced_ = trace;
+} */
+
+
+inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
+ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code, bool trace)
+{
+  const auto program = ThreadedProgram::create(code);
+  if (!program.has_value()) {
+    return std::unexpected(program.error());
+  }
+
+  std::vector<Slot> exec;
+  size_t n = program->instruction_count();
+  exec.resize(n + 1);
+
+  // Sentinel for sequential fall-off past the last instruction: trap kBadPc at
+  // the out-of-range pc (its pc is (ip - base) * 4). No gas is charged.
+  exec[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
+    : &trap_at<false, Trap::kBadPc>};
+
+  bool gas_overflow = false;
+
+  // Backward fusion carry: `next_op` is the instruction one slot ahead (i+1,
+  // processed on the previous iteration) and `next_fused` says whether that
+  // slot was itself consumed as a fused load (so it can't also be this pair's
+  // ALU tail). Seeded each iteration at the bottom of the loop.
+  Instr next_op = {};
+  bool next_fused = false;
+
+  for (size_t i = n; i-- > 0;) {
+    const auto instruction = program->instruction_at(i);
+    if (!instruction.has_value()) {
+      return std::unexpected(instruction.error());
+    }
+    const Instr &d = *instruction;
+    Slot &slot = exec[i];
+    slot.handler = trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
+
+    // x0 reads come from the always zero register at regs_[kRegisterCount].
+    // writes go to trash at regs_[0].  This keeps the write-heavy actions within 2 cache lines, instead of 3.
+    slot.rd = static_cast<uint8_t>(d.rd);
+    slot.rs1 = (d.rs1 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                            : static_cast<uint8_t>(d.rs1);
+
+    // Pick the union arm: rs2-users get {imm16, rs2}; everyone else the wide
+    // imm. (imm16 is the store offset here; for branches it's overwritten with
+    // the slot delta below; R-type ignores it.)
+    if (slot_packs_rs2(d.op)) {
+      slot.rb.rs2 = (d.rs2 == 0) ? static_cast<uint8_t>(kRegisterCount)
+                                 : static_cast<uint8_t>(d.rs2);
+      assert(fits_int16(d.imm) && "store immediate must fit imm16");
+      slot.rb.imm16 = static_cast<int16_t>(d.imm);
+    }
+    else {
+      slot.imm = d.imm;
+    }
+
+    // Resolve the PC-relative target of jal and the conditional branches once,
+    // here, so their handlers need no per-execution alignment/range check. In
+    // range: rewrite imm to the target slot delta (exact -- a valid target is
+    // 4-aligned, so the byte imm is a multiple of kInstructionBytes). jal keeps
+    // the wide imm arm (its slot delta can exceed int16); a branch's fits
+    // int16. Out of range: swap in the op-specific trapping handler.
+    if (d.op == Op::kJal || is_conditional_branch(d.op)) {
+      const uint32_t pc = static_cast<uint32_t>(i) * kInstructionBytes;
+      const uint32_t target = pc + bits_from_i32(d.imm);
+      if (program->contains_pc(target)) {
+        const int32_t delta = d.imm / static_cast<int32_t>(kInstructionBytes);
+        if (d.op == Op::kJal) {
+          slot.imm = delta;
+        }
+        else {
+          assert(fits_int16(delta) && "branch slot-delta must fit imm16");
+          slot.rb.imm16 = static_cast<int16_t>(delta);
+        }
+      }
+      else if (d.op == Op::kJal) {
+        // Out-of-range jal: a taken jal always traps, so bake trap_at directly
+        // (gas was charged at the run head, matching the in-range ordering).
+        slot.handler = trace ? &trap_at<true, Trap::kBadPc>
+                            : &trap_at<false, Trap::kBadPc>;
+      }
+      else {
+        slot.handler = trace ? branch_bad_target_handler_for<true>(d.op)
+                            : branch_bad_target_handler_for<false>(d.op);
+      }
+    }
+
+    // fill in gas costs
+    // gas_to_run[i] = gas of the run starting at i, through and including its
+    // terminating barrier; backward so each entry sees its successor's
+    // already-computed sum. enter_run pre-charges this at every run head, so no
+    // instruction self-charges. A barrier ends its run, so its gas_to_run is just
+    // its own gas (charged when a jump/branch lands directly on it); a
+    // non-barrier always continues into its successor, and the sum stops
+    // naturally at the barrier (whose gas_to_run excludes its own successor). The
+    // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
+    // gas 0). The per-instruction op and gas come straight from `code` -- they
+    // are build-time inputs, not stored in the Slot.
+    //
+    // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only reachable
+    // by a pathologically long straight-line run -- up to 16384 instrs * 8 gas
+    // for div) is rejected: gas_overflow_ makes drive() trap. TODO: instead split
+    // the run, charging 65535 at a synthetic mid-run recharge handler.
+    const auto self_gas = static_cast<uint32_t>(d.gas);
+    const uint32_t run_gas =
+        is_barrier(d.op)
+            ? self_gas
+            : self_gas + ((i + 1 < n) ? exec[i + 1].gas_to_run : 0U);
+    gas_overflow = gas_overflow || run_gas > 0xFFFFU;
+    exec[i].gas_to_run = static_cast<uint16_t>(run_gas);
+
+    // EXPERIMENT(fuse): collapse an adjacent (lw, fusible ALU) load->use pair
+    // into one fused handler on the load's slot, saving a dispatch. Building
+    // backward, slot i is the load candidate and `next_op` (slot i+1) is the
+    // ALU. We only fuse when i+1 is a real instruction (i+1<n, not the sentinel)
+    // and was not itself consumed as a fused load (`next_fused`) -- a slot can
+    // belong to only one pair, the backward analogue of the forward pass's ++i.
+    // The ALU slot keeps its standalone handler and gas_to_run as the branch-in
+    // fallback; fusion is behavior-preserving and never changes gas.
+    bool fused_here = false;
+    if (i + 1 < n && !next_fused) {
+      const Instr &ld = d;        // slot i: the load (writes ld.rd; x0 discards)
+      const Instr &alu = next_op; // slot i+1: the ALU that reads it
+      const bool rs1_match = alu.rs1 == ld.rd;
+      const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
+      if (ld.rd != 0 && (rs1_match || rs2_match)) {
+        // Feed the loaded value into rs1 when it matches (covers both-match),
+        // else rs2; ignored for the I-type tail (rs1-only).
+        const bool loaded_is_rs1 = rs1_match;
+        const Handler fused =
+            trace ? fused_load_handler<true>(ld.op, alu.op, loaded_is_rs1)
+                  : fused_load_handler<false>(ld.op, alu.op, loaded_is_rs1);
+        if (fused != nullptr) {
+          exec[i].handler = fused;
+          fused_here = true;
+        }
+      }
+    }
+    next_op = d;
+    next_fused = fused_here;
+  }
+
+  return ThreadedMachinePreInstantiation(std::move(exec), trace, gas_overflow);
 }
+
 
 inline MachineView
 ThreadedMachine::view()
@@ -1248,9 +1417,7 @@ ThreadedMachine::start()
   // Misuse to start with an outstanding ecall: drive<false> would execute past
   // the ecall without applying the host result.
   assert(!pending_ecall_.has_value());
-  if (!exec_built_ || exec_traced_) {
-    build_exec(/*trace=*/false);
-  }
+  assert(!exec_traced_);
   obs_ = nullptr;
   return drive<false>();
 }
@@ -1287,9 +1454,7 @@ ThreadedMachine::run(Host &host, TraceObserver &obs)
   // host result). run(Host&) gets this via start(); the traced path asserts it
   // directly since it drives the chain itself.
   assert(!pending_ecall_.has_value());
-  if (!exec_built_ || !exec_traced_) {
-    build_exec(/*trace=*/true);
-  }
+  assert(exec_traced_);
   obs_ = &obs;
   obs.on_initial(capture(Ctx{.m = this, .base = exec_.data()}));
   StepResult result = drive<true>();

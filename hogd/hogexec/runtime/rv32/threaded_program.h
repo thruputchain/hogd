@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <expected>
 #include <span>
-#include <vector>
 
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/isa_ops.h"
@@ -27,6 +26,7 @@ struct Instr {
 
 class ThreadedProgram {
 public:
+
   static std::expected<ThreadedProgram, ProgramError>
   create(std::span<const uint8_t> code)
   {
@@ -37,23 +37,23 @@ public:
       return std::unexpected(ProgramError::kCodeTooLarge);
     }
     ThreadedProgram program;
-    program.code_.reserve(code.size() / kInstructionBytes);
-    for (size_t off = 0; off < code.size(); off += kInstructionBytes) {
-      const auto decoded = decode_one(load_u32_le(code, off));
-      if (!decoded.has_value()) {
-        return std::unexpected(decoded.error());
-      }
-      program.code_.push_back(decoded.value());
-    }
+    program.code_ = code;
     return program;
   }
 
-  [[nodiscard]] size_t instruction_count() const { return code_.size(); }
-  [[nodiscard]] std::span<const Instr> code() const { return code_; }
+  [[nodiscard]] size_t instruction_count() const { return code_.size() / kInstructionBytes; }
   [[nodiscard]] bool contains_pc(uint32_t pc) const
   {
     return (pc % kInstructionBytes) == 0 &&
-           pc / kInstructionBytes < code_.size();
+           pc / kInstructionBytes < instruction_count();
+  }
+
+  std::expected<Instr, ProgramError> instruction_at(size_t index) const
+  {
+    if (index >= instruction_count()) {
+      return std::unexpected(ProgramError::kUnsupportedInstruction);
+    }
+    return decode_one(load_u32_le(code_, index * kInstructionBytes));
   }
 
 private:
@@ -199,7 +199,7 @@ private:
     }
   }
 
-  std::vector<Instr> code_;
+  std::span<const uint8_t> code_;
 };
 
 } // namespace hogd::rv32

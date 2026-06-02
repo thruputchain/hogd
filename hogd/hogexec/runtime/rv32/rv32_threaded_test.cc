@@ -68,7 +68,9 @@ TEST(Rv32Threaded, decodeMatchesCanonicalOverCorpus)
     for (size_t i = 0; i < words.size(); ++i) {
       const DecodedInstruction &d = canonical->instruction_at_aligned_pc(
           static_cast<uint32_t>(i) * kInstructionBytes);
-      const Instr &t = threaded->code()[i];
+      auto decoded = threaded->instruction_at(i);
+      ASSERT_TRUE(decoded.has_value());
+      const Instr &t = *decoded;
       EXPECT_EQ(t.op, d.op) << kind << " seed " << seed << " instr " << i;
       EXPECT_EQ(t.rd, d.rd) << kind << " seed " << seed << " instr " << i;
       EXPECT_EQ(t.rs1, d.rs1) << kind << " seed " << seed << " instr " << i;
@@ -93,16 +95,42 @@ TEST(Rv32Threaded, decodeMatchesCanonicalOverCorpus)
 
 TEST(Rv32Threaded, decodeRejectsLikeCanonical)
 {
-  EXPECT_EQ(
-      ThreadedProgram::create(std::vector<uint8_t>{0x13, 0x00, 0x00}).error(),
-      ProgramError::kCodeSizeNotAligned);
+  // Decode-validation lives in ThreadedMachinePreInstantiation::create (the
+  // production gate): ThreadedProgram now just holds the byte span and decodes
+  // lazily. Rejection must still match canonical Machine over the same inputs.
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(
+                std::vector<uint8_t>{0x13, 0x00, 0x00}, /*trace=*/false)
+                .error(),
+            ProgramError::kCodeSizeNotAligned);
   const std::vector<uint8_t> compressed = {0x01, 0x00, 0x00, 0x00};
-  EXPECT_EQ(ThreadedProgram::create(compressed).error(),
-            ProgramError::kUnsupportedCompressedInstruction);
+  EXPECT_EQ(
+      ThreadedMachinePreInstantiation::create(compressed, /*trace=*/false)
+          .error(),
+      ProgramError::kUnsupportedCompressedInstruction);
   std::vector<uint8_t> csr(4);
   store_u32_le(csr, 0, 0x00001073U);
-  EXPECT_EQ(ThreadedProgram::create(csr).error(),
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(csr, /*trace=*/false)
+                .error(),
             ProgramError::kUnsupportedSystemInstruction);
+}
+
+TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
+{
+  // Regression: code_ holds a byte span, so contains_pc must bound pc by the
+  // instruction count, not code_.size() (the byte count). A two-instruction
+  // program has valid pcs {0, 4} only; pc=8 is the first fall-off and every
+  // 4-aligned pc beyond it must be rejected -- a byte-count bound would wrongly
+  // accept pcs up to ~4x the program, letting out-of-range jal/branch targets
+  // resolve to slots past the exec_ sentinel.
+  const std::vector<uint32_t> words = {0x00000013U, 0x00000013U}; // two nops
+  const auto prog = ThreadedProgram::create(words_to_bytes(words));
+  ASSERT_TRUE(prog.has_value());
+  EXPECT_TRUE(prog->contains_pc(0));
+  EXPECT_TRUE(prog->contains_pc(4));
+  EXPECT_FALSE(prog->contains_pc(8));  // first pc past the last instruction
+  EXPECT_FALSE(prog->contains_pc(12));
+  EXPECT_FALSE(prog->contains_pc(28)); // < byte-count*4, the buggy upper bound
+  EXPECT_FALSE(prog->contains_pc(6));  // misaligned
 }
 
 // Smoke test: the threaded target builds and links. Real tests arrive in later
@@ -127,12 +155,12 @@ using test_program::addi;
 using test_program::make_program;
 using test_program::op;
 
-std::shared_ptr<const ThreadedProgram>
-threaded_from_words(std::span<const uint32_t> words)
+std::shared_ptr<const ThreadedMachinePreInstantiation>
+threaded_from_words(std::span<const uint32_t> words, bool trace = false)
 {
-  auto prog = ThreadedProgram::create(words_to_bytes(words));
-  EXPECT_TRUE(prog.has_value());
-  return std::make_shared<const ThreadedProgram>(std::move(prog.value()));
+  auto pre_instantiation = ThreadedMachinePreInstantiation::create(words_to_bytes(words), trace);
+  EXPECT_TRUE(pre_instantiation.has_value());
+  return std::make_shared<const ThreadedMachinePreInstantiation>(std::move(pre_instantiation.value()));
 }
 
 TEST(Rv32Threaded, runsBasicArithmetic)
@@ -141,7 +169,7 @@ TEST(Rv32Threaded, runsBasicArithmetic)
   const std::vector<uint32_t> words = {addi(1, 0, 5), addi(2, 1, 7),
                                        op(3, 1, 2, 0, 0)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+  ThreadedMachine machine(*program, /*memory_bytes=*/256, /*gas=*/100);
 
   RecordingHost host;
   const StepResult result = machine.run(host);
@@ -161,7 +189,7 @@ TEST(Rv32Threaded, branchTakenSkipsInstruction)
   const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 1),
                                        branch(0, 1, 2, 8), addi(3, 0, 99)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(3), 0U);                   // branch skipped the addi
@@ -174,7 +202,7 @@ TEST(Rv32Threaded, branchNotTakenFallsThrough)
   const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 2),
                                        branch(0, 1, 2, 8), addi(3, 0, 99)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(3), 99U);
@@ -189,7 +217,7 @@ TEST(Rv32Threaded, jalLinksAndJumps)
   const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
                                        addi(3, 0, 9)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(1), 4U);
@@ -202,7 +230,7 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   using test_program::j_type;
   const std::vector<uint32_t> words = {j_type(0, 4096)}; // target out of range
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
@@ -217,7 +245,7 @@ TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
   // kBadPc rather than falling through.
   const std::vector<uint32_t> words = {branch(0, 0, 0, 4096)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
@@ -232,7 +260,7 @@ TEST(Rv32Threaded, branchBadTargetNotTakenFallsThrough)
   const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 2),
                                        branch(0, 1, 2, 4096), addi(3, 0, 99)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end after addi
   EXPECT_EQ(machine.reg(3), 99U);                  // fall-through executed
@@ -249,7 +277,7 @@ TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
   const std::vector<uint32_t> words = {addi(5, 0, 1), branch(0, 0, 0, 8),
                                        addi(6, 0, 99), addi(7, 0, 42)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, /*gas=*/1);
+  ThreadedMachine machine(*program, 256, /*gas=*/1);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
@@ -268,7 +296,7 @@ TEST(Rv32Threaded, tightSelfLoopRunsOutOfGas)
   // spinning forever once the per-barrier self-charge is gone).
   const std::vector<uint32_t> words = {branch(0, 0, 0, 0)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, /*gas=*/8);
+  ThreadedMachine machine(*program, 256, /*gas=*/8);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
@@ -286,7 +314,7 @@ TEST(Rv32Threaded, jalrLinksAndJumpsToComputedTarget)
   const std::vector<uint32_t> words = {addi(1, 0, 12), jalr(5, 1, 0),
                                        addi(3, 0, 99), addi(4, 0, 9)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host),
             StepResult::kTrap);  // falls off after target
@@ -301,7 +329,7 @@ TEST(Rv32Threaded, auipcIsPcRelative)
   // nop at pc=0; auipc x1, 0 at pc=4 -> x1 = pc(4) + (0 << 12) = 4.
   const std::vector<uint32_t> words = {addi(0, 0, 0), u_type(0x17U, 1, 0)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(1), 4U);
@@ -316,7 +344,7 @@ TEST(Rv32Threaded, storeThenLoadRoundTrips)
   const std::vector<uint32_t> words = {addi(1, 0, 0), addi(3, 0, 0x7ff),
                                        store(1, 3, 16, 2), load(4, 2, 1, 16)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(4), 0x7ffU);
@@ -333,7 +361,7 @@ TEST(Rv32Threaded, signedByteLoadSignExtends)
                                        load(4, 0, 1, 8),  // lb
                                        load(5, 4, 1, 8)}; // lbu
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(4), 0xffffff80U); // lb: sign-extended
@@ -346,7 +374,7 @@ TEST(Rv32Threaded, misalignedLoadTraps)
   // x1=1; lw x4,0(x1) -> address 1, misaligned -> kMisalignedAccess.
   const std::vector<uint32_t> words = {addi(1, 0, 1), load(4, 2, 1, 0)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
@@ -359,7 +387,7 @@ TEST(Rv32Threaded, outOfBoundsStoreTraps)
   // 2044 is 4-byte aligned so alignment check passes; bounds check fires.
   const std::vector<uint32_t> words = {addi(1, 0, 0), store(1, 3, 2044, 2)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadMemory);
@@ -387,7 +415,7 @@ TEST(Rv32Threaded, fusedLoadFeedsRegArith)
       op(5, 4, 6, 0, 0),  // add x5, x4, x6  <- fused tail
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(4), 0x100U);
@@ -411,7 +439,7 @@ TEST(Rv32Threaded, fusedLoadFeedsRs1OfNonCommutativeOp)
       op(5, 4, 6, 0, 0x20), // sub x5, x4, x6 (x4 is rs1)  <- fused tail
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(5), 0xf9U);
@@ -434,7 +462,7 @@ TEST(Rv32Threaded, fusedLoadFeedsRs2OfNonCommutativeOp)
       op(5, 6, 4, 0, 0x20), // sub x5, x6, x4 (x4 is rs2)  <- fused tail
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(5), 0x100U);
@@ -456,7 +484,7 @@ TEST(Rv32Threaded, branchOntoFusedRrSlotExecutesStandalone)
       op(5, 4, 6, 0, 0),  // add x5, x4, x6 (branch target)   <- fused tail
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end after add
   EXPECT_EQ(machine.reg(4), 0U);                   // lw was skipped
@@ -477,7 +505,7 @@ TEST(Rv32Threaded, fusedLoadFaultSuppressesRegArith)
       op(5, 4, 6, 0, 0), // add x5, x4, x6 (uses x4)            <- fused tail
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
@@ -500,7 +528,7 @@ TEST(Rv32Threaded, fusedLoadFeedsImmArith)
       addi(4, 4, -2),     // addi x4, x4, -2  <- fused tail (I-type)
   };
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.reg(4), 0xfeU);
@@ -510,7 +538,7 @@ TEST(Rv32Threaded, ebreakTraps)
 {
   const std::vector<uint32_t> words = {0x00100073U}; // ebreak
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
@@ -521,7 +549,7 @@ TEST(Rv32Threaded, ecallHaltsWithA0)
   // x10(a0)=7, then ecall. RecordingHost default halts with a0.
   const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kHalted);
   EXPECT_EQ(machine.halt_code(), 7U);
@@ -534,7 +562,7 @@ TEST(Rv32Threaded, ecallContinueWritesA0AndAdvances)
   const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
                                        addi(11, 0, 5)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
   RecordingHost host(RecordingHost::OnEcall::kContinue);
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off after addi
   EXPECT_EQ(machine.reg(10), 0U); // continue_with(0) wrote a0=0
@@ -560,11 +588,8 @@ TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
     const ExecTrace ctrace = trace_execution(cmachine, chost);
 
     // Threaded trace (same program, same memory size and gas -> a fair diff).
-    auto threaded = ThreadedProgram::create(bytes);
-    ASSERT_TRUE(threaded.has_value()) << kind << " seed " << seed;
-    auto tprog =
-        std::make_shared<const ThreadedProgram>(std::move(threaded.value()));
-    ThreadedMachine tmachine(tprog, memory_bytes, kCorpusGasBudget);
+    auto threaded = threaded_from_words(words, /*trace=*/true);
+    ThreadedMachine tmachine(*threaded, memory_bytes, kCorpusGasBudget);
     RecordingHost thost;
     TraceObserver tobs;
     tmachine.run(thost, tobs);
@@ -624,21 +649,10 @@ TEST(Rv32Threaded, untracedRunCompletes)
   const std::vector<uint32_t> words =
       test_corpus::generate_register_only_program(123, 64);
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, /*memory_bytes=*/4096, kCorpusGasBudget);
+  ThreadedMachine machine(*program, /*memory_bytes=*/4096, kCorpusGasBudget);
   RecordingHost host;
   EXPECT_EQ(machine.run(host),
             StepResult::kHalted); // corpus ends in ecall
-}
-
-TEST(Rv32Threaded, nullProgramTrapsInvalidInstruction)
-{
-  // Matches canonical Machine: a null program is a construction trap of
-  // kInvalidInstruction (a bad initial pc on a valid program is kBadPc).
-  ThreadedMachine machine(nullptr, 256, 100);
-  EXPECT_TRUE(machine.halted());
-  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
-  RecordingHost host;
-  EXPECT_EQ(machine.run(host), StepResult::kTrap);
 }
 
 TEST(Rv32ThreadedYieldApi, startYieldsEcallThenResumeContinues)
@@ -648,7 +662,7 @@ TEST(Rv32ThreadedYieldApi, startYieldsEcallThenResumeContinues)
   const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
                                        addi(11, 0, 5)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, 256, 100);
+  ThreadedMachine machine(*program, 256, 100);
 
   EXPECT_EQ(machine.start(), StepResult::kEcall);
   ASSERT_TRUE(machine.pending_ecall().has_value());
@@ -666,7 +680,7 @@ TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
   {
     const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
     auto program = threaded_from_words(words);
-    ThreadedMachine machine(program, 256, 100);
+    ThreadedMachine machine(*program, 256, 100);
     EXPECT_EQ(machine.start(), StepResult::kEcall);
     EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
               StepResult::kHalted);
@@ -675,7 +689,7 @@ TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
   {
     const std::vector<uint32_t> words = {0x00000073U};
     auto program = threaded_from_words(words);
-    ThreadedMachine machine(program, 256, 100);
+    ThreadedMachine machine(*program, 256, 100);
     EXPECT_EQ(machine.start(), StepResult::kEcall);
     EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()), StepResult::kTrap);
     EXPECT_EQ(machine.trap(), Trap::kHostTrap);
@@ -689,7 +703,7 @@ TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)
   const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
 
   auto p1 = threaded_from_words(words);
-  ThreadedMachine driven(p1, 256, 100);
+  ThreadedMachine driven(*p1, 256, 100);
   RecordingHost manual_host;
   StepResult r = driven.start();
   // Mid-flight: assert the suspend state run() hides.
@@ -701,7 +715,7 @@ TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)
   }
 
   auto p2 = threaded_from_words(words);
-  ThreadedMachine ran(p2, 256, 100);
+  ThreadedMachine ran(*p2, 256, 100);
   RecordingHost run_host;
   const StepResult rr = ran.run(run_host);
 
@@ -721,7 +735,7 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnContinue)
   const std::vector<uint32_t> words = {addi(10, 0, 1), 0x00000073U,
                                        addi(11, 0, 5)};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+  ThreadedMachine machine(*program, /*memory_bytes=*/256, /*gas=*/100);
 
   ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kContinue);
   const StepResult result = machine.run(host);
@@ -739,7 +753,7 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
   // AND the host write persists -- there is NO per-ecall rollback.
   const std::vector<uint32_t> words = {0x00000073U};
   auto program = threaded_from_words(words);
-  ThreadedMachine machine(program, /*memory_bytes=*/256, /*gas=*/100);
+  ThreadedMachine machine(*program, /*memory_bytes=*/256, /*gas=*/100);
 
   ThreadedMemoryHost host(ThreadedMemoryHost::Outcome::kOutOfGas);
   const StepResult result = machine.run(host);
