@@ -327,6 +327,52 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
   EXPECT_EQ(result.serialized_events.len, 0U);
 }
 
+// A root invocation whose target address has never been deployed is rejected
+// before any invocation frame starts. The wrapper must surface this as a
+// structured Fault output, not crash on an empty frame stack. Regression test
+// for issue #2482.
+TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Note: no contract is created or deployed at this address.
+  ContractAddress undeployed_addr{0x42};
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = undeployed_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
+
+  // No frame ever ran, so no events are returned.
+  EXPECT_EQ(result.serialized_events.data, nullptr);
+  EXPECT_EQ(result.serialized_events.len, 0U);
+}
+
 // Verify that root_invoke does NOT return events when the contract reverts
 TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
 {

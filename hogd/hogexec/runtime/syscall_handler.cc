@@ -285,7 +285,13 @@ SystemCallHandler::get_most_recent_frame_output() const
     return last_frame_.value().get_frame_output();
   }
 
-  assert(!invocation_frame_stack_.empty());
+  // No frame finished and none is active: the (root) invoke was rejected before
+  // any frame started (e.g. an undeployed target or a pre-frame reentrance /
+  // input rejection). No frame produced output, so it faulted.
+  if (invocation_frame_stack_.empty()) {
+    return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+  }
+
   assert(invocation_frame_stack_.get_active_frame_child_return_output()
              .has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
