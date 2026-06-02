@@ -19,7 +19,10 @@ public:
   }
 
 private:
-  using clock = std::chrono::high_resolution_clock;
+  // steady_clock is monotonic, so elapsed() can never go backwards;
+  // high_resolution_clock is not guaranteed steady (it aliases system_clock on
+  // libstdc++) and could yield a negative interval on a wall-clock step.
+  using clock = std::chrono::steady_clock;
 
   // a timestamp for when the timer was created.
   clock::time_point start_ts_;
