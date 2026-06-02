@@ -22,7 +22,6 @@
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
@@ -120,11 +119,11 @@ public:
     return ret;
   }
 
-  x23::Async<ParallelSignedTransactionBatch>
-  get_transactions(size_t num_txs, BlockHeight expiry_height)
+  x23::Async<ParallelSignedTransactionBatch> get_transactions(size_t num_txs)
   {
     LoadgenExtensionResult result =
-        co_await client_->extend_experiment(context_id_, num_txs, expiry_height);
+        co_await client_->extend_experiment(context_id_, num_txs,
+                                            1'000'000'000);
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
     co_return result.success().work_txs;
   }
@@ -165,8 +164,7 @@ public:
     size_t total_transactions_nominated = 0;
 
     ParallelSignedTransactionBatch txs =
-        co_await loadgen_client_.get_transactions(
-            kLoadgenTxBatchSize, make_expiry_height(db_tip.height));
+        co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
     constexpr ValidatorID kValidatorId{};
     co_await sched_coord_client_.schedulercoord_submit_vetted(kValidatorId,
                                                               txs);
@@ -180,8 +178,7 @@ public:
       x23::Async<SchedulerNominationResult> nominate_handle =
           sched_coord_client_.schedulercoord_nominate(db_tip);
 
-      txs = co_await loadgen_client_.get_transactions(
-          kLoadgenTxBatchSize, make_expiry_height(db_tip.height));
+      txs = co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
       x23::Async<void> submit_vetted_handle =
           sched_coord_client_.schedulercoord_submit_vetted(kValidatorId, txs);
 
@@ -265,13 +262,6 @@ private:
   // The number of txs we submit at a time to the mempool.
   static constexpr size_t kSchedTxBatchSize =
       MempoolCoordinatorRpc::kMaxBlockSize;
-  static constexpr BlockHeight kLoadgenExpiryWindow =
-      kReplayCacheHeightsMaxLen / 2;
-
-  static BlockHeight make_expiry_height(BlockHeight block_height)
-  {
-    return block_height + kLoadgenExpiryWindow;
-  }
 
   LoadgenClient loadgen_client_;
   sched_coord_client_t &sched_coord_client_;
