@@ -21,6 +21,7 @@
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -34,6 +35,18 @@ SHA256Hash
 make_nonce(uint64_t value)
 {
   return sha256(value);
+}
+
+BlockHeight
+make_init_mint_expiry_height(size_t mint_index)
+{
+  // We cannot have more than [kReplayCacheNoncesMaxLen] uniquifiers per wallet
+  // for a given expiry height. In other words, for all txs that expire at some
+  // height x, no more than [kReplayCacheNoncesMaxLen] txs can be from the same
+  // wallet. Any excess txs will fail with [ExecResultTxNonDeterministicError].
+  constexpr size_t kInitMintUniquifiersPerHeight = kReplayCacheNoncesMaxLen;
+  return BlockHeight{1'000'000'000} +
+         static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
 }
 
 std::tuple<uint64_t, uint64_t>
@@ -86,13 +99,20 @@ ERC20ExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
+  constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
+  const auto num_initial_allocations =
+      static_cast<int128_t>(wallets_.size()) + 1;
+  const int128_t wallet_initial_hogs =
+      (GenesisConfigurationLoader::initial_hog_token_supply() /
+       num_initial_allocations) -
+      kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
                              erc20_meta::entrypoint<"initialize">(),
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
-                             int128_t{500'000} * config_.num_addresses);
+                             wallet_initial_hogs);
   erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
       sha256(*erc20_contract), make_nonce(0));
 
@@ -106,7 +126,7 @@ ERC20ExperimentState::generate_experiment()
                                wallet_meta::entrypoint<"initialize">(),
                                wallet_meta::make_calldata<"initialize">(
                                    wallet.public_key),
-                               500'000);
+                               wallet_initial_hogs);
   }
 
   // make unfurl txs
@@ -144,7 +164,7 @@ ERC20ExperimentState::generate_experiment()
                     },
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
-                                   std::numeric_limits<BlockHeight>::max(),
+                                   make_init_mint_expiry_height(i - 1),
                                .nonce = unfurl_txs.size() + i},
             },
     };
