@@ -54,14 +54,14 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // rd/rs1/rs2 are register indices. x0 writes are made unconditional by a trash
 // sink: rd==0 stays 0 and writes land harmlessly in regs_[0] (observable state
 // forces regs_[0] back to 0). x0 reads come from an always-zero register at
-// regs_[kRegisterCount], so build_exec remaps rs1/rs2 0 -> kRegisterCount. No
+// regs_[kRegisterCount], so PreInstantiation::create remaps rs1/rs2 0 -> kRegisterCount. No
 // per-op x0 branch either way.
 // The union exploits that no instruction needs rs2 together with a >16-bit imm:
 // only lui/auipc/jal carry a wide imm and none of them use rs2, while the
 // rs2-users (R-type/store/branch) need at most an int16 imm (store offset /
 // branch slot-delta). So rs2 shares the imm word with a narrow imm16.
 // `gas_to_run` is the run's total gas (body through terminating barrier),
-// charged once by enter_run; uint16 -- build_exec rejects a program whose run
+// charged once by enter_run; uint16 -- PreInstantiation::create rejects a program whose run
 // gas would overflow (TODO: split the run / charge in chunks instead).
 struct alignas(16) Slot {
   Handler handler = nullptr; // offset 0
@@ -134,10 +134,14 @@ public:
 
     exec_ = std::span(pre_instantiation.exec_);
     max_pc_ = (exec_.size() - 1) * kInstructionBytes;
-    set_gas(gas);
+    gas_remaining_ = gas;
   }
 
-  void set_gas(uint64_t gas) { gas_remaining_ = gas; }
+  // exec_ borrows the pre-instantiation's Slot array (not owned), so the
+  // pre-instantiation must outlive the machine. Reject binding a temporary,
+  // which would leave exec_ dangling the moment the constructor returns.
+  ThreadedMachine(ThreadedMachinePreInstantiation &&, uint32_t, uint64_t) =
+      delete;
 
   void reset(uint64_t gas)
   {
@@ -218,7 +222,7 @@ public:
   // scalar gas_remaining_ is pushed to its own cache line below so its
   // per-run-head store doesn't disturb this read-mostly region.
   uint32_t max_pc_ =
-      0; // program size in bytes; op_jalr bounds-check (build_exec)
+      0; // program size in bytes; op_jalr bounds-check (PreInstantiation::create)
   std::vector<uint8_t> memory_;
   std::span<const Slot> exec_;   // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
@@ -276,7 +280,7 @@ capture(const Ctx c)
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
 // already paid the run's gas (block-granular metering, like the wasm engines).
 // The conditional branches (B-type). Their taken target is PC-relative and
-// static, so build_exec resolves it the same way as jal.
+// static, so PreInstantiation::create resolves it the same way as jal.
 inline bool
 is_conditional_branch(Op op)
 {
@@ -562,11 +566,11 @@ op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
 }
 
-// jal's target is PC-relative and known at decode time, so build_exec resolves
+// jal's target is PC-relative and known at decode time, so PreInstantiation::create resolves
 // it: for an in-range target, `imm` is rewritten to the *slot delta* to the
 // target (target_slot - this_slot), and the byte target / alignment / range
 // check is hoisted out of the hot path. An out-of-range target instead bakes
-// trap_at<kBadPc> directly (build_exec), so this fast path has no validity
+// trap_at<kBadPc> directly (PreInstantiation::create), so this fast path has no validity
 // check.
 template<bool Trace>
 StepResult
@@ -668,13 +672,13 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 // first and are terminal -- a faulting load never lets the rr write. In traced
 // mode the handler retires the load as its own step (mirroring op_load's
 // HOGD_THREAD_NEXT) before running the rr, so the observed trace is
-// byte-identical to the two unfused. build_exec installs this only on the
+// byte-identical to the two unfused. PreInstantiation::create installs this only on the
 // load's slot; slot ip+1 keeps its standalone op_rr handler (and gas_to_run),
 // so a branch landing on the rr still executes it via enter_run, and the fused
 // handler -- which jumps straight to ip+2 -- never re-enters ip+1, so its gas
 // is not double-charged.
 //
-// Because fusion is gated on a load->use (build_exec), the loaded register
+// Because fusion is gated on a load->use (PreInstantiation::create), the loaded register
 // feeds the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v` straight
 // into that operand instead of reading it back out of regs_ -- avoiding the
 // store-to-regs_/reload-from-regs_ round trip and shortening the load-use
@@ -786,7 +790,7 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // Sequential fall-off past the last instruction (the exec_[n] sentinel) and
 // out-of-range jal/jalr both trap kBadPc; the unsupported-op default traps
 // kInvalidInstruction. All three bake trap_at<...> directly into the Slot
-// rather than going through a forwarding handler (see handler_for/build_exec).
+// rather than going through a forwarding handler (see handler_for/PreInstantiation::create).
 
 template<bool Trace>
 Handler
@@ -899,8 +903,8 @@ handler_for(Op op)
 }
 
 // Selects the out-of-range branch handler with the same Cmp handler_for bakes
-// for the in-range case. Build-time only (cold); build_exec calls it solely for
-// is_conditional_branch ops, so a non-branch op is a build_exec bug -- assert
+// for the in-range case. Build-time only (cold); PreInstantiation::create calls it solely for
+// is_conditional_branch ops, so a non-branch op is a PreInstantiation::create bug -- assert
 // and abort rather than mislabel it as a guest-visible invalid instruction.
 template<bool Trace>
 Handler
@@ -1047,137 +1051,6 @@ fits_int16(int32_t v)
   return v >= std::numeric_limits<int16_t>::min() &&
          v <= std::numeric_limits<int16_t>::max();
 }
-
-/*
-
-inline void
-ThreadedMachine::build_exec(bool trace)
-{
-  const std::span<const Instr> code = program_->code();
-  const size_t n = code.size();
-  exec_.resize(n + 1);
-  for (size_t i = 0; i < n; ++i) {
-    const Instr &d = code[i];
-    Slot &slot = exec_[i];
-    slot.handler = trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
-    slot.gas_to_run = 0; // filled by the backward pass below
-    // EXPERIMENT(flip): x0 writes land in the trash at regs_[0] (rd unmapped),
-    // x0 reads come from the always-zero register at regs_[kRegisterCount] (rs
-    // remapped). Observable state forces x0 (regs_[0]) back to 0.
-    slot.rd = static_cast<uint8_t>(d.rd);
-    slot.rs1 = (d.rs1 == 0) ? static_cast<uint8_t>(kRegisterCount)
-                            : static_cast<uint8_t>(d.rs1);
-    // Pick the union arm: rs2-users get {imm16, rs2}; everyone else the wide
-    // imm. (imm16 is the store offset here; for branches it's overwritten with
-    // the slot delta below; R-type ignores it.)
-    if (slot_packs_rs2(d.op)) {
-      slot.rb.rs2 = (d.rs2 == 0) ? static_cast<uint8_t>(kRegisterCount)
-                                 : static_cast<uint8_t>(d.rs2);
-      assert(fits_int16(d.imm) && "store immediate must fit imm16");
-      slot.rb.imm16 = static_cast<int16_t>(d.imm);
-    }
-    else {
-      slot.imm = d.imm;
-    }
-    // Resolve the PC-relative target of jal and the conditional branches once,
-    // here, so their handlers need no per-execution alignment/range check. In
-    // range: rewrite imm to the target slot delta (exact -- a valid target is
-    // 4-aligned, so the byte imm is a multiple of kInstructionBytes). jal keeps
-    // the wide imm arm (its slot delta can exceed int16); a branch's fits
-    // int16. Out of range: swap in the op-specific trapping handler.
-    if (d.op == Op::kJal || is_conditional_branch(d.op)) {
-      const uint32_t pc = static_cast<uint32_t>(i) * kInstructionBytes;
-      const uint32_t target = pc + bits_from_i32(d.imm);
-      if (program_->contains_pc(target)) {
-        const int32_t delta = d.imm / static_cast<int32_t>(kInstructionBytes);
-        if (d.op == Op::kJal) {
-          slot.imm = delta;
-        }
-        else {
-          assert(fits_int16(delta) && "branch slot-delta must fit imm16");
-          slot.rb.imm16 = static_cast<int16_t>(delta);
-        }
-      }
-      else if (d.op == Op::kJal) {
-        // Out-of-range jal: a taken jal always traps, so bake trap_at directly
-        // (gas was charged at the run head, matching the in-range ordering).
-        slot.handler = trace ? &trap_at<true, Trap::kBadPc>
-                             : &trap_at<false, Trap::kBadPc>;
-      }
-      else {
-        slot.handler = trace ? branch_bad_target_handler_for<true>(d.op)
-                             : branch_bad_target_handler_for<false>(d.op);
-      }
-    }
-  }
-  // Sentinel for sequential fall-off past the last instruction: trap kBadPc at
-  // the out-of-range pc (its pc is (ip - base) * 4). No gas is charged.
-  exec_[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
-                                   : &trap_at<false, Trap::kBadPc>};
-  // gas_to_run[i] = gas of the run starting at i, through and including its
-  // terminating barrier; backward so each entry sees its successor's
-  // already-computed sum. enter_run pre-charges this at every run head, so no
-  // instruction self-charges. A barrier ends its run, so its gas_to_run is just
-  // its own gas (charged when a jump/branch lands directly on it); a
-  // non-barrier always continues into its successor, and the sum stops
-  // naturally at the barrier (whose gas_to_run excludes its own successor). The
-  // i+1<n guard keeps the run from absorbing the fall-off sentinel (exec_[n],
-  // gas 0). The per-instruction op and gas come straight from `code` -- they
-  // are build-time inputs, not stored in the Slot.
-  //
-  // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only reachable
-  // by a pathologically long straight-line run -- up to 16384 instrs * 8 gas
-  // for div) is rejected: gas_overflow_ makes drive() trap. TODO: instead split
-  // the run, charging 65535 at a synthetic mid-run recharge handler.
-  bool overflow = false;
-  for (size_t i = n; i-- > 0;) {
-    const auto self_gas = static_cast<uint32_t>(code[i].gas);
-    const uint32_t run_gas =
-        is_barrier(code[i].op)
-            ? self_gas
-            : self_gas + ((i + 1 < n) ? exec_[i + 1].gas_to_run : 0U);
-    overflow = overflow || run_gas > 0xFFFFU;
-    exec_[i].gas_to_run = static_cast<uint16_t>(run_gas);
-  }
-  gas_overflow_ = overflow;
-  // EXPERIMENT(fuse): collapse each adjacent (lw, fusible ALU) pair into one
-  // fused handler on the load's slot, saving a dispatch. Restricted to a
-  // genuine load->use: the load's destination register must feed the ALU op (as
-  // rs1, or rs2 for R-type) -- that is the pattern worth fusing (dependent
-  // value, common in compiled code). An independent adjacent pair only saves a
-  // dispatch and just dilutes the fused handler set, so it is left unfused. The
-  // ALU slot keeps its standalone handler and gas_to_run (branch-in fallback);
-  // the fused handler skips to i+2 and never re-enters that slot, so nothing is
-  // double-charged and gas bookkeeping is unchanged. Both ops are in-run
-  // non-barriers, so an adjacent (load, alu) is always in the same run.
-  // Decisions use `code` ops/regs (architectural indices), independent of any
-  // target-trap handler swaps above (lw/ALU are never swapped).
-  for (size_t i = 0; i + 1 < n; ++i) {
-    const Instr &ld = code[i];
-    const Instr &alu = code[i + 1];
-    // Load->use: the load writes a real register (x0 discards) that the ALU op
-    // reads. rs2 only matters for the R-type tail (slot_packs_rs2).
-    const bool rs1_match = alu.rs1 == ld.rd;
-    const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
-    if (ld.rd == 0 || !(rs1_match || rs2_match)) {
-      continue;
-    }
-    // Feed the loaded value into rs1 when it matches (also covers both-match),
-    // otherwise rs2. The fused handler uses the value directly for that
-    // operand.
-    const bool loaded_is_rs1 = rs1_match;
-    const Handler fused =
-        trace ? fused_load_handler<true>(ld.op, alu.op, loaded_is_rs1)
-              : fused_load_handler<false>(ld.op, alu.op, loaded_is_rs1);
-    if (fused != nullptr) {
-      exec_[i].handler = fused;
-      ++i; // the ALU slot is consumed as this pair's tail
-    }
-  }
-  max_pc_ = static_cast<uint32_t>(n) * kInstructionBytes;
-  exec_built_ = true;
-  exec_traced_ = trace;
-} */
 
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
@@ -1340,7 +1213,7 @@ template<bool Trace>
 StepResult
 ThreadedMachine::drive()
 {
-  // Reject a program whose run gas overflowed uint16 (set in build_exec). This
+  // Reject a program whose run gas overflowed uint16 (set in PreInstantiation::create). This
   // is an interpreter-side encoding limit (gas_to_run is uint16), not a bad
   // opcode; kInvalidInstruction is a stand-in for "this interpreter can't run
   // this program" until runs are split. TODO(gramseyer): split overflowing runs

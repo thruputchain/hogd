@@ -122,7 +122,10 @@ TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
   // accept pcs up to ~4x the program, letting out-of-range jal/branch targets
   // resolve to slots past the exec_ sentinel.
   const std::vector<uint32_t> words = {0x00000013U, 0x00000013U}; // two nops
-  const auto prog = ThreadedProgram::create(words_to_bytes(words));
+  // Bind the byte image to a local: ThreadedProgram borrows it as a span, so it
+  // must outlive `prog`.
+  const std::vector<uint8_t> bytes = words_to_bytes(words);
+  const auto prog = ThreadedProgram::create(bytes);
   ASSERT_TRUE(prog.has_value());
   EXPECT_TRUE(prog->contains_pc(0));
   EXPECT_TRUE(prog->contains_pc(4));

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -26,6 +27,10 @@ struct Instr {
 
 class ThreadedProgram {
 public:
+  // `code` is borrowed, not copied: the returned ThreadedProgram holds a
+  // non-owning span into it, so the byte buffer must outlive the program (and
+  // anything it decodes lazily). Today the only caller, PreInstantiation::create,
+  // fully consumes the program before returning, so the borrow never escapes.
   static std::expected<ThreadedProgram, ProgramError>
   create(std::span<const uint8_t> code)
   {
@@ -50,11 +55,12 @@ public:
            pc / kInstructionBytes < instruction_count();
   }
 
+  // The error path is decode-only (bad/unsupported opcode); an out-of-range
+  // index is a caller bug, not a guest condition, so it asserts rather than
+  // fabricating a guest-facing decode error.
   std::expected<Instr, ProgramError> instruction_at(size_t index) const
   {
-    if (index >= instruction_count()) {
-      return std::unexpected(ProgramError::kUnsupportedInstruction);
-    }
+    assert(index < instruction_count());
     return decode_one(load_u32_le(code_, index * kInstructionBytes));
   }
 
