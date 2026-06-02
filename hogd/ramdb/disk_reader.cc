@@ -515,7 +515,9 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
         return apply_changes(std::move(log));
       },
       target_lsn, &lsn, max_snapshot_end_lsn);
-  if (!ret && (target_lsn || lsn == 0))
+  // Only a torn tail (kCorruption) justifies accepting the prefix; any other
+  // error means committed data went unread, so fail closed (#1935).
+  if (!ret && (target_lsn || lsn == 0 || ret.error() != DBCode::kCorruption))
     return ret.error();
   assert(!target_lsn || *target_lsn == lsn);
   return lsn;
@@ -529,7 +531,8 @@ DiskReader::verify(Directory &dir)
       dir,
       [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
       std::nullopt, &lsn);
-  if (!ret && lsn == 0)
+  // kCorruption-only, as in load() (#1935).
+  if (!ret && (lsn == 0 || ret.error() != DBCode::kCorruption))
     return ret.error();
   return lsn;
 }
