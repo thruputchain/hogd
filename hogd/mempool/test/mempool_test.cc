@@ -86,44 +86,6 @@ set_cached_hog_age_to_zero(MempoolTestInfra &server,
   hog_age->average_ages[kHogAgeGroupReceived] = 0;
 }
 
-SchedulerValidationResult
-validate_nominated_block_after_zeroing_local_scheduler_hogs(
-    MempoolTestInfra &server, const SignedTransaction &tx)
-{
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  ValidatorID validator_id{};
-
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{tx})())();
-
-  SchedulerGetTipResult get_tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  CHECK_EQ(res_nominate.outcome(),
-           SchedulerNominationOutcome::SchedulerNominationOK);
-
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  server.mempool_coord_rpc().scheduler()->shut_down()();
-
-  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  db_tip = get_tip.db_tip();
-  CHECK_EQ(db_tip.height, 0);
-
-  set_cached_hog_age_to_zero(server, account);
-
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{tx})())();
-  auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
-  CHECK_EQ(res_validate.outcome(),
-           SchedulerValidationResult::SchedulerValidationOK);
-  return res_validate;
-}
-
 } // namespace
 
 // TODO(jhumphri): Update this test once we implement authentication and
