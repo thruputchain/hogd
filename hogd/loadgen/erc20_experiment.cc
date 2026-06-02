@@ -99,8 +99,13 @@ ERC20ExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
+  constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
+  const int128_t num_initial_allocations =
+      static_cast<int128_t>(wallets_.size() + 1);
   const int128_t wallet_initial_hogs =
-      int128_t{500'000} * config_.num_addresses;
+      GenesisConfigurationLoader::initial_hog_token_supply() /
+          num_initial_allocations -
+      kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
                              erc20_meta::entrypoint<"initialize">(),
