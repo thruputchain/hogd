@@ -13,6 +13,7 @@
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -32,9 +33,16 @@ MockRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
   auto *context = SyscallHandlerContext::get_context();
   assert(context != nullptr);
   context->push_mock_runtime(this);
+  // Pop on every exit path. The foreign callback reached through
+  // backing_contract_.invoke() is not noexcept, so a C++ exception unwinding
+  // through it must still restore the mock-runtime stack -- otherwise the
+  // leaked entry leaves the handler permanently uncloseable (issue #2470).
+  x23::Defer pop_runtime([this, context]() {
+    auto *runtime = context->pop_mock_runtime();
+    assert(runtime == this);
+    (void)runtime;
+  });
   auto res = backing_contract_.invoke(method_name);
-  auto *runtime = context->pop_mock_runtime();
-  assert(runtime == this);
   return {res, gas_consumed()};
 }
 

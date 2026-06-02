@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <gtest/gtest.h>
 #include <span>
 #include <string>
@@ -3369,6 +3370,66 @@ TEST(TestBindingsTest, MockRootSystemFrameErrorsReturnFFIError)
     EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
     EXPECT_EQ(finish_res.serialized_events.data, nullptr);
   }
+}
+
+namespace {
+
+// A registered mock callback that unwinds through the test FFI with a C++
+// exception. root_invoke() converts this into an FFI error, but the handler's
+// internal mock-runtime bookkeeping must still be restored on the way out.
+class ThrowingMockContractException final : public std::exception {
+public:
+  char const *what() const noexcept override
+  {
+    return "mock contract callback unwound through test FFI";
+  }
+};
+
+ForeignInvokeResult
+throwing_mock_contract(void * /*unused*/, uint64_t /*method_number*/)
+{
+  throw ThrowingMockContractException{};
+}
+
+} // namespace
+
+// Regression test for #2470: a mock callback that throws used to leak the
+// mock-runtime stack entry, so the handler could no longer be closed. After the
+// RAII pop guard in MockRuntime::invoke_internal(), root_invoke() reports the
+// failure and the handler still closes cleanly.
+TEST(TestBindingsTest, MockContractThrowingCallbackHandlerStillCloseable)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ContractAddress deployment_addr =
+      deploy_mock_contract(db, rc, 1, throwing_mock_contract, nullptr);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  ASSERT_NE(syscall_handler, nullptr);
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+
+  // Before the fix this returned kTestFFIErrorCodeUnrecoverableError because
+  // the leaked mock-runtime stack entry blocked can_be_closed().
+  EXPECT_EQ(close_syscall_handler(syscall_handler), kTestFFIErrorCodeNone);
 }
 
 } // namespace hogd
