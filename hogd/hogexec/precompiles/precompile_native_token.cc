@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -42,9 +43,24 @@ using ERC20Exception =
 
 namespace {
 
+// Compute an event-signature topic the same way the SDK does:
+// sha256("<major_version>::<crate_name>::<type_name>"). See
+// groundhog_contract_util::event_signature in the SDK.
+Topic
+compute_event_signature(std::string_view qualified_name)
+{
+  SHA256Hasher hasher;
+  hasher.update(std::as_bytes(std::span(qualified_name)));
+  SHA256Hash digest = hasher.finalize();
+  Topic topic;
+  static_assert(sizeof(topic) == sizeof(digest));
+  std::memcpy(topic.data(), digest.data(), topic.size());
+  return topic;
+}
+
 // Emit an event through the kLogEvent syscall.
 // The event_buf must contain topics concatenated with data (as produced by
-// make_event_from_xdr_struct). num_topics topics of sizeof(Topic) bytes each
+// make_event_from_cxs_struct). num_topics topics of sizeof(Topic) bytes each
 // are split off the front; the remainder is data.
 template<uint32_t NumTopics>
 InvokeStatus<void>
@@ -189,11 +205,13 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto event_buf = make_event_from_xdr_struct(TransferEvent{
-      .from_address = *owner,
-      .to_address = receiver,
-      .amount = to_xdr(amount_signed_int),
-  });
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{
+                                     .from_address = *owner,
+                                     .to_address = receiver,
+                                     .amount = to_xdr(amount_signed_int),
+                                 });
 
   if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log transfer event in native token transfer");
@@ -258,11 +276,13 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     }
   }
 
-  auto event_buf = make_event_from_xdr_struct(TransferEvent{
-      .from_address = owner,
-      .to_address = receiver,
-      .amount = to_xdr(amount_signed_int),
-  });
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{
+                                     .from_address = owner,
+                                     .to_address = receiver,
+                                     .amount = to_xdr(amount_signed_int),
+                                 });
 
   if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log transfer_from event in native token transfer_from");
@@ -302,11 +322,13 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto event_buf = make_event_from_xdr_struct(ApprovalEvent{
-      .owner_address = *owner,
-      .spender_address = spender,
-      .amount = to_xdr(amount_signed_int),
-  });
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_approval_event_signature(),
+                                 ApprovalEvent{
+                                     .owner_address = *owner,
+                                     .spender_address = spender,
+                                     .amount = to_xdr(amount_signed_int),
+                                 });
 
   if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log adjust_allowance event in native token "
@@ -357,6 +379,22 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 }
 
 } // namespace
+
+Topic const &
+native_token_transfer_event_signature()
+{
+  static const Topic kSignature =
+      compute_event_signature("0.1::groundhog-erc20-if::TransferEvent");
+  return kSignature;
+}
+
+Topic const &
+native_token_approval_event_signature()
+{
+  static const Topic kSignature =
+      compute_event_signature("0.1::groundhog-erc20-if::ApprovalEvent");
+  return kSignature;
+}
 
 std::unique_ptr<NativeContract>
 make_native_token_contract()
