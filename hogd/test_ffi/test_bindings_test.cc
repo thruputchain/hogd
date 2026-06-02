@@ -3,6 +3,8 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -20,6 +22,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -171,6 +174,12 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -178,7 +187,8 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -294,10 +304,63 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
                      .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
+
+  // Events must NOT be returned on fault
+  EXPECT_EQ(result.serialized_events.data, nullptr);
+  EXPECT_EQ(result.serialized_events.len, 0U);
+}
+
+// A root invocation whose target address has never been deployed is rejected
+// before any invocation frame starts. The wrapper must surface this as a
+// structured Fault output, not crash on an empty frame stack. Regression test
+// for issue #2482.
+TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Note: no contract is created or deployed at this address.
+  ContractAddress undeployed_addr{0x42};
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = undeployed_addr,
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
@@ -319,7 +382,7 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
                                          result.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
 
-  // Events must NOT be returned on fault
+  // No frame ever ran, so no events are returned.
   EXPECT_EQ(result.serialized_events.data, nullptr);
   EXPECT_EQ(result.serialized_events.len, 0U);
 }
@@ -350,6 +413,12 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -357,7 +426,8 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -672,6 +742,12 @@ TEST(TestBindingsTest, MockContractRevertTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -679,7 +755,8 @@ TEST(TestBindingsTest, MockContractRevertTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -753,6 +830,12 @@ TEST(TestBindingsTest, MockContractReturnTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -760,7 +843,8 @@ TEST(TestBindingsTest, MockContractReturnTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -831,6 +915,12 @@ TEST(TestBindingsTest, MockContractFaultTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -838,7 +928,8 @@ TEST(TestBindingsTest, MockContractFaultTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -904,6 +995,12 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant it enough to cover that storage cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
   SignedTransaction stx{
       .tx = {.invocation =
                  {
@@ -911,7 +1008,8 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -1047,7 +1145,7 @@ test_ffi_invoke(const ContractAddress &input_address,
 
 // std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 // syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
-//   BlockHeight input_expiry_height,
+//   const BlockHeight &input_expiry_height,
 //   std::span<const std::byte> input_serialized_auth_token,
 //   uint32_t &output_token_id) noexcept
 HostFnStatus<SyscallErrorCode>
@@ -1055,9 +1153,12 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
                          std::span<const std::byte> input_serialized_auth_token,
                          uint32_t &output_token_id)
 {
+  // expiry_height is a 64-bit BlockHeight, which exceeds a single 32-bit ABI
+  // slot, so it is passed by reference (as an offset/pointer) rather than by
+  // value. In the native mock the offset slot carries a host pointer.
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kMintAuthToken),
-      static_cast<uint64_t>(input_expiry_height),
+      reinterpret_cast<uint64_t>(&input_expiry_height),
       reinterpret_cast<uint64_t>(input_serialized_auth_token.data()),
       input_serialized_auth_token.size_bytes(),
       reinterpret_cast<uint64_t>(&output_token_id), 0, 0, 0);
@@ -3007,6 +3108,75 @@ TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
+namespace {
+
+// Append an unsigned LEB128-encoded u32 to a wasm byte buffer.
+void
+append_wasm_u32_leb128(auto &out, uint32_t value)
+{
+  do {
+    uint8_t byte = value & 0x7fU;
+    value >>= 7U;
+    if (value != 0) {
+      byte |= 0x80U;
+    }
+    out.push_back(byte);
+  } while (value != 0);
+}
+
+// Append a well-formed, verifier-allowed "name" custom section padded with
+// `custom_bytes` of filler so the serialized contract can be pushed past
+// RAMDB's single-item size limit while staying a valid module.
+void
+append_name_custom_section(auto &wasm, uint32_t custom_bytes)
+{
+  constexpr std::string_view kSectionName = "name";
+
+  wasm.push_back(0); // custom section id
+  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(1 + kSectionName.size() +
+                                                     custom_bytes));
+  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(kSectionName.size()));
+  wasm.append_range(kSectionName);
+  wasm.append_range(std::string(custom_bytes, 'x'));
+}
+
+} // namespace
+
+// Regression test for #2462: an honest caller can pass a well-formed,
+// verifier-accepted Wasm contract whose serialized bytes exceed RAMDB's
+// single-item limit. The deterministic write rejection must surface as a
+// structured TestFFIErrorCode rather than throwing std::runtime_error through
+// the noexcept setup helper and terminating the process.
+TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasm)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_param_entrypoint.wasm");
+  append_name_custom_section(contract.wasmi_contract().wasm, 96_KiB);
+
+  auto bytes = x23::serialize(contract);
+  // Precondition: the contract is large enough to be rejected by the DB write
+  // but the module stays under the meter's 2 MiB cap, so verification passes.
+  ASSERT_GT(bytes.size(), kBigItemThreshold);
+  ASSERT_LT(contract.wasmi_contract().wasm.size(), 2_MiB);
+
+  auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
+  ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_EQ(verify_result.success, 1);
+
+  // The oversized write must be reported as an unrecoverable error, not crash.
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeUnrecoverableError);
+}
+
 // Test that do_verify_contract returns failure for wasm with large memory.
 TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
 {
@@ -3035,6 +3205,107 @@ TEST(TestBindingsTest, MakeNewDataBufferUint32Max)
   FFIDataBuffer buffer{.data = data, .len = kSize};
   EXPECT_EQ(buffer.len, kSize);
   EXPECT_EQ(free_ffi_data_buffer(buffer), kTestFFIErrorCodeNone);
+}
+
+// Regression test for #2455: a negative storage-token grant must be rejected
+// with a structured error rather than persisting an invalid native-token
+// balance row that later balance reads assert on. A zero grant is allowed.
+TEST(TestBindingsTest, NegativeStorageTokenGrantRejected)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  constexpr ContractAddress kAddr{0x42};
+
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), -1),
+            kTestFFIErrorCodeInvalidArgument);
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), 0),
+            kTestFFIErrorCodeNone);
+  EXPECT_EQ(setup_grant_contract_storage_tokens(db, kAddr.data(), 1),
+            kTestFFIErrorCodeNone);
+}
+
+namespace {
+struct DuplicateMockContext {
+  int calls = 0;
+  uint64_t method_number = 0;
+};
+
+ForeignInvokeResult
+duplicate_mock_callback(void *ctx, uint64_t method_number)
+{
+  auto *context = reinterpret_cast<DuplicateMockContext *>(ctx);
+  context->calls += 1;
+  context->method_number = method_number;
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
+}
+} // namespace
+
+// Regression test for #2469: re-registering the same mock contract id must
+// replace the stale callback/context pair, not silently keep the first one.
+// Otherwise an honest C API caller can free the old context after a successful
+// replacement and later hit stale-callback use-after-free.
+TEST(TestBindingsTest, DuplicateMockRegistrationReplacesCallback)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  DuplicateMockContext first_context;
+  DuplicateMockContext second_context;
+  ASSERT_EQ(register_new_contract(rc, 7, duplicate_mock_callback,
+                                  &first_context),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 7, duplicate_mock_callback,
+                                  &second_context),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 7;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  // The second registration wins; the first context is never touched.
+  EXPECT_EQ(second_context.calls, 1);
+  EXPECT_EQ(second_context.method_number, 0x1234);
+  EXPECT_EQ(first_context.calls, 0);
 }
 
 } // namespace hogd

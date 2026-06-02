@@ -11,8 +11,8 @@ namespace hogd {
 
 namespace {
 
-auto offsets = make_offset_seqs<5, uint64_t, uint64_t, std::span<std::byte>,
-                                SHA256Hash &, uint64_t>();
+auto offsets = make_offset_seqs<5, uint32_t, uint32_t, std::span<std::byte>,
+                                SHA256Hash &, uint32_t>();
 
 static_assert(get<0>(offsets) == 5);
 static_assert(get<1>(offsets) == 6);

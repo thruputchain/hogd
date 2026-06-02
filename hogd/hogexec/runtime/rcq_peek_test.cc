@@ -102,7 +102,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto root_res = handler.root_invoke();
@@ -158,7 +159,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
                                            .entrypoint =
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto root_res = handler.root_invoke();
@@ -211,7 +213,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
                                            .entrypoint =
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
   handler.enable_tracing();
 
@@ -274,7 +277,8 @@ TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
                                            .entrypoint =
                                                entrypoint_from_method_id(6),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
   handler.enable_tracing();
 
@@ -343,7 +347,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
                                            .entrypoint =
                                                entrypoint_from_method_id(7),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
   handler.enable_tracing();
 
@@ -413,13 +418,13 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
 
   auto insert_handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(4),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = insert_calldata.value()}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(4),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = insert_calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
   ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
   ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -438,7 +443,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
                                            .entrypoint =
                                                entrypoint_from_method_id(5),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = peek_calldata.value()}}},
+                                           .calldata = peek_calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
   peek_handler.enable_tracing();
 
@@ -513,7 +519,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
                                            .entrypoint =
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto root_res = handler.root_invoke();

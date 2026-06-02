@@ -170,10 +170,13 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
             ExecResult::ExecResultOK);
 
+  // An empty Transaction{} faults (no contract at the zero address) and then
+  // cannot reserve its replay nonce (the zero address has no balance and the
+  // default {0,0} uniquifier is already expired), so it is not included.
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxNonDeterministicError);
 
   client_.executorsched_finish_block(test_block_id);
 

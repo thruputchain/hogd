@@ -24,16 +24,20 @@
 
 namespace hogd {
 
-void
+DbHash
 NativeContractTestFramework::advance_block(
     BlockExecutionMode mode,
     DbSchedResult expected_dbsched_commit_snapshot_result)
 {
+  // Closing finalizes the block's resulting trie root; capture it so callers
+  // can compare committed-block state (mirrors discard_block's return).
+  DbHash closed_hash{};
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
+    closed_hash = r.db_hash();
   }
   {
     auto r = coord_wrapper_->client().dbsched_commit_snapshot(
@@ -62,6 +66,8 @@ NativeContractTestFramework::advance_block(
 
   storage_snapshot_cache_ =
       std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+
+  return closed_hash;
 }
 
 void
@@ -123,20 +129,27 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
       std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
 }
 
-void
+DbHash
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
+  // Close the block first (which finalizes its resulting trie root), capture
+  // that hash, then abandon it so the committed tip is unchanged. This lets a
+  // caller learn what state the abandoned block WOULD have produced (e.g. to
+  // compare a proposal block against a validation replay) without committing
+  // it, so the next block replays against the same pre-block state.
+  DbHash closed_hash{};
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
+      throw std::runtime_error("discard_block: dbsched_close_snapshot failed");
     }
+    closed_hash = r.db_hash();
   }
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
-          "advance_block: dbsched_abandon_snapshot failed");
+          "discard_block: dbsched_abandon_snapshot failed");
     }
   }
 
@@ -148,13 +161,15 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
+      throw std::runtime_error("discard_block: dbsched_create_snapshot failed");
     }
   }
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+
+  return closed_hash;
 }
 
 void

@@ -187,6 +187,13 @@ struct SyscallTypeParams {
   constexpr static auto kArgOffsetIndices = make_offset_seqs<0, Args...>();
   constexpr static size_t kNumArgs = std::tuple_size<args_t>();
 
+  // Total number of register argument words this syscall consumes (each arg
+  // type contributes SyscallArgParams<Arg>::kNumInputs: scalars 1, spans 2,
+  // etc.). syscall_entry passes arg0=syscall number plus arg1..arg7, so this
+  // must not exceed 7; see the static_assert in wrap_outer.
+  constexpr static size_t kTotalInputs =
+      (size_t{0} + ... + SyscallArgParams<Args>::kNumInputs);
+
   template<size_t I> requires (I < sizeof...(Args))
   using arg_i = TypeNum<I, std::tuple<Args...>>::type;
 
@@ -265,7 +272,7 @@ parse(AliasGuard &guard, std::span<std::byte> contract_memory,
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
-template<typename T, uint64_t... Args>
+template<typename T, uint32_t... Args>
 concept is_parseable =
     requires(AliasGuard &guard, std::span<std::byte> contract_memory) {
       SyscallArgParams<T>::parse(guard, contract_memory, Args...);
@@ -650,11 +657,18 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
-           SyscallNo syscall_no, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-           uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7) noexcept
+           SyscallNo syscall_no, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+           uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7) noexcept
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
+
+  // syscall_entry carries arg0 (syscall number) plus seven argument words
+  // (arg1..arg7) for both the WASM trampoline and the RV32 register-native
+  // bridge. A syscall that needs more register words than that cannot be
+  // dispatched; pack extra scalars into a struct passed by guest pointer.
+  static_assert(syscall_t::kTotalInputs <= 7,
+                "syscall consumes more than 7 register argument words");
 
   auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
 

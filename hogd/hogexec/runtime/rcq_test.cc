@@ -276,6 +276,7 @@ protected:
                                    .gas_limit = UINT64_MAX,
                                    .calldata = Calldata(calldata.begin(),
                                                         calldata.end())},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
     auto res = handler.root_invoke();
@@ -388,23 +389,32 @@ TEST_P(RCQTest, InsertThenConsume)
   auto const initial_balance = 1'000'000'000;
   setup_grant_storage_token(contract_address_, initial_balance);
 
+  // Each committed transaction consumes a uniquifier into the replay cache,
+  // whose (non-refundable) cost is charged to contract_address_ as the root
+  // invoked address and accumulates with the number of commits. The
+  // replay_cache_cost_charged(k) terms below subtract that running cost; they
+  // are 0 on MockInMemory and the real cost on HogDB, so the underlying
+  // expected balances are unchanged on MockInMemory.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   ASSERT_TRUE(consume({1, 2}));
 
   advance_block();
 
-  // The RCQ metadata item and one RCQ block with one RCQ entry remain.
+  // The RCQ metadata item and one RCQ block with one RCQ entry remain. Two
+  // transactions (insert, consume) have committed so far.
   ASSERT_TRUE(
       check_balance(initial_balance -
-                    get_default_cost_model()->get_retrocausal_queue_cost(1)));
+                    get_default_cost_model()->get_retrocausal_queue_cost(1) -
+                    replay_cache_cost_charged(2)));
 
   ASSERT_TRUE(consume({3}));
 
-  // The queue is now empty, so the storage cost should be zero.
+  // The queue is now empty, so the RCQ storage cost should be zero. Three
+  // transactions have committed in total.
   advance_block();
 
-  ASSERT_TRUE(check_balance(initial_balance));
+  ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
 TEST_P(RCQTest, InsertThenAbortOnConsume)
@@ -416,6 +426,13 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   auto const initial_balance = 1'000'000'000;
   setup_grant_storage_token(contract_address_, initial_balance);
 
+  // Only committed transactions consume a uniquifier into the replay cache;
+  // the aborted consume below is not included and consumes nothing. The
+  // (non-refundable) replay-cache cost is charged to contract_address_ as the
+  // root invoked address and accumulates with the number of commits. The
+  // replay_cache_cost_charged(k) terms are 0 on MockInMemory and the real cost
+  // on HogDB, so the underlying expected balances are unchanged on
+  // MockInMemory.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   // Consume 1 item, but then intentionally abort.
@@ -427,17 +444,20 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
 
   advance_block();
 
-  // The RCQ metadata item and one RCQ block with one RCQ entry remain.
+  // The RCQ metadata item and one RCQ block with one RCQ entry remain. Two
+  // transactions (insert, consume) have committed so far.
   ASSERT_TRUE(
       check_balance(initial_balance -
-                    get_default_cost_model()->get_retrocausal_queue_cost(1)));
+                    get_default_cost_model()->get_retrocausal_queue_cost(1) -
+                    replay_cache_cost_charged(2)));
 
   ASSERT_TRUE(consume({3}));
 
-  // The queue is now empty, so the cost should be zero.
+  // The queue is now empty, so the RCQ cost should be zero. Three transactions
+  // have committed in total.
   advance_block();
 
-  ASSERT_TRUE(check_balance(initial_balance));
+  ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
 TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
@@ -458,7 +478,9 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                         entrypoint_from_method_id(1), // Consume
                                     .gas_limit = UINT64_MAX,
                                     .calldata = Calldata({1}),
-                                }}}, // Consume 1 item
+                                },
+                            .uniquifier = make_new_uniquifier()}}, // Consume 1
+                                                                   // item
       *context_);
   ASSERT_TRUE(handler_t1.root_invoke().is_root_success());
   // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
@@ -473,7 +495,8 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                                entrypoint_from_method_id(
                                                    0), // Insert
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = Calldata({5, 4})}}},
+                                           .calldata = Calldata({5, 4})},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
   ASSERT_TRUE(handler_t2.root_invoke().is_root_success());
   // T2's RetrocausalQueueIt should have consumed_past_entries_ = 0.
@@ -520,7 +543,8 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                                entrypoint_from_method_id(
                                                    1), // Consume
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = Calldata({2})}}},
+                                           .calldata = Calldata({2})},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
   ASSERT_TRUE(handler_consume.root_invoke().is_root_success());
 
@@ -532,7 +556,8 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                                entrypoint_from_method_id(
                                                    0), // Insert
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = Calldata({9})}}},
+                                           .calldata = Calldata({9})},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
   ASSERT_TRUE(handler_insert.root_invoke().is_root_success());
 
@@ -694,7 +719,11 @@ TEST_P(RCQTest, ConcurrentPartialConsume)
 TEST_P(RCQTest, ConsumeReturnsStorageCost)
 {
   const int128_t hogs = 1'000'000'000;
-  setup_grant_storage_token(contract_address_, hogs);
+  // Two transactions commit against contract_address_ (insert, consume); each
+  // consumes a uniquifier into the replay cache, charged to the root invoked
+  // address, so top up the grant by that cost to keep check_balance unchanged.
+  setup_grant_storage_token(contract_address_,
+                            hogs + replay_cache_cost_charged(2));
 
   ASSERT_TRUE(insert({1}));
   advance_block();
@@ -750,26 +779,28 @@ TEST_P(RCQTest, ConcurrentOverflow)
 
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = contract_address_,
-                          .entrypoint = entrypoint_from_method_id(0), // Insert
-                          .gas_limit = UINT64_MAX,
-                          .calldata = Calldata(values.begin(), values.end())}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(
+                                                   0), // Insert
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata(values.begin(),
+                                                                values.end())},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
 
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = contract_address_,
-                          .entrypoint = entrypoint_from_method_id(0), // Insert
-                          .gas_limit = UINT64_MAX,
-                          .calldata = Calldata(values.begin(), values.end())}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(
+                                                   0), // Insert
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata(values.begin(),
+                                                                values.end())},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
 
   ASSERT_TRUE(handler1.root_invoke().is_root_success());
@@ -797,32 +828,43 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   setup_grant_storage_token(contract_address_, hogs);
   auto const *cm = get_default_cost_model();
 
-  // Block 1: insert 3 entries.
+  // Each committed transaction consumes a uniquifier into the replay cache,
+  // whose (non-refundable) cost is charged to contract_address_ as the root
+  // invoked address and accumulates with the number of commits. The
+  // replay_cache_cost_charged(k) terms below subtract that running cost after
+  // k commits; they are 0 on MockInMemory and the real cost on HogDB, so the
+  // underlying expected balances are unchanged on MockInMemory.
+
+  // Block 1: insert 3 entries (1 commit).
   ASSERT_TRUE(insert({1, 2, 3}));
   advance_block();
 
   // 3 live entries → cost = get_retrocausal_queue_cost(3).
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3)));
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+                            replay_cache_cost_charged(1)));
 
-  // Block 2: insert 2 more entries (5 total).
+  // Block 2: insert 2 more entries (5 total; 2 commits).
   ASSERT_TRUE(insert({4, 5}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(5)));
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(5) -
+                            replay_cache_cost_charged(2)));
 
-  // Block 3: consume 2 entries from past block 1 (entries 1, 2).
+  // Block 3: consume 2 entries from past block 1 (entries 1, 2; 3 commits).
   // 3 live entries remain.
   ASSERT_TRUE(consume({1, 2}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3)));
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+                            replay_cache_cost_charged(3)));
 
-  // Block 4: consume remaining 3 (entry 3 from block 1, 4 and 5 from block 2).
+  // Block 4: consume remaining 3 (entry 3 from block 1, 4 and 5 from block 2;
+  // 4 commits).
   ASSERT_TRUE(consume({3, 4, 5}));
   advance_block();
 
-  // Queue empty → full refund.
-  ASSERT_TRUE(check_balance(hogs));
+  // Queue empty → full RCQ refund, leaving only the accumulated replay cost.
+  ASSERT_TRUE(check_balance(hogs - replay_cache_cost_charged(4)));
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -895,26 +937,26 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
 
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_address_,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata =
-                                     Calldata(values.begin(), values.end())}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata(values.begin(),
+                                                                values.end())},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
 
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_address_,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata =
-                                     Calldata(values.begin(), values.end())}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata(values.begin(),
+                                                                values.end())},
+                            .uniquifier = make_new_uniquifier()}},
       *context_);
 
   ASSERT_TRUE(handler1.root_invoke().is_root_success());
@@ -962,12 +1004,13 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_address_,
-                                   .entrypoint = entrypoint_from_method_id(5),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = Calldata({0x2f})}}},
+                Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(5),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata({0x2f})},
+                            .uniquifier = make_new_uniquifier()}},
         *context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -984,12 +1027,13 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
     auto handler1 = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_address_,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = Calldata({0x41})}}},
+                Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata({0x41})},
+                            .uniquifier = make_new_uniquifier()}},
         *context);
     ASSERT_TRUE(handler1.root_invoke().is_root_success());
     ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -998,13 +1042,14 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
     auto handler2 = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_address_,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata =
-                                       Calldata({0x07, 0x02, 0x42, 0x43})}}},
+                Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = Calldata(
+                                               {0x07, 0x02, 0x42, 0x43})},
+                            .uniquifier = make_new_uniquifier()}},
         *context);
     ASSERT_TRUE(handler2.root_invoke().is_root_success());
     // Before the fix (#1357), this triggered:

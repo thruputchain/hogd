@@ -1041,10 +1041,10 @@ fn h004_mutate_first_import_to_funcexact(mut wasm: Vec<u8>) -> Vec<u8> {
 fn test_h004_funcexact_import_rejected_by_verify() {
     let wat = r#"
         (module
-          (type $syscall_t (func (param i64) (result i32)))
+          (type $syscall_t (func (param i32) (result i32)))
           (import "marmot" "syscall" (func $syscall (type $syscall_t)))
           (func (export "0000000000000001")
-            i64.const 7
+            i32.const 7
             call $syscall
             drop)
           (memory 1 1)

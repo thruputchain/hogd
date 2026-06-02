@@ -84,11 +84,27 @@ protected:
     write_deployment(kWalletAAddress, wallet_a_contract);
     write_deployment(kWalletBAddress, wallet_b_contract);
 
-    // Grant storage tokens
-    setup_grant_storage_token(kPaymentChannelAddress, 1'000'000'000);
-    setup_grant_storage_token(kERC20Address, 1'000'000'000);
-    setup_grant_storage_token(kWalletAAddress, 1'000'000'000);
-    setup_grant_storage_token(kWalletBAddress, 1'000'000'000);
+    // Grant storage tokens.
+    //
+    // Each committed transaction now charges the replay-cache cost to its root
+    // invoked address, so top up the addresses that commit transactions by the
+    // cost of the (worst-case) number of commits they make in any single test.
+    // No test here asserts an exact native-token balance, so a slightly
+    // generous count only adds spare and keeps every commit succeeding.
+    //   - Payment-channel address commits initialize + up to a close + dispute
+    //     + finalize (or close + two disputes/finalizes) => N = 4.
+    //   - ERC20 address commits only initialize_erc20 => N = 1.
+    //   - Wallet A commits initialize + (up to two) mints + transfer + approve
+    //     + open_channel => N = 6.
+    //   - Wallet B commits initialize + approve + (up to two) joins => N = 4.
+    setup_grant_storage_token(kPaymentChannelAddress,
+                              1'000'000'000 + replay_cache_cost_charged(4));
+    setup_grant_storage_token(kERC20Address,
+                              1'000'000'000 + replay_cache_cost_charged(1));
+    setup_grant_storage_token(kWalletAAddress,
+                              1'000'000'000 + replay_cache_cost_charged(6));
+    setup_grant_storage_token(kWalletBAddress,
+                              1'000'000'000 + replay_cache_cost_charged(4));
 
     // Initialize contracts
     initialize_payment_channel();
@@ -446,7 +462,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 0}},
+                                   .nonce = nonce_++}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -465,7 +481,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 1}},
+                                   .nonce = nonce_++}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -483,7 +499,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 2}},
+                                   .nonce = nonce_++}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -501,7 +517,7 @@ protected:
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 3}},
+                                   .nonce = nonce_++}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

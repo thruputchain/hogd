@@ -31,6 +31,13 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
     return false;
   }
+  // MockInMemory does not implement the replay cache (it is being removed).
+  // Accept-and-drop consume-uniquifier deltas so a transaction that consumes
+  // its nonce still commits against the mock; replay semantics (dedup, expiry,
+  // capacity) are verified against HogDB only.
+  if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier) {
+    return true;
+  }
   // Reject exclusive locks on balance keys (match HogDB behavior).
   if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance &&
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {

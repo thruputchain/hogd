@@ -33,6 +33,8 @@ add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)
 add_dependencies(all_wasm_contracts all_wasm_headers)
 
+add_custom_target(all_riscv_contracts)
+
 # Configure WASM build flags
 if(WASM_DEBUG_BACKTRACES)
   set(WASM_FLAGS "-F logging,entrypoints")
@@ -150,6 +152,52 @@ function(add_wasm_builds)
   add_dependencies(all_wasm_contracts all_wasms_built)
 endfunction()
 
+# Build all RV32 contracts via build_risc.sh
+# Usage: add_riscv_builds(CONTRACTS c1 c2 ...)
+# Each contract's [[bin]] target is compiled to an RV32 ELF and lowered to
+# <name>.rv32a (+ <name>.rv32.json), alongside the WASM artifacts.
+function(add_riscv_builds)
+  cmake_parse_arguments(ARG "" "" "CONTRACTS" ${ARGN})
+
+  set(common_depends
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+    ${roundtrip_rs_stamp})
+
+  set(all_outputs "")
+  set(all_depends ${common_depends})
+  set(build_commands "")
+
+  foreach(target_name ${ARG_CONTRACTS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
+
+    file(GLOB target_rs_files
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+
+    list(APPEND all_depends
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${target_rs_files})
+
+    list(APPEND build_commands
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_risc.sh
+        ${target_name}
+        ${CMAKE_CURRENT_BINARY_DIR})
+  endforeach()
+
+  add_custom_command(
+    OUTPUT ${all_outputs}
+    ${build_commands}
+    DEPENDS ${all_depends}
+    COMMENT "Building all RV32 contracts via build_risc.sh"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+
+  add_custom_target(all_riscvs_built DEPENDS ${all_outputs})
+  add_dependencies(all_riscv_contracts all_riscvs_built)
+endfunction()
+
 # Generate .x file from spec JSON type_defs
 function(add_types_xdr target_name)
   add_custom_command(
@@ -237,6 +285,47 @@ add_wasm_builds(
     nocontract_wallet
 )
 
+# Build the spec contracts for RV32 (each gets a [[bin]] wrapper + .rv32a).
+#
+# A few contracts are intentionally excluded because they cannot be lowered to
+# an RV32 artifact:
+#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw,
+#     nocontract_wallet): no #[contract] macro -> no gh_* entry symbols, so
+#     rv32-lower rejects the ELF ("no #[contract] entry-point symbols found").
+#     hash_bug additionally has no sdk dep, so the rv32 runtime never links.
+#   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
+#     (rust-lld: "section will not fit in region 'RAM'").
+message(STATUS "RV32 contracts: building 26 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
+add_riscv_builds(
+  CONTRACTS
+    fibonacci
+    fibonacci_call
+    dev_wallet
+    deploy_and_transfer
+    read_only_test
+    manual_revert_test
+    manual_revert_caller
+    simple_wallet
+    simple_wallet_authclaim
+    sha256_wrapper
+    initial_token_claim
+    itc_erc20
+    authclaim_test
+    htlc
+    payment_channel
+    return_fault_test
+    tuple_return
+    no_syscall_test
+    syscall_misc_tests
+    syscall_parse_hardening_test
+    nnint_output_fault_test
+    output_alias_test
+    calldata_wrapper
+    delegate_call_test
+    ed25519_verify_wrapper
+    view_gateway_test
+)
+
 # Generate .x files from spec JSON type_defs for contracts that define custom types
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
@@ -300,4 +389,4 @@ add_dependencies(simple_wallet_header simple_wallet_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)
-add_dependencies(build_all_contracts all_wasm_contracts)
+add_dependencies(build_all_contracts all_wasm_contracts all_riscv_contracts)

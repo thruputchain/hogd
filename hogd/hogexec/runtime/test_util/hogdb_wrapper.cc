@@ -30,6 +30,9 @@ void
 HogdbWrapper::grant_storage_token(ContractAddress const &address,
                                   int128_t amount)
 {
+  // Native-token balances are an always-nonnegative invariant; a negative
+  // grant would persist a row that later balance reads assert on.
+  CHECK_GE(amount, 0);
   auto ret = ctx_.get_db().write_address_balance(address, amount);
   if (!ret) {
     throw std::runtime_error(

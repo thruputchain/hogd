@@ -128,6 +128,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context);
 
@@ -148,6 +149,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
                                    .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context);
 
@@ -213,6 +215,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context);
 
@@ -234,6 +237,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
                                    .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *context);
 
@@ -345,6 +349,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
 
@@ -462,6 +467,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
     auto res = handler.root_invoke();
@@ -481,6 +487,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
                                    .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
     auto res = handler.root_invoke();
@@ -500,6 +507,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
                                    .entrypoint = entrypoint_from_method_id(2),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
     auto res = handler.root_invoke();
@@ -560,6 +568,7 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
                                    .calldata = meta::make_calldata<
                                        "read_only_native_get_balance">(
                                        kObserverAddr)},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
     auto res = handler.root_invoke();
@@ -583,6 +592,7 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
                             .gas_limit = UINT64_MAX,
                             .calldata = meta::make_calldata<
                                 "read_only_native_transfer">(kReceiverAddr)},
+                    .uniquifier = make_new_uniquifier(),
                 }},
         *multiplexed_context);
     auto res = handler.root_invoke();
@@ -610,6 +620,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
                                      "read_only_deploy_output_preserved">(),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
   handler.hack_dont_use_test_bypass_allow_reentrance();
@@ -637,6 +648,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
                               "read_only_aliasing_before_read_only_check">(),
                           .gas_limit = UINT64_MAX,
                           .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
   handler.hack_dont_use_test_bypass_allow_reentrance();

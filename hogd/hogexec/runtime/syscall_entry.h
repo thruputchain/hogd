@@ -7,7 +7,7 @@ namespace hogd {
 
 extern "C" TrampolineResult
 syscall_entry(ExternHostCallContext call_context, WasmContext wasm_context,
-              uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-              uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7);
+              uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+              uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7);
 
 } // namespace hogd

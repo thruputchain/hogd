@@ -70,7 +70,8 @@ TEST_P(FibonacciTest, FibonacciCalls)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
-                                  kSufficientGas, 5U)}},
+                                  kSufficientGas, 5U),
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -144,6 +145,12 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
+  // The two commits below each consume a replay nonce, charged to the invoked
+  // address. They run in the same block, so each consume is priced against the
+  // committed snapshot (no in-block discount); grant one nonce's cost per
+  // commit.
+  setup_grant_storage_token(native_contract_addr,
+                            replay_cache_cost_charged(1) * 2);
 
   auto make_multiplexed_context = [&]() -> std::unique_ptr<MultiplexedContext> {
     auto wasm_context = make_context();
@@ -174,7 +181,8 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(10U, 55U)
-                                        .value()}}},
+                                        .value()},
+                    .uniquifier = make_new_uniquifier()}},
         *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -198,7 +206,8 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(40U,
                                                                   102334155U)
-                                        .value()}}},
+                                        .value()},
+                    .uniquifier = make_new_uniquifier()}},
         *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

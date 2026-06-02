@@ -135,38 +135,38 @@ protected:
     context_ = std::make_unique<NativeContext>(std::move(contract_map));
   }
 
-  static SignedTransaction make_tx(uint32_t method,
-                                   std::vector<uint8_t> const &calldata)
+  SignedTransaction make_tx(uint32_t method,
+                            std::vector<uint8_t> const &calldata)
   {
     return SignedTransaction{
-        .tx = Transaction{
-            .invocation =
-                Invocation{.invoked_address = kAddr,
-                           .entrypoint = entrypoint_from_method_id(method),
-                           .gas_limit = UINT64_MAX,
-                           .calldata =
-                               Calldata(calldata.begin(), calldata.end())}}};
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = Calldata(calldata.begin(),
+                                                              calldata.end())},
+                          .uniquifier = make_new_uniquifier()}};
   }
 
-  static SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
+  SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
   {
     return make_tx(0, values);
   }
 
-  static SignedTransaction make_consume_tx(uint8_t count)
+  SignedTransaction make_consume_tx(uint8_t count)
   {
     return make_tx(1, {count});
   }
 
-  static SignedTransaction make_delete_tx() { return make_tx(2, {}); }
+  SignedTransaction make_delete_tx() { return make_tx(2, {}); }
 
-  static SignedTransaction make_bytestring_tx(std::vector<uint8_t> const &value)
+  SignedTransaction make_bytestring_tx(std::vector<uint8_t> const &value)
   {
     return make_tx(3, value);
   }
 
-  static SignedTransaction
-  make_delete_recreate_tx(std::vector<uint8_t> const &values)
+  SignedTransaction make_delete_recreate_tx(std::vector<uint8_t> const &values)
   {
     return make_tx(4, values);
   }
