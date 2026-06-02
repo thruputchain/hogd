@@ -318,7 +318,15 @@ register_new_contract(void *context, int32_t mock_contract_id,
     return kTestFFIErrorCodeInvalidPointer;
   CHECK(*c != nullptr);
 
-  (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  try {
+    // set_trampoline() inserts into a heap-allocating std::map, which can throw
+    // std::bad_alloc. Without this boundary the exception would cross the
+    // noexcept FFI helper and terminate an honest caller (issue #2489).
+    (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  } catch (std::exception const &e) {
+    log_error("error registering mock contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   return kTestFFIErrorCodeNone;
 }
 
