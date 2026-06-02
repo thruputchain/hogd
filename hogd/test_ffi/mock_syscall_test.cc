@@ -203,6 +203,10 @@ TEST(MockSyscallTest, IntTypeTest)
       reinterpret_cast<uint64_t>(&out_128), 0);
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
@@ -245,6 +249,10 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 }
 
 TEST(MockSyscallTest, SpanTest)
@@ -271,6 +279,10 @@ TEST(MockSyscallTest, SpanTest)
       out_span.size(), 0, 0, 0);
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
@@ -309,6 +321,10 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 }
 
 // A value-typed (non-pointer/offset) slot whose value does not fit a 32-bit
@@ -359,6 +375,10 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 }
 
 TEST(MockSyscallTest, NoReturnTest)
@@ -378,6 +398,10 @@ TEST(MockSyscallTest, NoReturnTest)
                                                0, 0, 0, 0, 0, 0);
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::Exit));
   ASSERT_EQ(res.result_code, 0);
@@ -403,6 +427,10 @@ TEST(MockSyscallTest, NoSyscallTest)
 
   context.pop_mock_runtime();
   context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,

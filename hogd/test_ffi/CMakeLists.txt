@@ -117,10 +117,19 @@ endif()
 
 # Tests link against the object files directly so they can reach internal
 # C++ symbols that the dylib intentionally hides.
+#
+# Per-issue security-regression tests live in their own *_regression_test.cc
+# files and are picked up by this glob, so adding one never edits a shared file
+# (which previously caused merge conflicts between in-flight test PRs). The
+# shared setup helpers they use live in test_ffi_test_helpers.h. CONFIGURE_DEPENDS
+# makes the build re-glob when files are added or removed.
+file(GLOB TEST_FFI_REGRESSION_TESTS CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/*_regression_test.cc")
 add_executable(
   test_ffi_test
   mock_syscall_test.cc
   test_bindings_test.cc
+  ${TEST_FFI_REGRESSION_TESTS}
 )
 
 target_include_directories(
