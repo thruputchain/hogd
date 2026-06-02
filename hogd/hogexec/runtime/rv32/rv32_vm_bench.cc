@@ -437,7 +437,7 @@ make_recursive_fibonacci_program()
 
 // Same fibonacci program decoded for the direct-threaded interpreter, for a
 // like-for-like switch-vs-threaded comparison.
-std::shared_ptr<const ThreadedProgram>
+ThreadedMachinePreInstantiation
 make_recursive_fibonacci_threaded_program()
 {
   const std::vector<uint32_t> words = recursive_fibonacci_words();
@@ -445,8 +445,8 @@ make_recursive_fibonacci_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return std::make_shared<const ThreadedProgram>(
-      ThreadedProgram::create(bytes).value());
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 // A compute-bound counterpart to recursive fibonacci: a tight loop of
@@ -492,7 +492,7 @@ make_compute_loop_program()
   return make_program(std::span<const uint32_t>(words.data(), words.size()));
 }
 
-std::shared_ptr<const ThreadedProgram>
+ThreadedMachinePreInstantiation
 make_compute_loop_threaded_program()
 {
   const std::vector<uint32_t> words = compute_loop_words();
@@ -500,8 +500,8 @@ make_compute_loop_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return std::make_shared<const ThreadedProgram>(
-      ThreadedProgram::create(bytes).value());
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 constexpr uint32_t kComputeLoopResult = 536887296; // sum(1..32768)
@@ -561,7 +561,7 @@ make_compute_loop_independent_program()
   return make_program(std::span<const uint32_t>(words.data(), words.size()));
 }
 
-std::shared_ptr<const ThreadedProgram>
+ThreadedMachinePreInstantiation
 make_compute_loop_independent_threaded_program()
 {
   const std::vector<uint32_t> words = compute_loop_independent_words();
@@ -569,8 +569,8 @@ make_compute_loop_independent_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return std::make_shared<const ThreadedProgram>(
-      ThreadedProgram::create(bytes).value());
+  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+      .value();
 }
 
 int64_t
