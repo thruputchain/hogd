@@ -88,7 +88,11 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   // Grant initial tokens to sender (large amount)
   constexpr int128_t kInitialBalance = 1'000'000;
   constexpr int128_t kTransferAmount = 500'000;
-  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+  // kSenderAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost (the asserted receiver balance is
+  // unaffected).
+  setup_grant_storage_token(kSenderAddr,
+                            kInitialBalance + replay_cache_cost_charged(1));
 
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
@@ -132,7 +136,8 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *test_runtime_context);
 
   auto res = handler.root_invoke();
@@ -172,7 +177,11 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   constexpr int128_t kInitialBalance = 1'000'000;
   constexpr int128_t kFirstTransferAmount = 300'000;
   constexpr int128_t kSecondTransferAmount = 200'000;
-  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+  // kSenderAddr is the root invoked address and commits 2 txs; top up its grant
+  // by the replay-cache storage cost (the asserted receiver balance is
+  // unaffected).
+  setup_grant_storage_token(kSenderAddr,
+                            kInitialBalance + replay_cache_cost_charged(2));
 
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
@@ -230,7 +239,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *test_runtime_context);
 
   auto res1 = handler1.root_invoke();
@@ -248,7 +258,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
                                            .entrypoint =
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *test_runtime_context);
 
   auto res2 = handler2.root_invoke();
@@ -294,8 +305,11 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   constexpr static ContractAddress kSenderAddr = make_contract_address(50);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(51);
 
-  // Grant initial tokens to sender (exactly balance_cost)
-  setup_grant_storage_token(kSenderAddr, balance_cost);
+  // Grant initial tokens to sender (exactly balance_cost, plus the replay-cache
+  // storage cost it owes as the root invoked address committing 1 tx). The
+  // receiver still nets 0 because the full balance_cost is transferred.
+  setup_grant_storage_token(kSenderAddr,
+                            balance_cost + replay_cache_cost_charged(1));
 
   // Amounts: we'll transfer (balance_cost - 1) first, then 1
   int128_t kFirstTransferAmount = balance_cost - 1;
@@ -416,7 +430,8 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *test_runtime_context);
 
   auto res = handler.root_invoke();
@@ -538,7 +553,8 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -640,7 +656,8 @@ TEST_F(BalanceCostTrackingTest,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -665,7 +682,11 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   ASSERT_GT(balance_cost, 0);
   static int128_t kTransferAmount = balance_cost + 1;
   static int128_t kInitialBalance = kTransferAmount + 1;
-  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+  // kSenderAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost so the (tiny) residual balance stays
+  // positive and the commit still succeeds.
+  setup_grant_storage_token(kSenderAddr,
+                            kInitialBalance + replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -738,7 +759,8 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -764,7 +786,11 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
   constexpr static ContractAddress kReceiverAddr = make_contract_address(211);
 
   static int128_t kTransferAmount = balance_cost + 42;
-  setup_grant_storage_token(kSenderAddr, kTransferAmount + 1);
+  // kSenderAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost (the asserted receiver balances, in-tx and
+  // committed, are unaffected).
+  setup_grant_storage_token(kSenderAddr,
+                            kTransferAmount + 1 + replay_cache_cost_charged(1));
 
   static uint128_t observed_receiver_balance = 0;
 
@@ -822,7 +848,8 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -860,7 +887,11 @@ TEST_F(BalanceCostTrackingTest,
 
   static int128_t kTransferAmount = 0;
   kTransferAmount = balance_cost;
-  setup_grant_storage_token(kSenderAddr, balance_cost + 1);
+  // kSenderAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost (the asserted receiver balances, in-tx and
+  // committed, are unaffected).
+  setup_grant_storage_token(kSenderAddr,
+                            balance_cost + 1 + replay_cache_cost_charged(1));
 
   static uint128_t observed_receiver_balance = 0;
 
@@ -918,7 +949,8 @@ TEST_F(BalanceCostTrackingTest,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -958,7 +990,10 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 
   constexpr int128_t kInitialBalance = 1'000'000;
   constexpr int128_t kTransferAmount = 500'000;
-  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+  // kSenderAddr is the root invoked address and commits 1 tx; top up its grant
+  // by the replay-cache storage cost.
+  setup_grant_storage_token(kSenderAddr,
+                            kInitialBalance + replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -1000,7 +1035,8 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *test_runtime_context);
 
   auto res = handler.root_invoke();
@@ -1025,9 +1061,11 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   EXPECT_EQ(hogs_transferred.at(kReceiverAddr), kTransferAmount - balance_cost);
 
   // The sender is a pre-existing balance, so its delta is unaffected by the
-  // balance creation cost.
+  // balance creation cost -- but it is the invoked address, so it also pays the
+  // replay-nonce cost, which is folded into its delta to the scheduler.
   ASSERT_TRUE(hogs_transferred.contains(kSenderAddr));
-  EXPECT_EQ(hogs_transferred.at(kSenderAddr), -kTransferAmount);
+  EXPECT_EQ(hogs_transferred.at(kSenderAddr),
+            -kTransferAmount - replay_cache_cost_charged(1));
 }
 
 // Characterization test (issue #2135): the native HOG precompile treats the
@@ -1115,7 +1153,8 @@ TEST_F(BalanceCostTrackingTest,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();

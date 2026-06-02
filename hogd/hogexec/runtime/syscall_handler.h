@@ -205,6 +205,20 @@ public:
   // the root_invoke earlier had an error.
   ExecResult try_commit_transaction();
   SystemStatus<void> abort_transaction();
+
+  // Adds the replay-nonce consume delta for the root invoked address to the
+  // current subtransaction batch (no-op when there is no uniquifier). The delta
+  // rides in the same batch/push as the surrounding deltas, so a duplicate or
+  // expired nonce makes that batch's reservation fail and the transaction is
+  // rejected as a replay.
+  void add_replay_nonce_delta();
+
+  // Commits a transaction whose body effects are discarded (a manual revert or
+  // a deterministic fault). Adds validation-mode RCQ observation deltas and the
+  // replay nonce to one batch, pushes it, then commits. A reservation conflict
+  // (forged observation or replay) aborts the transaction and returns
+  // ExecResultTxNonDeterministicError; otherwise returns success_result.
+  ExecResult commit_body_discarded(ExecResult success_result);
   // Emit the transaction's event log to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
   x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result);
@@ -389,6 +403,12 @@ private:
   const SHA256Hash source_tx_hash_;
   const AuthClaim auth_claim_;
   std::optional<Invocation> root_invocation_;
+
+  // The transaction's replay-protection uniquifier and the root invoked address
+  // it is consumed against. Both empty for the test-harness constructor (no
+  // Transaction), in which case no replay nonce is consumed.
+  const std::optional<Uniquifier> tx_uniquifier_;
+  const std::optional<ContractAddress> root_invoked_address_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.

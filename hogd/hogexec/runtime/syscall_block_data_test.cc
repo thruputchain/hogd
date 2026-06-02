@@ -93,7 +93,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height
@@ -167,7 +168,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = calldata.value()}}},
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height

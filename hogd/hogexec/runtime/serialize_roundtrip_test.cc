@@ -253,6 +253,10 @@ protected:
     auto native_contract_xdr = make_native_contract(0);
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr_, native_contract_xdr);
+    // The native contract is the root invoked address; each test commits one
+    // transaction against it, consuming a replay-cache entry charged here.
+    setup_grant_storage_token(native_contract_addr_,
+                              replay_cache_cost_charged(1));
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
@@ -320,13 +324,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -338,13 +342,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(1),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -356,13 +360,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(2),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(2),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -374,13 +378,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(3),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(3),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -392,13 +396,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(4),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(4),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -410,13 +414,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(5),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(5),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -428,13 +432,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(6),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(6),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -446,13 +450,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(7),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(7),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -467,13 +471,13 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(11),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(11),
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

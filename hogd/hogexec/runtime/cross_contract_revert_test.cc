@@ -192,7 +192,8 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -432,7 +433,8 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();
@@ -580,7 +582,8 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
   auto res = handler.root_invoke();

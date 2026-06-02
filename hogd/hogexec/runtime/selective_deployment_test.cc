@@ -146,6 +146,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
                   .contracts_to_deploy = {contract_to_deploy_1,
                                           contract_to_deploy_2},
               }},
@@ -245,6 +246,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -325,6 +327,7 @@ TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
                   .contracts_to_deploy = {malformed_contract},
               }},
       context);
@@ -396,6 +399,7 @@ TEST_P(SelectiveDeploymentTest,
                                .entrypoint = entrypoint_from_method_id(0),
                                .gas_limit = UINT64_MAX,
                                .calldata = {}},
+      .uniquifier = make_new_uniquifier(),
       .contracts_to_deploy = {malformed_contract},
   };
 

@@ -40,6 +40,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -108,7 +109,9 @@ SystemCallHandler::SystemCallHandler(
         },
         db_proxy_),
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
-    root_invocation_(tx.invocation), newly_created_contracts_([&] {
+    root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
+    root_invoked_address_(tx.invocation.invoked_address),
+    newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                          ByteArrayHasher>
           contracts;
@@ -367,80 +370,47 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
-    if (cumulative_invoke_result_.result_.error().code() ==
-        InvokeErrorCode::Unrecoverable) {
+    auto error_code = cumulative_invoke_result_.result_.error().code();
+    if (error_code == InvokeErrorCode::Unrecoverable) {
       error("try_commit_transaction: received Unrecoverable");
     }
 
+    // Deterministic faults (including OutOfGas) are still included in the
+    // block. Their body effects are discarded, but the transaction must still
+    // commit its per-tx side-records: RCQ observations (so block-close matching
+    // can reject forged observations on a faulting tx) and the replay nonce (so
+    // the transaction cannot be replayed). The body savepoints were already
+    // popped by mark_frame_as_failed during frame unwinding, so this commits a
+    // clean transaction containing only those side-records.
+    if (error_code == InvokeErrorCode::Deterministic ||
+        error_code == InvokeErrorCode::OutOfGas) {
+      return commit_body_discarded(to_exec_result(error_code));
+    }
+
+    // System / unrecoverable / validation errors: the transaction is not
+    // included and consumes nothing.
     auto res = abort_transaction();
     if (!res.has_value()) {
       return to_exec_result(res.error().code());
     }
 
-    return to_exec_result(cumulative_invoke_result_.result_.error().code());
+    return to_exec_result(error_code);
   }
   assert(last_frame_.has_value());
   assert(root_invoke_succeeded_);
   assert(cumulative_invoke_result_.result_.has_value());
 
   // If the last frame was set to manually revert, then we commit the
-  // transaction as a no-op.
+  // transaction as a no-op: body effects are discarded, but RCQ observations
+  // and the replay nonce are still committed (see commit_body_discarded).
   if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .should_revert()) {
-
-    // In validation mode, RCQ observation deltas must still reach HogDB so
-    // block-close matching can reject forged observations.  The normal success
-    // path handles this inside try_acquire_frame_locks(); the manual-revert
-    // path must submit observation-only deltas explicitly.
-    if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-      auto const &observations =
-          std::get<ValidationModeData>(execution_mode_data_)
-              .observations_to_validate();
-      for (auto const &[addrkey, entries] : observations) {
-        if (!entries.empty()) {
-          StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-          delta.retrocausal_queue().observed_concurrent_entries = {
-              entries.begin(), entries.end()};
-          db_proxy_.add_delta(addrkey, std::move(delta),
-                              std::to_underlying(StorageDeltaFlags::None));
-        }
-      }
-      auto push_res = db_proxy_.try_push_current_subtransaction();
-      if (!push_res.has_value()) {
-        // A system error (e.g. a stale block) leaves the HogDB InvokeTX open;
-        // abort it before returning, mirroring the normal root-success
-        // lock-push failure path below.
-        two_phase_commit_failed_ = true;
-        auto abort_status = abort_transaction();
-        if (!abort_status.has_value()) {
-          return to_exec_result(abort_status.error().code());
-        }
-        return to_exec_result(push_res.error().code());
-      }
-      if (!push_res.value()) {
-        two_phase_commit_failed_ = true;
-        auto abort_status = abort_transaction();
-        if (!abort_status.has_value()) {
-          return to_exec_result(abort_status.error().code());
-        }
-        return ExecResult::ExecResultTxNonDeterministicError;
-      }
-    }
-
-    auto res = db_proxy_.commit_transaction();
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
-                                   get_block_execution_mode());
-    if (!res.has_value()) {
-      return to_exec_result(res.error().code());
-    }
-
-    // extract the events, so that they cannot be sent later to the event server
+    // Extract the events so that the reverted transaction's events cannot be
+    // sent later to the event server.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     last_frame_.value().extract_events();
-
-    transaction_committed_or_aborted_ = true;
-    return ExecResult::ExecResultTxRootFrameReverted;
+    return commit_body_discarded(ExecResult::ExecResultTxRootFrameReverted);
   }
 
   // Root commit: push the accumulated delta batch in one HogDB subtransaction.
@@ -461,6 +431,11 @@ SystemCallHandler::try_commit_transaction()
         return mode.observations_to_validate();
       },
       execution_mode_data_);
+
+  // Add the replay-nonce consume delta to the batch before acquiring the body
+  // locks, so it rides in the same subtransaction push. A duplicate or expired
+  // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
+  add_replay_nonce_delta();
 
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
                .value()
@@ -520,6 +495,94 @@ SystemCallHandler::abort_transaction()
   HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                  get_block_execution_mode());
   return db_proxy_.abort_transaction();
+}
+
+void
+SystemCallHandler::add_replay_nonce_delta()
+{
+  // Only real transactions (constructed from a Transaction) carry a uniquifier;
+  // the test-harness constructor leaves it empty and consumes no nonce.
+  if (!tx_uniquifier_.has_value()) {
+    return;
+  }
+  // tx_uniquifier_ and root_invoked_address_ are populated together by the
+  // Transaction constructor; a uniquifier without a root address would make the
+  // access below undefined. Make that invariant explicit.
+  assert(root_invoked_address_.has_value());
+  // The replay cache is disabled for the initial token claim precompile (it
+  // provides its own replay protection and a replay cache there is a DoS
+  // vector); consume no uniquifier for transactions rooted at it. HogDB rejects
+  // a replay-cache delta keyed here (kInvalidExecutorBehavior), so this skip is
+  // load-bearing, not an optimization. See kInitialTokenClaimPrecompileAddress.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  if (root_invoked_address_.value() == kInitialTokenClaimPrecompileAddress) {
+    return;
+  }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
+                                    .key = StorageKey(
+                                        StorageKeyType::ReplayCache)},
+                      ReplayCacheItem{tx_uniquifier_.value()}.get_delta(),
+                      std::to_underlying(StorageDeltaFlags::None));
+}
+
+ExecResult
+SystemCallHandler::commit_body_discarded(ExecResult success_result)
+{
+  // In validation mode, RCQ observation deltas must reach HogDB so block-close
+  // matching can reject forged observations. The normal success path handles
+  // this inside try_acquire_frame_locks(); a manually-reverted or faulting
+  // transaction discards its body, so it must submit observation deltas here.
+  // (In proposal mode observations_to_validate() is empty.)
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto const &observations =
+        std::get<ValidationModeData>(execution_mode_data_)
+            .observations_to_validate();
+    for (auto const &[addrkey, entries] : observations) {
+      if (!entries.empty()) {
+        StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+        delta.retrocausal_queue().observed_concurrent_entries = {
+            entries.begin(), entries.end()};
+        db_proxy_.add_delta(addrkey, std::move(delta),
+                            std::to_underlying(StorageDeltaFlags::None));
+      }
+    }
+  }
+
+  // The replay nonce rides in the same batch as the observation deltas: a
+  // duplicate/expired nonce (or a forged observation) fails the reservation and
+  // the transaction is not included.
+  add_replay_nonce_delta();
+
+  auto push_res = db_proxy_.try_push_current_subtransaction();
+  if (!push_res.has_value()) {
+    // A system error (e.g. a stale block) leaves the HogDB InvokeTX open; abort
+    // it before returning, mirroring the root-success lock-push failure path.
+    two_phase_commit_failed_ = true;
+    auto abort_status = abort_transaction();
+    if (!abort_status.has_value()) {
+      return to_exec_result(abort_status.error().code());
+    }
+    return to_exec_result(push_res.error().code());
+  }
+  if (!push_res.value()) {
+    two_phase_commit_failed_ = true;
+    auto abort_status = abort_transaction();
+    if (!abort_status.has_value()) {
+      return to_exec_result(abort_status.error().code());
+    }
+    return ExecResult::ExecResultTxNonDeterministicError;
+  }
+
+  auto res = db_proxy_.commit_transaction();
+  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                 get_block_execution_mode());
+  if (!res.has_value()) {
+    return to_exec_result(res.error().code());
+  }
+
+  transaction_committed_or_aborted_ = true;
+  return success_result;
 }
 
 // can only be called when call_frame_stack_ is nonempty

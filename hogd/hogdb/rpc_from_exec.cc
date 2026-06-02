@@ -34,6 +34,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
@@ -118,6 +119,13 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     CHECK(addrkey.key.key_type() == StorageKeyType::ReplayCache);
+    // The initial token claim precompile is exempt from the replay cache (it
+    // provides its own replay protection via exclusive deletes). The executor
+    // consumes no uniquifier for it, so a uniquifier-consume delta keyed here
+    // can only come from a buggy executor: reject it as invalid behavior.
+    if (addrkey.address == kInitialTokenClaimPrecompileAddress) {
+      return to_rpc_error(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+    }
     return to_rpc_error(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:

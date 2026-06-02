@@ -105,6 +105,7 @@ add_library(runtime_test_objects OBJECT
   rcq_read_test.cc
   rcq_test.cc
   read_only_test.cc
+  replay_cache_integration_test.cc
   revert_tests.cc
   runtime_test.cc
   selective_deployment_test.cc

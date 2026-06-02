@@ -102,6 +102,7 @@ TEST_P(NNIntGetTest, GetOnNonExistentKey)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -171,6 +172,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -232,6 +234,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -294,6 +297,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -358,6 +362,7 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -421,6 +426,7 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -512,6 +518,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -583,6 +590,7 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -648,6 +656,7 @@ TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 

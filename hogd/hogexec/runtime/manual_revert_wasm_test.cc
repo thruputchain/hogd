@@ -53,6 +53,15 @@ protected:
     write_contract(contract);
     write_deployment(contract_addr_, contract);
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
+
+    // The root invoked address in every test is the native contract at
+    // make_contract_address(1) (deployed per-test below), which commits the
+    // transaction and consumes a replay-cache entry charged to it. Grant
+    // enough to cover the worst-case test (ErrorTypeManualReverts commits 4
+    // transactions against this address); tests with fewer commits simply
+    // leave the spare unused.
+    setup_grant_storage_token(make_contract_address(1),
+                              replay_cache_cost_charged(1) * 4);
   }
   ContractAddress contract_addr_;
 
@@ -143,13 +152,13 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = kSufficientGas,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = kSufficientGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
   auto res = handler.root_invoke();
@@ -223,13 +232,13 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = kSufficientGas,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = kSufficientGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
   auto res = handler.root_invoke();
@@ -290,13 +299,13 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = kSufficientGas,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = kSufficientGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
   auto res = handler.root_invoke();
@@ -365,13 +374,14 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = kSufficientGas,
-                                   .calldata = {}}}},
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address =
+                                                 native_contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = kSufficientGas,
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
     auto res = handler.root_invoke();
@@ -437,13 +447,13 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = kSufficientGas,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = kSufficientGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
   auto res = handler.root_invoke();
@@ -508,13 +518,14 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = kSufficientGas,
-                                   .calldata = {}}}},
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address =
+                                                 native_contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = kSufficientGas,
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
     auto res = handler.root_invoke();
@@ -566,13 +577,14 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = kSufficientGas,
-                                   .calldata = {}}}},
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address =
+                                                 native_contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = kSufficientGas,
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
     auto res = handler.root_invoke();

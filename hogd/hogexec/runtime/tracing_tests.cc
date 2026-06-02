@@ -76,9 +76,9 @@ TEST_F(TracingTest, Sha256Repeated)
   x23::Vec<uint8_t, 0xffffffff> data = {1, 2, 3, 4, 5};
 
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client.make_invocation<"sha256_repeated">(10000, n, data)},
+      Transaction{.invocation =
+                      client.make_invocation<"sha256_repeated">(10000, n, data),
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -141,7 +141,8 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   {
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = caller_client.make_invocation<"initialize">(
-                        UINT64_MAX, fibonacci_addr)},
+                        UINT64_MAX, fibonacci_addr),
+                    .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -154,7 +155,8 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   uint64_t gas_limit = 1'000'000;
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = caller_client.make_invocation<"call_fibonacci">(
-                      gas_limit, uint32_t{5}, gas_limit)},
+                      gas_limit, uint32_t{5}, gas_limit),
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -220,9 +222,10 @@ TEST_F(TracingTest, NoSyscallTest)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client.make_invocation<"run_test">(10000, uint64_t{12345})},
+      Transaction{.invocation =
+                      client.make_invocation<"run_test">(10000,
+                                                         uint64_t{12345}),
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -259,7 +262,8 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
 
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = client.make_invocation<"run_test">(
-                      10000, static_cast<uint64_t>(kSyscallCount))},
+                      10000, static_cast<uint64_t>(kSyscallCount)),
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_transaction_stats();
   auto res = handler.root_invoke();
@@ -318,7 +322,8 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
                       Invocation{.invoked_address = contract_0_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -416,7 +421,8 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
                       Invocation{.invoked_address = caller_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -532,7 +538,8 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *context);
 
   auto res1 = handler1.root_invoke();
@@ -545,7 +552,8 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *context);
   handler2.enable_tracing();
 
@@ -630,7 +638,8 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
   auto res = handler.root_invoke();
@@ -711,12 +720,17 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   write_contract(child_xdr);
   write_deployment(kChildAddress, child_xdr);
 
+  // The caller is the root invoked address; committing its transaction consumes
+  // one replay-cache entry charged to it.
+  setup_grant_storage_token(kCallerAddress, replay_cache_cost_charged(1));
+
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       Invocation{.invoked_address = kCallerAddress,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
   auto res = handler.root_invoke();

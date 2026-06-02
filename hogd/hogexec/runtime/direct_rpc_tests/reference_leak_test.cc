@@ -207,6 +207,9 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 // reference should be released allowing other types to be reserved
 TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
   // Replay cache is supported in HogDB.
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);

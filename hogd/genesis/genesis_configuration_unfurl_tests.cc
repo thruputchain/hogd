@@ -65,6 +65,9 @@ protected:
     deployer_auth_data.required_weight = 0;
     deployer_auth_data.last_written_height = 0;
     StorageItemWrapper deployer_auth_item(deployer_auth_data, &cost_model);
+    // The unfurl transactions are invoked on the initial token claim
+    // precompile, which is exempt from the replay cache, so they consume no
+    // replay-cache entry and incur no extra cost here.
     return deployer_auth_item.storage_cost(&cost_model) +
            cost_model.get_balance_cost();
   }
@@ -132,7 +135,8 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
   {
     auto tx = Transaction{.invocation =
                               caller_client.make_invocation<"call_fibonacci">(
-                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)};
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX),
+                          .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -244,7 +248,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
   {
     auto tx = Transaction{.invocation =
                               caller_client.make_invocation<"call_fibonacci">(
-                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)};
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX),
+                          .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -331,7 +336,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
   {
     auto tx = Transaction{.invocation =
                               caller_client.make_invocation<"call_fibonacci">(
-                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)};
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX),
+                          .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
