@@ -84,9 +84,6 @@ TEST(Mempool, SubmitUnvetted)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -118,9 +115,6 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByMempool)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -154,9 +148,6 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -251,9 +242,6 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
 
@@ -556,9 +544,6 @@ TEST(Mempool, NominateTxWithError)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
