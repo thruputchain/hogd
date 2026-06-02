@@ -3406,4 +3406,101 @@ TEST(TestBindingsTest, CommitBeforeRootInvokeReturnsErrorInsteadOfAborting)
   EXPECT_EQ(close_syscall_handler(syscall_handler), kTestFFIErrorCodeNone);
 }
 
+// Regression test for #2432: closing the runtime context while a handler from
+// it is still open used to free the MockRuntimeContext and dangle the handler's
+// RuntimeContext&, so a later root_invoke() was a use-after-free. The handler
+// now retains shared ownership, so root_invoke() still works after the
+// runtime-context handle is closed.
+TEST(TestBindingsTest, RootInvokeWorksAfterRuntimeContextHandleClosed)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+
+  ContractAddress deployment_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_return, nullptr);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  ASSERT_NE(syscall_handler, nullptr);
+
+  // Close the runtime-context handle while the handler is still open.
+  EXPECT_EQ(close_runtime_context(rc), kTestFFIErrorCodeNone);
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(result.serialized_output);
+  free_ffi_data_buffer(result.serialized_trace);
+  free_ffi_data_buffer(result.serialized_events);
+
+  EXPECT_EQ(close_syscall_handler(syscall_handler), kTestFFIErrorCodeNone);
+}
+
+// Regression test for #2433: freeing the DB while a handler derived from it is
+// open used to dangle the handler's DB-derived proxies (a use-after-free on
+// close). free_db() now rejects the call while a handler is open.
+TEST(TestBindingsTest, FreeDbRejectedWhileHandlerOpen)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  // Freeing the DB while the handler is open is rejected.
+  EXPECT_EQ(free_db(db), kTestFFIErrorCodeUnrecoverableError);
+
+  // After the handler is closed, the DB can be freed. ASSERT the close so a
+  // failure here doesn't fall through to free_db() (which would still be
+  // rejected) and leak the DB for the rest of the process.
+  ASSERT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+  EXPECT_EQ(free_db(db), kTestFFIErrorCodeNone);
+}
+
+// Regression test for #2436: advancing the DB block while a handler derived
+// from it is open used to replace the snapshot cache the handler still
+// referenced, so a later root_invoke() read freed snapshot state.
+// advance_new_block() now rejects the call while a handler is open.
+TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  // Advancing the block while the handler is open is rejected.
+  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+
+  // After the handler is closed, advancing the block succeeds.
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd

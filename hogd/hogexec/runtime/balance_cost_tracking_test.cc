@@ -1186,11 +1186,13 @@ TEST_F(BalanceCostTrackingTest,
   EXPECT_EQ(event.contract_address,
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
   EXPECT_EQ(event.num_topics, 3U);
-  auto expected_event = make_event_from_xdr_struct(TransferEvent{
-      .from_address = kSenderAddr,
-      .to_address = kZeroAddr,
-      .amount = to_xdr(kTransferAmount),
-  });
+  auto expected_event =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{
+                                     .from_address = kSenderAddr,
+                                     .to_address = kZeroAddr,
+                                     .amount = to_xdr(kTransferAmount),
+                                 });
   ASSERT_EQ(event.serialized_event.size(), expected_event.size());
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
                          event.serialized_event.end(), expected_event.begin()));

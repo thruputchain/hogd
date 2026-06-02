@@ -208,20 +208,27 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     // we read it again here. Importantly, we do this while holding
     // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
     // mempool tx capacity limit.
-    size_t scheduler_size = scheduler_->size();
+    ssize_t scheduler_size = scheduler_->size();
     if (scheduler_size >= mempool_tx_size_limit_) {
       info("submit_unvetted rejected txs as the mempool has too many pending "
            "txs");
       co_return;
     }
-    size_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
-    if (num_slots_left < txs->size()) {
+    ssize_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
+    CHECK_GE(num_slots_left, 0L);
+    if (std::cmp_less(num_slots_left, txs->size())) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
+      //
+      // We CHECK above that [num_slots_left] is >= 0, so it is safe to cast it
+      // to size_t.
+      const auto resize_to = static_cast<size_t>(num_slots_left);
+      const size_t num_discarded = txs->size() - resize_to;
+
       info("submit_unvetted received {} txs, but only {} will fit in the "
            "mempool. discarding {} txs.",
-           num_submitted_txs, num_slots_left, txs->size() - num_slots_left);
-      txs->resize(num_slots_left);
+           num_submitted_txs, resize_to, num_discarded);
+      txs->resize(resize_to);
     }
   }
 
@@ -1905,7 +1912,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                        << ", duration=" << validation.duration
                        << ", txs=" << validation.tx_count << "}";
   }
-  const size_t scheduler_size = scheduler_->size();
+  const ssize_t scheduler_size = scheduler_->size();
   const size_t total_submitted = commit_window_stats.submitted_vetted +
                                  commit_window_stats.submitted_unvetted;
   const auto since_last_commit_ms =

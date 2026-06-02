@@ -149,7 +149,21 @@ enable_syscall_logging(int32_t level) noexcept
     break;
   }
 
-  lazy_init();
+  try {
+    // First-use logger initialization allocates (hogd_init, the
+    // ThreadsafeLogger, and the global logger swap), so it can throw
+    // std::bad_alloc. This helper is noexcept and has no status return, so a
+    // thrown exception would terminate an honest caller (issue #2441). Report
+    // best-effort to stderr -- error() would dereference the still-null process
+    // logger -- and leave logging unchanged.
+    lazy_init();
+  } catch (std::exception const &e) {
+    std::fputs("error initializing logging for enable_syscall_logging: ",
+               stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return;
+  }
   assert(global_logger != nullptr);
   global_logger->set_log_level(log_level);
 }
@@ -251,6 +265,14 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
+  // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
+  // freeing it while a handler is still open would dangle those references on a
+  // later close/invoke. Reject the free instead of crashing (issue #2433).
+  if (ptr != nullptr && ptr->has_open_handlers()) {
+    error("free_db called while syscall handlers derived from this DB are "
+          "still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   try {
     delete ptr;
   } catch (std::exception const &e) {
@@ -266,6 +288,16 @@ advance_new_block(void *db) noexcept
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
     return kTestFFIErrorCodeInvalidPointer;
+
+  // Advancing the block replaces the snapshot cache that open handlers still
+  // reference; reject it while any handler derived from this DB is open so a
+  // later root_invoke() doesn't read freed snapshot state (issue #2436).
+  if (ptr->has_open_handlers()) {
+    error(
+        "advance_new_block called while syscall handlers derived from this DB "
+        "are still open; close them first");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   try {
     ptr->advance_new_block();
@@ -318,7 +350,15 @@ register_new_contract(void *context, int32_t mock_contract_id,
     return kTestFFIErrorCodeInvalidPointer;
   CHECK(*c != nullptr);
 
-  (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  try {
+    // set_trampoline() inserts into a heap-allocating std::map, which can throw
+    // std::bad_alloc. Without this boundary the exception would cross the
+    // noexcept FFI helper and terminate an honest caller (issue #2489).
+    (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
+  } catch (std::exception const &e) {
+    log_error("error registering mock contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   return kTestFFIErrorCodeNone;
 }
 
@@ -348,7 +388,7 @@ open_syscall_handler(void *db, void *rc,
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
-        new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
+        new SyscallHandlerContext(*runtime_context, stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
@@ -391,9 +431,8 @@ open_mocked_syscall_handler(void *db, void *rc,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
-    auto *handler =
-        new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_xdr, source_hash);
+    auto *handler = new SyscallHandlerContext(*runtime_context, *db_context,
+                                              auth_claim_xdr, source_hash);
     if (enable_tracing) {
       handler->to_handler().enable_tracing();
     }
@@ -595,18 +634,26 @@ abort_transaction(void *syscall_handler) noexcept
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto res = context->to_handler().abort_transaction();
-  context->mark_committed_or_aborted();
-  if (!res.has_value()) {
-    try {
+  try {
+    auto res = context->to_handler().abort_transaction();
+    // SystemCallHandler::abort_transaction() marks its transaction aborted
+    // before issuing the abort RPC, so the context must record the abort even
+    // when the RPC reports or throws an error; otherwise the destructor in
+    // close_syscall_handler() would attempt a second abort.
+    context->mark_committed_or_aborted();
+    if (!res.has_value()) {
       error("failed to abort transaction: {}", res.error());
       return kTestFFIErrorCodeUnrecoverableError;
-    } catch (std::exception const &e) {
-      log_error("error during abort_transaction: {}", e);
-      return kTestFFIErrorCodeUnrecoverableError;
     }
+    return kTestFFIErrorCodeNone;
+  } catch (std::exception const &e) {
+    // The abort RPC can throw (e.g. an SRPC XdrBadInput/XdrCallFailed on a bad
+    // reply); convert it to a structured error instead of letting it cross the
+    // noexcept FFI boundary and terminate the process (issue #2443).
+    context->mark_committed_or_aborted();
+    log_error("error during abort_transaction: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
-  return kTestFFIErrorCodeNone;
 }
 
 constexpr StorageCostModel kCostModel(12000, 1, 5, 5, 1234);
@@ -656,6 +703,12 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   } catch (x23::XdrException &e) {
     log_error("error deserializing contract: {}", e);
     return kTestFFIErrorCodeDeserializeError;
+  } catch (std::exception const &e) {
+    // Deserializing a well-formed contract still allocates (e.g. resizing the
+    // ContractBlob::wasm vector), so std::bad_alloc can be thrown here on valid
+    // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
+    log_error("unrecoverable: error deserializing contract: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
   }
 
   try {
@@ -723,12 +776,21 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  db_cast->get_base_db().write_deployment(
-      addr,
-      DeployedContractHash{.hash = h,
-                           .contract_size = contract_size,
-                           .contract_type = contract.contract_type()},
-      &kCostModel);
+  try {
+    // write_deployment() throws (e.g. std::runtime_error) when the underlying
+    // metadata write fails, such as RAMDB kNoMemory. Convert that to a
+    // structured error instead of letting it cross the noexcept FFI boundary
+    // and terminate the process (issue #2480).
+    db_cast->get_base_db().write_deployment(
+        addr,
+        DeployedContractHash{.hash = h,
+                             .contract_size = contract_size,
+                             .contract_type = contract.contract_type()},
+        &kCostModel);
+  } catch (std::exception const &e) {
+    log_error("error writing contract deployment: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   return kTestFFIErrorCodeNone;
 }
