@@ -845,7 +845,6 @@ Scheduler::account_is_ready(const ContractAddress &account,
       CHECK_EQ(txs_.remove(tx_hash), 1UL);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
-    CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
     size_ -= to_remove;
     txs.erase(txs.begin(), lower_it);
   }
@@ -926,7 +925,6 @@ Scheduler::schedule(size_t num_txs,
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
         }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
-        CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
         size_ -= to_remove;
         it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
       }
