@@ -950,6 +950,65 @@ TEST(Mempool, ValidateBatch)
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
+TEST(Mempool, ValidateRejectsBlockWithFailedTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  SchedulerNominationResult res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(
+          res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    ASSERT_EQ(db_tip.height, 1);
+
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = db_tip.events_hash,
+                           .prev_block_hash = nomination.prev_block_hash});
+  }
+
+  // Submit the same tx again so validation can look it up. Since the first
+  // block was committed, this tx now fails execution with a duplicate
+  // uniquifier.
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerValidationResult res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
