@@ -54,15 +54,15 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // rd/rs1/rs2 are register indices. x0 writes are made unconditional by a trash
 // sink: rd==0 stays 0 and writes land harmlessly in regs_[0] (observable state
 // forces regs_[0] back to 0). x0 reads come from an always-zero register at
-// regs_[kRegisterCount], so PreInstantiation::create remaps rs1/rs2 0 -> kRegisterCount. No
-// per-op x0 branch either way.
-// The union exploits that no instruction needs rs2 together with a >16-bit imm:
-// only lui/auipc/jal carry a wide imm and none of them use rs2, while the
-// rs2-users (R-type/store/branch) need at most an int16 imm (store offset /
-// branch slot-delta). So rs2 shares the imm word with a narrow imm16.
-// `gas_to_run` is the run's total gas (body through terminating barrier),
-// charged once by enter_run; uint16 -- PreInstantiation::create rejects a program whose run
-// gas would overflow (TODO: split the run / charge in chunks instead).
+// regs_[kRegisterCount], so PreInstantiation::create remaps rs1/rs2 0 ->
+// kRegisterCount. No per-op x0 branch either way. The union exploits that no
+// instruction needs rs2 together with a >16-bit imm: only lui/auipc/jal carry a
+// wide imm and none of them use rs2, while the rs2-users (R-type/store/branch)
+// need at most an int16 imm (store offset / branch slot-delta). So rs2 shares
+// the imm word with a narrow imm16. `gas_to_run` is the run's total gas (body
+// through terminating barrier), charged once by enter_run; uint16 --
+// PreInstantiation::create rejects a program whose run gas would overflow
+// (TODO: split the run / charge in chunks instead).
 struct alignas(16) Slot {
   Handler handler = nullptr; // offset 0
   uint16_t gas_to_run = 0;   // offset 8
@@ -140,8 +140,8 @@ public:
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,
   // which would leave exec_ dangling the moment the constructor returns.
-  ThreadedMachine(ThreadedMachinePreInstantiation &&, uint32_t, uint64_t) =
-      delete;
+  ThreadedMachine(ThreadedMachinePreInstantiation &&, uint32_t,
+                  uint64_t) = delete;
 
   void reset(uint64_t gas)
   {
@@ -221,8 +221,8 @@ public:
   // op_jalr's valid_target) and the cold pointers go here; the read/WRITE hot
   // scalar gas_remaining_ is pushed to its own cache line below so its
   // per-run-head store doesn't disturb this read-mostly region.
-  uint32_t max_pc_ =
-      0; // program size in bytes; op_jalr bounds-check (PreInstantiation::create)
+  uint32_t max_pc_ = 0; // program size in bytes; op_jalr bounds-check
+                        // (PreInstantiation::create)
   std::vector<uint8_t> memory_;
   std::span<const Slot> exec_;   // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
@@ -566,12 +566,12 @@ op_branch_bad_target(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
 }
 
-// jal's target is PC-relative and known at decode time, so PreInstantiation::create resolves
-// it: for an in-range target, `imm` is rewritten to the *slot delta* to the
-// target (target_slot - this_slot), and the byte target / alignment / range
-// check is hoisted out of the hot path. An out-of-range target instead bakes
-// trap_at<kBadPc> directly (PreInstantiation::create), so this fast path has no validity
-// check.
+// jal's target is PC-relative and known at decode time, so
+// PreInstantiation::create resolves it: for an in-range target, `imm` is
+// rewritten to the *slot delta* to the target (target_slot - this_slot), and
+// the byte target / alignment / range check is hoisted out of the hot path. An
+// out-of-range target instead bakes trap_at<kBadPc> directly
+// (PreInstantiation::create), so this fast path has no validity check.
 template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -672,19 +672,19 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 // first and are terminal -- a faulting load never lets the rr write. In traced
 // mode the handler retires the load as its own step (mirroring op_load's
 // HOGD_THREAD_NEXT) before running the rr, so the observed trace is
-// byte-identical to the two unfused. PreInstantiation::create installs this only on the
-// load's slot; slot ip+1 keeps its standalone op_rr handler (and gas_to_run),
-// so a branch landing on the rr still executes it via enter_run, and the fused
-// handler -- which jumps straight to ip+2 -- never re-enters ip+1, so its gas
-// is not double-charged.
+// byte-identical to the two unfused. PreInstantiation::create installs this
+// only on the load's slot; slot ip+1 keeps its standalone op_rr handler (and
+// gas_to_run), so a branch landing on the rr still executes it via enter_run,
+// and the fused handler -- which jumps straight to ip+2 -- never re-enters
+// ip+1, so its gas is not double-charged.
 //
-// Because fusion is gated on a load->use (PreInstantiation::create), the loaded register
-// feeds the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v` straight
-// into that operand instead of reading it back out of regs_ -- avoiding the
-// store-to-regs_/reload-from-regs_ round trip and shortening the load-use
-// dependency chain. (rd is still written for architectural visibility / the
-// trace step.) When both sources alias the load dest, LoadedIsRs1 wins and the
-// rs2 read happens to reload the same value -- still correct.
+// Because fusion is gated on a load->use (PreInstantiation::create), the loaded
+// register feeds the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v`
+// straight into that operand instead of reading it back out of regs_ --
+// avoiding the store-to-regs_/reload-from-regs_ round trip and shortening the
+// load-use dependency chain. (rd is still written for architectural visibility
+// / the trace step.) When both sources alias the load dest, LoadedIsRs1 wins
+// and the rs2 read happens to reload the same value -- still correct.
 template<bool Trace, uint32_t Width, bool SignExtend, bool LoadedIsRs1,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
@@ -790,7 +790,8 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // Sequential fall-off past the last instruction (the exec_[n] sentinel) and
 // out-of-range jal/jalr both trap kBadPc; the unsupported-op default traps
 // kInvalidInstruction. All three bake trap_at<...> directly into the Slot
-// rather than going through a forwarding handler (see handler_for/PreInstantiation::create).
+// rather than going through a forwarding handler (see
+// handler_for/PreInstantiation::create).
 
 template<bool Trace>
 Handler
@@ -903,9 +904,10 @@ handler_for(Op op)
 }
 
 // Selects the out-of-range branch handler with the same Cmp handler_for bakes
-// for the in-range case. Build-time only (cold); PreInstantiation::create calls it solely for
-// is_conditional_branch ops, so a non-branch op is a PreInstantiation::create bug -- assert
-// and abort rather than mislabel it as a guest-visible invalid instruction.
+// for the in-range case. Build-time only (cold); PreInstantiation::create calls
+// it solely for is_conditional_branch ops, so a non-branch op is a
+// PreInstantiation::create bug -- assert and abort rather than mislabel it as a
+// guest-visible invalid instruction.
 template<bool Trace>
 Handler
 branch_bad_target_handler_for(Op op)
@@ -1213,11 +1215,12 @@ template<bool Trace>
 StepResult
 ThreadedMachine::drive()
 {
-  // Reject a program whose run gas overflowed uint16 (set in PreInstantiation::create). This
-  // is an interpreter-side encoding limit (gas_to_run is uint16), not a bad
-  // opcode; kInvalidInstruction is a stand-in for "this interpreter can't run
-  // this program" until runs are split. TODO(gramseyer): split overflowing runs
-  // instead of rejecting (then this whole branch goes away).
+  // Reject a program whose run gas overflowed uint16 (set in
+  // PreInstantiation::create). This is an interpreter-side encoding limit
+  // (gas_to_run is uint16), not a bad opcode; kInvalidInstruction is a stand-in
+  // for "this interpreter can't run this program" until runs are split.
+  // TODO(gramseyer): split overflowing runs instead of rejecting (then this
+  // whole branch goes away).
   if (gas_overflow_) {
     trap_ = Trap::kInvalidInstruction;
     halted_ = true;
