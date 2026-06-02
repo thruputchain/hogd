@@ -179,9 +179,9 @@ TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
 
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -218,8 +218,8 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -251,8 +251,8 @@ TEST(MockSyscallTest, SpanTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -284,8 +284,8 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -320,8 +320,8 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -365,8 +365,8 @@ TEST(MockSyscallTest, NoReturnTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
@@ -391,8 +391,8 @@ TEST(MockSyscallTest, NoSyscallTest)
   auto &db_context = *static_cast<DBContext *>(db_result.db);
 
   auto runtime_context =
-      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
-  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
