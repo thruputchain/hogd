@@ -216,13 +216,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     }
     ssize_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
     CHECK_GE(num_slots_left, 0L);
-    if (num_slots_left < static_cast<ssize_t>(txs->size())) {
+    if (std::cmp_less(num_slots_left, txs->size())) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
       //
       // We CHECK above that [num_slots_left] is >= 0, so it is safe to cast it
       // to size_t.
-      const size_t resize_to = static_cast<size_t>(num_slots_left);
+      const auto resize_to = static_cast<size_t>(num_slots_left);
       const size_t num_discarded = txs->size() - resize_to;
 
       info("submit_unvetted received {} txs, but only {} will fit in the "
