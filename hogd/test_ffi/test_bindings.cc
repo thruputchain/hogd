@@ -149,7 +149,21 @@ enable_syscall_logging(int32_t level) noexcept
     break;
   }
 
-  lazy_init();
+  try {
+    // First-use logger initialization allocates (hogd_init, the
+    // ThreadsafeLogger, and the global logger swap), so it can throw
+    // std::bad_alloc. This helper is noexcept and has no status return, so a
+    // thrown exception would terminate an honest caller (issue #2441). Report
+    // best-effort to stderr -- error() would dereference the still-null process
+    // logger -- and leave logging unchanged.
+    lazy_init();
+  } catch (std::exception const &e) {
+    std::fputs("error initializing logging for enable_syscall_logging: ",
+               stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return;
+  }
   assert(global_logger != nullptr);
   global_logger->set_log_level(log_level);
 }
