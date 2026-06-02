@@ -111,6 +111,10 @@ LogletBuffer::calculate_crc32c()
 inline bool
 crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
 {
+  // The next slot is persisted as canonical zero bytes (#1530); zero it on the
+  // reconstructed header too so the checksum is independent of the host's
+  // nullptr representation.
+  commit_hdr->clear_next();
   uint32_t crc = crc32c_append(buf.calculate_crc32c(), byte_view(*commit_hdr));
   if (commit_crc != crc) {
     error("CRC check failed! Expected {:x}, got {:x}.", commit_crc, crc);
@@ -383,6 +387,8 @@ load_log_file(
         debug("couldn't read commit record crc");
         return DBError(DBCode::kCorruption);
       }
+      // The checksum is persisted little-endian (#1816).
+      commit_crc = le_to_cpu(commit_crc);
       if (!crc_valid(commit_crc, buf, &hdr)) {
         info("crc check failure checking commit for lsn {}", hdr.lsn);
         return DBError(DBCode::kCorruption);
