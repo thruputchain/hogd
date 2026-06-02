@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -72,6 +73,7 @@ DiskWriter::write_worker(const std::stop_token &stoken)
   alignas(ItemHeader) uint8_t commit_buf[sizeof(ItemHeader) + sizeof(uint32_t)];
   auto *commit_hdr =
       new (commit_buf) ItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0);
+  commit_hdr->clear_next();
 
   // called when a write to disk failed. wakes blocked commit() calls.
   auto signal_ioerror = [this] {
@@ -116,7 +118,10 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         // prepare the commit record.
         commit_hdr->lsn = synced_lsn_;
         crc = crc32c_append(crc, writable_byte_view(*commit_hdr));
-        std::ranges::copy(writable_byte_view(crc),
+        // Persist the checksum in a fixed (little-endian) byte order rather
+        // than the host's native uint32_t representation (#1816).
+        uint32_t crc_le = cpu_to_le(crc);
+        std::ranges::copy(writable_byte_view(crc_le),
                           commit_hdr->get_key().begin());
         crc = 0;
 
@@ -212,9 +217,16 @@ DiskWriter::print_stats()
   }
   out = bytes_out_.load(std::memory_order_relaxed);
 
-  time_point now = std::chrono::high_resolution_clock::now();
+  time_point now = std::chrono::steady_clock::now();
   std::chrono::nanoseconds ns = now - prev_stats_time_;
-  double rate = (out - prev_bytes_out_) * 1e9 / ns.count();
+  // Guard against a zero/non-positive interval: dividing by it yields a
+  // non-finite double, and converting that to size_t for print_iec_bytes is
+  // undefined behavior (#1523). bytes_out_ only grows, so the numerator is >=
+  // 0.
+  size_t rate = ns.count() > 0
+                    ? static_cast<size_t>((out - prev_bytes_out_) * 1e9 /
+                                          static_cast<double>(ns.count()))
+                    : 0;
 
   info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
        print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
@@ -282,7 +294,7 @@ ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
     std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
                 alignof(ItemHeader));
   dst->lsn = use_src_lsn ? src->lsn : w_.cur_lsn_;
-  dst->next = nullptr;
+  dst->clear_next();
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {dst->lsn};
 }
@@ -308,6 +320,7 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
     std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
                 alignof(ItemHeader));
   hdr->lsn = w_.cur_lsn_;
+  hdr->clear_next();
   std::ranges::copy(key, hdr->get_key().begin());
   return {};
 }
