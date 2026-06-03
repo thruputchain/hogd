@@ -316,6 +316,35 @@ gtest_discover_tests(
   NO_PRETTY_VALUES
 )
 
+add_executable(
+  rv32_contract_test
+  rv32/rv32_contract_test.cc
+  rv32/rv32_syscall_entry_bridge_test_main.cc
+)
+
+target_link_libraries(
+  rv32_contract_test
+  precompiles
+  rv32_syscall_bridge
+  runtime
+  runtime_test_lib
+  runtime_test_util
+  db_interface
+  hogdb
+  storage_cost
+  model_checker
+  contract_loader
+  genesis
+  GTest::gtest
+)
+gtest_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
+
+add_dependencies(
+  rv32_contract_test
+  all_riscvs_built # for fibonacci.rv32a (and fibonacci_call.rv32a)
+  all_wasm_headers # for built_contracts/fibonacci.h
+)
+
 add_dependencies(
   runtime_test_objects
   all_wasm_headers

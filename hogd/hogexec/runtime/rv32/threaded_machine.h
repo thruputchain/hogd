@@ -206,7 +206,8 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<uint8_t> memory() { return memory_; }
 
-  [[nodiscard]] bool consume_gas(uint64_t amount) {
+  [[nodiscard]] bool consume_gas(uint64_t amount)
+  {
     if (amount > gas_remaining_) {
       gas_remaining_ = 0;
       return false;
