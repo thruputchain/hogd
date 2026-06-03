@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <format>
 #include <memory>
 #include <string_view>
 #include <utility>
