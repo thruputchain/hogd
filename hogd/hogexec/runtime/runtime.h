@@ -246,12 +246,6 @@ public:
   }
 
   InvokeResult invoke(MethodID method_id, uint64_t gas_limit);
-  /*InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
-  {
-    char buf[16];
-    std::format_to(buf, "{:016X}", entrypoint);
-    return invoke(std::string_view(buf, 16), gas_limit);
-  }*/
 
   virtual ~Runtime() = default;
 
