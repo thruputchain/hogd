@@ -77,11 +77,11 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Create two contracts to add to contracts_to_deploy
   Contract contract_to_deploy_1(ContractType::kWasmi);
   contract_to_deploy_1.wasmi_contract() =
-      ContractBlob{.wasm = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1}};
+      ContractBlob{.data = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1}};
 
   Contract contract_to_deploy_2(ContractType::kWasmi);
   contract_to_deploy_2.wasmi_contract() =
-      ContractBlob{.wasm = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2}};
+      ContractBlob{.data = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2}};
 
   auto contract_1_hash = sha256(contract_to_deploy_1);
   auto contract_2_hash = sha256(contract_to_deploy_2);

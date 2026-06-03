@@ -72,7 +72,7 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
   // the try is technically unnecessary (for the ->wasmi_contract() access,
   // which is checked above); this satisfies clang-tidy
   try {
-    auto const &wasm = (*res)->wasmi_contract().wasm;
+    auto const &wasm = (*res)->wasmi_contract().data;
 
     if (wasm.empty()) {
       return ContractGetResult{.err_code = 0, .data = nullptr, .data_len = 0};
@@ -168,7 +168,7 @@ WasmtimeContext::verify_contract(Contract const &contract) const
   }
 
   try {
-    auto const &wasm = contract.wasmi_contract().wasm;
+    auto const &wasm = contract.wasmi_contract().data;
     return static_cast<InvokeErrorCode>(
         wasmtime_verify_contract(wasmtime_context_ptr_,
                                  reinterpret_cast<uint8_t const *>(wasm.data()),

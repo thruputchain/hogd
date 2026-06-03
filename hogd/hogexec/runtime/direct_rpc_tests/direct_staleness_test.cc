@@ -30,6 +30,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class DirectStalenessTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
@@ -156,7 +157,7 @@ TEST_F(DirectStalenessTest,
   auto [block_a, block_b] = create_sibling();
 
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().wasm = {0x00, 0x61, 0x73, 0x6d,
+  contract.wasmi_contract().data = {0x00, 0x61, 0x73, 0x6d,
                                     0x01, 0x00, 0x00, 0x00};
   auto contract_ptr = std::make_shared<const Contract>(contract);
   auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);

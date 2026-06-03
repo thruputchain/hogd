@@ -3161,13 +3161,13 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasm)
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_param_entrypoint.wasm");
-  append_name_custom_section(contract.wasmi_contract().wasm, 96_KiB);
+  append_name_custom_section(contract.wasmi_contract().data, 96_KiB);
 
   auto bytes = x23::serialize(contract);
   // Precondition: the contract is large enough to be rejected by the DB write
   // but the module stays under the meter's 2 MiB cap, so verification passes.
   ASSERT_GT(bytes.size(), kBigItemThreshold);
-  ASSERT_LT(contract.wasmi_contract().wasm.size(), 2_MiB);
+  ASSERT_LT(contract.wasmi_contract().data.size(), 2_MiB);
 
   auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
   ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);

@@ -66,7 +66,7 @@ process_contract(std::string const &contract_name, std::string const &filename)
 
   // Create contract object
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().wasm.append_range(wasm_data);
+  contract.wasmi_contract().data.append_range(wasm_data);
 
   // Compute hash
   SHA256Hash hash = sha256(contract);

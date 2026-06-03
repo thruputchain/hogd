@@ -24,7 +24,7 @@
 namespace hogd {
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class DirectStorageOrderingTest : public ::testing::TestWithParam<TestDB>,
                                   public NativeContractTestFramework {
 public:
@@ -294,7 +294,7 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
   fw.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().wasm.append_range(std::string(2048, 'x'));
+  contract.wasmi_contract().data.append_range(std::string(2048, 'x'));
   auto contract_ptr = std::make_shared<const Contract>(contract);
   const auto deployed_contract_hash =
       NativeContractTestFramework::make_deployed_contract_hash(contract_ptr);
