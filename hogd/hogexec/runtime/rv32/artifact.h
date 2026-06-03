@@ -227,8 +227,8 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
   digest = format_fingerprint_u64(digest, "memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, "memory_bytes_le_max", 1);
   digest = format_fingerprint_u64(digest, "code_size_nonzero", 1);
-  digest = format_fingerprint_u64(digest,
-                                  "initial_memory_size_le_memory_bytes", 1);
+  digest =
+      format_fingerprint_u64(digest, "initial_memory_size_le_memory_bytes", 1);
   digest = format_fingerprint_string(digest, "canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
   digest = format_fingerprint_u64(digest, "sections_must_be_in_bounds", 1);
