@@ -9,6 +9,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
+#include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
@@ -63,8 +64,22 @@ from_trampoline_result(TrampolineResult result)
 std::pair<InvokeStatus<void>, GasAmount>
 Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
-  rv32::ThreadedMachine machine = contract_.instantiate(gas_limit);
-  machine.seed_method_id(method_id);
+  auto machine_noexcept =
+      [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
+    try {
+      rv32::ThreadedMachine machine = contract_.instantiate(gas_limit);
+      machine.seed_method_id(method_id);
+      return machine;
+    } catch (std::exception const &e) {
+      error("Unrecoverable: std::exception: {}", e.what());
+      return InvokeError{InvokeErrorCode::Unrecoverable};
+    }
+  }();
+  if (!machine_noexcept.has_value()) {
+    return {machine_noexcept.error(), 0};
+  }
+
+  auto machine = *machine_noexcept;
 
   rv32::StepResult result = machine.start();
 
