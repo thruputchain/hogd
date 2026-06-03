@@ -205,9 +205,12 @@ get_cost_model(void *db) noexcept
             .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
   }
 
-  auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
-
   try {
+    // Reading the cost model copies the persisted RAMDB row, which allocates
+    // and can throw std::bad_alloc. Keep it inside the catch boundary so it is
+    // converted to a structured FFI error instead of crossing the noexcept
+    // helper and terminating the process (issue #2513).
+    auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
     auto serialized = x23::serialize(cost_model);
 
     auto buffer = make_new_data_buffer(serialized.size());
@@ -597,6 +600,13 @@ pop_context()
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     error("pop_context error: no context!");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+  // The thread-local context installed for a running root_invoke() is owned by
+  // that call; a mock contract callback must not pop it, or root_invoke()'s
+  // own deferred pop would CHECK-fail on the now-empty slot (issue #2510).
+  if (context->root_invoke_owns_context()) {
+    error("pop_context error: context is owned by the running root invocation");
     return kTestFFIErrorCodeUnrecoverableError;
   }
   context->pop_context();

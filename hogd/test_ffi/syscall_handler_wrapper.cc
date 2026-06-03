@@ -72,7 +72,14 @@ SyscallHandlerContext::root_invoke()
   if (!push_context()) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
-  x23::Defer _([this]() { pop_context(); });
+  // Claim ownership of the TLS context for the duration of the root call so a
+  // mock contract callback can't pop it via the exported pop_context() helper
+  // and trip the deferred pop's CHECK (issue #2510).
+  set_root_invoke_owns_context(true);
+  x23::Defer _([this]() {
+    set_root_invoke_owns_context(false);
+    pop_context();
+  });
 
   auto res = handler_.root_invoke();
 
@@ -212,13 +219,27 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
+  //
+  // start_frame() pushes a frame onto the handler's invocation stack. The
+  // trace-stack and mock-runtime bookkeeping that pairs with it must not be
+  // able to throw afterward, or the handler would be left with an active frame
+  // that has no backing mock runtime and can be neither finished nor closed
+  // (issue #2507). Perform the throwing allocations -- the EmptyRuntime and the
+  // two stacks' capacity -- before start_frame() so the publish step below is
+  // non-throwing.
+  auto mock_runtime = std::make_unique<EmptyRuntime>(invocation);
+  invocation_frame_trace_stack_.reserve(invocation_frame_trace_stack_.size() +
+                                        1);
+  mock_runtime_stack_.reserve(mock_runtime_stack_.size() + 1);
+
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
                                                    std::span<uint32_t const>{});
   if (stashed_parent_trace) {
     invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
   }
 
-  push_mock_runtime(new EmptyRuntime(invocation));
+  // Capacity was reserved above, so this push_back cannot reallocate or throw.
+  push_mock_runtime(mock_runtime.release());
   return kTestFFIErrorCodeNone;
 }
 

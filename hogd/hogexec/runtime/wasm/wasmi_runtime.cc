@@ -70,7 +70,7 @@ wasmi_contract_get_fn(void *host_call_context_ptr,
   }
 
   try {
-    auto const &wasm = (*res)->wasmi_contract().wasm;
+    auto const &wasm = (*res)->wasmi_contract().data;
 
     if (wasm.empty()) {
       return ContractGetResult{.err_code = 0, .data = nullptr, .data_len = 0};
@@ -177,8 +177,8 @@ WasmiContext::verify_contract(Contract const &contract) const
     return static_cast<InvokeErrorCode>(
         wasmi_verify_contract(wasmi_context_ptr_,
                               reinterpret_cast<const uint8_t *>(
-                                  contract.wasmi_contract().wasm.data()),
-                              contract.wasmi_contract().wasm.size()));
+                                  contract.wasmi_contract().data.data()),
+                              contract.wasmi_contract().data.size()));
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
     return InvokeErrorCode::Unrecoverable;

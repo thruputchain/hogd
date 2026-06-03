@@ -152,6 +152,19 @@ public:
     return finish_result_handoff_failed_;
   }
 
+  // root_invoke() installs this handler as the thread-local context for the
+  // duration of the root call and owns that slot. The exported pop_context()
+  // helper consults this so a mock contract callback cannot pop the root-owned
+  // context out from under the running root invocation (issue #2510).
+  void set_root_invoke_owns_context(bool owned)
+  {
+    root_invoke_owns_context_ = owned;
+  }
+  [[nodiscard]] bool root_invoke_owns_context() const
+  {
+    return root_invoke_owns_context_;
+  }
+
 private:
   constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
   constexpr static auto kMakeFFIError =
@@ -184,6 +197,7 @@ private:
   bool transaction_committed_or_aborted_ = false;
   bool is_mocked_handler_;
   bool finish_result_handoff_failed_ = false;
+  bool root_invoke_owns_context_ = false;
 };
 
 constexpr ForeignHostFnResult

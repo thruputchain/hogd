@@ -80,7 +80,7 @@ public:
       break;
     case ContractType::kWasmi:
       contract_size =
-          static_cast<uint32_t>(contract->wasmi_contract().wasm.size());
+          static_cast<uint32_t>(contract->wasmi_contract().data.size());
       break;
     default:
       assert(false);
