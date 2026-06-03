@@ -234,7 +234,7 @@ BENCHMARK(insert_then_parallel_generate_all_hashes)
     ->Unit(benchmark::kSecond);
 
 void
-insert_then_serial_generate_all_hashes(benchmark::State &state)
+insert_then_generate_all_hashes(benchmark::State &state)
 {
   const size_t num_threads = available_parallelism();
   std::vector<HexArray> paths =
@@ -262,7 +262,7 @@ insert_then_serial_generate_all_hashes(benchmark::State &state)
   state.counters["hash_s"] =
       hash_seconds / static_cast<double>(state.iterations());
 }
-BENCHMARK(insert_then_serial_generate_all_hashes)
+BENCHMARK(insert_then_generate_all_hashes)
     ->Iterations(1)
     ->Unit(benchmark::kSecond);
 
