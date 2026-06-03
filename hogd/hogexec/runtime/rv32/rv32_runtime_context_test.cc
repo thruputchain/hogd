@@ -38,7 +38,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
@@ -183,7 +182,6 @@ load_lowered_sdk_smoke_artifact(std::string artifact_path)
           rv32::RuntimeContractImage{
               .program = parsed->program,
               .initial_memory = std::move(parsed->initial_memory),
-              .dispatch_table = std::move(parsed->dispatch_table),
               .memory_bytes = parsed->memory_bytes,
           },
   };
@@ -460,6 +458,9 @@ make_return_image(std::span<const uint8_t> payload)
   };
 }
 
+// v4 guest-side dispatch: _start reads the seeded method id (a0 = low 32 bits)
+// and branches. Method 1 returns one_payload; any other id returns zero_payload
+// (the default arm), mirroring how an SDK-generated dispatcher routes by id.
 rv32::RuntimeContractImage
 make_two_method_return_image(std::span<const uint8_t> zero_payload,
                              std::span<const uint8_t> one_payload)
@@ -473,21 +474,26 @@ make_two_method_return_image(std::span<const uint8_t> zero_payload,
   std::ranges::copy(one_payload,
                     initial_memory.begin() + kOneReturnBufferAddress);
 
-  std::vector<uint32_t> program;
-  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
-                           static_cast<int32_t>(kZeroReturnBufferAddress),
-                           static_cast<int32_t>(zero_payload.size()), 0, 0, 0});
-  const uint32_t method_one_pc =
-      static_cast<uint32_t>(program.size()) * rv32::kInstructionBytes;
-  append_syscall(program, {static_cast<int32_t>(SyscallNo::kReturn),
-                           static_cast<int32_t>(kOneReturnBufferAddress),
-                           static_cast<int32_t>(one_payload.size()), 0, 0, 0});
+  // x6 = 1; if a0 (method id low) != 1, branch +20 bytes to the zero-method
+  // Return block; otherwise fall through to the one-method Return block. Each
+  // Return block is a0=kReturn, a1=buffer, a2=len, ecall (Return halts, so the
+  // one-method block never falls into the zero block).
+  const std::vector<uint32_t> program = {
+      addi(6, 0, 1),
+      rv32::test_program::branch(1, 10, 6, 20), // bne a0, x6, +20
+      addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+      addi(11, 0, static_cast<int32_t>(kOneReturnBufferAddress)),
+      addi(12, 0, static_cast<int32_t>(one_payload.size())),
+      ecall(),
+      addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+      addi(11, 0, static_cast<int32_t>(kZeroReturnBufferAddress)),
+      addi(12, 0, static_cast<int32_t>(zero_payload.size())),
+      ecall(),
+  };
 
   return rv32::RuntimeContractImage{
       .program = make_program(program),
       .initial_memory = std::move(initial_memory),
-      .dispatch_table = {{.method_id = 0, .pc = 0},
-                         {.method_id = 1, .pc = method_one_pc}},
       .memory_bytes = kMemoryBytes,
   };
 }
@@ -525,20 +531,16 @@ make_compiled_sha256_then_return_image()
   return rv32::RuntimeContractImage{
       .program = std::move(artifact->program),
       .initial_memory = std::move(artifact->initial_memory),
-      .dispatch_table = std::move(artifact->dispatch_table),
       .memory_bytes = artifact->memory_bytes,
   };
 }
 
 rv32::RuntimeContractImage
 make_artifact_runtime_image(std::initializer_list<uint32_t> words,
-                            std::vector<uint8_t> initial_memory,
-                            std::vector<rv32::DispatchEntry> dispatch_table = {
-                                {.method_id = 0, .pc = 0}})
+                            std::vector<uint8_t> initial_memory)
 {
   const std::vector<uint8_t> artifact =
-      rv32::test_artifact::build_artifact(words, initial_memory,
-                                          dispatch_table);
+      rv32::test_artifact::build_artifact(words, initial_memory);
   auto parsed = rv32::parse_artifact(artifact);
   if (!parsed.has_value()) {
     ADD_FAILURE() << "failed to parse synthetic RV32 artifact";
@@ -547,7 +549,6 @@ make_artifact_runtime_image(std::initializer_list<uint32_t> words,
   return rv32::RuntimeContractImage{
       .program = std::move(parsed->program),
       .initial_memory = std::move(parsed->initial_memory),
-      .dispatch_table = std::move(parsed->dispatch_table),
       .memory_bytes = parsed->memory_bytes,
   };
 }
@@ -1556,36 +1557,7 @@ TEST_F(Rv32RuntimeContextTest, ArtifactMemoryTransformReturnsDeterministicBytes)
       std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
 }
 
-TEST_F(Rv32RuntimeContextTest, ArtifactMissingDispatchMethodIsDeterministic)
-{
-  const std::array<uint8_t, 1> payload = {0};
-  auto image = make_artifact_runtime_image(
-      {
-          // Body is never reached: dispatch lacks method 0 and traps first.
-          addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
-          addi(11, 0, kReturnBufferAddress),
-          addi(12, 0, static_cast<int32_t>(payload.size())),
-          ecall(),
-      },
-      make_initial_return_memory(payload), {{.method_id = 1, .pc = 0}});
-  auto rv32_context =
-      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-  auto handler = make_new_system_call_handler(make_root_transaction(kParityGas),
-                                              rv32_context);
-  handler.enable_tracing();
-
-  const auto result = handler.root_invoke();
-
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
-  EXPECT_EQ(result.gas_consumed_, 0U);
-  ASSERT_NE(handler.get_trace(), nullptr);
-  EXPECT_TRUE(handler.get_trace()->system_calls.empty());
-}
-
-TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodToSelectedPc)
+TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodInGuest)
 {
   const std::array<uint8_t, 4> zero_payload = {'z', 'e', 'r', 'o'};
   const std::array<uint8_t, 3> one_payload = {'o', 'n', 'e'};
@@ -1607,53 +1579,29 @@ TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodToSelectedPc)
   EXPECT_TRUE(std::ranges::equal(output.return_buffer(), one_payload));
 }
 
-TEST_F(Rv32RuntimeContextTest, UnknownDispatchMethodIsDeterministicMiss)
+TEST_F(Rv32RuntimeContextTest, UnknownMethodIsMeteredGuestTrap)
 {
+  // v4 Option A: dispatch is in-guest. An unknown method id is NOT a
+  // pre-execution host miss -- the runtime builds the Machine, seeds the id,
+  // enters _start, and the guest dispatcher's default arm traps. So the miss is
+  // metered (nonzero gas) and the guest ran, diverging from WASM's zero-gas
+  // function-not-found (no host-side existence check on the RV32 path).
   constexpr Runtime::MethodID kUnknownMethodId = 2;
-  auto wasm_context = make_hogexec_context();
-  auto wasm_contract =
-      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
-
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      Invocation{
-                          .invoked_address = kWasmContractAddress,
-                          .entrypoint =
-                              entrypoint_from_method_id(kUnknownMethodId),
-                          .gas_limit = kEnoughGas,
-                          .calldata = Calldata{},
-                      },
-                  .uniquifier =
-                      Uniquifier{
-                          .block_expiry_height =
-                              std::numeric_limits<BlockHeight>::max(),
-                          .nonce = 41,
-                      }},
-      *wasm_context);
   auto rv32_handler = make_new_system_call_handler(
       make_root_transaction(kEnoughGas, kUnknownMethodId), rv32_context);
   rv32_handler.enable_tracing();
 
-  auto wasm_result = wasm_handler.root_invoke();
   auto rv32_result = rv32_handler.root_invoke();
 
-  ASSERT_FALSE(wasm_result.is_root_success());
   ASSERT_FALSE(rv32_result.is_root_success());
-  EXPECT_EQ(wasm_result.result_.error().code(),
-            rv32_result.result_.error().code());
-  ASSERT_EQ(rv32_result.result_.error().code(), InvokeErrorCode::Deterministic);
-  EXPECT_EQ(wasm_result.gas_consumed_, 0U);
-  EXPECT_EQ(rv32_result.gas_consumed_, 0U);
+  EXPECT_EQ(rv32_result.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_GT(rv32_result.gas_consumed_, 0U); // guest dispatcher ran (metered)
   ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  EXPECT_TRUE(rv32_handler.get_trace()->system_calls.empty());
 }
 
 TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
@@ -1909,31 +1857,6 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
             InvokeErrorCode::Deterministic);
 }
 
-TEST_F(Rv32RuntimeContextTest, InvalidRuntimeDispatchTableIsRejected)
-{
-  const std::array<uint8_t, 4> payload = {'r', 'v', '3', '2'};
-  auto image = make_return_image(payload);
-  image.dispatch_table = {
-      {.method_id = 1, .pc = 0},
-      {.method_id = 0, .pc = 0},
-  };
-  auto rv32_context =
-      rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-
-  EXPECT_EQ(rv32_context.verify_contract(*contract),
-            InvokeErrorCode::Deterministic);
-
-  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                              rv32_context);
-  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
-
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
-  EXPECT_EQ(result.gas_consumed_, 0U);
-}
-
 // Metadata cross-check for SDK-lowered RV32 artifacts.
 TEST_F(Rv32RuntimeContextTest,
        LoweredSdkArtifactFormatFingerprintMatchesRuntime)
@@ -1986,18 +1909,12 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   }
   LoadedRv32SmokeArtifact loaded_artifact = std::move(*loaded);
 
+  // v4 dispatches in-guest; there is no host-side dispatch table to inspect.
+  // The increment-then-get round trip below exercises dispatch end-to-end:
+  // each call enters _start with its method id seeded, and the guest routes it.
   const Runtime::MethodID increment_method =
       rv32_smoke_counter_method_id("increment");
   const Runtime::MethodID get_method = rv32_smoke_counter_method_id("get");
-  ASSERT_NE(std::ranges::find(loaded_artifact.image.dispatch_table,
-                              increment_method,
-                              &rv32::DispatchEntry::method_id),
-            loaded_artifact.image.dispatch_table.end())
-      << "lowered counter artifact is missing increment dispatch entry";
-  ASSERT_NE(std::ranges::find(loaded_artifact.image.dispatch_table, get_method,
-                              &rv32::DispatchEntry::method_id),
-            loaded_artifact.image.dispatch_table.end())
-      << "lowered counter artifact is missing get dispatch entry";
 
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, std::move(loaded_artifact.image)}});
@@ -2094,29 +2011,17 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
             << " bytes from " << loaded_artifact.path << "\n";
   std::cerr << "[smoke] parsed: code_bytes="
             << loaded_artifact.image.program->byte_size()
-            << " dispatch_entries="
-            << loaded_artifact.image.dispatch_table.size()
             << " memory_bytes=" << loaded_artifact.image.memory_bytes << "\n";
-  ASSERT_FALSE(loaded_artifact.image.dispatch_table.empty());
 
-  // Pick the smoke target. Default is the lowest-ID dispatch entry; set
-  // RV32_SMOKE_METHOD_ID=0x<16-hex> to target a specific method (e.g. a
-  // no-arg getter that returns cleanly without calldata). For counter the
-  // default lands on whichever of initialize/increment/decrement/get sorts
-  // first by ContractEntrypointID hash.
-  auto smoke_entry = loaded_artifact.image.dispatch_table.front();
+  // v4 dispatches in-guest, so the target is chosen by method id, not a table
+  // entry. Default to the no-arg `get` (returns cleanly without calldata); set
+  // RV32_SMOKE_METHOD_ID=0x<16-hex> to target a specific method.
+  uint64_t smoke_method_id = rv32_smoke_counter_method_id("get");
   if (const char *want = std::getenv("RV32_SMOKE_METHOD_ID")) {
-    const uint64_t target = std::strtoull(want, nullptr, 0);
-    const auto it = std::ranges::find(loaded_artifact.image.dispatch_table,
-                                      target, &rv32::DispatchEntry::method_id);
-    ASSERT_NE(it, loaded_artifact.image.dispatch_table.end())
-        << "RV32_SMOKE_METHOD_ID=0x" << std::hex << target
-        << " not in the artifact dispatch table";
-    smoke_entry = *it;
+    smoke_method_id = std::strtoull(want, nullptr, 0);
   }
-  std::cerr << "[smoke] invoking method_id=0x" << std::hex
-            << smoke_entry.method_id << " at pc=" << std::dec << smoke_entry.pc
-            << "\n";
+  std::cerr << "[smoke] invoking method_id=0x" << std::hex << smoke_method_id
+            << std::dec << "\n";
 
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, std::move(loaded_artifact.image)}});
@@ -2124,7 +2029,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   install_contract(contract);
 
   auto handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas, smoke_entry.method_id), rv32_context);
+      make_root_transaction(kParityGas, smoke_method_id), rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
 

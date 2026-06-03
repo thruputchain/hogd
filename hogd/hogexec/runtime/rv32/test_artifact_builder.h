@@ -7,9 +7,6 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
-#include "hogd/hogexec/runtime/rv32/encoding.h"
-#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 namespace hogd::rv32::test_artifact {
@@ -43,35 +40,21 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
-inline std::vector<uint8_t>
-dispatch_bytes(std::span<const DispatchEntry> dispatch_table)
-{
-  std::vector<uint8_t> bytes;
-  bytes.reserve(dispatch_table.size() * kDispatchEntryBytes);
-  for (const DispatchEntry &entry : dispatch_table) {
-    append_u64(bytes, entry.method_id);
-    append_u32(bytes, entry.pc);
-    append_u32(bytes, 0);
-  }
-  return bytes;
-}
-
+// Assemble a v4 artifact: header || code || initial_memory. memory_bytes is
+// stamped equal to the stored prefix size (callers that want a larger data
+// address space rewrite the memory_bytes header field, exercising the
+// Decision-5 initial_memory_size < memory_bytes path).
 inline std::vector<uint8_t>
 build_artifact(std::span<const uint32_t> words,
-               std::span<const uint8_t> initial_memory,
-               std::span<const DispatchEntry> dispatch_table)
+               std::span<const uint8_t> initial_memory)
 {
   const std::vector<uint8_t> code = test_program::code_from_words(words);
-  const std::vector<uint8_t> dispatch = dispatch_bytes(dispatch_table);
   const uint32_t code_offset = kArtifactHeaderBytes;
-  const uint32_t dispatch_offset =
-      code_offset + static_cast<uint32_t>(code.size());
   const uint32_t memory_offset =
-      dispatch_offset + static_cast<uint32_t>(dispatch.size());
+      code_offset + static_cast<uint32_t>(code.size());
 
   std::vector<uint8_t> artifact;
-  artifact.reserve(kArtifactHeaderBytes + code.size() + dispatch.size() +
-                   initial_memory.size());
+  artifact.reserve(kArtifactHeaderBytes + code.size() + initial_memory.size());
   append_bytes(artifact, kArtifactMagic);
   append_u32(artifact, kArtifactFormatVersion);
   append_u32(artifact, kArtifactHeaderBytes);
@@ -86,24 +69,19 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, static_cast<uint32_t>(initial_memory.size()));
   append_u32(artifact, code_offset);
   append_u32(artifact, memory_offset);
-  append_u32(artifact, dispatch_offset);
-  append_u32(artifact, static_cast<uint32_t>(dispatch.size()));
   append_digest(artifact, artifact_digest(code));
   append_digest(artifact, artifact_digest(initial_memory));
-  append_digest(artifact, artifact_digest(dispatch));
   append_bytes(artifact, code);
-  append_bytes(artifact, dispatch);
   append_bytes(artifact, initial_memory);
   return artifact;
 }
 
 inline std::vector<uint8_t>
 build_artifact(std::initializer_list<uint32_t> words,
-               std::span<const uint8_t> initial_memory,
-               std::span<const DispatchEntry> dispatch_table)
+               std::span<const uint8_t> initial_memory)
 {
   return build_artifact(std::span<const uint32_t>(words.begin(), words.size()),
-                        initial_memory, dispatch_table);
+                        initial_memory);
 }
 
 } // namespace hogd::rv32::test_artifact

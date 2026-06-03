@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
@@ -123,17 +122,13 @@ TEST(Rv32UnsupportedProfileTest,
      rejectsUpstreamInspiredEncodingsAtArtifactBoundary)
 {
   const std::array<uint8_t, 16> initial_memory = {};
-  const std::array<DispatchEntry, 1> dispatch_table = {
-      DispatchEntry{.method_id = 0, .pc = 0}};
 
   for (const UnsupportedProfileCase &test_case : kUnsupportedProfileCases) {
     SCOPED_TRACE(testing::Message()
                  << test_case.upstream_source << " " << test_case.instruction);
     const std::vector<uint32_t> words = {test_case.word};
-    const std::vector<uint8_t> artifact =
-        test_artifact::build_artifact(std::span<const uint32_t>(words.data(),
-                                                                words.size()),
-                                      initial_memory, dispatch_table);
+    const std::vector<uint8_t> artifact = test_artifact::build_artifact(
+        std::span<const uint32_t>(words.data(), words.size()), initial_memory);
 
     auto parsed = parse_artifact(
         std::span<const uint8_t>(artifact.data(), artifact.size()));

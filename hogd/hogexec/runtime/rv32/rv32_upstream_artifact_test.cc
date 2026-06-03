@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <array>
 #include <limits>
 #include <memory>
 #include <span>
@@ -15,7 +14,6 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
@@ -110,10 +108,8 @@ rv32::RuntimeContractImage
 make_artifact_image(std::span<const uint32_t> words,
                     std::vector<uint8_t> initial_memory)
 {
-  const std::array<rv32::DispatchEntry, 1> dispatch = {
-      rv32::DispatchEntry{.method_id = 0, .pc = 0}};
   const std::vector<uint8_t> artifact =
-      rv32::test_artifact::build_artifact(words, initial_memory, dispatch);
+      rv32::test_artifact::build_artifact(words, initial_memory);
   auto parsed = rv32::parse_artifact(artifact);
   if (!parsed.has_value()) {
     ADD_FAILURE() << "failed to parse upstream-derived RV32 artifact";
@@ -122,7 +118,6 @@ make_artifact_image(std::span<const uint32_t> words,
   return rv32::RuntimeContractImage{
       .program = std::move(parsed->program),
       .initial_memory = std::move(parsed->initial_memory),
-      .dispatch_table = std::move(parsed->dispatch_table),
       .memory_bytes = parsed->memory_bytes,
   };
 }

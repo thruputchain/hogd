@@ -26,6 +26,12 @@ public:
 
   void reset(uint64_t gas);
 
+  // v4 guest-dispatch entry seam: stage the invoked method id into a0/a1
+  // (a0 = low 32 bits, a1 = high 32 bits) after reset()/memory staging and
+  // before run(). The guest _start dispatches on it. Narrow by design -- not a
+  // general register-write API.
+  void seed_method_id(uint64_t method_id);
+
   [[nodiscard]] StepResult step();
   [[nodiscard]] StepResult start();
   [[nodiscard]] StepResult complete_ecall(const HostResult &result);

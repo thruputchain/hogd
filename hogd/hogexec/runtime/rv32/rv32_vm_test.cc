@@ -15,12 +15,12 @@
 
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
+#include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_support.h"
 
@@ -75,20 +75,6 @@ store_digest_at(std::vector<uint8_t> &bytes, size_t offset,
                 const ArtifactDigest &digest)
 {
   std::ranges::copy(digest, bytes.begin() + static_cast<ptrdiff_t>(offset));
-}
-
-void
-refresh_dispatch_digest(std::vector<uint8_t> &artifact)
-{
-  const uint32_t dispatch_offset =
-      load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-  const uint32_t dispatch_size =
-      load_u32_le(artifact, kArtifactDispatchSizeOffset);
-  const auto dispatch =
-      std::span<const uint8_t>(artifact).subspan(dispatch_offset,
-                                                 dispatch_size);
-  store_digest_at(artifact, kArtifactDispatchDigestOffset,
-                  artifact_digest(dispatch));
 }
 
 void
@@ -275,24 +261,19 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), compiled_sha256_return::kCodeBytes);
-  EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
-  ASSERT_EQ(parsed->dispatch_table.size(), 2U);
-  EXPECT_EQ(parsed->dispatch_table[0].method_id,
-            compiled_sha256_return::kSha256RepeatedMethodId);
-  EXPECT_EQ(parsed->dispatch_table[0].pc,
-            compiled_sha256_return::kSha256RepeatedPc);
-  EXPECT_EQ(parsed->dispatch_table[1].method_id,
-            compiled_sha256_return::kSha256MethodId);
-  EXPECT_EQ(parsed->dispatch_table[1].pc, compiled_sha256_return::kSha256Pc);
-  EXPECT_NE(compiled_sha256_return::kSha256RepeatedPc,
-            compiled_sha256_return::kSha256Pc);
+  // v4: memory_bytes is the full data address space; the stored image is only
+  // the initialized prefix (Decision 5), zero-extended by the runtime.
+  EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
-            kMaxMemoryBytes);
+            compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactInitialMemorySizeOffset),
-            kMaxMemoryBytes);
-  ASSERT_EQ(parsed->initial_memory.size(), kMaxMemoryBytes);
+            compiled_sha256_return::kInitialMemoryBytes);
+  ASSERT_EQ(parsed->initial_memory.size(),
+            compiled_sha256_return::kInitialMemoryBytes);
+  EXPECT_LE(compiled_sha256_return::kInitialMemoryBytes,
+            compiled_sha256_return::kMemoryBytes);
   EXPECT_TRUE(std::ranges::equal(
       std::span<const uint8_t>(compiled_sha256_return::kInput),
       std::span<const uint8_t>(parsed->initial_memory)
@@ -406,13 +387,6 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
-                 kMaxMemoryBytes - 1);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kInitialMemorySizeMismatch);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeOffsetOffset, kArtifactHeaderBytes - 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
   }
@@ -427,30 +401,6 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
     auto artifact = compiled_artifact_bytes();
     artifact.push_back(0);
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactDispatchOffsetOffset, kArtifactHeaderBytes);
-    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactDispatchSizeOffset, 0);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchSizeInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactDispatchSizeOffset, 4);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchSizeInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactDispatchSizeOffset,
-                 kMaxDispatchBytes + kDispatchEntryBytes);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchSizeInvalid);
   }
 }
 
@@ -471,12 +421,6 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
   }
   {
     auto artifact = compiled_artifact_bytes();
-    store_digest_at(artifact, kArtifactDispatchDigestOffset, ArtifactDigest{});
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchDigestMismatch);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
     const uint32_t code_offset =
         load_u32_le(artifact, kArtifactCodeOffsetOffset);
     const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
@@ -493,58 +437,21 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
   }
 }
 
-TEST(Rv32ArtifactTest, rejectsInvalidDispatchTables)
+TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
 {
-  {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t dispatch_offset =
-        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u64_at(artifact, dispatch_offset,
-                 compiled_sha256_return::kSha256MethodId);
-    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes,
-                 compiled_sha256_return::kSha256RepeatedMethodId);
-    refresh_dispatch_digest(artifact);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchTableInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t dispatch_offset =
-        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u64_at(artifact, dispatch_offset + kDispatchEntryBytes,
-                 compiled_sha256_return::kSha256RepeatedMethodId);
-    refresh_dispatch_digest(artifact);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchTableInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t dispatch_offset =
-        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u32_at(artifact, dispatch_offset + kDispatchEntryPcOffset, 2);
-    refresh_dispatch_digest(artifact);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchTableInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t dispatch_offset =
-        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
-    store_u32_at(artifact, dispatch_offset + kDispatchEntryPcOffset, code_size);
-    refresh_dispatch_digest(artifact);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchTableInvalid);
-  }
-  {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t dispatch_offset =
-        load_u32_le(artifact, kArtifactDispatchOffsetOffset);
-    store_u32_at(artifact, dispatch_offset + kDispatchEntryReservedOffset, 1);
-    refresh_dispatch_digest(artifact);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kDispatchTableInvalid);
-  }
+  // Decision 5: initial_memory_size may be < memory_bytes; the runtime
+  // zero-extends the tail. build_artifact stamps memory_bytes == the stored
+  // prefix, so bump the (non-digest-covered) memory_bytes field to a larger
+  // address space and confirm the shorter stored prefix still parses.
+  const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
+  auto artifact =
+      test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored);
+  store_u32_at(artifact, kArtifactMemoryBytesOffset, 256);
+  const auto parsed = parse_artifact(artifact);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->memory_bytes, 256U);
+  ASSERT_EQ(parsed->initial_memory.size(), stored.size());
+  EXPECT_TRUE(std::ranges::equal(parsed->initial_memory, stored));
 }
 
 TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
@@ -555,6 +462,15 @@ TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
   EXPECT_EQ(machine.reg(0), 0U);
   EXPECT_EQ(machine.reg(2), 4096U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
+}
+
+TEST(Rv32MachineSeed, seedsMethodIdIntoA0A1)
+{
+  const auto program = make_program({addi(0, 0, 0)});
+  Machine machine(program, 4096, 10);
+  machine.seed_method_id(0xCA571C66A719DD56ULL);
+  EXPECT_EQ(machine.reg(10), 0xA719DD56U); // a0 = low 32 bits
+  EXPECT_EQ(machine.reg(11), 0xCA571C66U); // a1 = high 32 bits
 }
 
 TEST(Rv32ProgramTest, reset_restores_initial_machine_state)

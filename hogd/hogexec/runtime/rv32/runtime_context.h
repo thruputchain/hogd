@@ -9,20 +9,18 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
 namespace hogd::rv32 {
 
 // Test-runtime image after artifact parsing/lowering. Production activation
 // still needs a deployed-artifact store and selector; this is not that layer.
+//
+// v4 enters every call at PC 0 (_start) with the invoked method id seeded into
+// a0/a1; the guest dispatches. There is no host-side method -> PC table.
 struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
-  // Test-built images default to the historical single method-0 entry. Parsed
-  // F2 artifacts always provide their explicit dispatch table.
-  std::vector<DispatchEntry> dispatch_table = {
-      DispatchEntry{.method_id = 0, .pc = 0}};
   uint32_t memory_bytes = kMaxMemoryBytes;
   HostFn8 entry = nullptr;
 };
