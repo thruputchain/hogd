@@ -1357,6 +1357,7 @@ MerkleTrie::unlock_nodes_from(Node *n, Node *locked_through)
 
   while (true) {
     CHECK_PTR(n);
+    CHECK_NE(n, &root_);
     CHECK(n->rw_lock.is_writer_locked_relaxed());
 
     Node *parent = n->parent;
