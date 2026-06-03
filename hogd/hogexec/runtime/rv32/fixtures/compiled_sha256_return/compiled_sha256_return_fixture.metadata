@@ -12,7 +12,7 @@
   "initial_memory_bytes": 215,
   "initial_memory_sha256": "45ef90c4d9f1c122e900b4b122467002c01f42769b140e5e01a234f4c6c5cd36",
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
-  "lowering_tool_sha256": "991baa1f3bd1888fa6865ca17d564dc6bf090e2cf4c1b9396f3ecb4964d665c0",
+  "lowering_tool_sha256": "18b370c44396c1c3c1a3119f7367bb85dab9a2802a5ce2e51c67e26ccd095ecd",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",

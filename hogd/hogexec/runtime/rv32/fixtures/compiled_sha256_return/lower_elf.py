@@ -375,6 +375,10 @@ def write_header(path, artifact, metadata):
         "inline constexpr uint32_t kFixtureInputOffset = "
         f"{metadata['fixture_input_offset']};"
     )
+    initial_memory_bytes = (
+        "inline constexpr uint32_t kInitialMemoryBytes = "
+        f"{metadata['initial_memory_bytes']};"
+    )
     body = f"""#pragma once
 
 #include <array>
@@ -383,7 +387,7 @@ def write_header(path, artifact, metadata):
 namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {K_MAX_MEMORY_BYTES};
-inline constexpr uint32_t kInitialMemoryBytes = {metadata['memory_bytes']};
+{initial_memory_bytes}
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
@@ -446,7 +450,10 @@ def main():
         "code_sha256": sha256_bytes(code),
         "initial_memory_sha256": sha256_bytes(memory),
         "code_bytes": len(code),
-        "memory_bytes": len(memory),
+        # memory_bytes is the full guest data address space (sp top); the
+        # stored image is only the initialized prefix (initial_memory_bytes).
+        "memory_bytes": K_MAX_MEMORY_BYTES,
+        "initial_memory_bytes": len(memory),
         "rustc_version": args.rustc_version,
         "target_triple": args.target_triple,
         "build_flags": args.build_flags,
