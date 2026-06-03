@@ -94,6 +94,11 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     auto work_txs =
         total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
 
+    // The work txs are reused across reps and scaling configs, so overwrite
+    // their uniquifiers each rep (the signature covers only the inner calldata,
+    // not the uniquifier). Capture the height they commit against so expiry
+    // heights are not yet expired; cleared after the rep.
+    const auto base_height = bs.block_height();
     auto start_time = std::chrono::steady_clock::now();
 
     uint32_t ntx_per_thread = num_txs_per_rep / num_exec_threads;
@@ -115,13 +120,16 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
       uint32_t cur_count = std::min(ntx_per_thread, num_txs_per_rep - offset);
 
       futures.emplace_back(exec_pool.submit([&bs, work_txs, offset, cur_count,
-                                             &pending_events,
+                                             base_height, &pending_events,
                                              &events_done]() -> void {
         auto runtime_context = make_hogexec_context();
 
         for (uint32_t j = 0; j < cur_count; j++) {
 
-          auto const &tx = work_txs[offset + j];
+          uint32_t k = offset + j;
+          work_txs[k].tx.uniquifier =
+              CommonBenchState::bench_uniquifier(base_height, k);
+          auto const &tx = work_txs[k];
 
           auto handler =
               bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
@@ -164,7 +172,9 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
              std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
                                                                    start_time)
                  .count());
-    bs.advance_block();
+    // Expire this rep's uniquifiers so the reused txs can be re-committed with
+    // fresh uniquifiers next rep/config. Outside the timed region.
+    bs.clear_uniquifiers(num_txs_per_rep);
   }
 }
 

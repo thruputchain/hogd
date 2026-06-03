@@ -110,6 +110,47 @@ public:
     return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
   }
 
+  // Height of the block transactions currently execute against. Used to derive
+  // uniquifier expiry heights that are not yet expired (expiry < height is
+  // rejected at commit).
+  BlockID block_height() const { return block_number_; }
+
+  // Replay-cache-safe uniquifier assignment for benchmarks.
+  //
+  // HogDB enforces unique Uniquifier consumption per invoked address, with at
+  // most kReplayCacheNoncesMaxLen (8000) nonces per expiry-height and
+  // kReplayCacheHeightsMaxLen (4000) distinct unexpired expiry-heights per
+  // address. A bench commits far more than that to a handful of addresses, so
+  // it must (a) keep each expiry-height under the per-height cap and (b) expire
+  // old uniquifiers between reps.
+  //
+  // bench_uniquifier buckets a rep-local `index` into groups of
+  // kBenchUniquifiersPerHeight, giving at most that many distinct nonces per
+  // expiry-height across all addresses (comfortably under 8000). Expiry heights
+  // start at the rep's base height, so none are pre-expired at commit time.
+  static constexpr uint64_t kBenchUniquifiersPerHeight = 4000;
+
+  static Uniquifier bench_uniquifier(BlockID base_height, uint64_t index)
+  {
+    auto expiry = static_cast<BlockHeight>(
+        base_height + (index / kBenchUniquifiersPerHeight));
+    return Uniquifier{.block_expiry_height = expiry, .nonce = index};
+  }
+
+  // Advance past (and thereby prune) every uniquifier bench_uniquifier would
+  // assign for a rep of `num_txs` transactions started at the current height.
+  // Must be called outside any timed region.
+  void clear_uniquifiers(uint64_t num_txs)
+  {
+    if (num_txs == 0) {
+      return;
+    }
+    uint64_t max_offset = (num_txs - 1) / kBenchUniquifiersPerHeight;
+    for (uint64_t i = 0; i <= max_offset; i++) {
+      advance_block();
+    }
+  }
+
 private:
   void connect_coord()
   {
