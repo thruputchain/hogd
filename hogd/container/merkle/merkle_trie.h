@@ -40,6 +40,7 @@ namespace hogd {
 // HexArray key("1234");
 // std::string value = "hello";
 // trie.insert(key, value);
+// trie.generate_all_hashes();
 //
 // std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.get_proof();
 //
@@ -56,22 +57,12 @@ public:
   // Type definitions.
   using Key = HexArray;
 
-  // Any nodes at a depth less than or equal to [no_hash_depth] are *not* hashed
-  // on any insert/update/remove operation on the trie. They are only hashed
-  // when [generate_top_level_hashes()] or [generate_all_hashes()] are called.
-  //
-  // The nodes in the topmost layers of the trie (i.e., the layers with the
-  // lowest depths relative to the root node, which has a depth of 0) are
-  // typically under heavy contention. By not hashing these nodes on every
-  // insert/update/remove operation, we significantly reduce contention and thus
-  // improve end-to-end performance. We do need to call
-  // [generate_top_level_hashes()] when we are done with all operations, but the
-  // overhead of this is much smaller than hashing these nodes on all
-  // operations.
-  MerkleTrie(
-      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
-      size_t no_hash_depth = 3)
-    : allocator_(allocator_type), no_hash_depth_(no_hash_depth)
+  // Mutating operations do not update node hashes. Call [generate_all_hashes()]
+  // after finishing mutations before reading the root hash or generating
+  // proofs.
+  explicit MerkleTrie(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
+    : allocator_(allocator_type)
   {
     init_root_node();
   }
@@ -196,25 +187,9 @@ public:
     walk<Node>(&root_, root_prefix, f);
   }
 
-  // If called with true, nodes are hashed on every [insert()/remove()]
-  // operation. If called with false, nodes are only hashed when
-  // [generate_all_hashes()] is called.
-  //
-  // Disabling hashing on every op improves performance when reconstructing a
-  // trie from disk.
-  void set_should_hash_nodes_on_each_op(bool to_set)
-  {
-    should_hash_nodes_on_each_op_ = to_set;
-  }
-
   // Generates a hash for every node in the trie. If the trie is modified while
   // this function runs, the behavior is undefined.
   void generate_all_hashes(size_t num_threads = available_parallelism());
-
-  // We do compute the hashes for the top two levels of nodes in the trie on
-  // each operation that modifies the trie. Rather, to avoid rehashing these
-  // nodes many times, we only hash them once when this function is called.
-  void generate_top_level_hashes();
 
 private:
   // Returns a string representation of [node] and all nodes under it in the
@@ -482,14 +457,9 @@ private:
                                          size_t &idx, Node *&existing_key,
                                          size_t &branch_depth);
 
-  // Computes and writes the hash for [node] only if
-  // [should_hash_nodes_on_each_op_] is true.
-  void compute_node_hash(Node &node) const;
-
-  // Regenerates the hashes *only* for the nodes on the path from [n] to the
-  // root of the trie.
-  void generate_hashes_from(Node *n, Node *locked_through,
-                            size_t locked_through_depth) const;
+  // Unlocks [n] and the nodes above it up through and including
+  // [locked_through].
+  static void unlock_nodes_from(Node *n, Node *locked_through);
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root);
@@ -510,7 +480,6 @@ private:
   {
     root_.clear();
     root_.init_branch(/*parent=*/nullptr);
-    compute_node_hash(root_);
   }
 
   friend class MerkleTriePrefix;
@@ -520,14 +489,8 @@ private:
   Node root_;
   // The memory allocator for nodes.
   Allocator<Node> allocator_;
-  // See the note above the constructor about [no_hash_depth].
-  const size_t no_hash_depth_ = 3;
   // The number of KV pairs in the trie.
   std::atomic<size_t> size_ = 0;
-  // If this is true, nodes are hashed on every [insert()/remove()] operation.
-  // If this is false, nodes are only hashed when [generate_all_hashes()] is
-  // called.
-  bool should_hash_nodes_on_each_op_ = true;
 };
 
 // This is an optimization for the [MerkleTrie]. It exposes the same exact API,
@@ -565,12 +528,11 @@ private:
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 class MerkleTriePrefix {
 public:
-  MerkleTriePrefix(
-      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
-      size_t no_hash_depth = 3)
+  explicit MerkleTriePrefix(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
   {
     for (std::optional<MerkleTrie> &trie : tries_) {
-      trie.emplace(allocator_type, no_hash_depth);
+      trie.emplace(allocator_type);
     }
   }
 
@@ -713,28 +675,6 @@ public:
       HexArray prefix;
       prefix.append(std::byte(i));
       tries_[i]->for_each(func, prefix);
-    }
-  }
-
-  void set_should_hash_nodes_on_each_op(bool to_set)
-  {
-    for (std::optional<MerkleTrie> &trie : tries_) {
-      trie->set_should_hash_nodes_on_each_op(to_set);
-    }
-  }
-
-  void generate_top_level_hashes()
-  {
-    std::vector<std::future<void>> futures;
-    futures.reserve(tries_.size());
-
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (size_t i = 0; i < tries_.size(); i++) {
-      futures.push_back(WorkerPool::get_default_pool().submit(
-          [this, i] { tries_[i]->generate_top_level_hashes(); }));
-    }
-    for (std::future<void> &future : futures) {
-      future.get();
     }
   }
 

@@ -501,12 +501,10 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         }
         if (branch != existing_key) {
           branch->rw_lock.unlock();
-          branch_depth++;
         }
         existing_key->value_hash() = sha256(obj);
-        // [generate_hashes_from()] unlocks the node locks we currently hold.
-        generate_hashes_from(existing_key, /*locked_through=*/existing_key,
-                             branch_depth);
+        // [unlock_nodes_from()] unlocks the node locks we currently hold.
+        unlock_nodes_from(existing_key, /*locked_through=*/existing_key);
         return true;
       }
       unlock_both(*branch, *existing_key);
@@ -593,8 +591,8 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
   CHECK_PTR(to_hash);
 
   size_.fetch_add(1, std::memory_order_relaxed);
-  // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash, /*locked_through=*/branch, branch_depth);
+  // [unlock_nodes_from()] unlocks the node locks we currently hold.
+  unlock_nodes_from(to_hash, /*locked_through=*/branch);
   return true;
 }
 
@@ -765,12 +763,6 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // currently points to the reused node rather than the [extension] we just
     // allocated. Thus, we update the parent pointer to [extension].
     extension_cache_child->parent = extension;
-    // Note that this second extension node is *not* on the path from the node
-    // that will hold [key_window] to the root. Thus, when we rehash the nodes
-    // on [key_window]'s path in the trie, we will not rehash this second
-    // extension node. Thus, to ensure that the hashes are generated properly
-    // in the trie, we need to hash this second extension node here.
-    compute_node_hash(*extension);
   }
   else {
     // The second extension node would have a path size of 1, so we instead
@@ -902,10 +894,6 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
     branch->branch_children()[branch_hex] = shorter_leaf;
     shorter_leaf->path() = shorter_path.get_subarray(1, shorter_path.size());
     shorter_leaf->value_hash() = std::move(shorter_value);
-    // We hash this leaf here, and then in the parent function, we hash all
-    // nodes on the path from the leaf *created below* to the root. Note that
-    // this leaf is not on that path, so we must hash it here.
-    compute_node_hash(*shorter_leaf);
   }
 
   // Now we place the longer key into a leaf node that is a child of the branch.
@@ -1108,8 +1096,8 @@ MerkleTrie::remove(const Key &k)
 
   size_.fetch_sub(1, std::memory_order_relaxed);
   CHECK_PTR(to_hash);
-  // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash, locked_through, branch_depth);
+  // [unlock_nodes_from()] unlocks the node locks we currently hold.
+  unlock_nodes_from(to_hash, locked_through);
   return true;
 }
 
@@ -1361,84 +1349,22 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 }
 
 void
-MerkleTrie::generate_hashes_from(Node *n, Node *locked_through,
-                                 size_t locked_through_depth) const
+MerkleTrie::unlock_nodes_from(Node *n, Node *locked_through)
 {
   // We hold the writer locks for [n] and the nodes above it up through and
   // including [locked_through].
   CHECK_PTR(locked_through);
 
-  bool locked = true;
   while (true) {
     CHECK_PTR(n);
-    if (locked) {
-      CHECK(n->rw_lock.is_writer_locked_relaxed());
-    }
-    else {
-      CHECK(n->rw_lock.is_locked_relaxed());
-    }
-
-    if (n == locked_through) {
-      // We have reached [locked_through], so we need to acquire the reader
-      // locks for nodes above us.
-      locked = false;
-
-      if (!should_hash_nodes_on_each_op_) {
-        // We are not hashing the nodes. Instead, we are using this function to
-        // unlock the nodes up through and including [locked_through]. We have
-        // finished this, so we can return now.
-        n->rw_lock.unlock();
-        return;
-      }
-    }
-
-    if (should_hash_nodes_on_each_op_) {
-      // We could just be holding the reader lock for this node rather than the
-      // writer lock. Thus, we need to protect the hash with its own lock so
-      // that two threads holding the reader lock for the node cannot race on
-      // writing the hash.
-      n->hash_lock.lock_writer();
-      n->hash = n->compute_node_hash();
-      n->hash_lock.unlock();
-    }
-
-    if (!n->parent) {
-      // We have reached the root, so we are finished.
-      CHECK_EQ(n, &root_);
-      n->rw_lock.unlock();
-      return;
-    }
-
-    if (!locked) {
-      if (locked_through_depth <= no_hash_depth_) {
-        // Do not rehash the nodes that have a depth less than or equal to
-        // [no_hash_depth_].
-        n->rw_lock.unlock();
-        return;
-      }
-      CHECK_GT(locked_through_depth, 0UL);
-      locked_through_depth--;
-
-      n->parent->rw_lock.lock_reader();
-    }
+    CHECK(n->rw_lock.is_writer_locked_relaxed());
 
     Node *parent = n->parent;
     n->rw_lock.unlock();
-    // It is technically safe to do [n = n->parent] below because a thread needs
-    // to hold both the writer lock for [n] and the writer lock for its parent
-    // in order to overwrite [n->parent], but we still cache [n->parent] in
-    // [parent] to avoid future issues.
+    if (n == locked_through) {
+      return;
+    }
     n = parent;
-  }
-}
-
-void
-MerkleTrie::compute_node_hash(Node &node) const
-{
-  if (should_hash_nodes_on_each_op_) {
-    // We do not need to lock/unlock the [hash_lock] here because
-    // [compute_hash_node] is only called on nodes that we were just created.
-    node.hash = node.compute_node_hash();
   }
 }
 
@@ -1551,18 +1477,6 @@ MerkleTrie::generate_all_hashes(size_t num_threads)
 
   std::unordered_set<Node *> frontier_set(frontier.begin(), frontier.end());
   generate_all_hashes_above_frontier(&root_, frontier_set);
-}
-
-void
-MerkleTrie::generate_top_level_hashes()
-{
-  // We do not hold any locks for these nodes. It only makes sense to call this
-  // function when there are no other threads mutating the trie. Otherwise, even
-  // before this function returns the hashes we recompute here will be stale.
-  auto f = [&](Node &node, Node * /*parent*/) {
-    node.hash = node.compute_node_hash();
-  };
-  walk<Node>(&root_, f, /*max_depth=*/no_hash_depth_);
 }
 
 void

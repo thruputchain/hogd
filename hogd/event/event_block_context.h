@@ -85,7 +85,6 @@ public:
           /*alocator_type=*/Allocator<Node>::Type::kBump)),
       work_directory_(work_directory), block_id_(block_id)
   {
-    trie_->set_should_hash_nodes_on_each_op(false);
     open_events_file();
   }
 

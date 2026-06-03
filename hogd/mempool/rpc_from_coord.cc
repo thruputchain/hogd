@@ -412,7 +412,6 @@ MempoolCoordinatorRpc::get_txset_hash(
     const x23::XdrVec<SignedTransactionHash> &hashes)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  trie.set_should_hash_nodes_on_each_op(false);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
   std::vector<std::future<void>> futures;

@@ -73,7 +73,6 @@ template<typename TrieType>
 SHA256Hash
 build_and_hash_trie(TrieType &trie, size_t num_threads)
 {
-  trie.set_should_hash_nodes_on_each_op(false);
   for (size_t i = 0; i < 512; i++) {
     HexArray key(std::format("{:032x}", i));
     std::string value = std::format("value-{}", i);
@@ -605,7 +604,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes();
   // We manually observed this root hash previously.
   EXPECT_EQ(
       HexArray(trie.get_root_hash()),
@@ -864,7 +863,7 @@ prove(T &trie)
                                     value_c.size()};
   EXPECT_TRUE(trie.insert(key_c, value_c_span));
 
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes();
   const auto &[root_hash, node_encodings] = trie.get_proof(key_b);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(key_b);
@@ -1170,6 +1169,7 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   HexArray key;
   std::span<std::byte> value_span;
   EXPECT_TRUE(trie.insert(key, value_span));
+  trie.generate_all_hashes();
 
   {
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
@@ -1178,6 +1178,7 @@ TEST(MerkleTrie, ProveEmptyKVPair)
 
   {
     EXPECT_TRUE(trie.remove(key));
+    trie.generate_all_hashes();
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
     EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value_span));
   }
@@ -1198,6 +1199,7 @@ prove_after_removing_key(T &trie)
                                   value.size()};
   EXPECT_TRUE(trie.insert(key, value_span));
   EXPECT_TRUE(trie.remove(key));
+  trie.generate_all_hashes();
 
   {
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
@@ -1245,6 +1247,7 @@ TEST(MerkleTrie, ProveAllByteVariations)
                                         value_b.data()),
                                     value_b.size()};
   EXPECT_TRUE(trie.insert(key_b, value_b_span));
+  trie.generate_all_hashes();
 
   auto [root_hash, node_encodings] = trie.get_proof(key_b);
   for (size_t i = 0; i < node_encodings.size(); i++) {
@@ -1288,6 +1291,7 @@ TEST(MerkleTriePrefix, ProveAllByteVariations)
                                         value_b.data()),
                                     value_b.size()};
   EXPECT_TRUE(trie.insert(key_b, value_b_span));
+  trie.generate_all_hashes();
 
   auto [_, node_encodings_by_node] = trie.get_proof_by_node(key_b);
   auto [root_hash, node_encodings] = trie.get_proof(key_b);
@@ -1403,7 +1407,7 @@ stress(T &trie, bool allow_empty)
     }
     EXPECT_EQ(seen.size(), total.size());
 
-    trie.generate_top_level_hashes();
+    trie.generate_all_hashes();
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value_span));
     SHA256Hash *value_hash;
@@ -1450,7 +1454,7 @@ stress(T &trie, bool allow_empty)
       EXPECT_EQ(it, total.end());
     }
 
-    trie.generate_top_level_hashes();
+    trie.generate_all_hashes();
     EXPECT_TRUE(trie.check());
 
     SHA256Hash *value_hash;
@@ -1518,7 +1522,7 @@ stress_two(T &trie, bool allow_empty)
     total.insert({path, value});
   }
 
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes();
   EXPECT_TRUE(trie.check());
   // Check every single KV pair.
   for (auto &[path, value] : total) {
@@ -1548,7 +1552,7 @@ stress_two(T &trie, bool allow_empty)
     }
   }
 
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes();
   EXPECT_TRUE(trie.check());
   EXPECT_EQ(trie.size(), 0);
 
@@ -1591,7 +1595,6 @@ run_multithread(size_t num_threads)
   std::vector<std::vector<HexArray>> paths(num_threads);
   {
     std::set<HexArray> generated;
-    trie.set_should_hash_nodes_on_each_op(false);
 
     std::print("Completing initial fill...");
     fflush(stdout);
@@ -1610,7 +1613,6 @@ run_multithread(size_t num_threads)
       EXPECT_TRUE(trie.insert(path, value_span));
     }
     EXPECT_EQ(trie.size(), kInitialSize);
-    trie.set_should_hash_nodes_on_each_op(true);
     trie.generate_all_hashes();
     EXPECT_TRUE(trie.check());
 
@@ -1660,7 +1662,7 @@ run_multithread(size_t num_threads)
     future.get();
   }
 
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes();
   std::println(" done.");
 
   EXPECT_EQ(trie.size(), kInitialSize);
