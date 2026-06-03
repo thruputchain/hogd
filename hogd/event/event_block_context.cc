@@ -70,7 +70,6 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     buffers_(std::move(data.buffers))
 {
   trie_->clear();
-  trie_->set_should_hash_nodes_on_each_op(false);
   {
     auto ul = buffers_.lock_threads();
     buffers_.for_each(ul, [](detail::EventContext &ctx) {
