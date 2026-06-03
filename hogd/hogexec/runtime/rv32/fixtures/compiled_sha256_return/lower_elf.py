@@ -11,7 +11,8 @@ ARTIFACT_MAGIC = b"GHRV32A1"
 ARTIFACT_FORMAT_VERSION = 4
 ARTIFACT_HEADER_BYTES = 132
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
-# v2: enter at PC 0 (_start) with the method id seeded in a0/a1 (guest dispatch).
+# v2: enter at PC 0 (_start) with the method id seeded in a0/a1 (guest
+# dispatch).
 ARTIFACT_ENTRY_ABI_VERSION = 2
 # v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 ARTIFACT_SYSCALL_ABI_VERSION = 1
@@ -30,8 +31,8 @@ STT_FUNC = 2
 EM_RISCV = 243
 SHN_ABS = 0xFFF1
 FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
-# v4 dispatches in-guest: _start reads the seeded method id from a0/a1 and routes
-# to the sha256 body (SHA256_METHOD_ID) or the sha256_repeated body
+# v4 dispatches in-guest: _start reads the seeded method id from a0/a1 and
+# routes to the sha256 body (SHA256_METHOD_ID) or the sha256_repeated body
 # (SHA256_REPEATED_METHOD_ID), trapping on any other id. These MethodIDs are
 # emitted to the fixture header and the C++ parity test static_asserts them
 # against the generated Sha256Wrapper WASM contract metadata.
@@ -235,10 +236,10 @@ def validate_sections(data, sections, symbols):
     if text.offset + text.size > len(data):
         raise ElfError(".text extends past end of file")
 
-    # v4 enters at PC 0; the ELF header (e_entry == 0, checked in parse_elf) and
-    # .text at vaddr 0 establish the entry. _start no longer has to be a function
-    # symbol -- it may be a bare asm label (the guest dispatcher) -- but if it is
-    # present it must sit at vaddr 0.
+    # v4 enters at PC 0; the ELF header (e_entry == 0, checked in parse_elf)
+    # and .text at vaddr 0 establish the entry. _start no longer has to be a
+    # function symbol -- it may be a bare asm label (the guest dispatcher) --
+    # but if it is present it must sit at vaddr 0.
     start = symbol_by_name(symbols, "_start")
     if start is not None and start.value != 0:
         raise ElfError(f"_start must be at vaddr 0, got {start.value}")
@@ -309,7 +310,8 @@ def validate_sections(data, sections, symbols):
         ]
         high_water = max(high_water, section.addr + section.size)
 
-    return data[text.offset:text.offset + text.size], bytes(memory[:high_water])
+    code_bytes = data[text.offset:text.offset + text.size]
+    return code_bytes, bytes(memory[:high_water])
 
 
 def extract_fixture_input(memory, sections, symbols):
