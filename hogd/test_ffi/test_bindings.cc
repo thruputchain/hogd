@@ -631,6 +631,19 @@ try_commit_transaction(void *syscall_handler) noexcept
 
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    // Reject a repeat commit (or a commit after a prior abort) on a still-live
+    // handle. Like the abort path, SystemCallHandler::try_commit_transaction()
+    // treats finalization as single-use and asserts
+    // !transaction_committed_or_aborted_, so re-entering it after the
+    // transaction is already terminal would crash assertion-enabled builds
+    // (issue #2518). The last_frame_finished() guard below does not cover this:
+    // it stays satisfied after a successful commit. Consult the wrapper's
+    // terminal flag first.
+    if (context->is_committed_or_aborted()) {
+      error("try_commit_transaction called on an already committed/aborted "
+            "transaction");
+      return kUnrecoverableError;
+    }
     // try_commit_transaction() requires the root invocation (or, for a mocked
     // handler, the root mock frame) to have finished first; otherwise the
     // internal commit path asserts last_frame_.has_value() and aborts. Reject
