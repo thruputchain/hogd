@@ -97,8 +97,8 @@ constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
 };
 constexpr std::string_view kRv32SmokeCounterInterface = "Counter";
 // Keep in sync with built_contracts/integration_test_contracts/
-// rv32_smoke_counter/Cargo.toml; dispatch-table asserts below fail loudly on
-// drift.
+// rv32_smoke_counter/Cargo.toml; the SDK-lowered round-trip tests below fail
+// loudly if the version drifts from method-id hashing inputs.
 constexpr std::string_view kRv32SmokeCounterVersion = "0.2.0";
 
 struct LoadedRv32SmokeArtifact {
@@ -1581,11 +1581,10 @@ TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodInGuest)
 
 TEST_F(Rv32RuntimeContextTest, UnknownMethodIsMeteredGuestTrap)
 {
-  // v4 Option A: dispatch is in-guest. An unknown method id is NOT a
-  // pre-execution host miss -- the runtime builds the Machine, seeds the id,
-  // enters _start, and the guest dispatcher's default arm traps. So the miss is
-  // metered (nonzero gas) and the guest ran, diverging from WASM's zero-gas
-  // function-not-found (no host-side existence check on the RV32 path).
+  // v4 Option A: dispatch is in-guest. An unknown method id is not a
+  // pre-execution host miss on the RV32 path: the runtime builds the Machine,
+  // seeds the id, enters _start, and the guest dispatcher's default arm traps.
+  // The miss is metered because the guest ran.
   constexpr Runtime::MethodID kUnknownMethodId = 2;
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
