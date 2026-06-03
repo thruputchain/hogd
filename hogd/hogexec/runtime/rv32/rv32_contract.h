@@ -24,7 +24,10 @@ private:
 
 class Rv32Runtime final : public Runtime {
 public:
-  Rv32Runtime(Rv32Contract &contract);
+  Rv32Runtime(Rv32Contract &contract,
+              std::unique_ptr<HostCallContext> host_call_context)
+    : Runtime(std::move(host_call_context)), contract_(contract)
+  {}
 
   ~Rv32Runtime() override = default;
 
