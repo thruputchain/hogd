@@ -124,6 +124,9 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   for (int nrep = 0; nrep < 5; nrep++) {
     info("bench rep {} for {} txs (fib {}, commit {}) on {} threads", nrep,
          num_txs, nfib, do_commit, num_exec_threads);
+    // Capture the height these txs commit against so their uniquifier expiry
+    // heights are not yet expired; cleared after the rep (see below).
+    const auto base_height = bs.block_height();
     auto start_time = std::chrono::steady_clock::now();
 
     int ntx_per_thread = num_txs / num_exec_threads;
@@ -144,11 +147,17 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
       int cur_count = std::min(ntx_per_thread, num_txs - (offset));
 
       futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
-                                             cur_count]() -> void {
+                                             cur_count, base_height]() -> void {
         auto runtime_context = make_hogexec_context();
+        // Copy the invocation once per thread; only the uniquifier varies, so
+        // we don't re-encode calldata inside the timed loop.
+        auto local_tx = tx;
         for (int j = 0; j < cur_count; j++) {
-
-          auto handler = bs.make_handler(tx, offset + j, *runtime_context);
+          int k = offset + j;
+          local_tx.tx.uniquifier =
+              CommonBenchState::bench_uniquifier(base_height,
+                                                 static_cast<uint64_t>(k));
+          auto handler = bs.make_handler(local_tx, k, *runtime_context);
           if (!handler.root_invoke().is_root_success()) {
             error("Failed to invoke transaction");
             throw std::runtime_error("Failed to invoke transaction");
@@ -176,6 +185,12 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
              std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
                                                                    start_time)
                  .count());
+    // Only commits consume uniquifiers; expire this rep's so the next rep (and
+    // the next call) starts from an empty replay cache. Outside the timed
+    // region.
+    if (do_commit) {
+      bs.clear_uniquifiers(static_cast<uint64_t>(num_txs));
+    }
   }
 }
 
