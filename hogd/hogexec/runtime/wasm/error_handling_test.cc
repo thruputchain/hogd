@@ -83,6 +83,12 @@ Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
+constexpr Runtime::MethodID kCall1 = 1;
+constexpr Runtime::MethodID kCall2 = 2;
+constexpr Runtime::MethodID kCallThenUnreachable = 3;
+constexpr Runtime::MethodID kSpin = 4;
+constexpr Runtime::MethodID kUnreachable = 5;
+
 extern "C" TrampolineResult
 reentrance(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
@@ -91,7 +97,7 @@ reentrance(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
     return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, 0);
   }
 
-  auto res = s_runtime->invoke("unreachable", UINT64_MAX);
+  auto res = s_runtime->invoke(kUnreachable, UINT64_MAX);
   if (!res.result_.has_value()) {
     return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, 0);
   }
@@ -144,7 +150,7 @@ TEST_P(WasmiErrorHandlingTest, ExitHandling)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_FALSE(res.is_root_success());
 }
@@ -159,7 +165,7 @@ TEST_P(WasmiErrorHandlingTest, Unrecoverable)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
 }
 
@@ -173,7 +179,7 @@ TEST_P(WasmiErrorHandlingTest, Abandon)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});
 }
 
@@ -187,7 +193,7 @@ TEST_P(WasmiErrorHandlingTest, ValidationError)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::ValidationFailure});
@@ -204,11 +210,11 @@ TEST_P(WasmiErrorHandlingTest, WasmError)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
 
-  res = runtime.value()->invoke("unreachable", UINT64_MAX);
+  res = runtime.value()->invoke(kUnreachable, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
@@ -225,11 +231,13 @@ TEST_P(WasmiErrorHandlingTest, NonexistFn)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
 
-  res = runtime.value()->invoke("blah", UINT64_MAX);
+  constexpr Runtime::MethodID kInvalidMethod = 4299;
+
+  res = runtime.value()->invoke(kInvalidMethod, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
@@ -245,12 +253,12 @@ TEST_P(WasmiErrorHandlingTest, FollowBadWithGood)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
 
-  res = runtime.value()->invoke("call2", UINT64_MAX);
+  res = runtime.value()->invoke(kCall2, UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
 }
@@ -265,7 +273,7 @@ TEST_P(WasmiErrorHandlingTest, CheckReturn)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call_then_unreachable", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCallThenUnreachable, UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
 }
@@ -280,12 +288,12 @@ TEST_P(WasmiErrorHandlingTest, FollowReallyBadWithGood)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
 
-  res = runtime.value()->invoke("call2", UINT64_MAX);
+  res = runtime.value()->invoke(kCall2, UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
 }
@@ -303,7 +311,7 @@ TEST_P(WasmiErrorHandlingTest, Reentrance)
   s_runtime = runtime.value().get();
   reentrance_hit = false;
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
 
@@ -357,12 +365,12 @@ TEST_P(WasmiErrorHandlingTest, OutOfGas)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke(kCall1, UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});
 
-  res = runtime.value()->invoke("call1", 1);
+  res = runtime.value()->invoke(kCall1, 1);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});
@@ -378,7 +386,7 @@ TEST_P(WasmiErrorHandlingTest, NoGas)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", 1);
+  auto res = runtime.value()->invoke(kCall1, 1);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});
@@ -394,7 +402,7 @@ TEST_P(WasmiErrorHandlingTest, Spin)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("spin", 10000);
+  auto res = runtime.value()->invoke(kSpin, 10000);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});

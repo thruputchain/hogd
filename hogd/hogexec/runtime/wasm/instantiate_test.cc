@@ -183,7 +183,7 @@ TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
   ASSERT_TRUE(runtime.has_value()) << "bad entrypoint ABI caused a SystemError";
   ASSERT_TRUE(runtime.value());
 
-  auto result = runtime.value()->invoke(Runtime::invoke_name(1), UINT64_MAX);
+  auto result = runtime.value()->invoke(1, UINT64_MAX);
 
   ASSERT_FALSE(result.result_);
   EXPECT_EQ(result.result_.error(),

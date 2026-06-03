@@ -65,7 +65,7 @@ TEST_P(UserCtxTest, CheckCtxCorrect)
 
   ctx_check = get_syscall_handler();
 
-  auto res = runtime.value()->invoke("calltest", UINT64_MAX);
+  auto res = runtime.value()->invoke(0, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

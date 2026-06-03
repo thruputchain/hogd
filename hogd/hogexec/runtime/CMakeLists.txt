@@ -54,6 +54,7 @@ target_link_libraries(
 add_library(runtime STATIC
   $<TARGET_OBJECTS:runtime_objects>
   $<TARGET_OBJECTS:wasm_runtime_objects>
+  $<TARGET_OBJECTS:rv32_runtime_objects>
 )
 
 add_library(runtime_test_lib

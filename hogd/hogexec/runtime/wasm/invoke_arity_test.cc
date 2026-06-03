@@ -165,60 +165,70 @@ protected:
     ASSERT_TRUE(runtime_);
   }
 
+  constexpr static Runtime::MethodID kArity0 = 0;
+  constexpr static Runtime::MethodID kArity1 = 1;
+  constexpr static Runtime::MethodID kArity2 = 2;
+  constexpr static Runtime::MethodID kArity3 = 3;
+  constexpr static Runtime::MethodID kArity4 = 4;
+  constexpr static Runtime::MethodID kArity5 = 5;
+  constexpr static Runtime::MethodID kArity6 = 6;
+  constexpr static Runtime::MethodID kArity7 = 7;
+  constexpr static Runtime::MethodID kArity8 = 8;
+
   std::unique_ptr<Runtime> runtime_;
 };
 
 TEST_P(InvokeArityTests, arity0)
 {
-  auto res = runtime_->invoke("calltest0", UINT64_MAX);
+  auto res = runtime_->invoke(kArity0, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity1)
 {
-  auto res = runtime_->invoke("calltest1", UINT64_MAX);
+  auto res = runtime_->invoke(kArity1, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity2)
 {
-  auto res = runtime_->invoke("calltest2", UINT64_MAX);
+  auto res = runtime_->invoke(kArity2, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity3)
 {
-  auto res = runtime_->invoke("calltest3", UINT64_MAX);
+  auto res = runtime_->invoke(kArity3, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity4)
 {
-  auto res = runtime_->invoke("calltest4", UINT64_MAX);
+  auto res = runtime_->invoke(kArity4, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity5)
 {
-  auto res = runtime_->invoke("calltest5", UINT64_MAX);
+  auto res = runtime_->invoke(kArity5, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity6)
 {
-  auto res = runtime_->invoke("calltest6", UINT64_MAX);
+  auto res = runtime_->invoke(kArity6, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity7)
 {
-  auto res = runtime_->invoke("calltest7", UINT64_MAX);
+  auto res = runtime_->invoke(kArity7, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
 TEST_P(InvokeArityTests, arity8)
 {
-  auto res = runtime_->invoke("calltest8", UINT64_MAX);
+  auto res = runtime_->invoke(kArity8, UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 

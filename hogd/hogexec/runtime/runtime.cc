@@ -70,11 +70,11 @@ make_hogexec_wasm_context(RuntimeEngine engine)
 }
 
 InvokeResult
-Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
+Runtime::invoke(MethodID method_id, uint64_t gas_limit)
 {
 
-  trace("Invoking method {} with gas limit {}", method_name, gas_limit);
-  auto [res, gas_consumed] = invoke_internal(method_name, gas_limit);
+  trace("Invoking method {} with gas limit {}", method_id, gas_limit);
+  auto [res, gas_consumed] = invoke_internal(method_id, gas_limit);
   trace("Invoke result: {}, gas consumed: {}",
         res.has_value() ? "success" : x23::show(res.error().code()),
         gas_consumed);

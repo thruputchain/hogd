@@ -261,6 +261,24 @@ add_dependencies(
 )
 gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 
+
+
+add_library(rv32_runtime_objects OBJECT
+  rv32_contract.cc
+)
+
+target_link_libraries(
+  rv32_runtime_objects
+  hogd_interface
+  rv32_vm
+)
+
+target_include_directories(
+  rv32_runtime_objects
+  PRIVATE
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
 if(BUILD_BENCHMARKS)
   wat2wasm_target(
     rv32_fibonacci_bench_wasm
