@@ -1588,6 +1588,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       // only by hogdb at [dbsched_close_snapshot()], so an invalid nominated
       // block can reach this path.
       if (result.result() != DbSchedResult::DbSchedResultOK) {
+        co_await abandon_snapshot(cache.block_id);
         co_await finish_block_handle;
         co_await decrement_num_validations_in_progress();
         validation_telemetry.outcome = validation_outcome_str(
