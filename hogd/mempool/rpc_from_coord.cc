@@ -1573,18 +1573,34 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         eventsched_close_block(cache.block_id, scheduler_->current_block() + 1);
 
     {
-      DbBlockResult result = co_await close_snapshot_handle;
-      CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-      cache.db_tip.db_hash = result.db_hash();
-    }
-    record_stage(stage_close_snapshot);
-
-    {
+      // I am deliberately co_await'ing [event_close_block_handle] first since
+      // [close_snapshot()] (the other RPC call above) can fail, and I would
+      // rather not have to deal with co_await'ing [event_close_block_handle] as
+      // well in the error path for that.
       EventBlockResult result = co_await event_close_block_handle;
       CHECK_EQ(result.error(), RPCError::kRPCNone);
       cache.db_tip.events_hash = result.root_hash();
     }
     record_stage(stage_close_event_block);
+    {
+      DbBlockResult result = co_await close_snapshot_handle;
+      // A forged RCQ observation can pass executor validation and be rejected
+      // only by hogdb at [dbsched_close_snapshot()], so an invalid nominated
+      // block can reach this path.
+      if (result.result() != DbSchedResult::DbSchedResultOK) {
+        CHECK_EQ(co_await abandon_snapshot(cache.block_id),
+                 DbSchedResult::DbSchedResultOK);
+        co_await finish_block_handle;
+        co_await decrement_num_validations_in_progress();
+        validation_telemetry.outcome = validation_outcome_str(
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+        info("schedulercoord_validate ret");
+        co_return SchedulerValidationResult(
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+      }
+      cache.db_tip.db_hash = result.db_hash();
+    }
+    record_stage(stage_close_snapshot);
   }
 
   BlockHeader header{.network_id = network_id_,
