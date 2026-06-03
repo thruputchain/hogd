@@ -675,6 +675,18 @@ abort_transaction(void *syscall_handler) noexcept
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
+  // Reject a repeat abort (or an abort after commit) on a still-live handle.
+  // SystemCallHandler::abort_transaction() treats finalization as single-use
+  // and asserts !transaction_committed_or_aborted_, so re-entering the core
+  // abort after the first one terminates assertion-enabled builds instead of
+  // returning a structured error (issue #2518). The wrapper already tracks the
+  // terminal state for destructor cleanup; consult it here before forwarding.
+  if (context->is_committed_or_aborted()) {
+    error("abort_transaction called on an already committed/aborted "
+          "transaction");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
   // Reject abort while an invocation frame is still executing. The handler is
   // either mid root_invoke -- possibly reentrantly, from a mock contract
   // callback that holds the handler pointer (issue #2511) -- or has an open
