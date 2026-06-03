@@ -1,13 +1,11 @@
 #![no_main]
 #![no_std]
 
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 
 const SYSCALL_SHA256: usize = 0;
 const SYSCALL_RETURN: usize = 6;
 const HASH_BYTES: usize = 32;
-
-type EntryPoint = unsafe extern "C" fn() -> !;
 
 #[no_mangle]
 #[link_section = ".rodata.fixture_input"]
@@ -25,25 +23,49 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     }
 }
 
-#[no_mangle]
-#[link_section = ".text._start"]
-pub unsafe extern "C" fn _start() -> ! {
-    sha256_return_hash()
-}
+// v4 guest-side dispatch. The runtime enters at _start (PC 0) with the invoked
+// method id seeded into a0 (low 32 bits) / a1 (high 32 bits). _start reads them
+// before any prologue runs, compares against the two method selectors, and tail
+// -calls the matching body; an unknown id falls through to `ebreak`, a
+// deterministic trap (the dispatcher's default arm). The selector low/high
+// halves below must match SHA256_METHOD_ID / SHA256_REPEATED_METHOD_ID in
+// lower_elf.py and the Sha256Wrapper entrypoint hashes the C++ parity test
+// pins.
+const SHA256_LO: i32 = 0xA719_DD56_u32 as i32; // SHA256_METHOD_ID & 0xFFFF_FFFF
+const SHA256_HI: i32 = 0xCA57_1C66_u32 as i32; // SHA256_METHOD_ID >> 32
+const SHA256_REPEATED_LO: i32 = 0x5D1F_3CFE_u32 as i32;
+const SHA256_REPEATED_HI: i32 = 0x5749_E8FA_u32 as i32;
+
+global_asm!(
+    ".pushsection .text._start,\"ax\",@progbits",
+    ".globl _start",
+    ".type _start, @function",
+    "_start:",
+    "  li   t0, {sha_lo}",
+    "  bne  a0, t0, 1f",
+    "  li   t0, {sha_hi}",
+    "  bne  a1, t0, 1f",
+    "  tail {sha}",
+    "1:",
+    "  li   t0, {rep_lo}",
+    "  bne  a0, t0, 2f",
+    "  li   t0, {rep_hi}",
+    "  bne  a1, t0, 2f",
+    "  tail {rep}",
+    "2:",
+    "  ebreak",
+    ".popsection",
+    sha = sym sha256_return_hash,
+    rep = sym sha256_return_empty,
+    sha_lo = const SHA256_LO,
+    sha_hi = const SHA256_HI,
+    rep_lo = const SHA256_REPEATED_LO,
+    rep_hi = const SHA256_REPEATED_HI,
+);
 
 #[no_mangle]
-#[link_section = ".text.sha256_repeated"]
-pub unsafe extern "C" fn RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED() -> ! {
-    sha256_return_empty()
-}
-
-#[used]
-#[link_section = ".rodata.entry_points"]
-static RV32_COMPILED_SHA256_RETURN_ENTRY_POINTS: [EntryPoint; 2] =
-    [_start, RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED];
-
-#[inline(always)]
-unsafe fn sha256_return_hash() -> ! {
+#[link_section = ".text.sha256_hash"]
+unsafe extern "C" fn sha256_return_hash() -> ! {
     let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
     let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
 
@@ -62,8 +84,9 @@ unsafe fn sha256_return_hash() -> ! {
     }
 }
 
-#[inline(always)]
-unsafe fn sha256_return_empty() -> ! {
+#[no_mangle]
+#[link_section = ".text.sha256_repeated"]
+unsafe extern "C" fn sha256_return_empty() -> ! {
     let input_ptr = RV32_COMPILED_SHA256_RETURN_INPUT.as_ptr() as usize;
     let output_ptr = core::ptr::addr_of_mut!(SHA_OUTPUT) as *mut u8 as usize;
 
