@@ -459,7 +459,7 @@ private:
 
   // Unlocks [n] and the nodes above it up through and including
   // [locked_through].
-  static void unlock_nodes_from(Node *n, Node *locked_through);
+  void unlock_nodes_from(Node *n, Node *locked_through);
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root);
