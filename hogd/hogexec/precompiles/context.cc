@@ -11,6 +11,7 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "precompiles.hh"
 
 namespace hogd {
@@ -37,12 +38,17 @@ make_hogexec_context()
   static thread_local std::unique_ptr<RuntimeContext> hogexec_native_context =
       make_hogexec_precompiles_context();
 
+  // RV32 is stateless (it resolves + translates contracts on demand), so a
+  // single borrowed instance per thread suffices, like the native context.
+  static thread_local Rv32Context hogexec_rv32_context;
+
   auto hogexec_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
   return std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kWasmi, {hogexec_context.release(), true}},
           {ContractType::kNative, {hogexec_native_context.get(), false}},
+          {ContractType::kRv32, {&hogexec_rv32_context, false}},
       });
 }
 

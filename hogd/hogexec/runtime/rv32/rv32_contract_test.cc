@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

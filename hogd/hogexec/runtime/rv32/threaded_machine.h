@@ -146,7 +146,7 @@ public:
     gas_remaining_ = gas;
   }
 
-  ThreadedMachine(ThreadedMachine&&) noexcept = default;
+  ThreadedMachine(ThreadedMachine &&) noexcept = default;
 
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,

@@ -1,12 +1,14 @@
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 
 #include <cassert>
+#include <exception>
 #include <expected>
 #include <memory>
 #include <optional>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -85,7 +87,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
     return {machine_noexcept.error(), 0};
   }
 
-  auto machine = *machine_noexcept;
+  auto &machine = *machine_noexcept;
 
   rv32::StepResult result = machine.start();
 
