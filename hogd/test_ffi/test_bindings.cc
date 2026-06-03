@@ -315,17 +315,20 @@ OpenRuntimeContextResult
 open_runtime_context() noexcept
 {
   lazy_init();
-  std::shared_ptr<hogd::MockRuntimeContext> *out;
   try {
-    out = new std::shared_ptr<hogd::MockRuntimeContext>();
+    // Own the wrapper slot via unique_ptr until construction fully succeeds, so
+    // a throw from make_shared() (or make_hogexec_context()) after the slot is
+    // allocated does not leak it. The honest C caller gets a null handle on
+    // failure and has no way to free the slot itself (issue #2506).
+    auto out = std::make_unique<std::shared_ptr<hogd::MockRuntimeContext>>();
     *out = std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+    CHECK(*out != nullptr);
+    return {.context = out.release(), .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating runtime context: {}", e);
     return {.context = nullptr,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
-  CHECK(*out != nullptr);
-  return {.context = out, .ffi_error_code = kTestFFIErrorCodeNone};
 }
 
 TestFFIErrorCode
