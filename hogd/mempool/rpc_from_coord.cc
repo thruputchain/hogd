@@ -1573,10 +1573,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         eventsched_close_block(cache.block_id, scheduler_->current_block() + 1);
 
     {
-      // I am deliberately co_await'ing this first since [close_snapshot()] (the
-      // other RPC call above) can fail, and I would rather not have to deal
-      // with co_await'ing [event_close_block_handle] as well in the error path
-      // for that.
+      // I am deliberately co_await'ing [event_close_block_handle] first since
+      // [close_snapshot()] (the other RPC call above) can fail, and I would
+      // rather not have to deal with co_await'ing [event_close_block_handle] as
+      // well in the error path for that.
       EventBlockResult result = co_await event_close_block_handle;
       CHECK_EQ(result.error(), RPCError::kRPCNone);
       cache.db_tip.events_hash = result.root_hash();
