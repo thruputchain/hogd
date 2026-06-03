@@ -519,6 +519,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // place. A global index across trials keeps nonces unique and each
   // expiry-height under the replay-cache per-height cap; expiry heights start
   // at this block, so none are expired when committed.
+  //
+  // Trial i's lowest expiry height is work_base + floor(i * work_txs.size() /
+  // kBenchUniquifiersPerHeight) and it commits at work_base + i, so we need
+  // work_txs.size() >= kBenchUniquifiersPerHeight or trial 1 would assign an
+  // already-expired height.
+  CHECK_GE(work_txs.size(), CommonBenchState::kBenchUniquifiersPerHeight);
   const BlockID work_base = current_block_number;
   for (size_t i = 0; i < 5; i++) {
     for (size_t j = 0; j < work_txs.size(); j++) {
