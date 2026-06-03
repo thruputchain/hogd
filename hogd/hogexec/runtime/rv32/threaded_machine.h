@@ -164,11 +164,6 @@ public:
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    if (construction_trap_ != Trap::kNone) {
-      trap_ = construction_trap_;
-      halted_ = true;
-      return;
-    }
     regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
@@ -256,7 +251,6 @@ public:
   Trap trap_ = Trap::kNone;
   std::optional<EcallArgs> pending_ecall_ =
       std::nullopt; // set while suspended at an ecall; cold
-  Trap construction_trap_ = Trap::kNone;
   const bool
       gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;

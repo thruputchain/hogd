@@ -25,7 +25,6 @@
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/threaded_machine.h"
-#include "hogd/hogexec/runtime/rv32/threaded_program.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
