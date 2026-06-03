@@ -492,6 +492,15 @@ SystemCallHandler::abort_transaction()
 {
   assert(!transaction_committed_or_aborted_);
   transaction_committed_or_aborted_ = true;
+  // Discard any events the (successful) root frame produced: an aborted
+  // transaction never publishes them, and emit_events() -- the only path that
+  // drains them on commit -- is not reached here. Leaving them in last_frame_
+  // would otherwise trip the debug destructor's "destroyed with events to emit"
+  // panic when an honest test FFI caller closes an uncommitted handler after an
+  // event-emitting root_invoke (issue #2454).
+  if (last_frame_.has_value()) {
+    last_frame_.value().extract_events();
+  }
   HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                  get_block_execution_mode());
   return db_proxy_.abort_transaction();
@@ -1148,11 +1157,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     case ContractType::kMockTest:
       return 0LU;
     case ContractType::kWasmi:
-      return contract.wasmi_contract().wasm.size();
-    default:
-      panic("Unrecoverable; Invalid contract type: {}",
-            contract.contract_type());
+      return contract.wasmi_contract().data.size();
+    case ContractType::kRv32:
+      return contract.rv32_contract().data.size();
     }
+    panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
   }();
 
   // deploy new contract

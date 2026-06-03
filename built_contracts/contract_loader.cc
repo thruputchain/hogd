@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -45,7 +44,7 @@ load_raw_file(std::string_view filename)
     count = std::fread(buf, sizeof(char), kBufferSize, f);
     std::span<char> buf_span(&buf[0], count);
     if (count > 0)
-      contents.wasm.append_range(buf_span);
+      contents.data.append_range(buf_span);
   }
   std::fclose(f);
 

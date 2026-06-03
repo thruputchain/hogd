@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -56,12 +57,17 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
   case ContractType::kWasmi:
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().wasm.size()),
+                                    contract->wasmi_contract().data.size()),
                                 .contract_type = ContractType::kWasmi};
-  default:
-    throw std::runtime_error(
-        "make_deployed_contract_hash: unsupported contract type");
+  case ContractType::kRv32:
+    return DeployedContractHash{.hash = sha256(*contract),
+                                .contract_size = static_cast<uint32_t>(
+                                    contract->rv32_contract().data.size()),
+                                .contract_type = ContractType::kRv32};
   }
+  throw std::runtime_error(
+      std::format("make_deployed_contract_hash: unsupported contract type: {}",
+                  contract->contract_type()));
 }
 } // namespace
 

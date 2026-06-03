@@ -70,7 +70,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
       TestDB::kHogDB);
 
   Contract contract_to_deploy(ContractType::kWasmi);
-  contract_to_deploy.wasmi_contract().wasm.append_range(std::string(8192, 'x'));
+  contract_to_deploy.wasmi_contract().data.append_range(std::string(8192, 'x'));
   const auto contract_hash = sha256(contract_to_deploy);
 
   constexpr static SHA256Hash kDeployNonce = []() {

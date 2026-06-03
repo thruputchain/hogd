@@ -740,7 +740,7 @@ invoke_wasm_error_contract(WasmEngine engine, HostFn0 external_call,
   const DeployedContractHash deployed{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
 

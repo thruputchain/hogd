@@ -205,9 +205,12 @@ get_cost_model(void *db) noexcept
             .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
   }
 
-  auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
-
   try {
+    // Reading the cost model copies the persisted RAMDB row, which allocates
+    // and can throw std::bad_alloc. Keep it inside the catch boundary so it is
+    // converted to a structured FFI error instead of crossing the noexcept
+    // helper and terminating the process (issue #2513).
+    auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
     auto serialized = x23::serialize(cost_model);
 
     auto buffer = make_new_data_buffer(serialized.size());
@@ -461,7 +464,26 @@ close_syscall_handler(void *syscall_handler) noexcept
       return kTestFFIErrorCodeUnrecoverableError;
     }
 
-    delete static_cast<SyscallHandlerContext *>(syscall_handler);
+    // Take ownership so the handler is freed on every path below, including
+    // when the abort reports an error or throws.
+    std::unique_ptr<SyscallHandlerContext> owned(context);
+
+    // The handler destructor requires the transaction to have been committed or
+    // aborted. Abort any still-open transaction here, inside this try/catch, so
+    // a throwing abort RPC becomes kTestFFIErrorCodeUnrecoverableError rather
+    // than terminating the process from the destructor's noexcept boundary
+    // (issue #2488). Mark aborted before issuing the RPC: the handler also
+    // marks itself aborted up front, so a retry after a thrown abort must not
+    // attempt a second abort.
+    if (!owned->is_committed_or_aborted()) {
+      owned->mark_committed_or_aborted();
+      auto res = owned->to_handler().abort_transaction();
+      if (!res.has_value()) {
+        error("error aborting transaction during close: {}", res.error());
+        return kTestFFIErrorCodeUnrecoverableError;
+      }
+    }
+
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
     log_error("error closing syscall handler: {}", e);
@@ -634,6 +656,20 @@ abort_transaction(void *syscall_handler) noexcept
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  // Reject abort while an invocation frame is still executing. The handler is
+  // either mid root_invoke -- possibly reentrantly, from a mock contract
+  // callback that holds the handler pointer (issue #2511) -- or has an open
+  // mock invocation frame (issue #2509). Finalizing the transaction underneath
+  // a running frame corrupts the handler (a later successful root frame then
+  // trips try_commit_transaction's assert) and leaves mock-frame state that
+  // blocks close. Surface a structured error and leave the handler untouched so
+  // the caller can finish its frames first.
+  if (context->to_handler().is_running()) {
+    error("abort_transaction called while an invocation frame is still active");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
   try {
     auto res = context->to_handler().abort_transaction();
     // SystemCallHandler::abort_transaction() marks its transaction aborted
@@ -1261,7 +1297,19 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
       "FFI (start): mock_syscall_entrypoint(syscall={}, arg1={}, arg2={}, "
       "arg3={}, arg4={}, arg5={}, arg6={}, arg7={})",
       syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-  hogd::lazy_init();
+  // First-use init allocates and can throw; this exported wrapper is the C ABI
+  // boundary (not noexcept), so translate a failed init into an unrecoverable
+  // host-function result rather than letting the exception escape. lazy_init()
+  // installs the process logger, so report via fputs (no allocation).
+  try {
+    hogd::lazy_init();
+  } catch (std::exception const &e) {
+    std::fputs("error initializing logging for mock_syscall_entrypoint: ",
+               stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return hogd::unrecoverable_error();
+  }
   auto result = hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4,
                                               arg5, arg6, arg7);
   hogd::do_ffi_trace("FFI (end): mock_syscall_entrypoint(syscall={}) -> {}",
@@ -1288,7 +1336,24 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
-  hogd::lazy_init();
+  // First-use init allocates and can throw; this exported wrapper is the C ABI
+  // boundary (not noexcept) and runs before the impl's catch boundary, so
+  // translate a failed init into a structured error rather than letting the
+  // exception escape the wrapper (issue #2514).
+  try {
+    hogd::lazy_init();
+  } catch (std::exception const &e) {
+    // lazy_init() is what installs the process logger, so it may not exist
+    // yet; report via fputs (no allocation) rather than error().
+    std::fputs(
+        "error initializing logging for verify_signed_transaction_auth: ",
+        stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return VerifyAuthResult{.auth_error_code = 0,
+                            .ffi_error_code =
+                                kTestFFIErrorCodeUnrecoverableError};
+  }
   auto result =
       hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "

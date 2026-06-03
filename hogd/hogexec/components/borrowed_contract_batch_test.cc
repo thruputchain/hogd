@@ -22,7 +22,7 @@ Contract
 make_wasm_contract(std::initializer_list<uint8_t> bytes)
 {
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().wasm = bytes;
+  contract.wasmi_contract().data = bytes;
   return contract;
 }
 
