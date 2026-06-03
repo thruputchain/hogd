@@ -35,7 +35,7 @@ private:
   Rv32Contract const &contract_;
 
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(MethodID method_id, uint64_t gas_limit) override;
+  invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
 };
 
 } // namespace hogd

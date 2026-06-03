@@ -729,9 +729,13 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
   return runtime.value()->invoke(method_id, gas_limit);
 }
 
+// definitions of method names in test_error_handling.wasm
+constexpr Runtime::MethodID kCall1 = 1;
+constexpr Runtime::MethodID kUnreachable = 5;
+
 InvokeResult
 invoke_wasm_error_contract(WasmEngine engine, HostFn0 external_call,
-                           std::string_view method, GasAmount gas_limit)
+                           Runtime::MethodID method, GasAmount gas_limit)
 {
   WasmTestFramework wasm;
   Contract contract;
@@ -1656,7 +1660,7 @@ TEST_F(Rv32RuntimeContextTest, HostErrorContractsMatchWasmOutcomes)
                                        rv32_context);
 
       const auto wasm_result =
-          invoke_wasm_error_contract(engine, wasm_entry, "call1", kEnoughGas);
+          invoke_wasm_error_contract(engine, wasm_entry, kCall1, kEnoughGas);
       const auto rv32_result =
           direct_invoke(contract, rv32_context, handler, kEnoughGas);
 
@@ -1684,7 +1688,7 @@ TEST_F(Rv32RuntimeContextTest, DeterministicTrapContractMatchesWasmOutcome)
                                      rv32_context);
 
     const auto wasm_result =
-        invoke_wasm_error_contract(engine, &wasm_good_call_entry, "unreachable",
+        invoke_wasm_error_contract(engine, &wasm_good_call_entry, kUnreachable,
                                    kEnoughGas);
     const auto rv32_result =
         direct_invoke(contract, rv32_context, handler, kEnoughGas);
@@ -1709,7 +1713,7 @@ TEST_F(Rv32RuntimeContextTest, OutOfGasContractMatchesWasmOutcome)
 
     const auto wasm_result =
         invoke_wasm_error_contract(engine, &wasm_consume_too_much_gas_entry,
-                                   "call1", kGasLimit);
+                                   kCall1, kGasLimit);
     const auto rv32_result =
         direct_invoke(contract, rv32_context, handler, kGasLimit);
 

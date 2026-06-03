@@ -145,6 +145,7 @@ target_link_libraries(
   protocol
   metrics
   event
+  rv32_vm
   hogd
 )
 

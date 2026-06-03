@@ -261,8 +261,6 @@ add_dependencies(
 )
 gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 
-
-
 add_library(rv32_runtime_objects OBJECT
   rv32_contract.cc
 )

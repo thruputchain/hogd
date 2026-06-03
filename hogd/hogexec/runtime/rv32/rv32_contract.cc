@@ -1,6 +1,8 @@
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 
 namespace hogd {
 
@@ -33,13 +35,99 @@ Rv32Contract::instantiate(uint64_t gas) const
   return rv32::ThreadedMachine(pre_instantiation_, gas);
 }
 
+namespace {
+
+std::pair<std::expected<int32_t, HostFnErrorCode>, GasAmount>
+from_trampoline_result(TrampolineResult result) {
+
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable)) {
+    return {std::unexpected(static_cast<HostFnErrorCode>(result.panic)), result.gas_consumed};
+  }
+
+  return {result.result_code, result.gas_consumed}; 
+}
+
+} // namespace
+
 std::pair<InvokeStatus<void>, GasAmount>
-Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit)
+Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
   rv32::ThreadedMachine machine = contract_.instantiate(gas_limit);
   machine.seed_method_id(method_id);
 
-  throw std::runtime_error("Not implemented");
+  rv32::StepResult result = machine.start();
+
+  while (result == rv32::StepResult::kEcall) {
+
+    auto const& pending_ecall = machine.pending_ecall();
+    assert(pending_ecall.has_value());
+
+    ExternHostCallContext host_fn_ctx = host_call_context_.get();
+    assert(host_fn_ctx != nullptr);
+
+    WasmContext wasm_context = {
+      .memory = LinearMemorySlice{.mem = machine.memory().data(), .sz = machine.memory().size()},
+      .gas_remaining = machine.gas_remaining(),
+    };
+
+    auto [host_result, gas_consumed] = from_trampoline_result(syscall_entry(host_fn_ctx, wasm_context, pending_ecall->a0, pending_ecall->a1, pending_ecall->a2, pending_ecall->a3, pending_ecall->a4, pending_ecall->a5, pending_ecall->a6, pending_ecall->a7));
+    
+    if (host_result.has_value()) {
+      result = machine.resume_from_ecall(rv32::HostResult::continue_with(*host_result, gas_consumed));
+      continue;
+    }
+
+    assert(gas_consumed <= machine.gas_remaining());
+    [[maybe_unused]] bool success = machine.consume_gas(gas_consumed);
+    assert(success);
+
+    GasAmount gas_remaining = machine.gas_remaining();
+    assert(gas_remaining <= gas_limit);
+
+    GasAmount total_gas_consumed = gas_limit - gas_remaining;
+
+    switch (host_result.error()) {
+    case HostFnErrorCode::NoneOrRecoverable:
+      error("Unrecoverable: HostFnErrorCode::NoneOrRecoverable is not expected from TrampolineResult");
+      return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    case HostFnErrorCode::Unrecoverable:
+      return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    case HostFnErrorCode::ValidationFailure:
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, total_gas_consumed};
+    case HostFnErrorCode::Abandon:
+      return {InvokeError{InvokeErrorCode::Abandon}, total_gas_consumed};
+    case HostFnErrorCode::Return:
+      return {InvokeError{InvokeErrorCode::None}, total_gas_consumed};
+    case HostFnErrorCode::OutOfGas:
+      return {InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+    case HostFnErrorCode::Exit:
+      return {InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
+    }
+  }
+
+  GasAmount gas_remaining = machine.gas_remaining();
+  assert(gas_remaining <= gas_limit);
+  GasAmount total_gas_consumed = gas_limit - gas_remaining;
+
+  if (result == rv32::StepResult::kContinue) [[unlikely]] {
+    error("Unrecoverable: rv32::StepResult::kContinue when halt expected");
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+  }
+
+  if (result == rv32::StepResult::kHalted) [[unlikely]] {
+    error("Unrecoverable: rv32::StepResult::kHalted is not expected from ThreadedMachine");
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+  }
+
+  assert(result == rv32::StepResult::kTrap);
+  assert(machine.trap() != rv32::Trap::kNone);
+  assert(machine.trap() != rv32::Trap::kHostTrap);
+
+  if (machine.trap() == rv32::Trap::kOutOfGas) {
+    return {InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+  }
+
+  return {InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
 }
 
 } // namespace hogd
