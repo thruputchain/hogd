@@ -280,7 +280,8 @@ CommonBenchState::advance_block()
 {
   auto r = coord_client_->dbsched_close_snapshot(block_number_);
   if (r.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to close snapshot");
+    throw std::runtime_error(std::format(
+        "Failed to close snapshot for block {}: {}", block_number_, r.result()));
   }
 
   close_event_block(block_number_);
@@ -291,14 +292,17 @@ CommonBenchState::advance_block()
                                              /*events_hash=*/{});
   // NOLINTEND(bugprone-argument-comment)
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to commit snapshot");
+    throw std::runtime_error(
+        std::format("Failed to commit snapshot for block {}: {}", block_number_,
+                    r2.result()));
   }
 
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
   if (r3 != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to create snapshot");
+    throw std::runtime_error(std::format(
+        "Failed to create snapshot for block {}: {}", block_number_, r3));
   }
 
   open_event_block(block_number_ + 1);
