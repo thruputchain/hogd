@@ -1,6 +1,6 @@
-#include <algorithm>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -60,6 +60,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class HogDBTest : public testing::Test {
 protected:
   HogDBTest() = default;
@@ -1130,7 +1131,7 @@ TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
 TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
 {
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().wasm.resize_uninitialized(kBigItemThreshold);
+  contract.wasmi_contract().data.resize_uninitialized(kBigItemThreshold);
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,

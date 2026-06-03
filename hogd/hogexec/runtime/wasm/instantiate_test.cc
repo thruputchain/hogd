@@ -29,7 +29,7 @@ TEST_P(InstantiateTest, MissingImportFail)
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
 
@@ -58,7 +58,7 @@ TEST_P(InstantiateTest, InstantiateUnexportedMemory)
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
@@ -88,7 +88,7 @@ TEST_P(InstantiateTest, InstantiateOobDataSegment)
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
@@ -109,7 +109,7 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
@@ -173,7 +173,7 @@ TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
       .contract_type = ContractType::kWasmi,
   };
 

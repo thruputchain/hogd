@@ -29,7 +29,7 @@ load_raw_file(std::string_view filename)
     count = std::fread(buf, sizeof(char), kBufferSize, f);
     std::span<char> buf_span(&buf[0], count);
     if (count > 0)
-      contents.wasm.append_range(buf_span);
+      contents.data.append_range(buf_span);
   }
   std::fclose(f);
 
@@ -37,14 +37,14 @@ load_raw_file(std::string_view filename)
   constexpr uint32_t kTestMaxImportedFunctions = 16;
   auto instrumented = InstrumentedBytes::instrument(
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                   contents.wasm.data()),
-                               contents.wasm.size()),
+                                   contents.data.data()),
+                               contents.data.size()),
       kTestMaxImportedFunctions);
   if (!instrumented) {
     throw std::runtime_error("failed to instrument wasm file: " + file);
   }
-  contents.wasm.clear();
-  contents.wasm.append_range(instrumented->data());
+  contents.data.clear();
+  contents.data.append_range(instrumented->data());
 
   return contents;
 }

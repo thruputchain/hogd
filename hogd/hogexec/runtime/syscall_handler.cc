@@ -1148,11 +1148,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     case ContractType::kMockTest:
       return 0LU;
     case ContractType::kWasmi:
-      return contract.wasmi_contract().wasm.size();
-    default:
-      panic("Unrecoverable; Invalid contract type: {}",
-            contract.contract_type());
+      return contract.wasmi_contract().data.size();
+    case ContractType::kRv32:
+      return contract.rv32_contract().data.size();
     }
+    panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
   }();
 
   // deploy new contract

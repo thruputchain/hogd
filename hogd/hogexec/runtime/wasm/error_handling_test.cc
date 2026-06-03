@@ -113,7 +113,7 @@ protected:
     deployed_contract_hash_ = DeployedContractHash{
         .hash = sha256(contract_),
         .contract_size =
-            static_cast<uint32_t>(contract_.wasmi_contract().wasm.size()),
+            static_cast<uint32_t>(contract_.wasmi_contract().data.size()),
         .contract_type = ContractType::kWasmi,
     };
 
