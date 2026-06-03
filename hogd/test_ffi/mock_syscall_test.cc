@@ -43,8 +43,7 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
-          WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -62,8 +61,7 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
-          WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -94,6 +92,13 @@ gas_metering_test() noexcept
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+error_syscall_test() noexcept
+{
+  return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
+          WrappedGasAmount{0}};
+}
+
 // just used to instantiate the mock contract
 ForeignInvokeResult
 dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
@@ -103,6 +108,7 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct IntTypeTestSyscallMeta {
   // bypasses having to load the most recent call frame to check for the read
   // only flag
@@ -115,10 +121,10 @@ struct IntTypeTestSyscallMeta {
                                                                    "out_2",
                                                                    "out_128"};
   constexpr static bool kCanReturn = true;
-  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
-      SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct SpanTypeTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
@@ -126,12 +132,12 @@ struct SpanTypeTestSyscallMeta {
   constexpr static std::array<std::string_view, 1> kInputNames = {"span_in"};
   constexpr static std::array<std::string_view, 1> kOutputNames = {"span_out"};
   constexpr static bool kCanReturn = true;
-  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
-      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 static_assert(is_syscall_meta<IntTypeTestSyscallMeta>);
 static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct NoReturnSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo =
@@ -143,6 +149,7 @@ struct NoReturnSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct SignedI32TypeTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
@@ -154,6 +161,7 @@ struct SignedI32TypeTestSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct UnsignedU32TypeTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
@@ -165,6 +173,7 @@ struct UnsignedU32TypeTestSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct GasMeteringTestSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
@@ -173,6 +182,19 @@ struct GasMeteringTestSyscallMeta {
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
   constexpr static bool kCanReturn = true;
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+struct ErrorSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo =
+      SyscallNo::kExit; // dummy syscall no (no args, so tracing compiles)
+  constexpr static auto kInnerFunc = &error_syscall_test;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
 };
 
 TEST(MockSyscallTest, IntTypeTest)
@@ -210,8 +232,7 @@ TEST(MockSyscallTest, IntTypeTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(
-                SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable));
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
   EXPECT_EQ(out_1, 10);
   EXPECT_EQ(out_2, UINT64_MAX);
@@ -286,8 +307,7 @@ TEST(MockSyscallTest, SpanTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(
-                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
   EXPECT_EQ(out, 0x04030201);
 }
@@ -435,6 +455,33 @@ TEST(MockSyscallTest, NoSyscallTest)
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
+}
+
+TEST(MockSyscallTest, ErrorSyscallTest)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+
+  auto res = mock_syscall_parser<ErrorSyscallMeta>(SyscallNo::kExit, 0, 0, 0, 0,
+                                                   0, 0, 0);
+  context.pop_mock_runtime();
+  context.pop_context();
+  // Finalize the transaction before the handler is destroyed: the destructor
+  // hard-CHECKs that it was committed or aborted (issue #2488).
+  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  context.mark_committed_or_aborted();
+
+  ASSERT_EQ(res.panic, 0);
+  ASSERT_EQ(res.result_code,
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable));
 }
 
 } // namespace hogd
