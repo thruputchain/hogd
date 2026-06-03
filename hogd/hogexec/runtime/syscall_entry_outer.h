@@ -640,7 +640,8 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       return {HostFnError{HostFnErrorCode::Exit}};
     }
 
-    if (syscall_result.has_value() && *syscall_result != SyscallErrorCode::kSyscallErrorCodeNone) {
+    if (syscall_result.has_value() &&
+        *syscall_result != SyscallErrorCode::kSyscallErrorCodeNone) {
       disarm_outputs(args);
     }
     return syscall_result;
