@@ -635,9 +635,13 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       if (runtime_log_level(LogLevel::kTrace)) {
         trace(
             "Syscall {} attempted to return an error code {} but cannot return",
-            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
       }
       return {HostFnError{HostFnErrorCode::Exit}};
+    }
+
+    if (syscall_result.has_value() && *syscall_result != SyscallErrorCode::kSyscallErrorCodeNone) {
+      disarm_outputs(args);
     }
     return syscall_result;
   }();
