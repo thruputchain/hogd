@@ -80,11 +80,23 @@ SyscallHandlerContext::root_invoke()
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
       res.result_.error().code() == InvokeErrorCode::OutOfGas) {
 
+    // handler_.root_invoke() above finalized the root frame, so the result is
+    // committable. If we then fail to serialize it for the caller, the result
+    // was never handed back; mark the handler so try_commit_transaction()
+    // refuses to commit a hidden result (issue #2508), mirroring
+    // finish_mock_invocation_frame().
+    auto serialization_handoff_failure = [this](TestFFIErrorCode code) {
+      if (handler_.last_frame_finished()) {
+        mark_finish_result_handoff_failed();
+      }
+      return kMakeFFIError(code);
+    };
+
     auto root_invocation_output = handler_.get_most_recent_frame_output();
     auto serialized_output =
         serialize_to_ffi_data_buffer(root_invocation_output);
     if (!serialized_output.has_value()) {
-      return kMakeFFIError(serialized_output.error());
+      return serialization_handoff_failure(serialized_output.error());
     }
 
     // serialized_output now owns a heap buffer. A later serialization failure
@@ -105,7 +117,7 @@ SyscallHandlerContext::root_invoke()
     if (trace) {
       auto s = serialize_to_ffi_data_buffer(*trace);
       if (!s.has_value()) {
-        return kMakeFFIError(s.error());
+        return serialization_handoff_failure(s.error());
       }
       serialized_trace = s.value();
     }
@@ -118,7 +130,7 @@ SyscallHandlerContext::root_invoke()
       if (!frame_events.empty()) {
         auto s = serialize_to_ffi_data_buffer(frame_events);
         if (!s.has_value()) {
-          return kMakeFFIError(s.error());
+          return serialization_handoff_failure(s.error());
         }
         serialized_events = s.value();
       }
