@@ -16,8 +16,6 @@ public:
   static std::optional<Rv32Contract> create(ContractBlob const &contract_blob);
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
-  ~Rv32Contract();
-
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
 
 private:
