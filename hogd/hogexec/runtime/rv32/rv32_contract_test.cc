@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
@@ -14,6 +15,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 
 namespace hogd {
@@ -22,6 +24,7 @@ namespace hogd {
 // artifact (.rv32a) as a kRv32 contract, resolve + translate it through
 // Rv32Context, and invoke it through Rv32Runtime. Mirrors the wasm-side
 // fibonacci tests (fibonacci_test.cc), but exercises the RV32 path.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
                           public NativeContractTestFramework {
 public:
@@ -52,6 +55,8 @@ protected:
     return addr;
   }
 };
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Smoke: the RV32 fibonacci contract loads, dispatches, runs, and returns
 // success through Rv32Context/Rv32Runtime.
@@ -224,6 +229,8 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, Rv32FibonacciTest,
                          ::testing::Values(TestDB::kMockInMemory,

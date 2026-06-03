@@ -1,15 +1,21 @@
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 
 #include <cassert>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
+#include "hogd/hogexec/runtime/rv32/threaded_machine.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
