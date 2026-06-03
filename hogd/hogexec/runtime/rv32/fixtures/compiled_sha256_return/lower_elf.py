@@ -8,13 +8,14 @@ from pathlib import Path
 K_MAX_CODE_BYTES = 64 * 1024
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 3
-ARTIFACT_HEADER_BYTES = 172
+ARTIFACT_FORMAT_VERSION = 4
+ARTIFACT_HEADER_BYTES = 132
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
-ARTIFACT_ENTRY_ABI_VERSION = 1
+# v2: enter at PC 0 (_start) with the method id seeded in a0/a1 (guest
+# dispatch).
+ARTIFACT_ENTRY_ABI_VERSION = 2
 # v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 ARTIFACT_SYSCALL_ABI_VERSION = 1
-DISPATCH_ENTRY_BYTES = 16
 GAS_TABLE_VERSION = 2
 # Must match hogd/hogexec/runtime/rv32/artifact.h kGasScheduleDigest.
 GAS_SCHEDULE_DIGEST = 0xEBE53DCEEA581D0C
@@ -30,13 +31,13 @@ STT_FUNC = 2
 EM_RISCV = 243
 SHN_ABS = 0xFFF1
 FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
-# Fixture dispatch is intentionally explicit while the real SDK lowerer is
-# pending: _start backs Sha256Wrapper::sha256, and the named non-callgraph
-# function below backs Sha256Wrapper::sha256_repeated. The C++ parity test
-# static_asserts these MethodIDs against the generated WASM contract metadata.
+# v4 dispatches in-guest: _start reads the seeded method id from a0/a1 and
+# routes to the sha256 body (SHA256_METHOD_ID) or the sha256_repeated body
+# (SHA256_REPEATED_METHOD_ID), trapping on any other id. These MethodIDs are
+# emitted to the fixture header and the C++ parity test static_asserts them
+# against the generated Sha256Wrapper WASM contract metadata.
 SHA256_METHOD_ID = 0xCA571C66A719DD56
 SHA256_REPEATED_METHOD_ID = 0x5749E8FA5D1F3CFE
-SHA256_REPEATED_SYMBOL = "RV32_COMPILED_SHA256_RETURN_SHA256_REPEATED"
 
 ALLOC_ALLOWLIST = {
     ".text",
@@ -235,13 +236,13 @@ def validate_sections(data, sections, symbols):
     if text.offset + text.size > len(data):
         raise ElfError(".text extends past end of file")
 
+    # v4 enters at PC 0; the ELF header (e_entry == 0, checked in parse_elf)
+    # and .text at vaddr 0 establish the entry. _start no longer has to be a
+    # function symbol -- it may be a bare asm label (the guest dispatcher) --
+    # but if it is present it must sit at vaddr 0.
     start = symbol_by_name(symbols, "_start")
-    if start is None:
-        raise ElfError("_start symbol is missing")
-    if start.value != 0:
+    if start is not None and start.value != 0:
         raise ElfError(f"_start must be at vaddr 0, got {start.value}")
-    if start.sym_type != STT_FUNC:
-        raise ElfError("_start must be a function symbol")
 
     text_end = text.addr + text.size
     for symbol in symbols:
@@ -266,6 +267,11 @@ def validate_sections(data, sections, symbols):
 
     memory = bytearray(K_MAX_MEMORY_BYTES)
     data_ranges = []
+    # Decision 5: store only the initialized prefix [0, high_water), where
+    # high_water is the end of the highest-addressed copied (PROGBITS) section.
+    # The runtime zero-extends [high_water, memory_bytes). bss/heap/stack above
+    # high_water are elided rather than padded.
+    high_water = 0
     for section in sections:
         if section.sh_type in (SHT_REL, SHT_RELA) and section.size != 0:
             raise ElfError(f"relocations are not allowed: {section.name}")
@@ -302,8 +308,10 @@ def validate_sections(data, sections, symbols):
         memory[section.addr:section.addr + section.size] = data[
             section.offset:section.offset + section.size
         ]
+        high_water = max(high_water, section.addr + section.size)
 
-    return data[text.offset:text.offset + text.size], bytes(memory)
+    code_bytes = data[text.offset:text.offset + text.size]
+    return code_bytes, bytes(memory[:high_water])
 
 
 def extract_fixture_input(memory, sections, symbols):
@@ -322,48 +330,11 @@ def extract_fixture_input(memory, sections, symbols):
     return symbol.value, memory[symbol.value:symbol.value + symbol.size]
 
 
-def method_pc(symbols, name):
-    symbol = symbol_by_name(symbols, name)
-    if symbol is None:
-        raise ElfError(f"{name} symbol is missing")
-    if symbol.sym_type != STT_FUNC:
-        raise ElfError(f"{name} must be a function symbol")
-    if symbol.value % 4 != 0:
-        raise ElfError(f"{name} must be four-byte aligned")
-    return symbol.value
-
-
-def dispatch_entries(symbols):
-    entries = [
-        (
-            SHA256_REPEATED_METHOD_ID,
-            method_pc(symbols, SHA256_REPEATED_SYMBOL),
-        ),
-        (SHA256_METHOD_ID, method_pc(symbols, "_start")),
-    ]
-    entries.sort()
-    return entries
-
-
-def build_dispatch_table(entries, code):
-    dispatch_table = b"".join(
-        struct.pack("<QII", method_id, pc, 0) for method_id, pc in entries
-    )
-    if len(dispatch_table) != len(entries) * DISPATCH_ENTRY_BYTES:
-        raise ElfError("internal dispatch table size mismatch")
-    for _method_id, pc in entries:
-        if pc >= len(code):
-            raise ElfError("dispatch entry points outside .text")
-    return dispatch_table
-
-
-def build_artifact(code, memory, entries):
+def build_artifact(code, memory):
     code_offset = ARTIFACT_HEADER_BYTES
-    dispatch_table = build_dispatch_table(entries, code)
-    dispatch_offset = code_offset + len(code)
-    memory_offset = dispatch_offset + len(dispatch_table)
+    memory_offset = code_offset + len(code)
     header = struct.pack(
-        "<8sIIQIIIIQIIIIIII32s32s32s",
+        "<8sIIQIIIIQIIIII32s32s",
         ARTIFACT_MAGIC,
         ARTIFACT_FORMAT_VERSION,
         ARTIFACT_HEADER_BYTES,
@@ -378,15 +349,12 @@ def build_artifact(code, memory, entries):
         len(memory),
         code_offset,
         memory_offset,
-        dispatch_offset,
-        len(dispatch_table),
         artifact_digest(code),
         artifact_digest(memory),
-        artifact_digest(dispatch_table),
     )
     if len(header) != ARTIFACT_HEADER_BYTES:
         raise ElfError("internal artifact header size mismatch")
-    return header + code + dispatch_table + memory
+    return header + code + memory
 
 
 def format_array(name, blob):
@@ -407,6 +375,10 @@ def write_header(path, artifact, metadata):
         "inline constexpr uint32_t kFixtureInputOffset = "
         f"{metadata['fixture_input_offset']};"
     )
+    initial_memory_bytes = (
+        "inline constexpr uint32_t kInitialMemoryBytes = "
+        f"{metadata['initial_memory_bytes']};"
+    )
     body = f"""#pragma once
 
 #include <array>
@@ -415,12 +387,11 @@ def write_header(path, artifact, metadata):
 namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {K_MAX_MEMORY_BYTES};
+{initial_memory_bytes}
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
 {repeated_method_id}
-inline constexpr uint32_t kSha256Pc = {metadata['sha256_pc']};
-inline constexpr uint32_t kSha256RepeatedPc = {metadata['sha256_repeated_pc']};
 {input_offset}
 inline constexpr char kFixtureSha256[] =
     "{metadata['fixture_sha256']}";
@@ -453,11 +424,10 @@ def main():
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
     code, memory = validate_sections(data, sections, symbols)
-    entries = dispatch_entries(symbols)
     fixture_input_offset, fixture_input = extract_fixture_input(
         memory, sections, symbols
     )
-    artifact = build_artifact(code, memory, entries)
+    artifact = build_artifact(code, memory)
     fixture_blob = code + memory
     metadata = {
         "source_sha256": sha256_file(args.source),
@@ -469,12 +439,10 @@ def main():
         "elf_sha256": sha256_file(args.elf),
         "fixture_sha256": sha256_bytes(fixture_blob),
         "artifact_sha256": sha256_bytes(artifact),
-        "dispatch_entries": [
-            {"method_id": f"0x{method_id:016x}", "pc": pc}
-            for method_id, pc in entries
+        "method_ids": [
+            f"0x{SHA256_METHOD_ID:016x}",
+            f"0x{SHA256_REPEATED_METHOD_ID:016x}",
         ],
-        "sha256_pc": dict(entries)[SHA256_METHOD_ID],
-        "sha256_repeated_pc": dict(entries)[SHA256_REPEATED_METHOD_ID],
         "artifact_bytes": len(artifact),
         "fixture_input": fixture_input,
         "fixture_input_offset": fixture_input_offset,
@@ -482,7 +450,10 @@ def main():
         "code_sha256": sha256_bytes(code),
         "initial_memory_sha256": sha256_bytes(memory),
         "code_bytes": len(code),
-        "memory_bytes": len(memory),
+        # memory_bytes is the full guest data address space (sp top); the
+        # stored image is only the initialized prefix (initial_memory_bytes).
+        "memory_bytes": K_MAX_MEMORY_BYTES,
+        "initial_memory_bytes": len(memory),
         "rustc_version": args.rustc_version,
         "target_triple": args.target_triple,
         "build_flags": args.build_flags,

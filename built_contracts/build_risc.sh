@@ -38,18 +38,17 @@ METADATA="${TARGET_DIR}/${TARGET_NAME}.rv32.json"
 RUSTC_VERSION="$(cd "${SCRIPT_DIR}" && rustc --version)"
 
 # Single source of truth for the cargo invocation: the recorded --build-flags
-# metadata is derived from the exact env + argv used below.
-CARGO_ENV="CARGO_PROFILE_RELEASE_STRIP=false"
+# metadata is derived from the exact argv used below. The v4 lowerer no longer
+# scans .symtab for entrypoints, so a normal (stripped) release build is a valid
+# input -- no CARGO_PROFILE_RELEASE_STRIP override needed.
 set -- cargo build -Zbuild-std=core,alloc --release --locked --frozen \
   --offline --no-default-features --features entrypoints \
   --target "${TARGET_TRIPLE}" --target-dir "${INTERNAL_TARGET_DIR}" \
   -p "${TARGET_NAME}" --bin "${TARGET_NAME}" "$@"
-BUILD_FLAGS="${CARGO_ENV} $*"
+BUILD_FLAGS="$*"
 
 (
   cd "${SCRIPT_DIR}"
-  # shellcheck disable=SC2086
-  export ${CARGO_ENV}
   "$@"
 )
 

@@ -62,6 +62,13 @@ Machine::reset(uint64_t gas)
   registers_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
 }
 
+void
+Machine::seed_method_id(uint64_t method_id)
+{
+  write_reg(10, static_cast<uint32_t>(method_id));       // a0 = low 32 bits
+  write_reg(11, static_cast<uint32_t>(method_id >> 32)); // a1 = high 32 bits
+}
+
 MachineView
 Machine::view()
 {

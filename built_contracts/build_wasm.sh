@@ -9,7 +9,7 @@
 set -e
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.4.6"
+EXPECTED_VERSION="groundhog 0.5.1"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
     echo "error: expected '$EXPECTED_VERSION', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2

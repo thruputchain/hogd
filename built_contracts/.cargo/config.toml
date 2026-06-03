@@ -21,6 +21,11 @@ rustflags = [
     "-C", "link-arg=-static",
     "-C", "link-arg=--no-dynamic-linker",
     "-C", "link-arg=--gc-sections",
+    # The groundhog-rv32 linker script deliberately overlaps the CODE and DATA
+    # VMAs (modified-Harvard: separate VM address spaces) so DATA starts near 0
+    # and the stored image carries no code-sized zero shadow. Tell lld the
+    # overlap is intentional.
+    "-C", "link-arg=--no-check-sections",
     "-C", "panic=abort",
     "-C", "relocation-model=static",
     "-Z", "trap-unreachable=false",

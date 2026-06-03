@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
 
-#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -15,7 +14,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
@@ -49,23 +47,11 @@ host_trap_code_to_invoke_status(uint32_t code)
   return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 
-std::optional<uint32_t>
-entry_pc_for_method(const RuntimeContractImage &image, uint64_t method_id)
-{
-  auto it = std::ranges::lower_bound(image.dispatch_table, method_id, {},
-                                     &DispatchEntry::method_id);
-  if (it == image.dispatch_table.end() || it->method_id != method_id) {
-    return std::nullopt;
-  }
-  return it->pc;
-}
-
 bool
 runtime_contract_image_is_valid(const RuntimeContractImage &image)
 {
   return image.program != nullptr &&
-         image.initial_memory.size() <= image.memory_bytes &&
-         dispatch_table_is_valid(image.dispatch_table, *image.program);
+         image.initial_memory.size() <= image.memory_bytes;
 }
 
 class Runtime final : public hogd::Runtime {
@@ -89,16 +75,16 @@ protected:
     if (!image_is_valid_) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
-    auto entry_pc = entry_pc_for_method(image_, *method_id);
-    if (!entry_pc.has_value()) {
-      return {InvokeError{InvokeErrorCode::Deterministic}, 0};
-    }
 
-    Machine machine(image_.program, image_.memory_bytes, gas_limit, *entry_pc);
+    // v4: enter at PC 0 (_start) and seed the invoked method id into a0/a1;
+    // the guest dispatches. An unknown method is handled in-guest (the
+    // dispatcher's default arm), not by a host-side pre-execution miss.
+    Machine machine(image_.program, image_.memory_bytes, gas_limit);
     if (!image_.initial_memory.empty() &&
         !machine.view().write_memory(0, image_.initial_memory)) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
+    machine.seed_method_id(*method_id);
 
     SyscallBridgeHost host(host_call_context_.get(), image_.entry == nullptr
                                                          ? &syscall_entry

@@ -16,7 +16,6 @@
 
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
@@ -893,9 +892,8 @@ ArtifactImage
 make_bench_artifact(std::initializer_list<uint32_t> words,
                     std::vector<uint8_t> initial_memory)
 {
-  const std::array<DispatchEntry, 1> dispatch = {{{.method_id = 0, .pc = 0}}};
   return parse_artifact_or_abort(
-      test_artifact::build_artifact(words, initial_memory, dispatch));
+      test_artifact::build_artifact(words, initial_memory));
 }
 
 ArtifactImage
