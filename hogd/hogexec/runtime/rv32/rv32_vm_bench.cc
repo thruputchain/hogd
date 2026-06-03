@@ -25,7 +25,6 @@
 #include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/rv32/threaded_machine.h"
-#include "hogd/hogexec/runtime/rv32/threaded_program.h"
 #include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
@@ -238,12 +237,17 @@ validate_artifact_memory(std::span<const uint8_t> memory,
 
 void
 preflight_artifact_benchmark(const ArtifactImage &artifact, Host &host,
-                             ArtifactValidation validation)
+                             ArtifactValidation validation,
+                             uint64_t method_id = 0)
 {
   Machine machine(artifact.program, artifact.memory_bytes, kBenchGasLimit);
   if (!machine.view().write_memory(0, artifact.initial_memory)) {
     std::abort();
   }
+  // v4 guest-side dispatch: seed the invoked method id into a0/a1 so the
+  // guest dispatcher routes to the right entrypoint instead of trapping in
+  // its default arm (mirrors rv32::RuntimeContext::invoke_internal).
+  machine.seed_method_id(method_id);
   const Rv32RunStats stats =
       run_rv32_program(machine, host, *artifact.program, kBenchGasLimit);
   if (stats.result != StepResult::kHalted || machine.halt_code() != 0 ||
@@ -330,9 +334,10 @@ run_rv32_benchmark(benchmark::State &state,
 void
 run_rv32_artifact_benchmark(benchmark::State &state,
                             const ArtifactImage &artifact, Host &host,
-                            ArtifactValidation validation)
+                            ArtifactValidation validation,
+                            uint64_t method_id = 0)
 {
-  preflight_artifact_benchmark(artifact, host, validation);
+  preflight_artifact_benchmark(artifact, host, validation, method_id);
   Machine machine(artifact.program, artifact.memory_bytes, kBenchGasLimit);
   int64_t executed_instructions = 0;
   int64_t consumed_gas = 0;
@@ -352,6 +357,7 @@ run_rv32_artifact_benchmark(benchmark::State &state,
     if (!machine.view().write_memory(0, artifact.initial_memory)) {
       std::abort();
     }
+    machine.seed_method_id(method_id);
     state.ResumeTiming();
 
     const Rv32RunStats stats =
@@ -444,7 +450,10 @@ make_recursive_fibonacci_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+  std::vector<uint8_t> initial_memory; // all zero initial memory
+  return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 kBenchMemoryBytes,
+                                                 /*trace=*/false)
       .value();
 }
 
@@ -499,7 +508,10 @@ make_compute_loop_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+  std::vector<uint8_t> initial_memory; // all zero initial memory
+  return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 kBenchMemoryBytes,
+                                                 /*trace=*/false)
       .value();
 }
 
@@ -568,7 +580,10 @@ make_compute_loop_independent_threaded_program()
   for (size_t i = 0; i < words.size(); ++i) {
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
-  return ThreadedMachinePreInstantiation::create(bytes, /*trace=*/false)
+  std::vector<uint8_t> initial_memory; // all zero initial memory
+  return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 kBenchMemoryBytes,
+                                                 /*trace=*/false)
       .value();
 }
 
@@ -779,7 +794,7 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
 {
   const auto program = make_recursive_fibonacci_threaded_program();
   const int64_t instructions = fibonacci_instruction_count();
-  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  ThreadedMachine machine(program, kBenchGasLimit);
   HaltHost host;
   for (auto _ : state) {
     state.PauseTiming();
@@ -823,7 +838,7 @@ bm_rv32_threaded_compute_loop(benchmark::State &state)
 {
   const auto program = make_compute_loop_threaded_program();
   const int64_t instructions = compute_loop_instruction_count();
-  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  ThreadedMachine machine(program, kBenchGasLimit);
   HaltHost host;
   for (auto _ : state) {
     state.PauseTiming();
@@ -847,7 +862,7 @@ bm_rv32_threaded_compute_loop_independent(benchmark::State &state)
 {
   const auto program = make_compute_loop_independent_threaded_program();
   const int64_t instructions = compute_loop_independent_instruction_count();
-  ThreadedMachine machine(program, kBenchMemoryBytes, kBenchGasLimit);
+  ThreadedMachine machine(program, kBenchGasLimit);
   HaltHost host;
   for (auto _ : state) {
     state.PauseTiming();
@@ -1053,8 +1068,9 @@ bm_rv32_artifact_compiled_sha256_return(benchmark::State &state)
   const ArtifactImage artifact =
       parse_artifact_or_abort(fixtures::compiled_sha256_return::kArtifact);
   SyscallBridgeHost host(nullptr, &artifact_bench_entry);
-  run_rv32_artifact_benchmark(state, artifact, host,
-                              ArtifactValidation::kCompiledSha256Return);
+  run_rv32_artifact_benchmark(
+      state, artifact, host, ArtifactValidation::kCompiledSha256Return,
+      fixtures::compiled_sha256_return::kSha256MethodId);
 }
 
 // Google Benchmark registers through static objects; keep the benchmark file

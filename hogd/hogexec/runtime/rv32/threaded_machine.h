@@ -76,12 +76,20 @@ struct alignas(16) Slot {
     } rb;
   };
 };
-
+// Immutable, decode-once form of a contract: the baked Slot handler array plus
+// the initial memory image (the contract's seeded bytes zero-padded out to
+// total_memory_size). Shared across ThreadedMachine instantiations -- each
+// machine copies the image into its own memory_ at construction/reset, so the
+// decode and the zero-fill happen once here rather than per invocation.
 class ThreadedMachinePreInstantiation {
 public:
+  // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
+  // it is zero-padded out to total_memory_size, which is the machine's full
+  // memory size and must be <= kMaxMemoryBytes and >= memory.size().
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
-  create(std::span<const uint8_t> code, bool trace);
+  create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
+         uint32_t total_memory_size, bool trace);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -93,12 +101,16 @@ public:
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
 private:
-  ThreadedMachinePreInstantiation(std::vector<Slot> exec, bool trace,
-                                  bool gas_overflow)
-    : exec_(std::move(exec)), trace_(trace), gas_overflow_(gas_overflow)
+  ThreadedMachinePreInstantiation(std::vector<Slot> exec,
+                                  std::vector<uint8_t> initial_memory_image,
+                                  bool trace, bool gas_overflow)
+    : exec_(std::move(exec)),
+      initial_memory_image_(std::move(initial_memory_image)), trace_(trace),
+      gas_overflow_(gas_overflow)
   {}
 
   std::vector<Slot> exec_;
+  std::vector<uint8_t> initial_memory_image_;
   bool trace_ = false;
   bool gas_overflow_ = false;
 
@@ -115,18 +127,15 @@ private:
 class alignas(64) ThreadedMachine {
 public:
   ThreadedMachine(ThreadedMachinePreInstantiation const &pre_instantiation,
-                  uint32_t memory_bytes, uint64_t gas)
-    : gas_overflow_(pre_instantiation.gas_overflow_),
+                  uint64_t gas)
+    : pre_instantiation_(&pre_instantiation),
+      gas_overflow_(pre_instantiation.gas_overflow_),
       exec_traced_(pre_instantiation.trace_)
   {
-    if (memory_bytes > kMaxMemoryBytes) {
-      construction_trap_ = Trap::kBadMemory;
-      trap_ = Trap::kBadMemory;
-      halted_ = true;
-      return;
-    }
-    memory_.resize(memory_bytes);
-    std::ranges::fill(memory_, 0);
+    const auto &image = pre_instantiation.initial_memory_image_;
+    assert(image.size() <= kMaxMemoryBytes);
+    memory_.assign(image.begin(), image.end());
+
     regs_.fill(0);
     // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
     // matches canonical Machine::reset and the old reset() path.
@@ -140,24 +149,21 @@ public:
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,
   // which would leave exec_ dangling the moment the constructor returns.
-  ThreadedMachine(ThreadedMachinePreInstantiation &&, uint32_t,
-                  uint64_t) = delete;
+  ThreadedMachine(ThreadedMachinePreInstantiation &&, uint64_t) = delete;
 
   void reset(uint64_t gas)
   {
     regs_.fill(0);
-    std::ranges::fill(memory_, uint8_t{0});
+    // memory_ is sized to the (already zero-padded) image, so restoring it is a
+    // straight copy -- no separate tail zero-fill needed.
+    std::ranges::copy(pre_instantiation_->initial_memory_image_,
+                      memory_.begin());
     pc_ = 0;
     gas_remaining_ = gas;
     trap_ = Trap::kNone;
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    if (construction_trap_ != Trap::kNone) {
-      trap_ = construction_trap_;
-      halted_ = true;
-      return;
-    }
     regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
@@ -177,6 +183,16 @@ public:
     return pending_ecall_;
   }
   [[nodiscard]] MachineView view();
+
+  // v4 guest-side dispatch: seed the invoked method id into a0/a1 so the
+  // guest's _start dispatcher routes to the right entrypoint. Call after
+  // construction/reset and before start()/run(); mirrors
+  // Machine::seed_method_id.
+  void seed_method_id(uint64_t method_id)
+  {
+    regs_[10] = static_cast<uint32_t>(method_id);       // a0 = low 32 bits
+    regs_[11] = static_cast<uint32_t>(method_id >> 32); // a1 = high 32 bits
+  }
 
   [[nodiscard]] uint32_t reg(size_t i) const
   {
@@ -226,6 +242,7 @@ public:
   std::vector<uint8_t> memory_;
   std::span<const Slot> exec_;   // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
+  ThreadedMachinePreInstantiation const *pre_instantiation_ = nullptr;
   // Read/write hot scalar on its own cache line, isolated from the read-mostly
   // data above and from the regs_ reads.
   alignas(64) uint64_t gas_remaining_ = 0; // checked/debited at every run head
@@ -234,7 +251,6 @@ public:
   Trap trap_ = Trap::kNone;
   std::optional<EcallArgs> pending_ecall_ =
       std::nullopt; // set while suspended at an ecall; cold
-  Trap construction_trap_ = Trap::kNone;
   const bool
       gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
@@ -1056,12 +1072,21 @@ fits_int16(int32_t v)
 
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
-                                        bool trace)
+                                        std::span<const uint8_t> memory,
+                                        uint32_t total_memory_size, bool trace)
 {
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
     return std::unexpected(program.error());
   }
+
+  if (total_memory_size > kMaxMemoryBytes ||
+      total_memory_size < memory.size()) {
+    return std::unexpected(ProgramError::kMemoryTooLarge);
+  }
+
+  std::vector<uint8_t> initial_memory_image(memory.begin(), memory.end());
+  initial_memory_image.resize(total_memory_size);
 
   std::vector<Slot> exec;
   size_t n = program->instruction_count();
@@ -1198,7 +1223,9 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     next_fused = fused_here;
   }
 
-  return ThreadedMachinePreInstantiation(std::move(exec), trace, gas_overflow);
+  return ThreadedMachinePreInstantiation(std::move(exec),
+                                         std::move(initial_memory_image), trace,
+                                         gas_overflow);
 }
 
 inline MachineView
