@@ -19,12 +19,12 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
-# Artifact container, consensus digest/validation, and method dispatch layered
-# on top of the portable core.
+# Artifact container plus consensus digest/validation layered on top of the
+# portable core. v4 moves method dispatch into the guest, so there is no
+# host-side dispatch table.
 add_library(
   rv32_vm
   artifact.cc
-  dispatch.cc
 )
 
 target_include_directories(

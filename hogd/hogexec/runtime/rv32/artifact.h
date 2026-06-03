@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/gas_cost_table.h"
-#include "hogd/hogexec/runtime/rv32/dispatch.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
 
@@ -17,10 +16,10 @@ namespace hogd::rv32 {
 
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {'G', 'H', 'R', 'V',
                                                           '3', '2', 'A', '1'};
-inline constexpr uint32_t kArtifactFormatVersion = 3;
-inline constexpr uint32_t kArtifactHeaderBytes = 172;
+inline constexpr uint32_t kArtifactFormatVersion = 4;
+inline constexpr uint32_t kArtifactHeaderBytes = 132;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
-inline constexpr uint32_t kArtifactEntryAbiVersion = 1;
+inline constexpr uint32_t kArtifactEntryAbiVersion = 2;
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
@@ -41,18 +40,14 @@ inline constexpr size_t kArtifactCodeSizeOffset = 52;
 inline constexpr size_t kArtifactInitialMemorySizeOffset = 56;
 inline constexpr size_t kArtifactCodeOffsetOffset = 60;
 inline constexpr size_t kArtifactInitialMemoryOffsetOffset = 64;
-inline constexpr size_t kArtifactDispatchOffsetOffset = 68;
-inline constexpr size_t kArtifactDispatchSizeOffset = 72;
-inline constexpr size_t kArtifactCodeDigestOffset = 76;
+inline constexpr size_t kArtifactCodeDigestOffset = 68;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
-inline constexpr size_t kArtifactDispatchDigestOffset =
-    kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes;
 inline constexpr char kArtifactSectionDigestAlgorithm[] = "sha256";
 inline constexpr char kArtifactCanonicalSectionOrder[] =
-    "header|code|dispatch|initial_memory";
+    "header|code|initial_memory";
 
-static_assert(kArtifactDispatchDigestOffset + kArtifactDigestBytes ==
+static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
 
 // FNV-1a digest over the full RV32 gas schedule: the instruction-cost table
@@ -146,7 +141,7 @@ constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_name(digest, "groundhog.rv32.artifact.format.v3");
+  digest = fnv_digest_name(digest, "groundhog.rv32.artifact.format.v4");
 
   digest = format_fingerprint_bytes(digest, "magic", kArtifactMagic);
   digest = format_fingerprint_u64(digest, "format_version", format_version);
@@ -210,14 +205,6 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
                                       "header.initial_memory_offset.offset",
                                       "header.initial_memory_offset.size",
                                       kArtifactInitialMemoryOffsetOffset, 4);
-  digest =
-      format_fingerprint_layout_field(digest, "header.dispatch_offset.offset",
-                                      "header.dispatch_offset.size",
-                                      kArtifactDispatchOffsetOffset, 4);
-  digest =
-      format_fingerprint_layout_field(digest, "header.dispatch_size.offset",
-                                      "header.dispatch_size.size",
-                                      kArtifactDispatchSizeOffset, 4);
   digest = format_fingerprint_layout_field(digest, "header.code_digest.offset",
                                            "header.code_digest.size",
                                            kArtifactCodeDigestOffset,
@@ -228,11 +215,6 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
                                       "header.initial_memory_digest.size",
                                       kArtifactInitialMemoryDigestOffset,
                                       kArtifactDigestBytes);
-  digest =
-      format_fingerprint_layout_field(digest, "header.dispatch_digest.offset",
-                                      "header.dispatch_digest.size",
-                                      kArtifactDispatchDigestOffset,
-                                      kArtifactDigestBytes);
 
   digest = format_fingerprint_string(digest, "section_digest_algorithm",
                                      kArtifactSectionDigestAlgorithm);
@@ -241,34 +223,12 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
       format_fingerprint_u64(digest, "instruction_bytes", kInstructionBytes);
   digest = format_fingerprint_u64(digest, "max_code_bytes", kMaxCodeBytes);
   digest = format_fingerprint_u64(digest, "max_memory_bytes", kMaxMemoryBytes);
-  digest = format_fingerprint_u64(digest, "max_dispatch_entries",
-                                  kMaxDispatchEntries);
-  digest =
-      format_fingerprint_u64(digest, "max_dispatch_bytes", kMaxDispatchBytes);
-
-  digest = format_fingerprint_u64(digest, "dispatch_entry_bytes",
-                                  kDispatchEntryBytes);
-  digest = format_fingerprint_layout_field(digest, "dispatch.method_id.offset",
-                                           "dispatch.method_id.size",
-                                           kDispatchEntryMethodOffset, 8);
-  digest = format_fingerprint_layout_field(digest, "dispatch.pc.offset",
-                                           "dispatch.pc.size",
-                                           kDispatchEntryPcOffset, 4);
-  digest = format_fingerprint_layout_field(digest, "dispatch.reserved.offset",
-                                           "dispatch.reserved.size",
-                                           kDispatchEntryReservedOffset, 4);
-  digest = format_fingerprint_u64(digest, "dispatch_reserved_allowed_mask", 0);
-  digest = format_fingerprint_u64(digest, "dispatch_table_nonempty", 1);
-  digest = format_fingerprint_u64(digest, "dispatch_size_multiple_of_entry", 1);
-  digest = format_fingerprint_u64(digest,
-                                  "dispatch_method_ids_strictly_increasing", 1);
-  digest =
-      format_fingerprint_u64(digest, "dispatch_pc_must_be_valid_program_pc", 1);
 
   digest = format_fingerprint_u64(digest, "memory_bytes_nonzero", 1);
+  digest = format_fingerprint_u64(digest, "memory_bytes_le_max", 1);
   digest = format_fingerprint_u64(digest, "code_size_nonzero", 1);
   digest = format_fingerprint_u64(digest,
-                                  "initial_memory_size_equals_memory_bytes", 1);
+                                  "initial_memory_size_le_memory_bytes", 1);
   digest = format_fingerprint_string(digest, "canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
   digest = format_fingerprint_u64(digest, "sections_must_be_in_bounds", 1);
@@ -279,19 +239,20 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x38927fa2342c674aULL);
+static_assert(kArtifactFormatFingerprint == 0x373c4a7cf1a42ef8ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v3 header, little-endian:
+// RV32 artifact v4 header, little-endian:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
-// code_offset, initial_memory_offset, dispatch_table_offset,
-// dispatch_table_size, sha256(code), sha256(initial_memory),
-// sha256(dispatch).
+// code_offset, initial_memory_offset, sha256(code), sha256(initial_memory).
+// Body: header || code || initial_memory. v4 moves method dispatch into the
+// guest (no dispatch table); the stored memory is only the initialized prefix
+// (initial_memory_size <= memory_bytes), zero-extended by the runtime.
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,
@@ -305,12 +266,8 @@ enum class ArtifactError {
   kGasScheduleDigestMismatch,
   kMemorySizeInvalid,
   kCodeSizeInvalid,
-  kInitialMemorySizeMismatch,
   kInitialMemoryTooLarge,
   kInvalidOffsets,
-  kDispatchSizeInvalid,
-  kDispatchDigestMismatch,
-  kDispatchTableInvalid,
   kCodeDigestMismatch,
   kInitialMemoryDigestMismatch,
   kInvalidProgram,
@@ -319,7 +276,6 @@ enum class ArtifactError {
 struct ArtifactImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
-  std::vector<DispatchEntry> dispatch_table;
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
