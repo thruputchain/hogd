@@ -27,6 +27,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/health/health.h"
+#include "hogd/httpd/httpd.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -67,9 +68,18 @@ int
 hogdb_init(std::string_view path, size_t ram_bytes,
            const std::string *coordinator_addr, std::string_view bind_ip,
            uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
-           uint16_t gateway_port)
+           uint16_t gateway_port, std::optional<x23::HostPort> metrics_addr)
 {
   Health::instance().start_service();
+
+  std::optional<httpd::HttpServer> metrics_server;
+  if (metrics_addr.has_value()) {
+    metrics_server.emplace();
+    httpd::add_health_metrics_routes(*metrics_server);
+    const uint16_t actual_metrics_port =
+        metrics_server->start_server(std::move(*metrics_addr));
+    info("PORT hogdb.metrics={}", actual_metrics_port);
+  }
 
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -208,7 +218,8 @@ usage(char *argv[])
   std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
                "--bind-ip <ip> [--coordinator-addr <host:port>] "
                "[--executor-port <port>] [--mempool-port <port>] "
-               "[--auth-port <port>] [--gateway-port <port>]",
+               "[--auth-port <port>] [--gateway-port <port>] "
+               "[--metrics <private-ip:port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -222,6 +233,15 @@ parse_port(const std::string &value)
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
   return static_cast<uint16_t>(port);
+}
+
+std::optional<x23::HostPort>
+parse_metrics_addr(std::string_view value)
+{
+  x23::HostPort host_port;
+  CHECK(host_port.parse(value));
+  CHECK(host_port.to_addr(/*dns=*/false).has_value());
+  return host_port;
 }
 
 } // namespace
@@ -242,9 +262,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t mempool_port = 0;
   uint16_t auth_port = 0;
   uint16_t gateway_port = 0;
+  std::optional<x23::HostPort> metrics_addr;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--metrics" && i + 1 < argc) {
+      metrics_addr = parse_metrics_addr(argv[++i]);
+      continue;
+    }
     if (arg == "--db-path" && i + 1 < argc) {
       path = argv[++i];
       continue;
@@ -288,5 +313,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, bind_ip,
-                          exec_port, mempool_port, auth_port, gateway_port);
+                          exec_port, mempool_port, auth_port, gateway_port,
+                          std::move(metrics_addr));
 };

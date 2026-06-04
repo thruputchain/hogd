@@ -36,6 +36,7 @@ target_link_libraries(
   event_exec
   event
   health
+  httpd
   hogd
 )
 

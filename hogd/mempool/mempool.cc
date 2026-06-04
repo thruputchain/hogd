@@ -52,21 +52,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
   std::optional<httpd::HttpServer> metrics_server;
   if (metrics_addr.has_value()) {
     metrics_server.emplace();
-    metrics_server->add_route(
-        "/health", []() -> x23::Async<httpd::HttpResponse> {
-          co_return httpd::HttpResponse{
-              .status = 200,
-              .content_type = "application/json",
-              .body = co_await Health::instance().dump_to_string(),
-          };
-        });
-    metrics_server->add_route("/metrics", [] {
-      return httpd::HttpResponse{
-          .status = 200,
-          .content_type = "text/plain",
-          .body = "",
-      };
-    });
+    httpd::add_health_metrics_routes(*metrics_server);
     const uint16_t actual_metrics_port =
         metrics_server->start_server(std::move(*metrics_addr));
     info("PORT mempool.metrics={}", actual_metrics_port);

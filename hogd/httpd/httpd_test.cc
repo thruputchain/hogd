@@ -115,5 +115,26 @@ TEST_F(HttpdTest, MultipleRoutesDispatchIndependently)
   EXPECT_TRUE(b.ends_with("\r\n\r\nb"));
 }
 
+TEST_F(HttpdTest, HealthMetricsRoutesReturnExpectedResponses)
+{
+  add_health_metrics_routes(server_);
+  uint16_t port = start();
+
+  std::string health =
+      request(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(health.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(health.find("Content-Type: application/json\r\n"),
+            std::string::npos);
+  EXPECT_NE(health.find("\"process_name\""), std::string::npos);
+  EXPECT_NE(health.find("\"status\""), std::string::npos);
+
+  std::string metrics =
+      request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(metrics.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(metrics.find("Content-Type: text/plain\r\n"), std::string::npos);
+  EXPECT_NE(metrics.find("Content-Length: 0\r\n"), std::string::npos);
+  EXPECT_TRUE(metrics.ends_with("\r\n\r\n"));
+}
+
 } // namespace
 } // namespace hogd::httpd

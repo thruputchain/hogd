@@ -5,6 +5,7 @@ add_library(
 target_link_libraries(
   httpd
   base
+  health
   x23
 )
 
