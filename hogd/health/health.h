@@ -64,6 +64,7 @@ public:
 
   x23::Async<void>
   dump_to_file(std::optional<std::filesystem::path> opt_path = std::nullopt);
+  x23::Async<std::string> dump_to_string();
 
   x23::Async<void> set_status(Status status);
   x23::Async<void> set_current_block_height(BlockHeight current_block_height);

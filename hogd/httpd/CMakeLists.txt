@@ -1,0 +1,20 @@
+add_library(
+  httpd
+  httpd.cc
+)
+target_link_libraries(
+  httpd
+  base
+  x23
+)
+
+add_executable(
+  httpd_test
+  httpd_test.cc
+)
+target_link_libraries(
+  httpd_test
+  httpd
+  GTest::gtest_main
+)
+gtest_discover_tests(httpd_test)
