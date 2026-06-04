@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/wasm/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <cstddef>

@@ -1,4 +1,5 @@
 #include "hogd/test_ffi/mock_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <memory>

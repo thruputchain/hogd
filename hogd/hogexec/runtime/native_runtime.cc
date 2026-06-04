@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <algorithm>
 #include <cassert>

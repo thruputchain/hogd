@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <memory>
 #include <unordered_map>

@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <format>

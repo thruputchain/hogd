@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <memory>
