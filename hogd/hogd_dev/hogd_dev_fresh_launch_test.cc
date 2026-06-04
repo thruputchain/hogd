@@ -9,9 +9,11 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <print>
 #include <string>
 #include <string_view>
@@ -22,9 +24,31 @@
 
 namespace {
 
-constexpr auto kStartupTimeout = std::chrono::seconds(30);
+constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
+
+// Honor HOGD_DEV_STARTUP_TIMEOUT_SECS just like hogd_dev_test.cc, so slow
+// sanitizer schedules (e.g. TSAN, which sets it to 180) can give hogd-dev
+// enough time to reach readiness. Falls back to the default when unset.
+std::chrono::seconds
+startup_timeout()
+{
+  const char *value = std::getenv("HOGD_DEV_STARTUP_TIMEOUT_SECS");
+  if (value == nullptr || *value == '\0') {
+    return kDefaultStartupTimeout;
+  }
+
+  errno = 0;
+  char *end = nullptr;
+  std::uint64_t seconds = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
+      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+    std::println(stderr, "invalid HOGD_DEV_STARTUP_TIMEOUT_SECS value");
+    std::exit(EXIT_FAILURE);
+  }
+  return std::chrono::seconds(static_cast<int>(seconds));
+}
 
 // NOLINTBEGIN(misc-include-cleaner)
 void
@@ -159,7 +183,7 @@ main() // NOLINT(bugprone-exception-escape)
 
   std::string stdout_output;
   std::string stderr_output;
-  const auto deadline = std::chrono::steady_clock::now() + kStartupTimeout;
+  const auto deadline = std::chrono::steady_clock::now() + startup_timeout();
   bool saw_readiness = false;
   bool child_exited = false;
   int child_status = 0;
