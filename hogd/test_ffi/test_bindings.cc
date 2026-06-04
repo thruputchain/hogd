@@ -116,19 +116,40 @@ best_effort_log(Fn &&fn) noexcept
   }
 }
 
-void
-lazy_init()
+// First-use initialization for the test_ffi entry points: runs hogd_init(),
+// allocates the ThreadsafeLogger, and swaps it in as the process logger. Every
+// exported entry point calls this on first use.
+//
+// Those steps allocate, so they can throw std::bad_alloc. Several entry points
+// reach lazy_init() from a noexcept helper, before their own try/catch
+// boundary; a throw there would cross the noexcept boundary and terminate an
+// honest caller instead of returning a structured error (issues #2441, #2464,
+// #2514, #2575). So lazy_init() is itself noexcept and reports failure via its
+// bool return -- callers translate false into their own
+// kTestFFIErrorCodeUnrecoverableError. Failure is reported best-effort to
+// stderr because the process logger does not exist yet: error() would
+// dereference a still-null logger.
+[[nodiscard]] bool
+lazy_init() noexcept
 {
-  static std::mutex init_mutex;
-  std::lock_guard lock(init_mutex);
-  static bool initialized = false;
-  ffi_trace("lazy_init: initialized={}", initialized);
-  if (!initialized) {
-    hogd_init(0, nullptr, false, LogLevel::kCritical);
-    auto logger = std::make_unique<ThreadsafeLogger>(LogLevel::kCritical);
-    global_logger = logger.get();
-    hogd::swap_logger(std::move(logger));
-    initialized = true;
+  try {
+    static std::mutex init_mutex;
+    std::lock_guard lock(init_mutex);
+    static bool initialized = false;
+    ffi_trace("lazy_init: initialized={}", initialized);
+    if (!initialized) {
+      hogd_init(0, nullptr, false, LogLevel::kCritical);
+      auto logger = std::make_unique<ThreadsafeLogger>(LogLevel::kCritical);
+      global_logger = logger.get();
+      hogd::swap_logger(std::move(logger));
+      initialized = true;
+    }
+    return true;
+  } catch (std::exception const &e) {
+    std::fputs("error initializing test_ffi logging: ", stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+    return false;
   }
 }
 
@@ -176,19 +197,10 @@ enable_syscall_logging(int32_t level) noexcept
     break;
   }
 
-  try {
-    // First-use logger initialization allocates (hogd_init, the
-    // ThreadsafeLogger, and the global logger swap), so it can throw
-    // std::bad_alloc. This helper is noexcept and has no status return, so a
-    // thrown exception would terminate an honest caller (issue #2441). Report
-    // best-effort to stderr -- error() would dereference the still-null process
-    // logger -- and leave logging unchanged.
-    lazy_init();
-  } catch (std::exception const &e) {
-    std::fputs("error initializing logging for enable_syscall_logging: ",
-               stderr);
-    std::fputs(e.what(), stderr);
-    std::fputc('\n', stderr);
+  // First-use init can fail (allocation failure); lazy_init() reports it to
+  // stderr and returns false. This helper has no status return, so just leave
+  // logging unchanged (issue #2441).
+  if (!lazy_init()) {
     return;
   }
   assert(global_logger != nullptr);
@@ -199,7 +211,12 @@ CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
             uint32_t serialized_cost_model_len) noexcept
 {
-  lazy_init();
+  // First-use init can fail (allocation failure); return a structured error
+  // rather than letting it cross this noexcept boundary (issue #2575).
+  if (!lazy_init()) {
+    return {.db = nullptr,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
   try {
     StorageCostModelXdr cost_model_xdr =
         StorageCostModel::default_cost_model().to_xdr();
@@ -344,7 +361,12 @@ advance_new_block(void *db) noexcept
 OpenRuntimeContextResult
 open_runtime_context() noexcept
 {
-  lazy_init();
+  // First-use init can fail (allocation failure); return a structured error
+  // rather than letting it cross this noexcept boundary (issue #2575).
+  if (!lazy_init()) {
+    return {.context = nullptr,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
   try {
     // Own the wrapper slot via unique_ptr until construction fully succeeds, so
     // a throw from make_shared() (or make_hogexec_context()) after the slot is
@@ -1422,17 +1444,10 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
       "FFI (start): mock_syscall_entrypoint(syscall={}, arg1={}, arg2={}, "
       "arg3={}, arg4={}, arg5={}, arg6={}, arg7={})",
       syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-  // First-use init allocates and can throw; this exported wrapper is the C ABI
-  // boundary (not noexcept), so translate a failed init into an unrecoverable
-  // host-function result rather than letting the exception escape. lazy_init()
-  // installs the process logger, so report via fputs (no allocation).
-  try {
-    hogd::lazy_init();
-  } catch (std::exception const &e) {
-    std::fputs("error initializing logging for mock_syscall_entrypoint: ",
-               stderr);
-    std::fputs(e.what(), stderr);
-    std::fputc('\n', stderr);
+  // First-use init can fail (allocation failure); translate it into an
+  // unrecoverable host-function result rather than letting it escape this C ABI
+  // boundary. lazy_init() reports the failure to stderr.
+  if (!hogd::lazy_init()) {
     return hogd::unrecoverable_error();
   }
   auto result = hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4,
@@ -1461,20 +1476,11 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
-  // First-use init allocates and can throw; this exported wrapper is the C ABI
-  // boundary (not noexcept) and runs before the impl's catch boundary, so
-  // translate a failed init into a structured error rather than letting the
-  // exception escape the wrapper (issue #2514).
-  try {
-    hogd::lazy_init();
-  } catch (std::exception const &e) {
-    // lazy_init() is what installs the process logger, so it may not exist
-    // yet; report via fputs (no allocation) rather than error().
-    std::fputs(
-        "error initializing logging for verify_signed_transaction_auth: ",
-        stderr);
-    std::fputs(e.what(), stderr);
-    std::fputc('\n', stderr);
+  // First-use init can fail (allocation failure); translate it into a
+  // structured error rather than letting it escape this C ABI boundary, which
+  // runs before the impl's catch boundary (issue #2514). lazy_init() reports
+  // the failure to stderr.
+  if (!hogd::lazy_init()) {
     return VerifyAuthResult{.auth_error_code = 0,
                             .ffi_error_code =
                                 kTestFFIErrorCodeUnrecoverableError};

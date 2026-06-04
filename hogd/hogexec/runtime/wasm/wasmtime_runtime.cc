@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/wasm/wasmtime_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <cstddef>
@@ -128,10 +129,10 @@ WasmtimeContext::~WasmtimeContext()
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-WasmtimeContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler)
+WasmtimeContext::make_new_runtime(DeployedContract const &deployed_contract,
+                                  SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   assert(syscall_handler != nullptr);
 
   NewWasmtimeRuntimeResult new_runtime_result =

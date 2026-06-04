@@ -1,4 +1,5 @@
 #include "hogd/test_ffi/mock_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <memory>
@@ -47,10 +48,10 @@ MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-MockRuntimeContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler)
+MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
+                                     SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type == ContractType::kMockTest) {
 
     auto contract =
@@ -80,8 +81,7 @@ MockRuntimeContext::make_new_runtime(
   }
   // otherwise some other contract type; returns whatever the base context
   // wants to do with the contract.
-  return base_context_->make_new_runtime(deployed_contract_hash,
-                                         syscall_handler);
+  return base_context_->make_new_runtime(deployed_contract, syscall_handler);
 }
 
 } // namespace hogd

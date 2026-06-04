@@ -13,11 +13,22 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 #include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
+
+// A cached contract: the bytecode plus, for translatable engines (rv32), its
+// eagerly-built ready-to-instantiate image. `translated` is nullopt for
+// non-rv32 contracts (and if translation failed -- treated as Unrecoverable by
+// the engine, matching prior behavior).
+struct ContractCacheEntry {
+  Contract contract;
+  std::optional<Rv32Contract> translated;
+};
 
 class DatabaseProxy;
 
@@ -50,8 +61,8 @@ public:
 
   SystemStatus<const Contract *>
   try_get_contract_by_hash(SHA256Hash const &hash);
-  SystemStatus<std::optional<DeployedContractHash>>
-  try_get_deployed_contract_hash(ContractAddress const &addr);
+  SystemStatus<const DeployedContract *>
+  try_get_deployed_contract(ContractAddress const &addr);
   SystemStatus<const SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
@@ -76,22 +87,25 @@ public:
 
 private:
   void release_db_tip();
+  // Lookup/insert/eager-translate the contract entry for `hash`. Returns
+  // nullptr (wrapped) for a negative lookup.
+  SystemStatus<const ContractCacheEntry *>
+  get_contract_entry(SHA256Hash const &hash);
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
-  SynchronizedMap<SHA256Hash, std::optional<const Contract>, ByteArrayHasher,
-                  std::equal_to<>,
+  SynchronizedMap<SHA256Hash, std::optional<ContractCacheEntry>,
+                  ByteArrayHasher, std::equal_to<>,
                   std::allocator<std::pair<const SHA256Hash,
-                                           std::optional<const Contract>>>,
+                                           std::optional<ContractCacheEntry>>>,
                   std::shared_mutex>
       contract_cache_;
   // Neither does the deployment cache
-  SynchronizedMap<
-      ContractAddress, std::optional<DeployedContractHash>, ByteArrayHasher,
-      std::equal_to<>,
-      std::allocator<std::pair<const ContractAddress,
-                               std::optional<DeployedContractHash>>>,
-      std::shared_mutex>
+  SynchronizedMap<ContractAddress, std::optional<DeployedContract>,
+                  ByteArrayHasher, std::equal_to<>,
+                  std::allocator<std::pair<const ContractAddress,
+                                           std::optional<DeployedContract>>>,
+                  std::shared_mutex>
       deployment_cache_;
 
   SynchronizedMap<

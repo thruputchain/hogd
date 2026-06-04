@@ -7,9 +7,6 @@ add_library(item_objects OBJECT
 target_link_libraries(item_objects hogd_interface)
 target_include_directories(item_objects PRIVATE ${CMAKE_BINARY_DIR})
 
-add_library(item STATIC $<TARGET_OBJECTS:item_objects>)
-target_link_libraries(item hogexec_common components)
-
 # Standalone item tests — no syscall handlers, WASM runtimes, or precompiles
 add_library(item_test_objects OBJECT
   item_view_test.cc
@@ -23,7 +20,7 @@ add_executable(item_test
   $<TARGET_OBJECTS:item_test_objects>
 )
 target_link_libraries(item_test
-  item
+  runtime
   runtime_test_util
   hogexec_common
   components

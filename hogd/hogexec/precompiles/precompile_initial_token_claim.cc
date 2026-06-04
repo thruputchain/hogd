@@ -47,8 +47,12 @@ calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
   // calldata
   std::vector<std::uint8_t> key_data;
 
-  // Domain separator
-  std::string_view prefix = "Initial Deployment";
+  // Domain separator. Use a `u8"..."` literal so the hashed bytes are the
+  // UTF-8 (== ASCII, here) encoding mandated by the standard rather than
+  // implementation-defined ordinary-literal code units; otherwise the derived
+  // storage key would depend on the execution character set (`-fexec-charset`).
+  // See hogd issue #2573.
+  std::u8string_view prefix = u8"Initial Deployment";
 
   // reserve space for the key data
   key_data.reserve(prefix.size() + hash.size() + nonce.size() +
