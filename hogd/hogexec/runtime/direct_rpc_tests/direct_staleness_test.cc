@@ -428,7 +428,11 @@ TEST_F(DirectStalenessTest,
           Invocation{.invoked_address = kContractAddr,
                      .entrypoint = entrypoint_from_method_id(0),
                      .gas_limit = std::numeric_limits<GasAmount>::max(),
-                     .calldata = {}}};
+                     .calldata = {}},
+      // Non-expired uniquifier: this test drives a manual revert and a
+      // staleness abort, not replay expiry, and a default (height-0) uniquifier
+      // is now rejected as expired during initial validation.
+      .uniquifier = make_new_uniquifier()};
 
   StorageSnapshotCache block_b_cache(block_b, get_db_proxy());
   EventServerProxy event_proxy(
