@@ -211,8 +211,9 @@ Rv32Context::make_new_runtime(
         &deployed_contract.entry->translated.value(), syscall_handler);
   }
 
-  // Fallback: transaction-local deployment (no cache entry). Resolve the code
-  // and translate on the fly; the runtime owns the result for its lifetime.
+  // Fallback: either a transaction-local deployment (no cache entry) or a
+  // cached entry whose translation is absent. Resolve the code and translate
+  // on the fly; the runtime owns the result for its lifetime.
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
