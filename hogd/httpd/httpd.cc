@@ -44,7 +44,7 @@ reason_phrase(int status)
   case 500:
     return "Internal Server Error";
   default:
-    return "OK";
+    return "Unknown";
   }
 }
 

@@ -28,7 +28,6 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "x23/async.h"
 #include "x23/sockio.h"
 
 namespace hogd {

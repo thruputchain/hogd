@@ -25,6 +25,7 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
