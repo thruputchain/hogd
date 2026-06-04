@@ -40,7 +40,7 @@ reason_phrase(int status)
   case 405:
     return "Method Not Allowed";
   case 418: // haha
-    return "I'm a teapot";
+    return "I'm a groundhog";
   case 500:
     return "Internal Server Error";
   default:
@@ -119,6 +119,19 @@ plain_response(int status, std::string body)
 
 } // namespace
 
+struct HttpServer::ResetFdOnExit {
+  x23::CoroPoll &cp;
+  x23::UniqueFd &fd;
+
+  ~ResetFdOnExit() { cp.reset(fd); }
+};
+
+struct HttpServer::EofOnExit {
+  x23::RefPtr<HttpServer> self;
+
+  ~EofOnExit() { self->eof(); }
+};
+
 HttpServer::~HttpServer()
 {
   if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
@@ -150,17 +163,27 @@ HttpServer::start_server(x23::HostPort bind_addr)
   port_ = x23::get_port(x23::local_addr(lfd));
   listen_fd_ = lfd.get();
 
-  [&cp = cp_, lfd = std::move(lfd), self = x23::RefPtr(*this),
-   _d = x23::Defer([this] { eof(); })](this auto /*copy*/) -> x23::Detached {
-    x23::Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
-    while (auto c = co_await cp.accept(lfd)) {
-      [self, fd = x23::UniqueFd{*c}]() mutable -> x23::Detached {
-        co_await self->handle_connection(std::move(fd));
-      }();
-    }
-  }();
+  accept_loop(cp_, std::move(lfd), x23::RefPtr(*this));
 
   return port_;
+}
+
+x23::Detached
+HttpServer::accept_loop(x23::CoroPoll &cp, x23::UniqueFd lfd,
+                        x23::RefPtr<HttpServer> self)
+{
+  EofOnExit _eof{self};
+  ResetFdOnExit _resetfd{cp, lfd};
+  while (auto c = co_await cp.accept(lfd)) {
+    handle_connection_detached(self, x23::UniqueFd{*c});
+  }
+}
+
+x23::Detached
+HttpServer::handle_connection_detached(x23::RefPtr<HttpServer> self,
+                                       x23::UniqueFd fd)
+{
+  co_await self->handle_connection(std::move(fd));
 }
 
 x23::Async<void>

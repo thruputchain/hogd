@@ -60,6 +60,13 @@ private:
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
+  struct ResetFdOnExit;
+  struct EofOnExit;
+
+  static x23::Detached accept_loop(x23::CoroPoll &cp, x23::UniqueFd lfd,
+                                   x23::RefPtr<HttpServer> self);
+  static x23::Detached handle_connection_detached(x23::RefPtr<HttpServer> self,
+                                                  x23::UniqueFd fd);
   x23::Async<void> handle_connection(x23::UniqueFd fd);
   x23::Async<HttpResponse> route(std::string_view method,
                                  std::string_view target);

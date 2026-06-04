@@ -173,10 +173,14 @@ std::optional<x23::HostPort>
 parse_metrics_addr(std::string_view value)
 {
   x23::HostPort host_port;
-  CHECK(host_port.parse(value));
+  if (!host_port.parse(value)) {
+    throw std::runtime_error(std::format("Invalid address: {}", value));
+  }
   std::expected<sockaddr_storage, x23::GaiError> addr =
       host_port.to_addr(/*dns=*/false);
-  CHECK(addr.has_value());
+  if (!addr.has_value()) {
+    throw std::runtime_error(std::format("Invalid address: {}", value));
+  }
   return host_port;
 }
 

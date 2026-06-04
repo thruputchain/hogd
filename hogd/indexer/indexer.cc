@@ -121,8 +121,12 @@ std::optional<x23::HostPort>
 parse_metrics_addr(std::string_view value)
 {
   x23::HostPort host_port;
-  CHECK(host_port.parse(value));
-  CHECK(host_port.to_addr(/*dns=*/false).has_value());
+  if (!host_port.parse(value)) {
+    throw std::runtime_error(std::format("Invalid address: {}", value));
+  }
+  if (!host_port.to_addr(/*dns=*/false).has_value()) {
+    throw std::runtime_error(std::format("Invalid address: {}", value));
+  }
   return host_port;
 }
 
