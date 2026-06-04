@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <cstddef>
@@ -40,6 +41,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -917,6 +919,46 @@ SystemCallHandler::set_return_buffer(
   }
 }
 
+SystemCallHandler::~SystemCallHandler()
+{
+  if constexpr (is_debug_build()) {
+    if (!transaction_committed_or_aborted_ &&
+        !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
+      warn("SystemCallHandler destroyed without committing or aborting "
+           "transaction");
+      if (debug_force_commit_abort_) {
+        panic("SystemCallHandler destroyed at invalid state: {}",
+              transaction_committed_or_aborted_);
+      }
+    }
+    if (last_frame_.has_value() &&
+        !last_frame_.value().extract_events().empty() &&
+        root_invoke_succeeded_ && !two_phase_commit_failed_) {
+      panic("SystemCallHandler destroyed with events to emit");
+    }
+  }
+}
+
+const Rv32Contract *
+SystemCallHandler::get_or_create_local_rv32_translation(
+    SHA256Hash const &hash, Contract const &contract)
+{
+  auto it = local_rv32_translations_.find(hash);
+  if (it != local_rv32_translations_.end()) {
+    // Cached result -- the pointer is null for a known non-translatable
+    // artifact, so we never retranslate.
+    return it->second.get();
+  }
+
+  std::optional<Rv32Contract> translated =
+      Rv32Contract::create(contract.rv32_contract());
+  auto [inserted, _] = local_rv32_translations_.emplace(
+      hash, translated.has_value()
+                ? std::make_unique<Rv32Contract>(std::move(*translated))
+                : nullptr);
+  return inserted->second.get();
+}
+
 SystemStatus<const Contract *>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
@@ -942,30 +984,26 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
-  // check if the address has a deployed contract hash
-  auto deployed_hash_expect =
-      snapshot_cache_.try_get_deployed_contract_hash(addr);
-  if (!deployed_hash_expect) {
-    return deployed_hash_expect.error();
+  // Check the snapshot for a deployed contract; on a hit, the returned entry
+  // carries the back-pointer to its (eagerly translated) code.
+  auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
+  if (!deployed_expect) {
+    return deployed_expect.error();
   }
-  auto deployed_hash = *deployed_hash_expect;
-
-  if (!deployed_hash) {
-    // There was no deployment in the previous snapshot.
-    // Now check for the transaction's local context.
-    deployed_hash =
-        invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+  const DeployedContract *deployed = *deployed_expect;
+  if (deployed != nullptr) {
+    return runtime_context_.make_new_runtime(*deployed, this);
   }
 
-  if (!deployed_hash) {
-    // A deployment was not found in the local context
-    // nor in the snapshot.
+  // Not in the snapshot; check the transaction's local context.
+  auto local_hash =
+      invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+  if (!local_hash) {
     return nullptr;
   }
-
-  // actually make the new runtime
-  // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_.make_new_runtime(*deployed_hash, this);
+  // Tx-local deployment: no cache entry (entry stays null; the engine falls
+  // back to resolve_contract).
+  return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
 }
 
 Calldata const &
@@ -1135,11 +1173,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
   auto deploy_check_status =
-      snapshot_cache_.try_get_deployed_contract_hash(deploy_addr);
+      snapshot_cache_.try_get_deployed_contract(deploy_addr);
   if (!deploy_check_status) {
     return deploy_check_status.error();
   }
-  if (*deploy_check_status) {
+  if (*deploy_check_status != nullptr) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }

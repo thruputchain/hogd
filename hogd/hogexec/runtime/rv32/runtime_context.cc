@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/rv32/runtime_context.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <memory>
@@ -146,10 +147,10 @@ RuntimeContext::verify_contract(Contract const &contract) const
 }
 
 SystemStatus<std::unique_ptr<hogd::Runtime>>
-RuntimeContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler)
+RuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
+                                 SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type != ContractType::kMockTest) {
     error("Unrecoverable: Attempt made to access a non-mock-test contract from "
           "rv32::RuntimeContext: {}",

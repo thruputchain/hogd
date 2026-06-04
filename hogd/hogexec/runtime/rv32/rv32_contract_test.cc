@@ -78,6 +78,25 @@ TEST_P(Rv32FibonacciTest, FibonacciCalls)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
+// The deployment back-pointer exposes the eagerly-built rv32 translation,
+// so the engine reaches a ready-to-instantiate image with no extra lookup.
+TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
+{
+  auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
+
+  auto cache = get_storage_snapshot_cache();
+  auto deployed = cache->try_get_deployed_contract(contract_addr);
+  ASSERT_TRUE(deployed.has_value());
+  ASSERT_NE(deployed.value(), nullptr);
+  ASSERT_NE(deployed.value()->entry, nullptr);
+  EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
+  EXPECT_TRUE(deployed.value()->entry->translated.has_value());
+  // Back-pointer aliases the contract-cache entry the hash lookup returns.
+  auto by_hash = cache->try_get_contract_by_hash(deployed.value()->hash.hash);
+  ASSERT_TRUE(by_hash.has_value());
+  EXPECT_EQ(&deployed.value()->entry->contract, by_hash.value());
+}
+
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
 // root frame's return buffer (CXS-serialized u32).
 TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)

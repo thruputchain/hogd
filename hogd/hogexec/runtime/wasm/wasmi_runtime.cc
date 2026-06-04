@@ -1,4 +1,5 @@
 #include "hogd/hogexec/runtime/wasm/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <cstddef>
@@ -138,10 +139,10 @@ WasmiContext::~WasmiContext()
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-WasmiContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler)
+WasmiContext::make_new_runtime(DeployedContract const &deployed_contract,
+                               SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   NewWasmiRuntimeResult new_runtime_result =
       new_wasmi_runtime(deployed_contract_hash.hash.data(), syscall_handler,
                         wasmi_context_ptr_);

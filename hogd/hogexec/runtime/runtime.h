@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 
 namespace hogd {
@@ -184,7 +185,7 @@ public:
   virtual InvokeErrorCode verify_contract(Contract const &contract) const = 0;
 
   virtual SystemStatus<std::unique_ptr<Runtime>>
-  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
+  make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) = 0;
 };
 

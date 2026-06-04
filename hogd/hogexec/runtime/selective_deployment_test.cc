@@ -13,6 +13,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/item/deployed_contract.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -56,7 +57,7 @@ public:
   }
 
   SystemStatus<std::unique_ptr<Runtime>>
-  make_new_runtime(DeployedContractHash const & /*unused*/,
+  make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) override
   {
     return nullptr;
