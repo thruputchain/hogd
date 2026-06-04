@@ -55,6 +55,7 @@ add_library(runtime STATIC
   $<TARGET_OBJECTS:runtime_objects>
   $<TARGET_OBJECTS:wasm_runtime_objects>
   $<TARGET_OBJECTS:rv32_runtime_objects>
+  $<TARGET_OBJECTS:item_objects>
 )
 
 add_library(runtime_test_lib
@@ -139,7 +140,6 @@ add_executable(
 target_link_libraries(
   runtime
   hogexec_common
-  item
   components
   unified_lib
   protocol
