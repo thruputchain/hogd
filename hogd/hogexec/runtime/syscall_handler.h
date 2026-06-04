@@ -437,10 +437,12 @@ private:
   bool hack_DONTUSE_TEST_BYPASS_allow_reentrance_{false};
 
   // Validate that the transaction can be run safely.
-  // Ensures, for example, that the wasms are valid.
-  // Sets cumulative_invoke_result_ to the appropriate error if validation
-  // fails.
-  void perform_initial_validation();
+  // Ensures, for example, that the wasms are valid, and that the replay
+  // uniquifier has not already expired.
+  // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
+  // validation failure; returns a system error (e.g. an unreadable db tip)
+  // through the SystemStatus so the caller can surface it rather than drop it.
+  SystemStatus<void> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode

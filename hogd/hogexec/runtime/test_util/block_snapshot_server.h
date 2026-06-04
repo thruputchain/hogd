@@ -73,14 +73,17 @@ public:
       return ExpectedDBTip(RPCError::kRPCBadBlockID);
     }
 
-    // fake dbtip
+    // Fake parent dbtip. get_db_tip returns the *parent* of the open block, so
+    // the tip's id must differ from block_id_ (DatabaseProxy::get_db_tip
+    // rejects a tip whose id equals the requested block). Model the parent as
+    // one block back.
     ExpectedDBTip out;
     out.error(RPCError::kRPCNone);
     out.db_tip() = DbTip{
-        .height = static_cast<BlockHeight>(block_id_),
+        .height = static_cast<BlockHeight>(block_id_) - 1,
         .block_hash = sha256(block_id_),
         .db_hash = {},
-        .id = block_id_,
+        .id = block_id_ - 1,
     };
     return out;
   }

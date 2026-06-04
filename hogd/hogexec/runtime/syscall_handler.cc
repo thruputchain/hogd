@@ -167,7 +167,7 @@ SystemCallHandler::SystemCallHandler(
     snapshot_cache_(snapshot_cache)
 {}
 
-void
+SystemStatus<void>
 SystemCallHandler::perform_initial_validation()
 {
   // Reject a transaction whose replay uniquifier has already expired before any
@@ -183,30 +183,28 @@ SystemCallHandler::perform_initial_validation()
   // Mirror add_replay_nonce_delta's guards: only real transactions carry a
   // uniquifier, and the initial-token-claim precompile bypasses the replay
   // cache entirely, so neither consumes -- nor needs an expiry gate for -- a
-  // uniquifier.
-  if (tx_uniquifier_.has_value() &&
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      root_invoked_address_.value() != kInitialTokenClaimPrecompileAddress) {
+  // uniquifier. tx_uniquifier_ and root_invoked_address_ are populated
+  // together.
+  if (tx_uniquifier_.has_value()) {
     assert(root_invoked_address_.has_value());
-    auto height = get_block_height();
-    // If the db tip is unreadable we can't positively conclude the uniquifier
-    // is expired, so we skip the check and let normal execution proceed; the
-    // authoritative replay-cache reservation in try_commit_transaction still
-    // rejects an expired uniquifier (just later). The check is purely
-    // best-effort -- it only short-circuits when it can prove expiry.
-    //
-    // ReplayCacheLock rejects a uniquifier whose block_expiry_height is
-    // strictly less than the *executing* block's height. HogDB's BlockTx
-    // executes at parent_tip.height + 1 (see RPCContext::open_block_tx_locked),
-    // while get_block_height() reads that parent tip, so the executing height
-    // is +1. Matching that comparison here rejects exactly the uniquifiers the
-    // late replay-cache reservation would reject -- only earlier.
-    if (height.has_value() &&
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        tx_uniquifier_.value().block_expiry_height < height.value() + 1) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-      return;
+    if (*root_invoked_address_ != kInitialTokenClaimPrecompileAddress) {
+      // ReplayCacheLock rejects a uniquifier whose block_expiry_height is
+      // strictly less than the *executing* block's height. HogDB's BlockTx
+      // executes at parent_tip.height + 1 (see
+      // RPCContext::open_block_tx_locked), while get_block_height() reads that
+      // parent tip, so the executing height is +1. Matching that comparison
+      // here rejects exactly the uniquifiers the late replay-cache reservation
+      // would reject -- only earlier. A db-tip read failure is a system error
+      // and is propagated to the caller, not dropped.
+      auto height = get_block_height();
+      if (!height.has_value()) {
+        return std::unexpected(height.error());
+      }
+      if (tx_uniquifier_->block_expiry_height < *height + 1) {
+        cumulative_invoke_result_.result_ =
+            InvokeError{InvokeErrorCode::ValidationFailure};
+        return {};
+      }
     }
   }
 
@@ -218,7 +216,7 @@ SystemCallHandler::perform_initial_validation()
     if (!validation_data.validate()) {
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
-      return;
+      return {};
     }
   }
 
@@ -242,9 +240,10 @@ SystemCallHandler::perform_initial_validation()
     if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ = InvokeError{res};
-      return;
+      return {};
     }
   }
+  return {};
 }
 
 void
@@ -269,7 +268,11 @@ SystemCallHandler::check_final_validation_data()
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  perform_initial_validation();
+  // A system error here (e.g. an unreadable db tip during the replay-expiry
+  // check) is surfaced as the corresponding invoke error rather than dropped.
+  if (auto res = perform_initial_validation(); !res.has_value()) {
+    cumulative_invoke_result_.result_ = res.error().to_invoke_error();
+  }
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
