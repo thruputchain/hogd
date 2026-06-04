@@ -311,7 +311,8 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --scp-is-validator true
 
 # Wait for loadgen.
-./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
+# We already waited on [$LOADGEN_PORT] above, so we only still need to wait on
+# [$LOADGEN_HTTP_PORT].
 ./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_HTTP_PORT
 
 # Wait for hogexec.
