@@ -19,15 +19,14 @@ MultiplexedContext::MultiplexedContext(
 
 SystemStatus<std::unique_ptr<Runtime>>
 MultiplexedContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
+    DeployedContract const &deployed_contract,
     SystemCallHandler *syscall_handler)
 {
-  auto it = contexts_.find(deployed_contract_hash.contract_type);
+  auto it = contexts_.find(deployed_contract.hash.contract_type);
   if (it == contexts_.end()) {
     return nullptr;
   }
-  return it->second.first->make_new_runtime(deployed_contract_hash,
-                                            syscall_handler);
+  return it->second.first->make_new_runtime(deployed_contract, syscall_handler);
 }
 
 InvokeErrorCode

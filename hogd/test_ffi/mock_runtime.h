@@ -35,7 +35,7 @@ public:
   {}
 
   SystemStatus<std::unique_ptr<Runtime>>
-  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
+  make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override;
 
   InvokeErrorCode verify_contract(Contract const &contract) const override

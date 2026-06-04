@@ -65,9 +65,10 @@ NativeContract::invoke(Runtime::MethodID method,
 
 SystemStatus<std::unique_ptr<Runtime>>
 NativeContext::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
+    DeployedContract const &deployed_contract,
     SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type != ContractType::kNative) {
     error("Unrecoverable: Attempt made to access a non-native contract from "
           "NativeContext: {}",

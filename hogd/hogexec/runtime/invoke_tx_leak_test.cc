@@ -49,8 +49,8 @@ public:
   }
 
   SystemStatus<std::unique_ptr<Runtime>>
-  make_new_runtime(DeployedContractHash const & /*hash*/,
-                   SystemCallHandler * /*handler*/) override
+  make_new_runtime(DeployedContract const & /*unused*/,
+                   SystemCallHandler * /*unused*/) override
   {
     return nullptr;
   }

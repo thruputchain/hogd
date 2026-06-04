@@ -294,9 +294,9 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   EXPECT_EQ(warm.value(), nullptr);
 
   // Warm negative deployment lookup.
-  auto warm_deploy = cache1.try_get_deployed_contract_hash(contract_addr);
+  auto warm_deploy = cache1.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(warm_deploy.has_value());
-  EXPECT_FALSE(warm_deploy.value().has_value());
+  EXPECT_EQ(warm_deploy.value(), nullptr);
 
   // Now deploy the contract and advance.
   auto contract = make_native_contract(0);
@@ -310,18 +310,18 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   ASSERT_TRUE(stale_contract.has_value());
   EXPECT_EQ(stale_contract.value(), nullptr);
 
-  auto stale_deploy = cache1.try_get_deployed_contract_hash(contract_addr);
+  auto stale_deploy = cache1.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(stale_deploy.has_value());
-  EXPECT_FALSE(stale_deploy.value().has_value());
+  EXPECT_EQ(stale_deploy.value(), nullptr);
 
   // Fresh viewing snapshot sees the deployment.
   auto snap2 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap2.has_value());
   StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
 
-  auto fresh_deploy = cache2.try_get_deployed_contract_hash(contract_addr);
+  auto fresh_deploy = cache2.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(fresh_deploy.has_value());
-  EXPECT_TRUE(fresh_deploy.value().has_value());
+  EXPECT_NE(fresh_deploy.value(), nullptr);
 
   auto deployed_hash = sha256(*contract);
   auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash);

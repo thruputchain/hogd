@@ -942,30 +942,26 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
-  // check if the address has a deployed contract hash
-  auto deployed_hash_expect =
-      snapshot_cache_.try_get_deployed_contract_hash(addr);
-  if (!deployed_hash_expect) {
-    return deployed_hash_expect.error();
+  // Check the snapshot for a deployed contract; on a hit, the returned entry
+  // carries the back-pointer to its (eagerly translated) code.
+  auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
+  if (!deployed_expect) {
+    return deployed_expect.error();
   }
-  auto deployed_hash = *deployed_hash_expect;
-
-  if (!deployed_hash) {
-    // There was no deployment in the previous snapshot.
-    // Now check for the transaction's local context.
-    deployed_hash =
-        invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+  const DeployedContract *deployed = *deployed_expect;
+  if (deployed != nullptr) {
+    return runtime_context_.make_new_runtime(*deployed, this);
   }
 
-  if (!deployed_hash) {
-    // A deployment was not found in the local context
-    // nor in the snapshot.
+  // Not in the snapshot; check the transaction's local context.
+  auto local_hash =
+      invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+  if (!local_hash) {
     return nullptr;
   }
-
-  // actually make the new runtime
-  // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_.make_new_runtime(*deployed_hash, this);
+  // Tx-local deployment: no cache entry (entry stays null; the engine falls
+  // back to resolve_contract).
+  return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
 }
 
 Calldata const &
@@ -1135,11 +1131,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
   auto deploy_check_status =
-      snapshot_cache_.try_get_deployed_contract_hash(deploy_addr);
+      snapshot_cache_.try_get_deployed_contract(deploy_addr);
   if (!deploy_check_status) {
     return deploy_check_status.error();
   }
-  if (*deploy_check_status) {
+  if (*deploy_check_status != nullptr) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }

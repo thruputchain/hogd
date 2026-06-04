@@ -63,9 +63,6 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<const DeployedContract *>
   try_get_deployed_contract(ContractAddress const &addr);
-  // Deprecated shim; removed in the make_new_runtime migration (next task).
-  SystemStatus<std::optional<DeployedContractHash>>
-  try_get_deployed_contract_hash(ContractAddress const &addr);
   SystemStatus<const SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 

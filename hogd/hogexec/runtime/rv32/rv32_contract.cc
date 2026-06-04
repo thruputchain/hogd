@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
@@ -189,9 +190,10 @@ Rv32Context::verify_contract(Contract const &contract) const
 
 SystemStatus<std::unique_ptr<Runtime>>
 Rv32Context::make_new_runtime(
-    DeployedContractHash const &deployed_contract_hash,
+    DeployedContract const &deployed_contract,
     SystemCallHandler *syscall_handler)
 {
+  DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type != ContractType::kRv32) {
     error("Unrecoverable: Attempt made to access a non-rv32 contract from "
           "Rv32Context: {}",
@@ -200,6 +202,17 @@ Rv32Context::make_new_runtime(
   }
   assert(syscall_handler != nullptr);
 
+  // Fast path: a snapshot deployment carries a back-pointer to the cached
+  // contract entry, which already holds the eagerly-built translation. No
+  // resolve_contract round trip, no per-invocation translation.
+  if (deployed_contract.entry != nullptr &&
+      deployed_contract.entry->translated.has_value()) {
+    return std::make_unique<Rv32Runtime>(
+        &deployed_contract.entry->translated.value(), syscall_handler);
+  }
+
+  // Fallback: transaction-local deployment (no cache entry). Resolve the code
+  // and translate on the fly; the runtime owns the result for its lifetime.
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
@@ -218,24 +231,15 @@ Rv32Context::make_new_runtime(
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  // Translate (artifact SHA256 verification + program decode/fusion) only on a
-  // cache miss; the context owns the result and hands the runtime a borrowed
-  // pointer into the (node-based, stable-address) cache.
-  auto it = translation_cache_.find(deployed_contract_hash.hash);
-  if (it == translation_cache_.end()) {
-    std::optional<Rv32Contract> translated =
-        Rv32Contract::create(contract.value()->rv32_contract());
-    if (!translated.has_value()) [[unlikely]] {
-      error("Unrecoverable: failed to translate rv32 contract: {}",
-            show_byte_array(deployed_contract_hash.hash));
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-    it = translation_cache_
-             .emplace(deployed_contract_hash.hash, std::move(*translated))
-             .first;
+  std::optional<Rv32Contract> translated =
+      Rv32Contract::create(contract.value()->rv32_contract());
+  if (!translated.has_value()) [[unlikely]] {
+    error("Unrecoverable: failed to translate rv32 contract: {}",
+          show_byte_array(deployed_contract_hash.hash));
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(&it->second, syscall_handler);
+  return std::make_unique<Rv32Runtime>(std::move(*translated), syscall_handler);
 }
 
 } // namespace hogd

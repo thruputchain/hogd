@@ -131,19 +131,6 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
   return obj2->has_value() ? &obj2->value() : nullptr;
 }
 
-SystemStatus<std::optional<DeployedContractHash>>
-StorageSnapshotCache::try_get_deployed_contract_hash(ContractAddress const &addr)
-{
-  auto res = try_get_deployed_contract(addr);
-  if (!res) {
-    return res.error();
-  }
-  if (res.value() == nullptr) {
-    return std::optional<DeployedContractHash>{};
-  }
-  return std::optional<DeployedContractHash>{res.value()->hash};
-}
-
 SystemStatus<const SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
