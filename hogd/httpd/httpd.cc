@@ -1,6 +1,7 @@
 #include "hogd/httpd/httpd.h"
 
 #include <atomic>
+#include <exception>
 #include <expected>
 #include <format>
 #include <optional>
@@ -14,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
@@ -175,16 +177,19 @@ HttpServer::handle_connection(x23::UniqueFd fd)
   }
 
   HttpResponse response;
-  if (!has_complete_headers(request)) {
+  std::optional<
+      std::tuple<std::string_view, std::string_view, std::string_view>>
+      parsed;
+  if (has_complete_headers(request)) {
+    parsed = parse_request_line(first_line(request));
+  }
+  if (!parsed.has_value()) {
     response = plain_response(400, "Bad Request\n");
   }
-  else if (auto parsed = parse_request_line(first_line(request))) {
+  else {
     auto [method, target, version] = *parsed;
     (void)version;
     response = co_await route(method, target);
-  }
-  else {
-    response = plain_response(400, "Bad Request\n");
   }
 
   std::string serialized = serialize_response(response);

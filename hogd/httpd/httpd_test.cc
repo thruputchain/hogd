@@ -3,7 +3,9 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
+#include <unistd.h>
 
+#include "hogd/base/types.h"
 #include "x23/cleanup.h"
 #include "x23/sockio.h"
 #include "gtest/gtest.h"
