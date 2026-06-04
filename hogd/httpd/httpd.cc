@@ -1,16 +1,20 @@
 #include "hogd/httpd/httpd.h"
 
+#include <atomic>
 #include <expected>
 #include <format>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <tuple>
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "x23/async.h"
-#include "x23/rpc.h"
+#include "x23/cleanup.h"
+#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd::httpd {

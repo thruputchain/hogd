@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <future>
 #include <optional>
@@ -8,7 +9,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <thread>
+#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -25,6 +28,8 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
+#include "x23/async.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -182,12 +187,12 @@ parse_port(const std::string &value)
 std::optional<x23::HostPort>
 parse_metrics_addr(const std::string &arg)
 {
-  constexpr std::string_view prefix = "--metrics=";
-  if (!arg.starts_with(prefix)) {
+  constexpr std::string_view kPrefix = "--metrics=";
+  if (!arg.starts_with(kPrefix)) {
     return std::nullopt;
   }
   x23::HostPort host_port;
-  CHECK(host_port.parse(std::string_view(arg).substr(prefix.size())));
+  CHECK(host_port.parse(std::string_view(arg).substr(kPrefix.size())));
   std::expected<sockaddr_storage, x23::GaiError> addr =
       host_port.to_addr(/*dns=*/false);
   CHECK(addr.has_value());
