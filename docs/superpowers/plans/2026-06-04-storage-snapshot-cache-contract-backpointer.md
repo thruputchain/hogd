@@ -4,7 +4,7 @@
 
 **Goal:** Give the deployment cache entry a back-pointer to the contract-code cache entry, store the eagerly-built rv32 translation inside that entry, and let the rv32 engine reach code + ready-to-instantiate image from a single deployment lookup with no second hash lookup.
 
-**Architecture:** `contract_cache_` entries grow from `Contract` to `ContractCacheEntry { Contract; std::optional<Rv32Contract> translated; }`, with the translation built eagerly (calling `Rv32Contract::create`) at insert time. `deployment_cache_` entries become `DeployedContract { DeployedContractHash hash; const ContractCacheEntry* entry; }`. `make_new_runtime` takes `DeployedContract const&`; rv32 uses the back-pointer on the snapshot path and falls back to its existing translation path for tx-local deployments. `item_objects` is folded into the `runtime` static lib so the cache can call into rv32 directly.
+**Architecture:** `contract_cache_` entries grow from `Contract` to `ContractCacheEntry { Contract; std::optional<Rv32Contract> translated; }`, with the translation built eagerly (calling `Rv32Contract::create`) at insert time. `deployment_cache_` entries become `DeployedContract { DeployedContractHash hash; const ContractCacheEntry* entry; }`. `make_new_runtime` takes `DeployedContract const&`; rv32 uses the back-pointer on the snapshot path and translates on the fly for tx-local deployments (the runtime owns that translation). `Rv32Context::translation_cache_` is removed entirely — the snapshot cache is now the only translation store. `item_objects` is folded into the `runtime` static lib so the cache can call into rv32 directly.
 
 **Tech Stack:** C++23, CMake, GoogleTest. Built objects: `item_objects`, `rv32_runtime_objects`, `runtime` (static lib).
 
@@ -18,7 +18,7 @@
 - **Single back-pointer** to `ContractCacheEntry` (not separate code/translation pointers).
 - **Direct dependency** from the cache on `Rv32Contract` (no injected translator, no abstract base) — resolved by folding `item_objects` into `runtime`.
 - **`DeployedContract` is implicitly constructible from `DeployedContractHash`** (entry = null), so the ~40 `make_new_runtime(deployed_contract_hash, …)` *call sites* compile unchanged; only the virtual signature and its *overrides* change.
-- **rv32 keeps its existing `translation_cache_`** as the tx-local fallback. The snapshot/hot path bypasses it via the back-pointer. (Fully removing `translation_cache_` via an owning `Rv32Runtime` is a deliberate follow-up, not this PR.)
+- **`Rv32Context::translation_cache_` is removed entirely.** The snapshot/hot path translates eagerly into the snapshot cache and reaches it via the back-pointer. The tx-local fallback translates on the fly and hands ownership to the `Rv32Runtime` (which gains an owning constructor; `Runtime` is non-movable so an interior pointer is stable). Consequence: a tx-local rv32 contract re-translates on each `make_new_runtime` call — acceptable for that rare path, and it removes the unbounded `static thread_local` growth the `TODO(geoff)` flagged.
 
 ## Header-cycle constraint (why `deployed_contract.h` is separate)
 
@@ -387,7 +387,7 @@ Change the virtual signature and every override; update `resolve_runtime` and th
 
 **Files:**
 - Modify (signature, body unchanged via alias): `hogd/hogexec/runtime/runtime.h:186-188`, `hogd/hogexec/runtime/multiplexed_context.h:23` + `multiplexed_context.cc:21-31`, `hogd/hogexec/runtime/native_runtime.h:95` + `native_runtime.cc:67-69`, `hogd/hogexec/runtime/wasm/wasmtime_runtime.h:83` + `wasmtime_runtime.cc:131-133`, `hogd/hogexec/runtime/wasm/wasmi_runtime.h:98` + `wasmi_runtime.cc:141-143`, `hogd/hogexec/runtime/rv32/runtime_context.h:38` + `rv32/runtime_context.cc:149-151`, `hogd/test_ffi/mock_runtime.h:38` + `mock_runtime.cc:50-52`
-- Modify (signature + fast path): `hogd/hogexec/runtime/rv32/rv32_contract.h:65` + `rv32/rv32_contract.cc:191`
+- Modify (signature + fast path + retire `translation_cache_`): `hogd/hogexec/runtime/rv32/rv32_contract.h` (signature `:65`, `Rv32Runtime` `:35-48`, `Rv32Context` `:50-71`) + `rv32/rv32_contract.cc:191`
 - Modify (override signature only, body ignores arg): `hogd/hogexec/runtime/invoke_tx_leak_test.cc:52-58`, `hogd/hogexec/runtime/selective_deployment_test.cc:59-65`
 - Modify (callers): `hogd/hogexec/runtime/syscall_handler.cc` (`resolve_runtime` ~942-969; deploy check ~1137-1142)
 - Modify (drop shim): `hogd/hogexec/runtime/item/storage_snapshot_cache.{h,cc}`
@@ -451,9 +451,60 @@ In `hogd/hogexec/runtime/invoke_tx_leak_test.cc:52` and `hogd/hogexec/runtime/se
   }
 ```
 
-- [ ] **Step 4: rv32 fast path (`rv32/rv32_contract.cc:191`, header `:65`)**
+- [ ] **Step 4a: `rv32_contract.h` — owning `Rv32Runtime`, drop `translation_cache_`, fix signature**
 
-Change the header decl `rv32_contract.h:65` to `DeployedContract const &deployed_contract`. Replace the body of `Rv32Context::make_new_runtime`:
+In `hogd/hogexec/runtime/rv32/rv32_contract.h`:
+
+Give `Rv32Runtime` an owning constructor and an owned member (declared **before** `contract_` so the interior pointer is valid at init). Replace the class body:
+```cpp
+// One invocation of an RV32 contract. Either borrows a const Rv32Contract*
+// owned by the snapshot cache (stable address; snapshot deployments), or owns
+// a freshly translated Rv32Contract (transaction-local deployments). Runtime is
+// non-movable, so the interior pointer in the owning case stays valid.
+class Rv32Runtime final : public Runtime {
+public:
+  Rv32Runtime(Rv32Contract const *contract, SystemCallHandler *syscall_handler)
+    : Runtime(syscall_handler), contract_(contract)
+  {}
+
+  Rv32Runtime(Rv32Contract contract, SystemCallHandler *syscall_handler)
+    : Runtime(syscall_handler), owned_contract_(std::move(contract)),
+      contract_(&owned_contract_.value())
+  {}
+
+  ~Rv32Runtime() override = default;
+
+private:
+  std::optional<Rv32Contract> owned_contract_;
+  Rv32Contract const *contract_;
+
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
+};
+```
+(`invoke_internal` still uses `contract_`, unchanged.)
+
+In `Rv32Context`: change the `make_new_runtime` decl to `DeployedContract const &deployed_contract`, delete the `translation_cache_` member, and rewrite the class doc comment to reflect that translations now live in the snapshot cache:
+```cpp
+// RuntimeContext for RV32 contracts. Resolves the deployed contract by hash
+// like the wasm context. Snapshot deployments arrive with their translation
+// already built (in the StorageSnapshotCache, reached via DeployedContract's
+// back-pointer); transaction-local deployments are translated on the fly and
+// owned by the Rv32Runtime. The context itself holds no per-contract state.
+class Rv32Context final : public RuntimeContext {
+public:
+  InvokeErrorCode verify_contract(Contract const &contract) const override;
+
+  SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContract const &deployed_contract,
+                   SystemCallHandler *syscall_handler) override;
+};
+```
+Remove the now-unused `#include <unordered_map>` (the header's `<optional>` and `threaded_machine.h` includes stay; `Rv32Contract` already lives here).
+
+- [ ] **Step 4b: rv32 fast path + on-the-fly fallback (`rv32/rv32_contract.cc:191`)**
+
+Replace the body of `Rv32Context::make_new_runtime`:
 
 ```cpp
 SystemStatus<std::unique_ptr<Runtime>>
@@ -479,7 +530,7 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   }
 
   // Fallback: transaction-local deployment (no cache entry). Resolve the code
-  // and translate via the context-local cache, exactly as before.
+  // and translate on the fly; the runtime owns the result for its lifetime.
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
@@ -498,25 +549,17 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  auto it = translation_cache_.find(deployed_contract_hash.hash);
-  if (it == translation_cache_.end()) {
-    std::optional<Rv32Contract> translated =
-        Rv32Contract::create(contract.value()->rv32_contract());
-    if (!translated.has_value()) [[unlikely]] {
-      error("Unrecoverable: failed to translate rv32 contract: {}",
-            show_byte_array(deployed_contract_hash.hash));
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-    it = translation_cache_
-             .emplace(deployed_contract_hash.hash, std::move(*translated))
-             .first;
+  std::optional<Rv32Contract> translated =
+      Rv32Contract::create(contract.value()->rv32_contract());
+  if (!translated.has_value()) [[unlikely]] {
+    error("Unrecoverable: failed to translate rv32 contract: {}",
+          show_byte_array(deployed_contract_hash.hash));
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(&it->second, syscall_handler);
+  return std::make_unique<Rv32Runtime>(std::move(*translated), syscall_handler);
 }
 ```
-
-(`translation_cache_` stays as-is for the fallback; no change to `rv32_contract.h`'s member list.)
 
 - [ ] **Step 5: Update `resolve_runtime` (`syscall_handler.cc` ~942-969)**
 
@@ -600,7 +643,7 @@ Expected: full build succeeds; tests PASS. Common failure: a missed `make_new_ru
 
 ```bash
 git add -A
-git commit -m "runtime: thread DeployedContract through make_new_runtime; rv32 uses cache back-pointer"
+git commit -m "runtime: thread DeployedContract through make_new_runtime; rv32 uses cache back-pointer, drop translation_cache_"
 ```
 
 ---
@@ -680,5 +723,5 @@ Expected: no output from either (the shim is gone; no override still takes `Depl
 ## Notes carried from the spec
 
 - `ThreadedMachinePreInstantiation` is now shared across threads (a `const Rv32Contract*` borrowed from the cross-thread snapshot cache). Confirm during Task 3 review that `Rv32Contract::instantiate() const` and its `ThreadedMachinePreInstantiation` touch no mutable shared state.
-- Trade-off accepted: translations reset per block (block-GC) instead of living in the unbounded `static thread_local` cache; `Rv32Context::translation_cache_` is retained only for the tx-local fallback. Fully removing it (owning `Rv32Runtime`) is a follow-up.
+- Trade-off accepted: translations reset per block (block-GC) instead of living in the unbounded `static thread_local` cache. `Rv32Context::translation_cache_` is removed entirely (this PR); tx-local deployments re-translate per `make_new_runtime` and the `Rv32Runtime` owns the result.
 - Eager translation fires whenever an rv32 `Contract` enters `contract_cache_`, including a contract fetched only for deploy-validation. Accepted.
