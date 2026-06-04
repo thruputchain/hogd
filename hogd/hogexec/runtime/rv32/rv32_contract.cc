@@ -235,8 +235,8 @@ Rv32Context::make_new_runtime(
              .first;
   }
 
-  return std::make_unique<Rv32Runtime>(
-      &it->second, make_new_host_call_context(syscall_handler));
+  return std::make_unique<Rv32Runtime>(&it->second, make_new_host_call_context(
+                                                        syscall_handler));
 }
 
 } // namespace hogd

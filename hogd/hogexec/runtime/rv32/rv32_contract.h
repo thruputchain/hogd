@@ -48,10 +48,10 @@ private:
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
 };
 
-// RuntimeContext for RV32 contracts. Resolves the deployed contract by hash like
-// the wasm context, and memoizes the (expensive) translation -- artifact SHA256
-// verification + program decode/fusion -- keyed by contract hash, so it happens
-// once per contract rather than once per invocation.
+// RuntimeContext for RV32 contracts. Resolves the deployed contract by hash
+// like the wasm context, and memoizes the (expensive) translation -- artifact
+// SHA256 verification + program decode/fusion -- keyed by contract hash, so it
+// happens once per contract rather than once per invocation.
 //
 // A RuntimeContext is single-threaded, so the cache needs no synchronization,
 // and the owned Rv32Contracts have stable addresses (node-based map) handed out
