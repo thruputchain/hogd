@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -80,8 +81,19 @@ public:
   bool push_context()
   {
     if (get_context() != nullptr) {
-      error("push_context error: threadlocal SyscallHandlerContext already "
-            "exists");
+      // The exported pop/push_context() FFI entries are not noexcept, so a
+      // std::bad_alloc from this guard diagnostic (error() formats and
+      // allocates) would propagate across the C ABI. Keep it best-effort, and
+      // report a logging failure via fputs (no allocation) rather than silently
+      // dropping it, so the guard still returns false (issue #2559).
+      try {
+        error("push_context error: threadlocal SyscallHandlerContext already "
+              "exists");
+      } catch (std::exception const &e) {
+        std::fputs("error logging push_context guard: ", stderr);
+        std::fputs(e.what(), stderr);
+        std::fputc('\n', stderr);
+      }
       return false;
     }
 
@@ -126,6 +138,15 @@ public:
 
   // Guard against destructor assetion -- don't close the handler before popping
   // all frames off of the transaction.
+  //
+  // This intentionally keys off mock_runtime_stack_ rather than the lower
+  // invocation-frame stack (handler_.is_running()): a mock callback that throws
+  // unwinds before finish_frame() pops the lower frame, so the invocation-frame
+  // stack can legitimately retain a dangling frame on a handler that must still
+  // close cleanly (#2470). mock_runtime_stack_ is RAII-managed, so it is the
+  // signal for "frames the harness still owes a finish". The half-open-frame
+  // window where the two stacks could diverge during open is closed by making
+  // start_mock_invocation_frame() exception-atomic (#2507, #2560).
   [[nodiscard]] bool can_be_closed() const
   {
     return mock_runtime_stack_.empty();
