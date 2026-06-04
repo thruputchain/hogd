@@ -46,8 +46,15 @@ namespace {
 // Compute an event-signature topic the same way the SDK does:
 // sha256("<major_version>::<crate_name>::<type_name>"). See
 // groundhog_contract_util::event_signature in the SDK.
+//
+// The preimage is taken from a `u8"..."` literal so its bytes are the UTF-8
+// (== ASCII, for these names) encoding mandated by the standard, independent of
+// the ordinary execution character set (`-fexec-charset`). An ordinary `"..."`
+// literal would hash implementation-defined code units, so two honest
+// validators built with different execution charsets could emit divergent event
+// topics and thus divergent block hashes. See hogd issue #2573.
 Topic
-compute_event_signature(std::string_view qualified_name)
+compute_event_signature(std::u8string_view qualified_name)
 {
   SHA256Hasher hasher;
   hasher.update(std::as_bytes(std::span(qualified_name)));
@@ -384,7 +391,7 @@ Topic const &
 native_token_transfer_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature("0.1::groundhog-erc20-if::TransferEvent");
+      compute_event_signature(u8"0.1::groundhog-erc20-if::TransferEvent");
   return kSignature;
 }
 
@@ -392,7 +399,7 @@ Topic const &
 native_token_approval_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature("0.1::groundhog-erc20-if::ApprovalEvent");
+      compute_event_signature(u8"0.1::groundhog-erc20-if::ApprovalEvent");
   return kSignature;
 }
 

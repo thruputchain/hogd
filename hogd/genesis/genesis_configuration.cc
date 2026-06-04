@@ -173,8 +173,13 @@ GenesisConfigurationLoader::calculate_storage_key(
   // calldata
   std::vector<std::uint8_t> key_data;
 
-  // Add prefix
-  std::string_view prefix = "Initial Deployment";
+  // Add prefix. Use a `u8"..."` literal so the hashed bytes are the standard's
+  // UTF-8 (== ASCII, here) encoding rather than implementation-defined
+  // ordinary-literal code units; otherwise this storage key would depend on the
+  // execution character set (`-fexec-charset`) and could diverge across honest
+  // builds. Must stay byte-identical to the reader-side derivation in
+  // precompile_initial_token_claim.cc. See hogd issue #2573.
+  std::u8string_view prefix = u8"Initial Deployment";
   key_data.insert(key_data.end(), prefix.begin(), prefix.end());
 
   // Add hash
