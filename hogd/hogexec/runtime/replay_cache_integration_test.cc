@@ -149,8 +149,9 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
   advance_block();
   advance_block();
 
-  auto handler = make_new_system_call_handler(
-      make_tx(3, /*nonce=*/10, /*expiry=*/0), *ctx_);
+  auto handler =
+      make_new_system_call_handler(make_tx(3, /*nonce=*/10, /*expiry=*/0),
+                                   *ctx_);
   // The executor calls this before root_invoke().
   handler.reject_if_replay_uniquifier_expired();
   auto root_res = handler.root_invoke();
@@ -169,8 +170,9 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightLateRejectionWhenGateSkipped)
   advance_block();
   advance_block();
 
-  auto handler = make_new_system_call_handler(
-      make_tx(3, /*nonce=*/11, /*expiry=*/0), *ctx_);
+  auto handler =
+      make_new_system_call_handler(make_tx(3, /*nonce=*/11, /*expiry=*/0),
+                                   *ctx_);
   auto root_res = handler.root_invoke();
   EXPECT_TRUE(root_res.is_root_success());
   EXPECT_TRUE(body_ran_);
