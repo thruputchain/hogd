@@ -265,7 +265,7 @@ for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   fi
   remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $HOGDB_HTTP_PORT
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 done
 
 # Start auth.
@@ -310,23 +310,28 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --scp-control-addr 127.0.0.1:4400 \
   --scp-is-validator true
 
-# Wait for hogexec (port 8040).
+# Wait for loadgen.
+./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
+./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_HTTP_PORT
+
+# Wait for hogexec.
 for s in "${hogexec_servers[@]}"; do
-  ./scripts/wait-port.sh "$(hog_ip "$s")" 8040
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $EXECUTOR_MEMPOOL_PORT
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $EXECUTOR_HTTP_PORT
 done
 
-# Wait for event (ports 8090-8092).
+# Wait for event.
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_EXECUTOR_PORT
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_MEMPOOL_PORT
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_INDEXER_PORT
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_HTTP_PORT
 
-# Wait for indexer (ports 8060-8061).
+# Wait for indexer.
 ./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
 ./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
 ./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
 
-# Wait for hogdb (ports 8080-8082).
+# Wait for hogdb.
 for s in "${hogdb_servers[@]}"; do
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_EXECUTOR_PORT
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_MEMPOOL_PORT
@@ -334,15 +339,15 @@ for s in "${hogdb_servers[@]}"; do
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_HTTP_PORT
 done
 
-# Wait for auth (ports 8050-8051).
+# Wait for auth.
 ./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_DB_PORT
 ./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_MEMPOOL_PORT
 ./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_HTTP_PORT
 
-# Wait for chuckd (port 7888).
+# Wait for chuckd.
 ./scripts/wait-port.sh "$(hog_ip "$chuckd_server")" 7888
 
-# Wait for mempool (ports 8070-8073).
+# Wait for mempool.
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_COORDINATOR_PORT
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EXECUTOR_PORT
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_DB_PORT
