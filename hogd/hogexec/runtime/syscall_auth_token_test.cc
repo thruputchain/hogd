@@ -2697,6 +2697,269 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// Issue #2543 reported the behavior exercised here as a rollback bug. It is
+// working as intended: the AuthTokenRegistry (id counter + unwrap cache) is
+// transaction-global, owned by the InvocationFrameStack, not by an individual
+// InvocationFrame. A manual child revert reclaims forwarded token *ownership*
+// for the parent but deliberately does not rewind registry id allocation. This
+// test pins the exact, intended id behavior so it cannot regress silently:
+//
+//   * Consuming the same root token a second time (after the first consume's
+//     frame manually reverted) returns the SAME cached child-id range -- unwrap
+//     is idempotent per token for the life of the transaction.
+//   * The reverted consume still advanced the id counter, so a token minted
+//     afterwards lands immediately after the reverted child range, and the
+//     polluted path's later range differs from a control path that never did
+//     the reverted consume.
+TEST_F(SyscallAuthTokenTest,
+       RevertedConsumeAuthTokenIdAllocationsPersistAcrossManualRevert)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+
+  struct ConsumeRange {
+    uint32_t start = UINT32_MAX;
+    uint32_t count = UINT32_MAX;
+  };
+
+  struct ScenarioResult {
+    uint32_t root_id = UINT32_MAX;
+    ConsumeRange reverted_consume;
+    uint32_t intervening_token_id = UINT32_MAX;
+    ConsumeRange later_consume;
+    bool did_reverted_consume = false;
+  };
+
+  ScenarioResult polluted;
+  ScenarioResult control;
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto const &calldata = ctx.handler().get_calldata();
+        if (calldata.size() != sizeof(uint32_t) + sizeof(uint8_t)) {
+          ADD_FAILURE() << "Expected token id and revert flag in calldata";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        uint32_t token_id = 0;
+        std::memcpy(&token_id, calldata.data(), sizeof(token_id));
+        uint8_t revert_flag = 0;
+        std::memcpy(&revert_flag, calldata.data() + sizeof(token_id),
+                    sizeof(revert_flag));
+
+        std::array<std::byte, 256> payload_buf{};
+        RuntimeMemoryLength payload_written_len = 0;
+        ConsumeRange range;
+        ContractAddress minter{};
+        auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+            token_id, std::span<std::byte>{payload_buf}, minter,
+            payload_written_len, range.start, range.count);
+        EXPECT_TRUE(consume_res.has_value());
+        EXPECT_EQ(consume_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(minter, kCallerAddress);
+        EXPECT_EQ(range.count, 1U);
+
+        std::array<uint32_t, 2> range_words{range.start, range.count};
+        auto ret = ctx.syscall<SyscallNo::kReturn>(
+            std::as_bytes(std::span<const uint32_t>{range_words}),
+            revert_flag != 0, std::span<const std::byte>{});
+        EXPECT_FALSE(ret.has_value());
+        EXPECT_EQ(ret.error().code(), HostFnErrorCode::Return);
+        return {};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  auto make_caller =
+      [&](bool do_reverted_consume,
+          ScenarioResult &scenario) -> NativeContract::function_t {
+    return [&, do_reverted_consume](
+               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      auto mint_token = [&](AuthTokenNode const &root_node,
+                            uint32_t &token_id) -> bool {
+        auto serialized = x23::serialize(root_node);
+        auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized.data()),
+                                       serialized.size()},
+            token_id);
+        EXPECT_TRUE(mint_res.has_value());
+        EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        return mint_res.has_value() &&
+               mint_res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+      };
+
+      auto read_last_child_range = [&](ConsumeRange &range) -> bool {
+        std::array<std::byte, sizeof(uint32_t) * 2> return_buf{};
+        RuntimeMemoryLength return_written_len = 0;
+        std::array<std::byte, sizeof(uint32_t)> auth_token_buf{};
+        RuntimeMemoryLength auth_token_written_len = 0;
+        auto get_res = ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::span<std::byte>{return_buf}, return_written_len,
+            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(static_cast<size_t>(return_written_len), return_buf.size());
+        EXPECT_EQ(static_cast<size_t>(auth_token_written_len), 0U);
+        if (!get_res.has_value() ||
+            get_res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            static_cast<size_t>(return_written_len) != return_buf.size()) {
+          return false;
+        }
+
+        std::array<uint32_t, 2> range_words{};
+        std::memcpy(range_words.data(), return_buf.data(), return_buf.size());
+        range.start = range_words[0];
+        range.count = range_words[1];
+        return true;
+      };
+
+      auto invoke_child = [&](uint32_t token_id, bool revert_frame,
+                              ConsumeRange &range) -> bool {
+        Calldata calldata;
+        calldata.resize_uninitialized(sizeof(uint32_t) + sizeof(uint8_t));
+        std::memcpy(calldata.data(), &token_id, sizeof(token_id));
+        uint8_t revert_flag = revert_frame ? 1 : 0;
+        std::memcpy(calldata.data() + sizeof(token_id), &revert_flag,
+                    sizeof(revert_flag));
+
+        std::array<uint32_t, 1> forwarded{token_id};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs outputs{};
+        auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, calldata, std::span<uint32_t const>{forwarded},
+            inputs, outputs);
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(outputs.frame_status,
+                  revert_frame ? InvocationFrameStatusCode::Abort
+                               : InvocationFrameStatusCode::Return);
+        EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len),
+                  sizeof(uint32_t) * 2);
+        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+        if (!invoke_res.has_value() ||
+            invoke_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return false;
+        }
+        return read_last_child_range(range);
+      };
+
+      AuthTokenNode child{.consumer_address = kCallerAddress,
+                          .payload = x23::serialize(99U),
+                          .child_nodes = {}};
+      AuthTokenNode root{.consumer_address = kChildAddress,
+                         .payload = x23::serialize(42U),
+                         .child_nodes = {child}};
+      if (!mint_token(root, scenario.root_id)) {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      }
+
+      if (do_reverted_consume) {
+        scenario.did_reverted_consume = true;
+        if (!invoke_child(scenario.root_id, true, scenario.reverted_consume)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+      }
+
+      AuthTokenNode unrelated{.consumer_address = kCallerAddress,
+                              .payload = x23::serialize(123U),
+                              .child_nodes = {}};
+      if (!mint_token(unrelated, scenario.intervening_token_id)) {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      }
+
+      if (do_reverted_consume) {
+        EXPECT_EQ(scenario.intervening_token_id,
+                  scenario.reverted_consume.start +
+                      scenario.reverted_consume.count);
+      }
+
+      if (!invoke_child(scenario.root_id, false, scenario.later_consume)) {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      }
+      EXPECT_EQ(scenario.later_consume.count, 1U);
+
+      return {};
+    };
+  };
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(0, make_caller(true, polluted));
+  fns_caller.emplace(1, make_caller(false, control));
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  setup_grant_storage_token(kCallerAddress, replay_cache_cost_charged(2));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+
+  auto polluted_handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = kCallerAddress,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+          .uniquifier = make_new_uniquifier(),
+      },
+      *runtime_context);
+  auto polluted_res = polluted_handler.root_invoke();
+  ASSERT_TRUE(polluted_res.is_root_success());
+
+  auto control_handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = kCallerAddress,
+                  .entrypoint = entrypoint_from_method_id(1),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+          .uniquifier = make_new_uniquifier(),
+      },
+      *runtime_context);
+  auto control_res = control_handler.root_invoke();
+  ASSERT_TRUE(control_res.is_root_success());
+
+  ASSERT_TRUE(polluted.did_reverted_consume);
+  EXPECT_EQ(polluted.reverted_consume.count, 1U);
+  EXPECT_EQ(polluted.later_consume.count, 1U);
+  EXPECT_EQ(control.later_consume.count, 1U);
+
+  // Intended: the second consume of the same root returns the SAME range as the
+  // reverted first consume (idempotent unwrap cache survives the manual
+  // revert).
+  EXPECT_EQ(polluted.reverted_consume.start, polluted.later_consume.start);
+  // Intended: the reverted consume still advanced the global id counter, so the
+  // polluted later range differs from the control path that never consumed.
+  EXPECT_NE(polluted.later_consume.start, control.later_consume.start);
+  // Intended: a token minted after the reverted consume lands immediately after
+  // the reverted child range -- the allocation was not rolled back.
+  EXPECT_EQ(polluted.intervening_token_id,
+            polluted.reverted_consume.start + polluted.reverted_consume.count);
+  // Control: with no prior consume, the intervening mint precedes the later
+  // consume's freshly allocated child range.
+  EXPECT_LT(control.intervening_token_id, control.later_consume.start);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
