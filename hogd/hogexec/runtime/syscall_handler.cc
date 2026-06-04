@@ -168,69 +168,46 @@ SystemCallHandler::SystemCallHandler(
 {}
 
 void
-SystemCallHandler::reject_if_replay_uniquifier_expired()
+SystemCallHandler::perform_initial_validation()
 {
-  // Best-effort early gate (#2568): a transaction whose replay uniquifier has
-  // already expired is rejected here, before root_invoke() can run the contract
-  // body. The HogDB replay cache remains the authoritative atomic consume at
-  // commit time; this only stops the body from running against an input that
-  // final commit will reject anyway. The executor calls this on a freshly
-  // opened (current) block; it is intentionally not folded into root_invoke()
-  // so the low-level handler primitive keeps its existing contract for callers
-  // that drive it directly.
-  assert(cumulative_invoke_result_.is_root_success());
-
+  // Reject a transaction whose replay uniquifier has already expired before any
+  // attached-contract verification or body execution runs (#2568). This is a
+  // deterministic envelope check: the HogDB replay cache remains the
+  // authoritative atomic consume at commit time, but without this an expired
+  // transaction's body would run to completion and only be rejected by the late
+  // replay-cache reservation. Done first, and with an early return, so the
+  // checks below cannot overwrite the ValidationFailure (an expired uniquifier
+  // combined with an invalid attached contract must still surface as
+  // ValidationFailure, not the contract-verification error).
+  //
   // Mirror add_replay_nonce_delta's guards: only real transactions carry a
   // uniquifier, and the initial-token-claim precompile bypasses the replay
   // cache entirely, so neither consumes -- nor needs an expiry gate for -- a
   // uniquifier.
-  if (!tx_uniquifier_.has_value()) {
-    return;
-  }
-  assert(root_invoked_address_.has_value());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (root_invoked_address_.value() == kInitialTokenClaimPrecompileAddress) {
-    return;
-  }
-
-  auto height = get_block_height();
-  if (!height.has_value()) {
-    // Can't read the db tip to determine the execution height, so we can't
-    // positively conclude the uniquifier is expired. Skip the early gate and
-    // let normal execution proceed; the authoritative replay-cache reservation
-    // in try_commit_transaction still rejects an expired uniquifier (just
-    // later). This keeps the gate purely best-effort -- it only short-circuits
-    // when it can prove expiry.
-    return;
-  }
-
-  // ReplayCacheLock rejects a uniquifier whose block_expiry_height is strictly
-  // less than the *executing* block's height. HogDB's BlockTx executes at
-  // parent_tip.height + 1 (see RPCContext::open_block_tx_locked), while
-  // get_block_height() reads that parent tip, so the executing height is +1.
-  // Matching that comparison here rejects exactly the uniquifiers the late
-  // replay-cache reservation would reject -- only earlier.
-  BlockHeight executing_height = height.value() + 1;
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (tx_uniquifier_.value().block_expiry_height < executing_height) {
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::ValidationFailure};
-  }
-}
-
-void
-SystemCallHandler::perform_initial_validation()
-{
-  // An earlier gate may have already rejected the transaction (e.g.
-  // reject_if_replay_uniquifier_expired() writing ValidationFailure). Don't run
-  // -- and crucially don't let the checks below overwrite -- that result: an
-  // expired uniquifier combined with an invalid attached contract must still
-  // surface as the deterministic ValidationFailure, not be downgraded to the
-  // contract-verification error (which would route through
-  // commit_body_discarded and report a late replay-cache NonDeterministicError
-  // instead).
-  if (!cumulative_invoke_result_.is_root_success()) {
-    return;
+  if (tx_uniquifier_.has_value() &&
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      root_invoked_address_.value() != kInitialTokenClaimPrecompileAddress) {
+    assert(root_invoked_address_.has_value());
+    auto height = get_block_height();
+    // If the db tip is unreadable we can't positively conclude the uniquifier
+    // is expired, so we skip the check and let normal execution proceed; the
+    // authoritative replay-cache reservation in try_commit_transaction still
+    // rejects an expired uniquifier (just later). The check is purely
+    // best-effort -- it only short-circuits when it can prove expiry.
+    //
+    // ReplayCacheLock rejects a uniquifier whose block_expiry_height is
+    // strictly less than the *executing* block's height. HogDB's BlockTx
+    // executes at parent_tip.height + 1 (see RPCContext::open_block_tx_locked),
+    // while get_block_height() reads that parent tip, so the executing height
+    // is +1. Matching that comparison here rejects exactly the uniquifiers the
+    // late replay-cache reservation would reject -- only earlier.
+    if (height.has_value() &&
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        tx_uniquifier_.value().block_expiry_height < height.value() + 1) {
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::ValidationFailure};
+      return;
+    }
   }
 
   // Validate the proposal data structure before execution begins.

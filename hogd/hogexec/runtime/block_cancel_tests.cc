@@ -74,7 +74,10 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
   write_deployment(kContractAddress, contract);
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
-  // Create a transaction and call root_invoke()
+  // Create a transaction and call root_invoke(). Use a non-expired uniquifier:
+  // this test exercises the commit-after-block-advance failure, not replay
+  // expiry, and a default (height-0) uniquifier is now rejected as expired
+  // during initial validation.
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
@@ -82,7 +85,8 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto res = handler.root_invoke();

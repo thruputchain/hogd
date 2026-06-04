@@ -102,13 +102,9 @@ public:
                                                 .nonce = nonce}};
   }
 
-  // Mirrors the executor's per-transaction sequence
-  // (ExecutorContext::run_propose_transaction): the expired-uniquifier gate
-  // runs before root_invoke(), then the body, then the commit.
   ExecResult run_and_commit(Transaction const &tx)
   {
     auto handler = make_new_system_call_handler(tx, *ctx_);
-    handler.reject_if_replay_uniquifier_expired();
     handler.root_invoke();
     return handler.try_commit_transaction();
   }
@@ -140,8 +136,8 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejected)
             ExecResult::ExecResultTxValidationFailure);
 }
 
-// An expired uniquifier is rejected by the executor's pre-body gate, before the
-// root contract body can run. Previously the body executed and only the late
+// An expired uniquifier is rejected during initial validation, before the root
+// contract body can run. Previously the body executed and only the late
 // replay-cache reservation in try_commit_transaction rejected the tx (#2568).
 TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
 {
@@ -152,8 +148,6 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
   auto handler =
       make_new_system_call_handler(make_tx(3, /*nonce=*/10, /*expiry=*/0),
                                    *ctx_);
-  // The executor calls this before root_invoke().
-  handler.reject_if_replay_uniquifier_expired();
   auto root_res = handler.root_invoke();
   EXPECT_FALSE(root_res.is_root_success());
   EXPECT_FALSE(body_ran_);
@@ -162,10 +156,11 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
 }
 
 // An expired uniquifier combined with an invalid attached contract is still
-// rejected as the deterministic ValidationFailure -- the expiry gate's result
-// is not shadowed by the attached-contract verification fault (which would
-// otherwise route through commit_body_discarded and report a late replay-cache
-// NonDeterministicError). The body never runs either way (#2568).
+// rejected as the deterministic ValidationFailure -- the expiry check runs
+// first and returns before attached-contract verification can overwrite the
+// result with its Deterministic fault (which would otherwise route through
+// commit_body_discarded and report a late replay-cache NonDeterministicError).
+// The body never runs either way (#2568).
 TEST_F(ReplayCacheIntegrationTest,
        ExpiredHeightWithInvalidContractStillValidationFailure)
 {
@@ -174,11 +169,10 @@ TEST_F(ReplayCacheIntegrationTest,
 
   auto tx = make_tx(3, /*nonce=*/12, /*expiry=*/0);
   // Native contract id 99 is not registered in ctx_, so verify_contract() would
-  // fault it as Deterministic if perform_initial_validation() ran it.
+  // fault it as Deterministic if it ran after the expiry check.
   tx.contracts_to_deploy.push_back(*make_native_contract(99));
 
   auto handler = make_new_system_call_handler(tx, *ctx_);
-  handler.reject_if_replay_uniquifier_expired();
   auto root_res = handler.root_invoke();
   EXPECT_FALSE(root_res.is_root_success());
   EXPECT_FALSE(body_ran_);
@@ -186,23 +180,18 @@ TEST_F(ReplayCacheIntegrationTest,
             ExecResult::ExecResultTxValidationFailure);
 }
 
-// Without the executor's pre-body gate, the body still runs and the late
-// replay-cache reservation rejects the expired uniquifier at commit time. This
-// pins the low-level handler primitive's unchanged contract (the gate is opt-in
-// at the executor layer, not folded into root_invoke()).
-TEST_F(ReplayCacheIntegrationTest, ExpiredHeightLateRejectionWhenGateSkipped)
+// A non-expired uniquifier (default max expiry) still runs the body and
+// commits, even after the block height has advanced.
+TEST_F(ReplayCacheIntegrationTest, UnexpiredHeightRunsBodyAndCommits)
 {
   advance_block();
   advance_block();
 
-  auto handler =
-      make_new_system_call_handler(make_tx(3, /*nonce=*/11, /*expiry=*/0),
-                                   *ctx_);
+  auto handler = make_new_system_call_handler(make_tx(3, /*nonce=*/11), *ctx_);
   auto root_res = handler.root_invoke();
   EXPECT_TRUE(root_res.is_root_success());
   EXPECT_TRUE(body_ran_);
-  EXPECT_EQ(handler.try_commit_transaction(),
-            ExecResult::ExecResultTxNonDeterministicError);
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
 TEST_F(ReplayCacheIntegrationTest, ManualRevertBurnsNonce)
