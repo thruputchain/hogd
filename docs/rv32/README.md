@@ -12,6 +12,12 @@
   - Author-side tooling design: standalone lowerer (wasm-opt model), the
     3-repo split, and the guest-side dispatch decision.
   - Answers the "Production SDK lowerer design" gate from the ownership review.
+- [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md)
+  - Execution contract for the guest-side dispatch cut (author-toolchain
+    Phase 3): the `_start` entry ABI, unknown-method semantics, the v4 artifact
+    layout, and cross-repo sequencing.
+  - Proposes closure of author-toolchain open questions #1 (method-id passing)
+    and #2 (v4); becomes final once Decision 2 is signed off.
 - [rv32-rust-vm-lessons.md](rv32-rust-vm-lessons.md)
   - Prior-art notes from CKB-VM and PolkaVM.
   - Explains why the artifact/runtime boundary looks the way it does.

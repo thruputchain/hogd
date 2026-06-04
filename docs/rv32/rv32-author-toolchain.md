@@ -82,7 +82,7 @@ PC and tells the guest which method was invoked.
 | Symbols | Must retain `.symtab` (the strip issue) | Not needed — strip is fine |
 | Fragility | method→PC depends on linker/codegen layout | None — one fixed entry |
 | Method set visibility | In the artifact | In the contract spec (already emitted by `groundhog build`) |
-| Unknown method | Runtime zero-gas deterministic miss | Guest dispatcher must be deterministic (abort/return-error, never panic) — small gas cost |
+| Unknown method | Runtime zero-gas deterministic miss | Must be deterministic; whether it stays a zero-gas host miss or becomes a metered guest outcome is the open production decision — see [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) Decision 2 |
 | Cross-repo coupling | Dispatch-table format shared 3 ways | Gone |
 
 **Recommendation: adopt guest-side dispatch.** It deletes the single biggest
@@ -176,6 +176,12 @@ entrypoint, and `rv32-lower` remains the lower-level scriptable escape hatch.
 
 ## Open questions (Geoff-owned, runtime side)
 
+Questions 1 and 2 below have a proposed resolution in
+[rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) (the Phase 3 execution
+contract): method_id passed in `a0`/`a1`, shipped together with a v4 cut that
+drops the dispatch section. That note also settles the `_start` ABI left
+unsettled in the components table above.
+
 1. **How does the guest learn the invoked method id?** Cleanest: the runtime
    drops `method_id` into a register at the entry PC and the SDK-generated
    `_start` reads it. Alternative: a `get_invoked_method` syscall (more moving
@@ -207,7 +213,7 @@ entrypoint, and `rv32-lower` remains the lower-level scriptable escape hatch.
   `artifact.h` remains the cross-repo guard.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `built_contracts/build_risc.sh`, which wraps
-  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.5`;
+  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.6`;
   `scripts/rv32_lower.py` was deleted. One supported implementation from here
   on. The runtime smoke now builds its generated SDK artifact from the
   `rv32_smoke_counter` fixture in the `built_contracts/integration_test_contracts`
