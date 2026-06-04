@@ -23,7 +23,7 @@ extern "C" TrampolineResult
 foo(ExternHostCallContext external_context, WasmContext /*unused*/,
     uint32_t value)
 {
-  auto *handler = reinterpret_cast<SystemCallHandler *>(external_context);
+  auto *handler = static_cast<SystemCallHandler *>(external_context);
   EXPECT_TRUE(handler == ctx_check);
   EXPECT_TRUE(value == 12);
   return to_trampoline_result({SyscallErrorCode(15)}, 0);

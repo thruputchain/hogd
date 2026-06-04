@@ -92,7 +92,7 @@ syscall_entry(ExternHostCallContext call_context, WasmContext wasm_context,
                 "type mismatch");
 
   auto [err, gas_consumed] =
-      syscall_entry_inner(reinterpret_cast<SystemCallHandler *>(call_context),
+      syscall_entry_inner(static_cast<SystemCallHandler *>(call_context),
                           wasm_context, arg0, arg1, arg2, arg3, arg4, arg5,
                           arg6, arg7);
   return to_trampoline_result(err, gas_consumed);
