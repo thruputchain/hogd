@@ -4,7 +4,6 @@
 #include <cassert>
 #include <functional>
 #include <memory>
-#include <string_view>
 #include <utility>
 
 #include "contract.hh"
@@ -116,17 +115,10 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
 {}
 
 std::pair<InvokeStatus<void>, GasAmount>
-NativeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
+NativeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
-  auto method_id = Runtime::method_id_from_name(method_name);
-  if (!method_id) {
-    error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
-          "method name '{}'",
-          method_name);
-    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-  }
 
-  return contract_.invoke(*method_id, *host_call_context_->syscall_handler,
+  return contract_.invoke(method_id, *host_call_context_->syscall_handler,
                           gas_limit);
 }
 

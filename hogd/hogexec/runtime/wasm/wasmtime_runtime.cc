@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <format>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -202,15 +203,14 @@ WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
 }
 
 std::pair<InvokeStatus<void>, GasAmount>
-WasmtimeRuntime::invoke_internal(std::string_view method_name,
-                                 uint64_t gas_limit)
+WasmtimeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
+  uint8_t method_name[16];
+  std::format_to(method_name, "{:016X}", method_id);
 
   WasmtimeInvokeResult res =
-      wasmtime_invoke(wasmtime_runtime_ptr_,
-                      reinterpret_cast<uint8_t const *>(method_name.data()),
-                      static_cast<uint32_t>(method_name.size()), gas_limit);
+      wasmtime_invoke(wasmtime_runtime_ptr_, &method_name[0], 16, gas_limit);
 
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
   trace("Wasmtime Invoke Result: {}",

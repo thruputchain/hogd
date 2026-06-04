@@ -2,8 +2,6 @@
 
 #include <cassert>
 #include <memory>
-#include <optional>
-#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -64,14 +62,8 @@ public:
 
 protected:
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view method_name, uint64_t gas_limit) override
+  invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
-    auto method_id = hogd::Runtime::method_id_from_name(method_name);
-    if (!method_id) {
-      error("Unrecoverable: rv32::Runtime failed to parse method name '{}'",
-            method_name);
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-    }
     if (!image_is_valid_) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
@@ -84,7 +76,7 @@ protected:
         !machine.view().write_memory(0, image_.initial_memory)) {
       return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
-    machine.seed_method_id(*method_id);
+    machine.seed_method_id(method_id);
 
     SyscallBridgeHost host(host_call_context_.get(), image_.entry == nullptr
                                                          ? &syscall_entry

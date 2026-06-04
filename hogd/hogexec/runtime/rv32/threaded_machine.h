@@ -146,6 +146,8 @@ public:
     gas_remaining_ = gas;
   }
 
+  ThreadedMachine(ThreadedMachine &&) noexcept = default;
+
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,
   // which would leave exec_ dangling the moment the constructor returns.
@@ -204,7 +206,17 @@ public:
   [[nodiscard]] Trap trap() const { return trap_; }
   [[nodiscard]] bool halted() const { return halted_; }
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
-  [[nodiscard]] std::span<const uint8_t> memory() const { return memory_; }
+  [[nodiscard]] std::span<uint8_t> memory() { return memory_; }
+
+  [[nodiscard]] bool consume_gas(uint64_t amount)
+  {
+    if (amount > gas_remaining_) {
+      gas_remaining_ = 0;
+      return false;
+    }
+    gas_remaining_ -= amount;
+    return true;
+  }
 
 private:
   // Internal seam primitives (not part of the public API; the free-function
@@ -1286,6 +1298,7 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   // Debit host gas before committing; over-budget host cannot mutate state.
   // Host memory writes persist on OOG (no per-ecall rollback).
   if (gas_remaining_ < result.gas_consumed) {
+    gas_remaining_ = 0;
     return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,
                                            gas_remaining_);
   }

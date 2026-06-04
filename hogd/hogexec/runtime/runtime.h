@@ -245,20 +245,14 @@ public:
     return std::nullopt;
   }
 
-  InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
-  InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
-  {
-    char buf[16];
-    std::format_to(buf, "{:016X}", entrypoint);
-    return invoke(std::string_view(buf, 16), gas_limit);
-  }
+  InvokeResult invoke(MethodID method_id, uint64_t gas_limit);
 
   virtual ~Runtime() = default;
 
 protected:
   // Invariant:  The returned GasAmount must be <= the input gas_limit
   virtual std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view method_name, uint64_t gas_limit) = 0;
+  invoke_internal(MethodID method_id, uint64_t gas_limit) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

@@ -2,7 +2,7 @@
   (type (;0;) (func (param i32) (result i32)))
   (import "test" "redir_call" (func $foo (type 0)))
 
-  (func (export "calltest")
+  (func (export "0000000000000000")
     i32.const 12
     call $foo
     drop

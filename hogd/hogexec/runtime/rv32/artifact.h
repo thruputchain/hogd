@@ -279,11 +279,23 @@ struct ArtifactImage {
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
+// The ThreadedArtifactImage output from parse_threaded_artifact must not
+// outlive the input span.
+struct ThreadedArtifactImage {
+  std::span<const uint8_t> code;
+  std::span<const uint8_t> initial_memory;
+  uint32_t memory_bytes = kMaxMemoryBytes;
+};
+
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
 parse_artifact(std::span<const uint8_t> bytes);
+
+[[nodiscard]]
+std::expected<ThreadedArtifactImage, ArtifactError>
+parse_threaded_artifact(std::span<const uint8_t> bytes);
 
 } // namespace hogd::rv32

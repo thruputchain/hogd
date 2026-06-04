@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <format>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -186,14 +187,15 @@ WasmiContext::verify_contract(Contract const &contract) const
 }
 
 std::pair<InvokeStatus<void>, GasAmount>
-WasmiRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
+WasmiRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
+  uint8_t method_name[16];
+  std::format_to(method_name, "{:016X}", method_id);
+
   WasmiInvokeResult res =
-      wasmi_invoke(wasmi_runtime_ptr_,
-                   reinterpret_cast<const uint8_t *>(method_name.data()),
-                   method_name.size(), gas_limit);
+      wasmi_invoke(wasmi_runtime_ptr_, &method_name[0], 16, gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
   trace("Wasmi Invoke Result: {}",

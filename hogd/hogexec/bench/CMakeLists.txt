@@ -23,6 +23,36 @@ target_include_directories(
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
+  fibonacci_rv32only
+  fibonacci_rv32only.cc
+)
+target_link_libraries(
+  fibonacci_rv32only
+  hogd
+  protocol
+  runtime
+  exec_interface
+  db_interface
+  hogdb
+  runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
+  contract_loader
+)
+
+target_include_directories(
+  fibonacci_rv32only
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(
+  fibonacci_rv32only
+  all_riscvs_built # for fibonacci.rv32a
+  all_wasm_headers # for built_contracts/fibonacci.h
+)
+
+set_property(TARGET fibonacci_rv32only PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
   payments_bench
   payments_bench.cc
 )

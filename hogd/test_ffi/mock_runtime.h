@@ -3,7 +3,6 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <string_view>
 #include <utility>
 
 #include "contract.hh"
@@ -114,15 +113,13 @@ private:
 
 class MockRuntime : public MockGasRuntime {
 public:
-  MockRuntime(MockContract contract)
-    : MockGasRuntime(), backing_contract_(std::move(contract))
-  {}
+  MockRuntime(MockContract contract) : backing_contract_(std::move(contract)) {}
 
   ~MockRuntime() override = default;
 
 private:
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+  invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   MockContract backing_contract_;
 };
@@ -137,7 +134,7 @@ public:
 
 private:
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view /*unused*/, uint64_t /*gas_limit*/) override
+  invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");
   }

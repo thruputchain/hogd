@@ -44,25 +44,17 @@ load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
   return digest;
 }
 
-} // namespace
+struct ArtifactParseResults {
+  std::span<const uint8_t> code;
+  std::span<const uint8_t> initial_memory;
+  uint32_t total_memory_bytes;
+};
 
-ArtifactDigest
-artifact_digest(std::span<const uint8_t> bytes)
+[[nodiscard]]
+std::expected<ArtifactParseResults, ArtifactError>
+artifact_image_checks(std::span<const uint8_t> bytes)
 {
-  ArtifactDigest digest = {};
-  // Keep rv32_vm dependency-narrow for now. Protocol activation should either
-  // use the consensus SHA256 wrapper or keep an explicit equivalence check.
-  static constexpr std::array<uint8_t, 1> kEmpty = {0};
-  // OpenSSL ignores the input pointer when len is zero; provide a non-null
-  // placeholder so the call shape remains valid for empty sections too.
-  const uint8_t *input = bytes.empty() ? kEmpty.data() : bytes.data();
-  SHA256(input, bytes.size(), digest.data());
-  return digest;
-}
 
-std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes)
-{
   if (bytes.size() < kArtifactHeaderBytes) {
     return std::unexpected(ArtifactError::kTooSmall);
   }
@@ -125,6 +117,7 @@ parse_artifact(std::span<const uint8_t> bytes)
   if (code_size == 0 || code_size > kMaxCodeBytes) {
     return std::unexpected(ArtifactError::kCodeSizeInvalid);
   }
+
   // Decision 5: the stored image is the initialized prefix [0, init_size) of
   // the data address space; the runtime zero-fills [init_size, memory_bytes).
   if (initial_memory_size > memory_bytes) {
@@ -156,16 +149,64 @@ parse_artifact(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kInitialMemoryDigestMismatch);
   }
 
-  auto program = Program::create(code);
+  return ArtifactParseResults{
+      .code = code,
+      .initial_memory = initial_memory,
+      .total_memory_bytes = memory_bytes,
+  };
+}
+
+} // namespace
+
+ArtifactDigest
+artifact_digest(std::span<const uint8_t> bytes)
+{
+  ArtifactDigest digest = {};
+  // Keep rv32_vm dependency-narrow for now. Protocol activation should either
+  // use the consensus SHA256 wrapper or keep an explicit equivalence check.
+  static constexpr std::array<uint8_t, 1> kEmpty = {0};
+  // OpenSSL ignores the input pointer when len is zero; provide a non-null
+  // placeholder so the call shape remains valid for empty sections too.
+  const uint8_t *input = bytes.empty() ? kEmpty.data() : bytes.data();
+  SHA256(input, bytes.size(), digest.data());
+  return digest;
+}
+
+std::expected<ArtifactImage, ArtifactError>
+parse_artifact(std::span<const uint8_t> bytes)
+{
+  auto results = artifact_image_checks(bytes);
+  if (!results.has_value()) {
+    return std::unexpected(results.error());
+  }
+
+  auto program = Program::create(results->code);
   if (!program.has_value()) {
     return std::unexpected(ArtifactError::kInvalidProgram);
   }
+
+  auto initial_memory = results->initial_memory;
 
   return ArtifactImage{
       .program = std::make_shared<Program>(std::move(*program)),
       .initial_memory =
           std::vector<uint8_t>(initial_memory.begin(), initial_memory.end()),
-      .memory_bytes = memory_bytes,
+      .memory_bytes = results->total_memory_bytes,
+  };
+}
+
+std::expected<ThreadedArtifactImage, ArtifactError>
+parse_threaded_artifact(std::span<const uint8_t> bytes)
+{
+  auto results = artifact_image_checks(bytes);
+  if (!results.has_value()) {
+    return std::unexpected(results.error());
+  }
+
+  return ThreadedArtifactImage{
+      .code = results->code,
+      .initial_memory = results->initial_memory,
+      .memory_bytes = results->total_memory_bytes,
   };
 }
 

@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <memory>
-#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -132,7 +131,7 @@ public:
 
 private:
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+  invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   NativeContract &contract_;
 };

@@ -29,7 +29,11 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port)
 {
   // Create a temporary directory for the database
   Directory dir = Directory::open_temporary().value();
-  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  // Generously sized: the execution benches now commit a unique uniquifier per
+  // tx (so a single block can hold millions of replay-cache entries for one
+  // address at high thread counts), and ramdb fails closed if a snapshot copy
+  // runs out of heap. The bench hosts have ample RAM, so reserve plenty.
+  constexpr static size_t kDefaultHeapSize = 32ULL * 1024 * 1024 * 1024;
 
   // Open the database
   auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
