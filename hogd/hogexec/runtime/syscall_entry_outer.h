@@ -5,6 +5,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstdio>
 #include <exception>
 #include <format>
 #include <optional>
@@ -473,6 +474,31 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
+// Report a dropped syscall-trace diagnostic straight to stderr without
+// allocating (same fallback pattern as test_ffi's do_ffi_trace).
+//
+// The trace logging and trace-record construction in wrap_after_parse() run
+// inside a noexcept syscall-body lambda (noexcept so gas accounting and
+// return-state validation can never be skipped). An escaping std::bad_alloc --
+// e.g. while formatting a trace message or copying a span into the XDR trace
+// record -- would terminate the process before the caller's structured-error
+// boundary (mock_syscall_entrypoint() / wrap_outer()) could translate it. Trace
+// data is best-effort diagnostics, mirroring SystemCallHandler::start_frame()'s
+// drop-and-continue handling of trace allocation failure (#2473), so each of
+// those steps is wrapped in an inline try/catch that drops the affected
+// record/log line, reports it here, and lets the syscall finish with its real
+// result instead of crashing an honest caller (issues #2561, #2562). The catch
+// bodies are inlined rather than routed through a helper so the syscall hot
+// path takes no added call overhead; this reporter only runs on the (cold)
+// failure path, where allocating again to log would be unsafe.
+inline void
+report_dropped_syscall_trace(char const *what) noexcept
+{
+  std::fputs("error tracing syscall: ", stderr);
+  std::fputs(what, stderr);
+  std::fputc('\n', stderr);
+}
+
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
 // both the regular and mock syscall handlers.  This is split out from
@@ -511,15 +537,23 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 
     // Check whether any inputs/outputs were aliased
     if (!guard.check()) {
-      trace("Syscall {} faulted due to aliased memory regions", kSyscall);
+      try {
+        trace("Syscall {} faulted due to aliased memory regions", kSyscall);
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
       disarm_outputs(args);
       return kFaultResult;
     }
 
     if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
       if (handler.is_read_only()) {
-        trace("Syscall {} is not read-only, but called in read-only mode",
-              kSyscall);
+        try {
+          trace("Syscall {} is not read-only, but called in read-only mode",
+                kSyscall);
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
+        }
         disarm_outputs(args);
         return {HostFnStatus<SyscallErrorCode>{
                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
@@ -529,16 +563,28 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 
     if (runtime_log_level(LogLevel::kTrace)) {
       // Once the syscall inputs are parsed, we can print them in a formatted
-      // log message.
-      trace("Syscall {} Input: {}", kSyscall,
+      // log message. Formatting allocates, so keep it best-effort: this runs in
+      // the noexcept syscall body and must not crash on allocation failure
+      // (issue #2562).
+      try {
+        trace(
+            "Syscall {} Input: {}", kSyscall,
             make_syscall_input_message<SyscallMeta>(std::tuple{
                 SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                     std::get<Is>(args))...}));
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
     }
 
     if constexpr (SyscallMeta::kSyscallNo != kNoTracingSyscall) {
       if (auto *trace_data =
               handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
+        // Copying inputs into the XDR trace record allocates and can throw.
+        // Keep it best-effort rather than panicking: this runs in the noexcept
+        // syscall body, so a thrown std::bad_alloc would terminate an honest
+        // caller before the mock entrypoint's catch could translate it. Drop
+        // the trace inputs and continue (issue #2561).
         try {
           [&]<size_t... Inputs>(std::index_sequence<Inputs...> /*unused*/) {
             set_syscall_trace_inputs(
@@ -547,9 +593,8 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
                     Inputs>>::deref(std::get<Inputs>(args))...});
           }(std::make_index_sequence<
               std::tuple_size_v<decltype(trace_data->inputs)>>{});
-        } catch (std::exception &e) {
-          panic("Failed to trace syscall {}: {}", SyscallMeta::kSyscallNo,
-                e.what());
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
         }
       }
     }
@@ -569,15 +614,23 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
     if (runtime_log_level(LogLevel::kTrace)) {
-      bool is_syscall_error =
-          !res.first.has_value() ||
-          (*res.first) != SyscallErrorCode::kSyscallErrorCodeNone;
-      trace("Syscall {} Output: {}", kSyscall,
-            is_syscall_error
-                ? syscall_error_message(res.first)
-                : make_syscall_output_message<SyscallMeta>(std::tuple{
-                      SyscallArgParams<typename syscall_t::template arg_i<Is>>::
-                          deref(std::get<Is>(args))...}));
+      // The inner syscall has already run and written its outputs; formatting
+      // them for the trace log allocates. Keep it best-effort so an allocation
+      // failure here does not terminate the noexcept syscall body after a
+      // successful side effect (issue #2562).
+      try {
+        bool is_syscall_error =
+            !res.first.has_value() ||
+            (*res.first) != SyscallErrorCode::kSyscallErrorCodeNone;
+        trace("Syscall {} Output: {}", kSyscall,
+              is_syscall_error
+                  ? syscall_error_message(res.first)
+                  : make_syscall_output_message<SyscallMeta>(std::tuple{
+                        SyscallArgParams<typename syscall_t::template arg_i<
+                            Is>>::deref(std::get<Is>(args))...}));
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
     }
 
     return res;
@@ -605,7 +658,11 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       case HostFnErrorCode::ValidationFailure:
         return false;
       case HostFnErrorCode::Unrecoverable:
-        error("Unrecoverable: syscall_entry_outer got Unrecoverable");
+        try {
+          error("Unrecoverable: syscall_entry_outer got Unrecoverable");
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
+        }
         return false;
       case HostFnErrorCode::OutOfGas:
       case HostFnErrorCode::Exit:
@@ -633,9 +690,13 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       // If the syscall cannot return to the wasm environment but the syscall
       // tried to return an error code, abort the entire call frame.
       if (runtime_log_level(LogLevel::kTrace)) {
-        trace(
-            "Syscall {} attempted to return an error code {} but cannot return",
-            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+        try {
+          trace("Syscall {} attempted to return an error code {} but cannot "
+                "return",
+                SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
+        }
       }
       return {HostFnError{HostFnErrorCode::Exit}};
     }

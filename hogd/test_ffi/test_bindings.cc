@@ -89,6 +89,33 @@ do_ffi_trace(std::format_string<Args...> fmt, Args &&...args) noexcept
   }
 }
 
+// Run a best-effort diagnostic log step; on failure report to stderr without
+// allocating rather than letting the exception escape.
+//
+// Several exported FFI helpers are noexcept and reject misuse (a still-open
+// handler, an already-finalized transaction, a null handle) with a structured
+// TestFFIErrorCode. Those rejection paths log via error() *before* the
+// function's try/catch boundary, and error() routes into the process logger,
+// which allocates a token vector and an output string while formatting the
+// message. A std::bad_alloc there would otherwise cross the noexcept boundary
+// and terminate an honest caller instead of returning the structured error
+// (issue #2559). Wrapping the guard diagnostic keeps it best-effort: the
+// message is emitted when memory allows, and a logging failure is reported via
+// fputs (no allocation -- same fallback as do_ffi_trace) so it is never
+// silently dropped while still letting the guard return its FFI error code.
+template<typename Fn>
+void
+best_effort_log(Fn &&fn) noexcept
+{
+  try {
+    std::forward<Fn>(fn)();
+  } catch (std::exception const &e) {
+    std::fputs("error emitting test FFI guard diagnostic: ", stderr);
+    std::fputs(e.what(), stderr);
+    std::fputc('\n', stderr);
+  }
+}
+
 void
 lazy_init()
 {
@@ -272,8 +299,10 @@ free_db(DBContext *ptr) noexcept
   // freeing it while a handler is still open would dangle those references on a
   // later close/invoke. Reject the free instead of crashing (issue #2433).
   if (ptr != nullptr && ptr->has_open_handlers()) {
-    error("free_db called while syscall handlers derived from this DB are "
-          "still open; close them first");
+    best_effort_log([] {
+      error("free_db called while syscall handlers derived from this DB are "
+            "still open; close them first");
+    });
     return kTestFFIErrorCodeUnrecoverableError;
   }
   try {
@@ -296,9 +325,10 @@ advance_new_block(void *db) noexcept
   // reference; reject it while any handler derived from this DB is open so a
   // later root_invoke() doesn't read freed snapshot state (issue #2436).
   if (ptr->has_open_handlers()) {
-    error(
-        "advance_new_block called while syscall handlers derived from this DB "
-        "are still open; close them first");
+    best_effort_log([] {
+      error("advance_new_block called while syscall handlers derived from this "
+            "DB are still open; close them first");
+    });
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
@@ -437,12 +467,49 @@ open_mocked_syscall_handler(void *db, void *rc,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
-    auto *handler = new SyscallHandlerContext(*runtime_context, *db_context,
-                                              auth_claim_xdr, source_hash);
+    auto handler =
+        std::make_unique<SyscallHandlerContext>(*runtime_context, *db_context,
+                                                auth_claim_xdr, source_hash);
     if (enable_tracing) {
-      handler->to_handler().enable_tracing();
+      // enable_tracing() allocates an InvocationFrameTrace and can throw. The
+      // SyscallHandlerContext constructor has already opened the transaction
+      // and registered an open-handler borrow on the DB, and
+      // ~SyscallHandlerContext CHECKs that the transaction was committed or
+      // aborted, so a leaked raw handler here would both pin the DB (blocking
+      // advance/free) and be unclosable by a caller who never received a handle
+      // (issue #2564). Tear the handler down through the same
+      // abort-then-destroy path as close_syscall_handler() before unwinding to
+      // a structured error.
+      try {
+        handler->to_handler().enable_tracing();
+      } catch (...) {
+        if (!handler->is_committed_or_aborted()) {
+          handler->mark_committed_or_aborted();
+          // Best-effort abort; we are already unwinding to an FFI error, and
+          // the destructor only requires the transaction be marked finalized.
+          // Report a failed abort -- whether it returns an error status or
+          // throws -- rather than silently dropping it.
+          try {
+            auto abort_res = handler->to_handler().abort_transaction();
+            if (!abort_res.has_value()) {
+              best_effort_log([&] {
+                error("error aborting transaction during traced "
+                      "open_mocked_syscall_handler cleanup: {}",
+                      abort_res.error());
+              });
+            }
+          } catch (std::exception const &abort_err) {
+            std::fputs("error aborting transaction during traced "
+                       "open_mocked_syscall_handler cleanup: ",
+                       stderr);
+            std::fputs(abort_err.what(), stderr);
+            std::fputc('\n', stderr);
+          }
+        }
+        throw;
+      }
     }
-    return {.syscall_handler = static_cast<void *>(handler),
+    return {.syscall_handler = static_cast<void *>(handler.release()),
             .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
@@ -505,7 +572,7 @@ ForeignTracedInvokeResult
 root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 {
   if (!syscall_handler) {
-    error("root_invoke error: no syscall handler!");
+    best_effort_log([] { error("root_invoke error: no syscall handler!"); });
     return make_ffi_result_type<ForeignTracedInvokeResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
@@ -529,7 +596,8 @@ open_mock_invocation_frame(void *syscall_handler,
                            int32_t invoke_flags) noexcept
 {
   if (!syscall_handler) {
-    error("open_mock_invocation_frame error: no syscall handler!");
+    best_effort_log(
+        [] { error("open_mock_invocation_frame error: no syscall handler!"); });
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
@@ -565,7 +633,9 @@ finish_mock_invocation_frame(void *syscall_handler,
                              int32_t invoke_error_code) noexcept
 {
   if (!syscall_handler) {
-    error("finish_mock_invocation_frame error: no syscall handler!");
+    best_effort_log([] {
+      error("finish_mock_invocation_frame error: no syscall handler!");
+    });
     return make_ffi_result_type<ForeignTracedInvokeResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
@@ -586,12 +656,12 @@ TestFFIErrorCode
 push_context(void *syscall_handler)
 {
   if (!syscall_handler) {
-    error("push_context error: no syscall handler!");
+    best_effort_log([] { error("push_context error: no syscall handler!"); });
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
   if (!context->push_context()) {
-    error("failed to push context");
+    best_effort_log([] { error("failed to push context"); });
     return kTestFFIErrorCodeUnrecoverableError;
   }
   return kTestFFIErrorCodeNone;
@@ -602,14 +672,17 @@ pop_context()
 {
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
-    error("pop_context error: no context!");
+    best_effort_log([] { error("pop_context error: no context!"); });
     return kTestFFIErrorCodeUnrecoverableError;
   }
   // The thread-local context installed for a running root_invoke() is owned by
   // that call; a mock contract callback must not pop it, or root_invoke()'s
   // own deferred pop would CHECK-fail on the now-empty slot (issue #2510).
   if (context->root_invoke_owns_context()) {
-    error("pop_context error: context is owned by the running root invocation");
+    best_effort_log([] {
+      error(
+          "pop_context error: context is owned by the running root invocation");
+    });
     return kTestFFIErrorCodeUnrecoverableError;
   }
   context->pop_context();
@@ -624,7 +697,8 @@ try_commit_transaction(void *syscall_handler) noexcept
           kTestFFIErrorCodeUnrecoverableError);
 
   if (!syscall_handler) {
-    error("try_commit_transaction error: no syscall handler!");
+    best_effort_log(
+        [] { error("try_commit_transaction error: no syscall handler!"); });
     return make_ffi_result_type<ForeignTryCommitResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
@@ -683,7 +757,8 @@ TestFFIErrorCode
 abort_transaction(void *syscall_handler) noexcept
 {
   if (!syscall_handler) {
-    error("abort_transaction error: no syscall handler!");
+    best_effort_log(
+        [] { error("abort_transaction error: no syscall handler!"); });
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
@@ -695,8 +770,10 @@ abort_transaction(void *syscall_handler) noexcept
   // returning a structured error (issue #2518). The wrapper already tracks the
   // terminal state for destructor cleanup; consult it here before forwarding.
   if (context->is_committed_or_aborted()) {
-    error("abort_transaction called on an already committed/aborted "
-          "transaction");
+    best_effort_log([] {
+      error("abort_transaction called on an already committed/aborted "
+            "transaction");
+    });
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
@@ -709,7 +786,10 @@ abort_transaction(void *syscall_handler) noexcept
   // blocks close. Surface a structured error and leave the handler untouched so
   // the caller can finish its frames first.
   if (context->to_handler().is_running()) {
-    error("abort_transaction called while an invocation frame is still active");
+    best_effort_log([] {
+      error(
+          "abort_transaction called while an invocation frame is still active");
+    });
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
@@ -745,9 +825,11 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
     return kTestFFIErrorCodeInvalidPointer;
   }
   if (tokens < 0) {
-    error("setup_grant_contract_storage_tokens: tokens must be nonnegative, "
-          "got {}",
-          tokens);
+    best_effort_log([tokens] {
+      error("setup_grant_contract_storage_tokens: tokens must be nonnegative, "
+            "got {}",
+            tokens);
+    });
     return kTestFFIErrorCodeInvalidArgument;
   }
   auto *db_cast = static_cast<DBContext *>(db);
