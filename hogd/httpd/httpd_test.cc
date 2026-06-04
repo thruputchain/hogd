@@ -16,10 +16,11 @@ read_all(x23::BorrowedFd fd)
 {
   std::string out;
   char buf[1024];
-  for (;;) {
+  while (true) {
     ssize_t n = ::read(fd.get(), buf, sizeof(buf));
-    if (n <= 0)
+    if (n <= 0) {
       return out;
+    }
     out.append(buf, n);
   }
 }

@@ -147,7 +147,9 @@ HttpServer::start_server(x23::HostPort bind_addr)
    _d = x23::Defer([this] { eof(); })](this auto /*copy*/) -> x23::Detached {
     x23::Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
     while (auto c = co_await cp.accept(lfd)) {
-      self->handle_connection(x23::UniqueFd{*c})();
+      [self, fd = x23::UniqueFd{*c}]() mutable -> x23::Detached {
+        co_await self->handle_connection(std::move(fd));
+      }();
     }
   }();
 
@@ -162,9 +164,10 @@ HttpServer::handle_connection(x23::UniqueFd fd)
   while (request.size() < kMaxRequestHeaderBytes &&
          !has_complete_headers(request)) {
     auto read_result = co_await cp_.read(fd, &buf, 4096, /*full=*/false);
-    if (!read_result || *read_result == 0)
+    if (!read_result || *read_result == 0) {
       co_return;
-    request.assign(reinterpret_cast<const char *>(buf.data()), buf.size());
+    }
+    request.append(reinterpret_cast<const char *>(buf.data()), buf.size());
   }
 
   HttpResponse response;
