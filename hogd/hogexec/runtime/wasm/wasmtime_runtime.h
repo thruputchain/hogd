@@ -42,7 +42,7 @@ public:
   //
   // Imported functions functions have a signature of
   // HostFnResult
-  // function(HostCallContext* context, uint64_t arg0,...);
+  // function(ExternHostCallContext context, uint64_t arg0,...);
   template<typename Fn> requires supported_host_fn_ptr<Fn>
   bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
@@ -95,7 +95,7 @@ private:
 class WasmtimeRuntime : public Runtime {
 public:
   // should be called only from within WasmtimeContext::make_new_runtime
-  WasmtimeRuntime(std::unique_ptr<HostCallContext> host_call_context,
+  WasmtimeRuntime(SystemCallHandler *syscall_handler,
                   void *wasmtime_runtime_ptr);
 
   ~WasmtimeRuntime() override;

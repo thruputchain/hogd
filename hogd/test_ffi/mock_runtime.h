@@ -69,10 +69,9 @@ private:
 // Note that mocked contracts do not on their own track gas usage,
 // aside from that explicitly consumed by syscalls.
 //
-// Also note that the host_call_context_ in a mock contract
-// does NOT keep track of a SystemCallHandler* pointer.
-// The mock testing system uses a separate method for tracking
-// SystemCallHandler* context.
+// Note that a mock contract does NOT keep track of a SystemCallHandler*
+// pointer (it is constructed with a null handler). The mock testing system
+// uses a separate method for tracking SystemCallHandler* context.
 class MockGasRuntime : public Runtime {
 public:
   GasAmount gas_remaining() const { return gas_remaining_; }
@@ -96,8 +95,7 @@ public:
 protected:
   explicit MockGasRuntime(
       GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
-    : Runtime(std::make_unique<HostCallContext>()), initial_gas_(initial_gas),
-      gas_remaining_(initial_gas)
+    : Runtime(nullptr), initial_gas_(initial_gas), gas_remaining_(initial_gas)
   {}
 
   void reset_gas(GasAmount initial_gas)

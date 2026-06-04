@@ -54,9 +54,8 @@ runtime_contract_image_is_valid(const RuntimeContractImage &image)
 
 class Runtime final : public hogd::Runtime {
 public:
-  Runtime(RuntimeContractImage image,
-          std::unique_ptr<HostCallContext> host_call_context)
-    : hogd::Runtime(std::move(host_call_context)), image_(std::move(image)),
+  Runtime(RuntimeContractImage image, SystemCallHandler *syscall_handler)
+    : hogd::Runtime(syscall_handler), image_(std::move(image)),
       image_is_valid_(runtime_contract_image_is_valid(image_))
   {}
 
@@ -78,9 +77,9 @@ protected:
     }
     machine.seed_method_id(method_id);
 
-    SyscallBridgeHost host(host_call_context_.get(), image_.entry == nullptr
-                                                         ? &syscall_entry
-                                                         : image_.entry);
+    SyscallBridgeHost host(syscall_handler_, image_.entry == nullptr
+                                                 ? &syscall_entry
+                                                 : image_.entry);
     const StepResult step_result = machine.run(host);
     const GasAmount gas_consumed = gas_limit - machine.gas_remaining();
 
@@ -185,8 +184,7 @@ RuntimeContext::make_new_runtime(
     return nullptr;
   }
 
-  return std::make_unique<Runtime>(it->second,
-                                   make_new_host_call_context(syscall_handler));
+  return std::make_unique<Runtime>(it->second, syscall_handler);
 }
 
 } // namespace hogd::rv32

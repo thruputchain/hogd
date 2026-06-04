@@ -170,8 +170,7 @@ protected:
                                       uint64_t gas_remaining,
                                       const rv32::EcallArgs &args)
   {
-    auto host_context = make_new_host_call_context(&handler);
-    rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
+    rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
     std::array<uint32_t, rv32::kRegisterCount> registers{};
     rv32::MachineView view(0, gas_remaining, registers, memory);
     return bridge.ecall(view, args);
@@ -227,8 +226,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
   ASSERT_TRUE(machine.view().write_memory(0, memory));
 
   auto handler = make_handler();
-  auto host_context = make_new_host_call_context(&handler);
-  rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
+  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
   auto stashed_trace = start_frame(handler);
 
   for (uint64_t i = 0; i + 1 < kSyscallInstructions; ++i) {
@@ -373,8 +371,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
   rv32::Machine machine(program, 256, kPlentyOfGas);
 
   auto handler = make_handler();
-  auto host_context = make_new_host_call_context(&handler);
-  rv32::SyscallBridgeHost bridge(host_context.get(), &syscall_entry);
+  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
   auto stashed_trace = start_frame(handler);
   const rv32::StepResult result = machine.run(bridge);
   finish_frame(handler, std::move(stashed_trace));
