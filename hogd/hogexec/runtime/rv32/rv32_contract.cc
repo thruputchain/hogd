@@ -182,8 +182,14 @@ Rv32Context::verify_contract(Contract const &contract) const
   if (contract.contract_type() != ContractType::kRv32) {
     return InvokeErrorCode::Deterministic;
   }
-  if (!rv32::parse_threaded_artifact(contract.rv32_contract().data)
-           .has_value()) {
+  // Verify full translatability, not just artifact parsing: parse_threaded_-
+  // artifact only runs the structural artifact checks, whereas Rv32Contract::-
+  // create additionally builds the threaded program (instruction decode) and
+  // the pre-instantiation image, which can reject inputs that parse cleanly.
+  // Rejecting non-translatable contracts at creation time is what makes the
+  // "not translatable" path in make_new_runtime unreachable for a deployed
+  // contract (so its Unrecoverable error is a true should-never-happen).
+  if (!Rv32Contract::create(contract.rv32_contract()).has_value()) {
     return InvokeErrorCode::Deterministic;
   }
   return InvokeErrorCode::None;
