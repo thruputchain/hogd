@@ -51,6 +51,7 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch \
 # races in application code.
 export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=1"
 export HOGD_DEV_STARTUP_TIMEOUT_SECS=180
+export HOGD_DEV_EXIT_TIMEOUT_SECS=120
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
