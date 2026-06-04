@@ -14,6 +14,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -30,39 +31,14 @@ StorageSnapshotCache::~StorageSnapshotCache()
   release_db_tip();
 }
 
-SystemStatus<std::optional<DeployedContractHash>>
-StorageSnapshotCache::try_get_deployed_contract_hash(
-    ContractAddress const &addr)
-{
-  {
-    // Use shared lock for read-only cache lookup
-    auto [obj, sl] = deployment_cache_.find_shared(addr);
-    if (obj) {
-      return *obj;
-    }
-  }
-
-  auto db_res = db_proxy_.get_deployment(block_id_, addr);
-  if (!db_res) {
-    return db_res.error();
-  }
-  auto out = db_res.value();
-  // caches both positive and negative lookups
-  deployment_cache_.insert(addr, std::move(db_res.value()));
-  return out;
-}
-
-SystemStatus<const Contract *>
-StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
+SystemStatus<const ContractCacheEntry *>
+StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      if (obj->has_value()) {
-        return &obj->value();
-      }
-      return nullptr;
+      return obj->has_value() ? &obj->value() : nullptr;
     }
   }
 
@@ -81,23 +57,91 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     }
   }
 
+  // Build the entry, eagerly translating rv32 contracts so the deployment
+  // back-pointer exposes a ready-to-instantiate image with no extra lookup.
+  std::optional<ContractCacheEntry> entry;
+  if (db_res.value()) {
+    Contract contract = std::move(db_res.value()).value();
+    std::optional<Rv32Contract> translated;
+    if (contract.contract_type() == ContractType::kRv32) {
+      translated = Rv32Contract::create(contract.rv32_contract());
+    }
+    entry.emplace(ContractCacheEntry{.contract = std::move(contract),
+                                     .translated = std::move(translated)});
+  }
+
   // TODO(geoff): If we decide to NOT reset the cache after every block,
   // then the contract cache needs to only cache positive lookups
-  auto [obj, lock] = contract_cache_.insert(hash, std::move(db_res.value()));
+  auto [obj, lock] = contract_cache_.insert(hash, std::move(entry));
   if (obj != nullptr) {
-    if (obj->has_value()) {
-      return &obj->value();
-    }
-    return nullptr;
+    return obj->has_value() ? &obj->value() : nullptr;
   }
   CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
   CHECK_PTR(obj2);
-  if (obj2->has_value()) {
-    return &obj2->value();
+  return obj2->has_value() ? &obj2->value() : nullptr;
+}
+
+SystemStatus<const Contract *>
+StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
+{
+  auto entry = get_contract_entry(hash);
+  if (!entry) {
+    return entry.error();
   }
-  return nullptr;
+  return entry.value() ? &entry.value()->contract : nullptr;
+}
+
+SystemStatus<const DeployedContract *>
+StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
+{
+  {
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = deployment_cache_.find_shared(addr);
+    if (obj) {
+      return obj->has_value() ? &obj->value() : nullptr;
+    }
+  }
+
+  auto db_res = db_proxy_.get_deployment(block_id_, addr);
+  if (!db_res) {
+    return db_res.error();
+  }
+
+  std::optional<DeployedContract> deployed;
+  if (db_res.value()) {
+    DeployedContractHash meta = db_res.value().value();
+    // Eagerly warm + translate the contract code; back-point at its entry.
+    auto entry = get_contract_entry(meta.hash);
+    if (!entry) {
+      return entry.error();
+    }
+    deployed.emplace(meta, entry.value());
+  }
+
+  auto [obj, lock] = deployment_cache_.insert(addr, std::move(deployed));
+  if (obj != nullptr) {
+    return obj->has_value() ? &obj->value() : nullptr;
+  }
+  CHECK(lock.owns_lock());
+  // concurrent insert happened: fetch the result from the cache again
+  auto *obj2 = deployment_cache_.find(addr, lock);
+  CHECK_PTR(obj2);
+  return obj2->has_value() ? &obj2->value() : nullptr;
+}
+
+SystemStatus<std::optional<DeployedContractHash>>
+StorageSnapshotCache::try_get_deployed_contract_hash(ContractAddress const &addr)
+{
+  auto res = try_get_deployed_contract(addr);
+  if (!res) {
+    return res.error();
+  }
+  if (res.value() == nullptr) {
+    return std::optional<DeployedContractHash>{};
+  }
+  return std::optional<DeployedContractHash>{res.value()->hash};
 }
 
 SystemStatus<const SnapshotStorageItem *>

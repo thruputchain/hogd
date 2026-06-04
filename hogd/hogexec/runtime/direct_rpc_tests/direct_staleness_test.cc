@@ -328,6 +328,15 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   ASSERT_TRUE(fresh_contract.has_value());
   EXPECT_NE(fresh_contract.value(), nullptr);
 
+  // The deployment entry back-points at the same cached contract entry the
+  // direct hash lookup returns, and a native contract has no translation.
+  auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr);
+  ASSERT_TRUE(fresh_deploy_ptr.has_value());
+  ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
+  EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract,
+            fresh_contract.value());
+  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
+
   EXPECT_TRUE(
       get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
   EXPECT_TRUE(
