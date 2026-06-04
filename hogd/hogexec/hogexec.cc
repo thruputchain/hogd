@@ -6,9 +6,7 @@
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <sys/socket.h>
-#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -26,19 +24,15 @@ namespace {
 
 int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
-             int nthreads, uint16_t mempool_port,
-             std::optional<x23::HostPort> metrics_addr)
+             int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
   Health::instance().start_service();
 
-  std::optional<httpd::HttpServer> metrics_server;
-  if (metrics_addr.has_value()) {
-    metrics_server.emplace();
-    httpd::add_health_metrics_routes(*metrics_server);
-    const uint16_t actual_metrics_port =
-        metrics_server->start_server(std::move(*metrics_addr));
-    info("PORT hogexec.metrics={}", actual_metrics_port);
-  }
+  httpd::HttpServer metrics_server;
+  httpd::add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port =
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+  info("PORT hogexec.metrics={}", actual_metrics_port);
 
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
@@ -77,7 +71,7 @@ usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
                "[--nthreads <nthreads>] [--mempool-port <port>] "
-               "[--metrics <private-ip:port>]",
+               "[--metrics-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -91,19 +85,6 @@ parse_port(const std::string &value)
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
   return static_cast<uint16_t>(port);
-}
-
-std::optional<x23::HostPort>
-parse_metrics_addr(std::string_view value)
-{
-  x23::HostPort host_port;
-  if (!host_port.parse(value)) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
-  }
-  if (!host_port.to_addr(/*dns=*/false).has_value()) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
-  }
-  return host_port;
 }
 
 } // namespace
@@ -120,12 +101,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string bind_ip;
   std::optional<int> nthreads;
   uint16_t mempool_port = 0;
-  std::optional<x23::HostPort> metrics_addr;
+  uint16_t metrics_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--metrics" && i + 1 < argc) {
-      metrics_addr = parse_metrics_addr(argv[++i]);
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
       continue;
     }
     if (arg == "--coordinator-addr" && i + 1 < argc) {
@@ -167,5 +148,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   return hogd::hogexec_init(coord_address, bind_ip, *nthreads, mempool_port,
-                            std::move(metrics_addr));
+                            metrics_port);
 }

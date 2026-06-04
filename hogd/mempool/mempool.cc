@@ -9,7 +9,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <thread>
 #include <utility>
 
@@ -39,7 +38,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
              std::string_view bind_ip, uint16_t db_port, uint16_t event_port,
              uint16_t executor_port, uint16_t auth_port,
              uint16_t coordinator_port, uint16_t gateway_port,
-             std::optional<x23::HostPort> metrics_addr)
+             uint16_t metrics_port)
 {
   Registration &registration = Registration::registration();
 
@@ -48,14 +47,11 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
   // Start the health service.
   Health::instance().start_service();
 
-  std::optional<httpd::HttpServer> metrics_server;
-  if (metrics_addr.has_value()) {
-    metrics_server.emplace();
-    httpd::add_health_metrics_routes(*metrics_server);
-    const uint16_t actual_metrics_port =
-        metrics_server->start_server(std::move(*metrics_addr));
-    info("PORT mempool.metrics={}", actual_metrics_port);
-  }
+  httpd::HttpServer metrics_server;
+  httpd::add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port =
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+  info("PORT mempool.metrics={}", actual_metrics_port);
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
@@ -153,7 +149,7 @@ usage(char *argv[])
       "--network-id <hex> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
-      "[--metrics <private-ip:port>]",
+      "[--metrics-port <port>]",
       argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -167,21 +163,6 @@ parse_port(const std::string &value)
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
   return static_cast<uint16_t>(port);
-}
-
-std::optional<x23::HostPort>
-parse_metrics_addr(std::string_view value)
-{
-  x23::HostPort host_port;
-  if (!host_port.parse(value)) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
-  }
-  std::expected<sockaddr_storage, x23::GaiError> addr =
-      host_port.to_addr(/*dns=*/false);
-  if (!addr.has_value()) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
-  }
-  return host_port;
 }
 
 } // namespace
@@ -204,12 +185,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t auth_port = 0;
   uint16_t coordinator_port = 0;
   uint16_t gateway_port = 0;
-  std::optional<x23::HostPort> metrics_addr;
+  uint16_t metrics_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--metrics" && i + 1 < argc) {
-      metrics_addr = parse_metrics_addr(argv[++i]);
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
       continue;
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
@@ -273,5 +254,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
                             bind_ip, db_port, event_port, executor_port,
                             auth_port, coordinator_port, gateway_port,
-                            std::move(metrics_addr));
+                            metrics_port);
 }

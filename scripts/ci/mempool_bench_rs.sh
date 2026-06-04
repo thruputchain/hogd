@@ -85,7 +85,7 @@ echo 'kill stale processes'
 kill_stale_processes
 
 echo 'launch loadgen'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --port $LOADGEN_PORT
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT
 
 echo 'wait for loadgen'
 ./scripts/wait-port.sh hog7 $LOADGEN_PORT

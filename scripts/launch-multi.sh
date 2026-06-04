@@ -39,26 +39,35 @@ EXPORT_REGEX='^X23'
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
 export LOADGEN_PORT=11222
+export LOADGEN_HTTP_PORT=11223
+
+export EXECUTOR_MEMPOOL_PORT=8040
+export EXECUTOR_HTTP_PORT=8041
 
 export AUTH_DB_PORT=8050
 export AUTH_MEMPOOL_PORT=8051
+export AUTH_HTTP_PORT=8052
 
 export INDEXER_EVENT_PORT=8060
 export INDEXER_BLOCK_EXPLORER_PORT=8061
+export INDEXER_HTTP_PORT=8062
 
 export MEMPOOL_COORDINATOR_PORT=8070
 export MEMPOOL_EXECUTOR_PORT=8071
 export MEMPOOL_DB_PORT=8072
 export MEMPOOL_EVENT_PORT=8073
 export MEMPOOL_AUTH_PORT=8074
+export MEMPOOL_HTTP_PORT=8075
 
 export DB_EXECUTOR_PORT=8080
 export DB_MEMPOOL_PORT=8081
 export DB_AUTH_PORT=8082
+export DB_HTTP_PORT=8083
 
 export EVENT_EXECUTOR_PORT=8090
 export EVENT_MEMPOOL_PORT=8091
 export EVENT_INDEXER_PORT=8092
+export EVENT_HTTP_PORT=8093
 
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
@@ -226,19 +235,19 @@ check_binaries() {
 #check_binaries
 
 echo "Start loadgen..."
-remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port $LOADGEN_PORT
+remote_launch "$loadgen_server" "$LOADGEN_BINARY" --bind-ip "$(hog_ip "$loadgen_server")" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
 ./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
 
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port 8040
+  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 done
 
 # Start event.
 echo "Start event..."
 remote_launch "$event_server" "$EVENT_BINARY" \
-  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip "$event_server")" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
+  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip "$event_server")" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 # Start indexer.
 echo "Start indexer..."
@@ -246,7 +255,7 @@ if $delete_db; then
   ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
 fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
+  --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -256,19 +265,19 @@ for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   fi
   remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $HOGDB_HTTP_PORT
 done
 
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip "$auth_server")" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
+  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip "$auth_server")" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   --bind-ip "$(hog_ip "$mempool_server")" \
-  --metrics "$(hog_ip "$mempool_server"):8080" \
+  --metrics-port $MEMPOOL_HTTP_PORT \
   --network-id 0 \
   --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
@@ -310,21 +319,25 @@ done
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_EXECUTOR_PORT
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_MEMPOOL_PORT
 ./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_INDEXER_PORT
+./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_HTTP_PORT
 
 # Wait for indexer (ports 8060-8061).
 ./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
 ./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
+./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
 
 # Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_EXECUTOR_PORT
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_MEMPOOL_PORT
   ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_AUTH_PORT
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_HTTP_PORT
 done
 
 # Wait for auth (ports 8050-8051).
 ./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_DB_PORT
 ./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_MEMPOOL_PORT
+./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_HTTP_PORT
 
 # Wait for chuckd (port 7888).
 ./scripts/wait-port.sh "$(hog_ip "$chuckd_server")" 7888
@@ -335,6 +348,7 @@ done
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_DB_PORT
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EVENT_PORT
 ./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_AUTH_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_HTTP_PORT
 
 echo "Done with launch."
 

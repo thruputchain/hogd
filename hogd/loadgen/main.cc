@@ -3,20 +3,17 @@
 #include <exception>
 #include <format>
 #include <future>
-#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <string_view>
-#include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/health/health.h"
 #include "hogd/httpd/httpd.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "x23/sockio.h"
 
 namespace {
 
@@ -26,30 +23,29 @@ constexpr uint16_t kDefaultLoadgenPort = 0;
 usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
   std::println(stderr,
-               "Usage: {} [--port <port>] "
-               "[--metrics <private-ip:port>] [--help]",
+               "Usage: {} --bind-ip <ip> [--port <port>] "
+               "[--metrics-port <port>] [--help]",
                progname);
   std::println(stderr, "Options:");
+  std::println(stderr, "  --bind-ip <ip>  IP address to bind metrics on");
   std::println(stderr,
                "  --port <port>  Port number to listen on (default: {})",
                kDefaultLoadgenPort);
-  std::println(stderr, "  --metrics <private-ip:port>  Health/metrics HTTP "
-                       "endpoint address");
+  std::println(stderr, "  --metrics-port <port>  Health/metrics HTTP port "
+                       "(default: 0)");
   std::println(stderr, "  --help         Show this help message");
   exit(exit_code);
 }
 
-std::optional<x23::HostPort>
-parse_metrics_addr(std::string_view value)
+uint16_t
+parse_port(const std::string &value)
 {
-  x23::HostPort host_port;
-  if (!host_port.parse(value)) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
+  size_t pos = 0;
+  uint64_t port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
   }
-  if (!host_port.to_addr(/*dns=*/false).has_value()) {
-    throw std::runtime_error(std::format("Invalid address: {}", value));
-  }
-  return host_port;
+  return static_cast<uint16_t>(port);
 }
 
 } // namespace
@@ -64,8 +60,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const char *progname = argc > 0 ? argv[0] : "loadgen_server";
+  std::string bind_ip;
   uint16_t port = kDefaultLoadgenPort;
-  std::optional<x23::HostPort> metrics_addr;
+  uint16_t metrics_port = 0;
 
   // Parse command line arguments
   for (int i = 1; i < argc; ++i) {
@@ -73,39 +70,39 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (arg == "--help") {
       usage(progname, EXIT_SUCCESS);
     }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
+      continue;
+    }
     if (arg == "--port" && i + 1 < argc) {
       try {
-        int parsed_port = std::stoi(argv[++i]);
-        if (parsed_port < 0 || parsed_port > 65535) {
-          std::println(stderr, "Error: Port must be between 0 and 65535");
-          return EXIT_FAILURE;
-        }
-        port = static_cast<uint16_t>(parsed_port);
+        port = parse_port(argv[++i]);
       } catch (const std::exception &) {
         std::println(stderr, "Error: Invalid port number '{}'", argv[i]);
         return EXIT_FAILURE;
       }
       continue;
     }
-    if (arg == "--metrics" && i + 1 < argc) {
-      metrics_addr = parse_metrics_addr(argv[++i]);
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
       continue;
     }
     std::println(stderr, "Error: Unexpected argument '{}'", arg);
     usage(progname);
   }
 
+  if (bind_ip.empty()) {
+    usage(progname);
+  }
+
   hogd::info("Starting loadgen server on port {}", port);
   hogd::Health::instance().start_service();
 
-  std::optional<hogd::httpd::HttpServer> metrics_server;
-  if (metrics_addr.has_value()) {
-    metrics_server.emplace();
-    hogd::httpd::add_health_metrics_routes(*metrics_server);
-    const uint16_t actual_metrics_port =
-        metrics_server->start_server(std::move(*metrics_addr));
-    hogd::info("PORT loadgen.metrics={}", actual_metrics_port);
-  }
+  hogd::httpd::HttpServer metrics_server;
+  hogd::httpd::add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port = metrics_server.start_server(
+      hogd::make_bind_host_port(bind_ip, metrics_port));
+  hogd::info("PORT loadgen.metrics={}", actual_metrics_port);
 
   // Create and start the loadgen server
   hogd::RpcServer<hogd::LoadgenRpc> server;

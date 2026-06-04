@@ -16,6 +16,7 @@
 #include "hogd/health/health.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -173,7 +174,7 @@ HttpServer::accept_loop(x23::CoroPoll &cp, x23::UniqueFd lfd,
                         x23::RefPtr<HttpServer> self)
 {
   EofOnExit _eof{self};
-  ResetFdOnExit _resetfd{cp, lfd};
+  ResetFdOnExit _resetfd{.cp = cp, .fd = lfd};
   while (auto c = co_await cp.accept(lfd)) {
     handle_connection_detached(self, x23::UniqueFd{*c});
   }
