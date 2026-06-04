@@ -22,8 +22,9 @@ struct WasmContext {
   uint64_t gas_remaining;
 };
 
-// The first parameter is the host call context.  This is a c++ only type, and
-// passed around within the rust as a void*.
+// The first parameter is the host call context: a C++ `SystemCallHandler*`
+// installed by the host when the sandbox is created and handed back, unchanged,
+// to syscall_entry on every host call. Rust treats it as an opaque void*.
 
 // NOLINTBEGIN(modernize-use-using)
 

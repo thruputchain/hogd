@@ -97,10 +97,8 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
   return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
 }
 
-Runtime::Runtime(std::unique_ptr<HostCallContext> host_call_context)
-  : host_call_context_(host_call_context.release())
-{
-  host_call_context_->runtime = this;
-}
+Runtime::Runtime(SystemCallHandler *syscall_handler)
+  : syscall_handler_(syscall_handler)
+{}
 
 } // namespace hogd

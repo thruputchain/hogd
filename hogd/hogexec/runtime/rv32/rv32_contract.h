@@ -34,9 +34,8 @@ private:
 // path).
 class Rv32Runtime final : public Runtime {
 public:
-  Rv32Runtime(Rv32Contract const *contract,
-              std::unique_ptr<HostCallContext> host_call_context)
-    : Runtime(std::move(host_call_context)), contract_(contract)
+  Rv32Runtime(Rv32Contract const *contract, SystemCallHandler *syscall_handler)
+    : Runtime(syscall_handler), contract_(contract)
   {}
 
   ~Rv32Runtime() override = default;

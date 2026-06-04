@@ -19,7 +19,6 @@
 
 namespace hogd {
 
-// Context to be passed into a host function call
 class SystemCallHandler;
 class Runtime;
 
@@ -52,22 +51,6 @@ get_engine_info(RuntimeEngine engine)
 }
 
 } // namespace detail
-
-// Passed in as the argument to functions invoked from a sandbox.
-// The Runtime* argument allows a syscall to consume gas.
-struct HostCallContext {
-  Runtime *runtime = nullptr;
-  SystemCallHandler *syscall_handler = nullptr;
-};
-
-inline std::unique_ptr<HostCallContext>
-make_new_host_call_context(SystemCallHandler *syscall_handler)
-{
-  // ctor of Runtime is responsible for filling in out->runtime pointer.
-  auto out = std::make_unique<HostCallContext>();
-  out->syscall_handler = syscall_handler;
-  return out;
-}
 
 std::string_view inline engine_to_string(RuntimeEngine engine)
 {
@@ -186,7 +169,7 @@ public:
   //
   // Imported functions functions have a signature of
   // HostFnResult
-  // function(HostCallContext* context, uint64_t arg0,...);
+  // function(ExternHostCallContext context, uint64_t arg0,...);
   //
   // Validate link_fn parameters. Returns false if any parameter is invalid.
   static bool validate_link_fn_params(std::string_view module_name,
@@ -215,7 +198,9 @@ std::unique_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
 // sandbox.  Can be created by an instance of RuntimeContext.
 class Runtime {
 public:
-  Runtime(std::unique_ptr<HostCallContext> host_call_context);
+  // `syscall_handler` is non-owning and must outlive the Runtime. It is the
+  // opaque context the sandbox bakes in and hands back to syscall_entry.
+  explicit Runtime(SystemCallHandler *syscall_handler);
 
   using MethodID =
       uint64_t; // from ContractEntryPointID, interpreted in big-endian
@@ -254,7 +239,7 @@ protected:
   virtual std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) = 0;
 
-  std::unique_ptr<HostCallContext> host_call_context_;
+  SystemCallHandler *syscall_handler_ = nullptr;
 };
 
 } // namespace hogd

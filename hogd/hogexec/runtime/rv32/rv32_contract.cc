@@ -96,7 +96,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
     auto const &pending_ecall = machine.pending_ecall();
     assert(pending_ecall.has_value());
 
-    ExternHostCallContext host_fn_ctx = host_call_context_.get();
+    ExternHostCallContext host_fn_ctx = syscall_handler_;
     assert(host_fn_ctx != nullptr);
 
     WasmContext wasm_context = {
@@ -235,8 +235,7 @@ Rv32Context::make_new_runtime(
              .first;
   }
 
-  return std::make_unique<Rv32Runtime>(&it->second, make_new_host_call_context(
-                                                        syscall_handler));
+  return std::make_unique<Rv32Runtime>(&it->second, syscall_handler);
 }
 
 } // namespace hogd

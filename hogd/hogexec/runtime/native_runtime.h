@@ -124,8 +124,7 @@ private:
 class NativeRuntime : public Runtime {
 public:
   // should be called only from within NativeContext::make_new_runtime
-  NativeRuntime(NativeContract &contract,
-                std::unique_ptr<HostCallContext> host_call_context);
+  NativeRuntime(NativeContract &contract, SystemCallHandler *syscall_handler);
 
   ~NativeRuntime() override = default;
 

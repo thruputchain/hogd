@@ -104,22 +104,18 @@ NativeContext::make_new_runtime(
     return nullptr;
   }
 
-  return std::make_unique<NativeRuntime>(*it->second,
-                                         make_new_host_call_context(
-                                             syscall_handler));
+  return std::make_unique<NativeRuntime>(*it->second, syscall_handler);
 }
 
 NativeRuntime::NativeRuntime(NativeContract &contract,
-                             std::unique_ptr<HostCallContext> host_call_context)
-  : Runtime(std::move(host_call_context)), contract_(contract)
+                             SystemCallHandler *syscall_handler)
+  : Runtime(syscall_handler), contract_(contract)
 {}
 
 std::pair<InvokeStatus<void>, GasAmount>
 NativeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
-
-  return contract_.invoke(method_id, *host_call_context_->syscall_handler,
-                          gas_limit);
+  return contract_.invoke(method_id, *syscall_handler_, gas_limit);
 }
 
 } // namespace hogd

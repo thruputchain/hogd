@@ -33,21 +33,16 @@ make_err(SystemErrorCode err)
 }
 
 extern "C" ContractGetResult
-wasmtime_contract_get_fn(void *host_call_context_ptr,
+wasmtime_contract_get_fn(void *syscall_handler_ptr,
                          const uint8_t *hash_ptr) noexcept
 {
-  if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
+  if (syscall_handler_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
     error("Unrecoverable: nullptr(s) passed to wasmtime_contract_get_fn");
     return make_err(SystemErrorCode::Unrecoverable);
   }
 
-  auto *host_call_context =
-      static_cast<HostCallContext *>(host_call_context_ptr);
-  if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
-    error("Unrecoverable: nullptr syscall_handler in wasmtime_contract_get_fn");
-    return make_err(SystemErrorCode::Unrecoverable);
-  }
-  SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
+  SystemCallHandler &syscall_handler =
+      *static_cast<SystemCallHandler *>(syscall_handler_ptr);
 
   // TODO(geoff): this is an extra copy
   SHA256Hash hash{};
@@ -138,11 +133,10 @@ WasmtimeContext::make_new_runtime(
     SystemCallHandler *syscall_handler)
 {
   assert(syscall_handler != nullptr);
-  auto host_call_context = make_new_host_call_context(syscall_handler);
 
   NewWasmtimeRuntimeResult new_runtime_result =
-      new_wasmtime_runtime(deployed_contract_hash.hash.data(),
-                           host_call_context.get(), wasmtime_context_ptr_);
+      new_wasmtime_runtime(deployed_contract_hash.hash.data(), syscall_handler,
+                           wasmtime_context_ptr_);
 
   if (new_runtime_result.err_code != 0) [[unlikely]] {
     return SystemError::from_raw_error_code(new_runtime_result.err_code);
@@ -152,7 +146,7 @@ WasmtimeContext::make_new_runtime(
     return nullptr;
   }
 
-  return std::make_unique<WasmtimeRuntime>(std::move(host_call_context),
+  return std::make_unique<WasmtimeRuntime>(syscall_handler,
                                            new_runtime_result.runtime_pointer);
 }
 
@@ -221,11 +215,9 @@ WasmtimeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
   return {{}, res.gas_consumed};
 }
 
-WasmtimeRuntime::WasmtimeRuntime(
-    std::unique_ptr<HostCallContext> host_call_context,
-    void *wasmtime_runtime_ptr)
-  : Runtime(std::move(host_call_context)),
-    wasmtime_runtime_ptr_(wasmtime_runtime_ptr)
+WasmtimeRuntime::WasmtimeRuntime(SystemCallHandler *syscall_handler,
+                                 void *wasmtime_runtime_ptr)
+  : Runtime(syscall_handler), wasmtime_runtime_ptr_(wasmtime_runtime_ptr)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
 }

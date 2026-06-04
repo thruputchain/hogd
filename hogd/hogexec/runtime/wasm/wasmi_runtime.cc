@@ -33,21 +33,16 @@ make_err(SystemErrorCode err)
 }
 
 extern "C" ContractGetResult
-wasmi_contract_get_fn(void *host_call_context_ptr,
+wasmi_contract_get_fn(void *syscall_handler_ptr,
                       const uint8_t *hash_ptr) noexcept
 {
-  if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
+  if (syscall_handler_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
     error("Unrecoverable: nullptr(s) passed to wasmi_contract_get_fn");
     return make_err(SystemErrorCode::Unrecoverable);
   }
 
-  auto *host_call_context =
-      static_cast<HostCallContext *>(host_call_context_ptr);
-  if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
-    error("Unrecoverable: nullptr syscall_handler in wasmi_contract_get_fn");
-    return make_err(SystemErrorCode::Unrecoverable);
-  }
-  SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
+  SystemCallHandler &syscall_handler =
+      *static_cast<SystemCallHandler *>(syscall_handler_ptr);
 
   // TODO(geoff): this is an extra copy
   SHA256Hash hash{};
@@ -147,11 +142,9 @@ WasmiContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
     SystemCallHandler *syscall_handler)
 {
-  auto host_call_context = make_new_host_call_context(syscall_handler);
-
   NewWasmiRuntimeResult new_runtime_result =
-      new_wasmi_runtime(deployed_contract_hash.hash.data(),
-                        host_call_context.get(), wasmi_context_ptr_);
+      new_wasmi_runtime(deployed_contract_hash.hash.data(), syscall_handler,
+                        wasmi_context_ptr_);
 
   if (new_runtime_result.err_code != 0) {
     return SystemError::from_raw_error_code(new_runtime_result.err_code);
@@ -163,8 +156,7 @@ WasmiContext::make_new_runtime(
     return {};
   }
 
-  return std::make_unique<WasmiRuntime>(std::move(host_call_context),
-                                        wasmi_runtime_ptr);
+  return std::make_unique<WasmiRuntime>(syscall_handler, wasmi_runtime_ptr);
 }
 
 InvokeErrorCode
@@ -206,9 +198,9 @@ WasmiRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
   return {{}, res.gas_consumed};
 }
 
-WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
+WasmiRuntime::WasmiRuntime(SystemCallHandler *syscall_handler,
                            void *wasmi_runtime_ptr)
-  : Runtime(std::move(host_call_context)), wasmi_runtime_ptr_(wasmi_runtime_ptr)
+  : Runtime(syscall_handler), wasmi_runtime_ptr_(wasmi_runtime_ptr)
 {}
 
 WasmiRuntime::~WasmiRuntime()

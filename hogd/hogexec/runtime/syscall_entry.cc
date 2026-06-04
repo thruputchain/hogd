@@ -47,15 +47,16 @@ constexpr auto kSyscallTable =
 // returns gas_consumed, syscall error>
 template<std::same_as<uint32_t>... Args>
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_entry_inner(HostCallContext *call_context, WasmContext wasm_context,
-                    uint32_t syscall_no, Args... args) noexcept
+syscall_entry_inner(SystemCallHandler *syscall_handler,
+                    WasmContext wasm_context, uint32_t syscall_no,
+                    Args... args) noexcept
 {
   SyscallFunc syscall_fn = nullptr;
-  assert(call_context->syscall_handler);
+  assert(syscall_handler);
   bool valid_syscall_no = syscall_no < kSyscallTable.size();
   if (!valid_syscall_no) {
     // invalid syscall
-    if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
+    if (auto *stats = syscall_handler->get_transaction_stats()) {
       stats->invalid_syscall_count++;
     }
     syscall_fn = &wrap_outer<NoSyscallFuncMeta>;
@@ -70,13 +71,13 @@ syscall_entry_inner(HostCallContext *call_context, WasmContext wasm_context,
   static_assert(kSyscallTable.size() < INT32_MAX,
                 "xdr enum overflow otherwise");
 
-  if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
+  if (auto *stats = syscall_handler->get_transaction_stats()) {
     if (valid_syscall_no) {
       stats->syscall_counts[syscall_no]++;
     }
   }
 
-  return syscall_fn(*call_context->syscall_handler, wasm_context,
+  return syscall_fn(*syscall_handler, wasm_context,
                     static_cast<SyscallNo>(syscall_no), args...);
 }
 
@@ -91,7 +92,7 @@ syscall_entry(ExternHostCallContext call_context, WasmContext wasm_context,
                 "type mismatch");
 
   auto [err, gas_consumed] =
-      syscall_entry_inner(reinterpret_cast<HostCallContext *>(call_context),
+      syscall_entry_inner(static_cast<SystemCallHandler *>(call_context),
                           wasm_context, arg0, arg1, arg2, arg3, arg4, arg5,
                           arg6, arg7);
   return to_trampoline_result(err, gas_consumed);

@@ -95,14 +95,10 @@ public:
     auto context = make_hogexec_context();
     auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-    auto host_call_context = std::make_unique<HostCallContext>();
-    host_call_context->syscall_handler = &handler;
-
     handler.start_frame(kPlaceholderInvocation,
                         std::to_underlying(InvokeFlag::None),
                         std::span<uint32_t>{});
 
-    // Runtime ctor sets host_call_context->runtime
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
@@ -129,14 +125,10 @@ public:
     auto context = make_hogexec_context();
     auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-    auto host_call_context = std::make_unique<HostCallContext>();
-    host_call_context->syscall_handler = &handler;
-
     handler.start_frame(kPlaceholderInvocation,
                         std::to_underlying(InvokeFlag::None),
                         std::span<uint32_t>{});
 
-    // Runtime ctor sets host_call_context->runtime
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
@@ -209,14 +201,10 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
-
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::None),
                       std::span<uint32_t>{});
 
-  // Runtime ctor sets host_call_context->runtime
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoreturnFailingSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
@@ -255,14 +243,10 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
-
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::None),
                       std::span<uint32_t>{});
 
-  // Runtime ctor sets host_call_context->runtime
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10000),
                                      kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
@@ -296,14 +280,10 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
-
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::None),
                       std::span<uint32_t>{});
 
-  // Runtime ctor sets host_call_context->runtime
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
@@ -341,14 +321,10 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
-
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::ReadOnly),
                       std::span<uint32_t>{});
 
-  // Runtime ctor sets host_call_context->runtime
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10000),
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
@@ -387,9 +363,6 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
-
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::None),
                       std::span<uint32_t>{});
@@ -417,9 +390,6 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 {
   auto context = make_hogexec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
-
-  auto host_call_context = std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::None),
