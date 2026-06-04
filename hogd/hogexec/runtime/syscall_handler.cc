@@ -221,6 +221,18 @@ SystemCallHandler::reject_if_replay_uniquifier_expired()
 void
 SystemCallHandler::perform_initial_validation()
 {
+  // An earlier gate may have already rejected the transaction (e.g.
+  // reject_if_replay_uniquifier_expired() writing ValidationFailure). Don't run
+  // -- and crucially don't let the checks below overwrite -- that result: an
+  // expired uniquifier combined with an invalid attached contract must still
+  // surface as the deterministic ValidationFailure, not be downgraded to the
+  // contract-verification error (which would route through
+  // commit_body_discarded and report a late replay-cache NonDeterministicError
+  // instead).
+  if (!cumulative_invoke_result_.is_root_success()) {
+    return;
+  }
+
   // Validate the proposal data structure before execution begins.
   // This checks well-formedness (e.g. bit count matches byte count,
   // no entropy grinding via padding bits).

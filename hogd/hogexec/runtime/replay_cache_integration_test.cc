@@ -161,6 +161,31 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
             ExecResult::ExecResultTxValidationFailure);
 }
 
+// An expired uniquifier combined with an invalid attached contract is still
+// rejected as the deterministic ValidationFailure -- the expiry gate's result
+// is not shadowed by the attached-contract verification fault (which would
+// otherwise route through commit_body_discarded and report a late replay-cache
+// NonDeterministicError). The body never runs either way (#2568).
+TEST_F(ReplayCacheIntegrationTest,
+       ExpiredHeightWithInvalidContractStillValidationFailure)
+{
+  advance_block();
+  advance_block();
+
+  auto tx = make_tx(3, /*nonce=*/12, /*expiry=*/0);
+  // Native contract id 99 is not registered in ctx_, so verify_contract() would
+  // fault it as Deterministic if perform_initial_validation() ran it.
+  tx.contracts_to_deploy.push_back(*make_native_contract(99));
+
+  auto handler = make_new_system_call_handler(tx, *ctx_);
+  handler.reject_if_replay_uniquifier_expired();
+  auto root_res = handler.root_invoke();
+  EXPECT_FALSE(root_res.is_root_success());
+  EXPECT_FALSE(body_ran_);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
 // Without the executor's pre-body gate, the body still runs and the late
 // replay-cache reservation rejects the expired uniquifier at commit time. This
 // pins the low-level handler primitive's unchanged contract (the gate is opt-in
