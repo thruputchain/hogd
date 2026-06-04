@@ -32,6 +32,8 @@ reason_phrase(int status)
     return "Not Found";
   case 405:
     return "Method Not Allowed";
+  case 418: // haha
+    return "I'm a teapot";
   case 500:
     return "Internal Server Error";
   default:
