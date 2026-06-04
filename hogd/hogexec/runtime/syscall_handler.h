@@ -415,9 +415,10 @@ private:
 
   // Per-transaction cache of translated rv32 contracts for transaction-local
   // deployments (which are not in the block-scoped StorageSnapshotCache).
-  // Filled lazily, keyed by contract hash. Entries are node-stable and borrowed
-  // by Rv32Runtime, so they must outlive the runtimes -- they live for the
-  // whole transaction.
+  // Filled lazily, keyed by contract hash; a null mapped value memoizes a
+  // non-translatable artifact so we never retranslate. Entries are node-stable
+  // and borrowed by Rv32Runtime, so they must outlive the runtimes -- they live
+  // for the whole transaction.
   std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, ByteArrayHasher>
       local_rv32_translations_;
 

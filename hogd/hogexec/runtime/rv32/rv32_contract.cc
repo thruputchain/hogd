@@ -202,19 +202,26 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   }
   assert(syscall_handler != nullptr);
 
-  // Fast path: a snapshot deployment carries a back-pointer to the cached
-  // contract entry, which already holds the eagerly-built translation. No
-  // resolve_contract round trip, no per-invocation translation.
-  if (deployed_contract.entry != nullptr &&
-      deployed_contract.entry->translated.has_value()) {
+  // Snapshot deployment: the back-pointer entry was translated eagerly when the
+  // contract entered the cache. A present translation is the fast path (no
+  // resolve_contract round trip, no per-invocation translation); a null
+  // translation is the cached result for a non-translatable artifact, so fail
+  // here rather than re-resolving and re-translating (which would just fail
+  // again).
+  if (deployed_contract.entry != nullptr) {
+    if (!deployed_contract.entry->translated.has_value()) [[unlikely]] {
+      error("Unrecoverable: rv32 contract is not translatable: {}",
+            show_byte_array(deployed_contract_hash.hash));
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
     return std::make_unique<Rv32Runtime>(&*deployed_contract.entry->translated,
                                          syscall_handler);
   }
 
-  // Fallback: either a transaction-local deployment (no cache entry) or a
-  // cached entry whose translation is absent. Resolve the code, then borrow a
-  // translation owned by the per-transaction handler -- the runtime never owns
-  // its Rv32Contract.
+  // Transaction-local deployment: not in the block-scoped snapshot cache.
+  // Resolve the code, then borrow a translation owned by the per-transaction
+  // handler (which memoizes failures too, so we never retranslate) -- the
+  // runtime never owns its Rv32Contract.
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {

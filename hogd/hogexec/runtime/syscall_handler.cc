@@ -945,18 +945,17 @@ SystemCallHandler::get_or_create_local_rv32_translation(
 {
   auto it = local_rv32_translations_.find(hash);
   if (it != local_rv32_translations_.end()) {
+    // Cached result -- the pointer is null for a known non-translatable
+    // artifact, so we never retranslate.
     return it->second.get();
   }
 
   std::optional<Rv32Contract> translated =
       Rv32Contract::create(contract.rv32_contract());
-  if (!translated.has_value()) {
-    return nullptr;
-  }
-
-  auto [inserted, _] =
-      local_rv32_translations_.emplace(hash, std::make_unique<Rv32Contract>(
-                                                 std::move(*translated)));
+  auto [inserted, _] = local_rv32_translations_.emplace(
+      hash, translated.has_value()
+                ? std::make_unique<Rv32Contract>(std::move(*translated))
+                : nullptr);
   return inserted->second.get();
 }
 
