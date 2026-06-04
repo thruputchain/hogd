@@ -168,7 +168,7 @@ usage(char *argv[])
       "--network-id <hex> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
-      "[--metrics=<private-ip:port>]",
+      "[--metrics <private-ip:port>]",
       argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -185,14 +185,10 @@ parse_port(const std::string &value)
 }
 
 std::optional<x23::HostPort>
-parse_metrics_addr(const std::string &arg)
+parse_metrics_addr(std::string_view value)
 {
-  constexpr std::string_view kPrefix = "--metrics=";
-  if (!arg.starts_with(kPrefix)) {
-    return std::nullopt;
-  }
   x23::HostPort host_port;
-  CHECK(host_port.parse(std::string_view(arg).substr(kPrefix.size())));
+  CHECK(host_port.parse(value));
   std::expected<sockaddr_storage, x23::GaiError> addr =
       host_port.to_addr(/*dns=*/false);
   CHECK(addr.has_value());
@@ -223,9 +219,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (std::optional<x23::HostPort> parsed_metrics_addr =
-            parse_metrics_addr(arg)) {
-      metrics_addr = std::move(*parsed_metrics_addr);
+    if (arg == "--metrics" && i + 1 < argc) {
+      metrics_addr = parse_metrics_addr(argv[++i]);
       continue;
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
