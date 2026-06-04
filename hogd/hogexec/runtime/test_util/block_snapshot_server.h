@@ -67,7 +67,7 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ExpectedDBTip get_db_tip(BlockID block)
+  ExpectedDBTip get_db_tip(BlockID block) const
   {
     if (block != block_id_) {
       return ExpectedDBTip(RPCError::kRPCBadBlockID);

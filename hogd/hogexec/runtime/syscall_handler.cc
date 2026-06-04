@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <limits>
 #include <map>
 #include <memory>
