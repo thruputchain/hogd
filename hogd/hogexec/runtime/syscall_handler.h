@@ -19,7 +19,6 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -47,6 +46,10 @@
 namespace hogd {
 
 class StorageSnapshotCache;
+// Defined in rv32/rv32_contract.h. Held only by pointer here (stored as
+// unique_ptr in the per-transaction translation cache), so a forward
+// declaration keeps the heavy rv32 header out of this widely-included one.
+class Rv32Contract;
 
 // TODO(geoff): root_invoke() validates any incoming wasm blobs.
 // We may later do that validation preemptively in the coordinator.
@@ -89,25 +92,10 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
-  ~SystemCallHandler()
-  {
-    if constexpr (is_debug_build()) {
-      if (!transaction_committed_or_aborted_ &&
-          !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
-        warn("SystemCallHandler destroyed without committing or aborting "
-             "transaction");
-        if (debug_force_commit_abort_) {
-          panic("SystemCallHandler destroyed at invalid state: {}",
-                transaction_committed_or_aborted_);
-        }
-      }
-      if (last_frame_.has_value() &&
-          !last_frame_.value().extract_events().empty() &&
-          root_invoke_succeeded_ && !two_phase_commit_failed_) {
-        panic("SystemCallHandler destroyed with events to emit");
-      }
-    }
-  }
+  // Defined out-of-line so the forward-declared Rv32Contract (held by
+  // unique_ptr in local_rv32_translations_) is complete at the point of
+  // destruction.
+  ~SystemCallHandler();
 
   // Debug management operations
   void enable_transaction_stats()
@@ -377,6 +365,15 @@ public:
   // returns nullptr if the contract does not exist
   SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
 
+  // Returns a translated rv32 contract for a transaction-local deployment,
+  // translating and caching it in this handler on first use. The returned
+  // pointer is owned by this handler (stable for the transaction's lifetime)
+  // and borrowed by the Rv32Runtime. `contract` must be the kRv32 contract for
+  // `hash`. Returns nullptr if translation fails.
+  const Rv32Contract *
+  get_or_create_local_rv32_translation(SHA256Hash const &hash,
+                                       Contract const &contract);
+
   // == Error converstion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
@@ -415,6 +412,14 @@ private:
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                            ByteArrayHasher>
       newly_created_contracts_;
+
+  // Per-transaction cache of translated rv32 contracts for transaction-local
+  // deployments (which are not in the block-scoped StorageSnapshotCache).
+  // Filled lazily, keyed by contract hash. Entries are node-stable and borrowed
+  // by Rv32Runtime, so they must outlive the runtimes -- they live for the
+  // whole transaction.
+  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, ByteArrayHasher>
+      local_rv32_translations_;
 
   ExecutionModeData execution_mode_data_;
 

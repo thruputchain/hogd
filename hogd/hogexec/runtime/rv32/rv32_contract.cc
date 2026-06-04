@@ -212,8 +212,9 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   }
 
   // Fallback: either a transaction-local deployment (no cache entry) or a
-  // cached entry whose translation is absent. Resolve the code and translate
-  // on the fly; the runtime owns the result for its lifetime.
+  // cached entry whose translation is absent. Resolve the code, then borrow a
+  // translation owned by the per-transaction handler -- the runtime never owns
+  // its Rv32Contract.
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
@@ -232,15 +233,16 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  std::optional<Rv32Contract> translated =
-      Rv32Contract::create(contract.value()->rv32_contract());
-  if (!translated.has_value()) [[unlikely]] {
+  const Rv32Contract *translated =
+      syscall_handler->get_or_create_local_rv32_translation(
+          deployed_contract_hash.hash, *contract.value());
+  if (translated == nullptr) [[unlikely]] {
     error("Unrecoverable: failed to translate rv32 contract: {}",
           show_byte_array(deployed_contract_hash.hash));
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(std::move(*translated), syscall_handler);
+  return std::make_unique<Rv32Runtime>(translated, syscall_handler);
 }
 
 } // namespace hogd

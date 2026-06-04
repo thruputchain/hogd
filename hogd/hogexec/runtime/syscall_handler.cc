@@ -41,6 +41,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -916,6 +917,47 @@ SystemCallHandler::set_return_buffer(
     invocation_frame_stack_.set_active_frame_return(
         std::move(output), std::move(returned_auth_token_ids));
   }
+}
+
+SystemCallHandler::~SystemCallHandler()
+{
+  if constexpr (is_debug_build()) {
+    if (!transaction_committed_or_aborted_ &&
+        !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
+      warn("SystemCallHandler destroyed without committing or aborting "
+           "transaction");
+      if (debug_force_commit_abort_) {
+        panic("SystemCallHandler destroyed at invalid state: {}",
+              transaction_committed_or_aborted_);
+      }
+    }
+    if (last_frame_.has_value() &&
+        !last_frame_.value().extract_events().empty() &&
+        root_invoke_succeeded_ && !two_phase_commit_failed_) {
+      panic("SystemCallHandler destroyed with events to emit");
+    }
+  }
+}
+
+const Rv32Contract *
+SystemCallHandler::get_or_create_local_rv32_translation(
+    SHA256Hash const &hash, Contract const &contract)
+{
+  auto it = local_rv32_translations_.find(hash);
+  if (it != local_rv32_translations_.end()) {
+    return it->second.get();
+  }
+
+  std::optional<Rv32Contract> translated =
+      Rv32Contract::create(contract.rv32_contract());
+  if (!translated.has_value()) {
+    return nullptr;
+  }
+
+  auto [inserted, _] =
+      local_rv32_translations_.emplace(hash, std::make_unique<Rv32Contract>(
+                                                 std::move(*translated)));
+  return inserted->second.get();
 }
 
 SystemStatus<const Contract *>

@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <optional>
-#include <utility>
 
 #include "contract.hh"
 #include "hogd/hogexec/runtime/item/deployed_contract.h"
@@ -28,36 +27,31 @@ private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;
 };
 
-// One invocation of an RV32 contract. Either borrows a const Rv32Contract*
-// owned by the snapshot cache (stable address; snapshot deployments), or owns
-// a freshly translated Rv32Contract (transaction-local deployments). Runtime is
-// non-movable, so the interior pointer in the owning case stays valid.
+// One invocation of an RV32 contract. Borrows a const Rv32Contract* that
+// outlives it: either owned by the block-scoped StorageSnapshotCache (snapshot
+// deployments) or by the per-transaction SystemCallHandler's translation cache
+// (transaction-local deployments). Both are node-stable and outlive the
+// runtimes they hand out, so the pointer stays valid with no refcounting.
 class Rv32Runtime final : public Runtime {
 public:
   Rv32Runtime(Rv32Contract const *contract, SystemCallHandler *syscall_handler)
     : Runtime(syscall_handler), contract_(contract)
   {}
 
-  Rv32Runtime(Rv32Contract contract, SystemCallHandler *syscall_handler)
-    : Runtime(syscall_handler), owned_contract_(std::move(contract)),
-      contract_(&owned_contract_.value())
-  {}
-
   ~Rv32Runtime() override = default;
 
 private:
-  std::optional<Rv32Contract> owned_contract_;
   Rv32Contract const *contract_;
 
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
 };
 
-// RuntimeContext for RV32 contracts. Resolves the deployed contract by hash
-// like the wasm context. Snapshot deployments arrive with their translation
-// already built (in the StorageSnapshotCache, reached via DeployedContract's
-// back-pointer); transaction-local deployments are translated on the fly and
-// owned by the Rv32Runtime. The context itself holds no per-contract state.
+// RuntimeContext for RV32 contracts. Snapshot deployments arrive with their
+// translation already built in the StorageSnapshotCache, reached via
+// DeployedContract's back-pointer; transaction-local deployments are translated
+// into (and borrowed from) the SystemCallHandler's per-transaction translation
+// cache. The context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const &contract) const override;
