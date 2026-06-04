@@ -39,7 +39,7 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      return obj->has_value() ? &obj->value() : nullptr;
+      return obj->has_value() ? &**obj : nullptr;
     }
   }
 
@@ -75,13 +75,13 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   // then the contract cache needs to only cache positive lookups
   auto [obj, lock] = contract_cache_.insert(hash, std::move(entry));
   if (obj != nullptr) {
-    return obj->has_value() ? &obj->value() : nullptr;
+    return obj->has_value() ? &**obj : nullptr;
   }
   CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
   CHECK_PTR(obj2);
-  return obj2->has_value() ? &obj2->value() : nullptr;
+  return obj2->has_value() ? &**obj2 : nullptr;
 }
 
 SystemStatus<const Contract *>
@@ -101,7 +101,7 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
-      return obj->has_value() ? &obj->value() : nullptr;
+      return obj->has_value() ? &**obj : nullptr;
     }
   }
 
@@ -123,13 +123,13 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
 
   auto [obj, lock] = deployment_cache_.insert(addr, std::move(deployed));
   if (obj != nullptr) {
-    return obj->has_value() ? &obj->value() : nullptr;
+    return obj->has_value() ? &**obj : nullptr;
   }
   CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = deployment_cache_.find(addr, lock);
   CHECK_PTR(obj2);
-  return obj2->has_value() ? &obj2->value() : nullptr;
+  return obj2->has_value() ? &**obj2 : nullptr;
 }
 
 SystemStatus<const SnapshotStorageItem *>

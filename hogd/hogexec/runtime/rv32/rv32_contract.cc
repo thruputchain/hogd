@@ -207,8 +207,8 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   // resolve_contract round trip, no per-invocation translation.
   if (deployed_contract.entry != nullptr &&
       deployed_contract.entry->translated.has_value()) {
-    return std::make_unique<Rv32Runtime>(
-        &deployed_contract.entry->translated.value(), syscall_handler);
+    return std::make_unique<Rv32Runtime>(&*deployed_contract.entry->translated,
+                                         syscall_handler);
   }
 
   // Fallback: either a transaction-local deployment (no cache entry) or a
