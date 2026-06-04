@@ -47,9 +47,8 @@ MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-MockRuntimeContext::make_new_runtime(
-    DeployedContract const &deployed_contract,
-    SystemCallHandler *syscall_handler)
+MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
+                                     SystemCallHandler *syscall_handler)
 {
   DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type == ContractType::kMockTest) {

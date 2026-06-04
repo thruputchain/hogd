@@ -333,8 +333,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(fresh_deploy_ptr.has_value());
   ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
-  EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract,
-            fresh_contract.value());
+  EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
   EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
 
   EXPECT_TRUE(

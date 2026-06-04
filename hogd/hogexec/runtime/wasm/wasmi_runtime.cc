@@ -138,9 +138,8 @@ WasmiContext::~WasmiContext()
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-WasmiContext::make_new_runtime(
-    DeployedContract const &deployed_contract,
-    SystemCallHandler *syscall_handler)
+WasmiContext::make_new_runtime(DeployedContract const &deployed_contract,
+                               SystemCallHandler *syscall_handler)
 {
   DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   NewWasmiRuntimeResult new_runtime_result =

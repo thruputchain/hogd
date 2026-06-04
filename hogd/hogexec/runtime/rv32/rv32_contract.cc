@@ -189,9 +189,8 @@ Rv32Context::verify_contract(Contract const &contract) const
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
-Rv32Context::make_new_runtime(
-    DeployedContract const &deployed_contract,
-    SystemCallHandler *syscall_handler)
+Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
+                              SystemCallHandler *syscall_handler)
 {
   DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type != ContractType::kRv32) {

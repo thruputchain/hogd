@@ -2,9 +2,9 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "contract.hh"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/item/deployed_contract.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/rv32/threaded_machine.h"
