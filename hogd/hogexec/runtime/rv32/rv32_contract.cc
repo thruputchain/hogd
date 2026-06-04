@@ -75,7 +75,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   auto machine_noexcept =
       [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
     try {
-      rv32::ThreadedMachine machine = contract_.instantiate(gas_limit);
+      rv32::ThreadedMachine machine = contract_->instantiate(gas_limit);
       machine.seed_method_id(method_id);
       return machine;
     } catch (std::exception const &e) {
@@ -218,19 +218,25 @@ Rv32Context::make_new_runtime(
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  // Translate the deployed contract fresh (no cache yet); the Rv32Runtime owns
-  // the result for the duration of the call.
-  std::optional<Rv32Contract> rv32_contract =
-      Rv32Contract::create(contract.value()->rv32_contract());
-  if (!rv32_contract.has_value()) [[unlikely]] {
-    error("Unrecoverable: failed to translate rv32 contract: {}",
-          show_byte_array(deployed_contract_hash.hash));
-    return SystemError{SystemErrorCode::Unrecoverable};
+  // Translate (artifact SHA256 verification + program decode/fusion) only on a
+  // cache miss; the context owns the result and hands the runtime a borrowed
+  // pointer into the (node-based, stable-address) cache.
+  auto it = translation_cache_.find(deployed_contract_hash.hash);
+  if (it == translation_cache_.end()) {
+    std::optional<Rv32Contract> translated =
+        Rv32Contract::create(contract.value()->rv32_contract());
+    if (!translated.has_value()) [[unlikely]] {
+      error("Unrecoverable: failed to translate rv32 contract: {}",
+            show_byte_array(deployed_contract_hash.hash));
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+    it = translation_cache_
+             .emplace(deployed_contract_hash.hash, std::move(*translated))
+             .first;
   }
 
-  return std::make_unique<Rv32Runtime>(std::move(*rv32_contract),
-                                       make_new_host_call_context(
-                                           syscall_handler));
+  return std::make_unique<Rv32Runtime>(
+      &it->second, make_new_host_call_context(syscall_handler));
 }
 
 } // namespace hogd
