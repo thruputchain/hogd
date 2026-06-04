@@ -48,8 +48,11 @@ public:
   // method 0: success (no-op)
   // method 1: manual revert
   // method 2: deterministic fault
+  // method 3: mark body execution, then success
   void SetUp() override
   {
+    body_ran_ = false;
+
     auto contract_xdr = make_native_contract(0);
     write_contract(contract_xdr);
     write_deployment(kAddr, contract_xdr);
@@ -69,6 +72,12 @@ public:
         2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
           return InvokeError{InvokeErrorCode::Deterministic};
         });
+    fns.emplace(3,
+                [this](NativeSyscallContext & /*ctx*/) noexcept
+                    -> InvokeStatus<void> {
+                  body_ran_ = true;
+                  return {};
+                });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -77,6 +86,7 @@ public:
 
   static constexpr ContractAddress kAddr = make_contract_address(7);
   std::unique_ptr<NativeContext> ctx_;
+  bool body_ran_ = false;
 
   static Transaction
   make_tx(uint32_t method, uint64_t nonce,
@@ -92,9 +102,13 @@ public:
                                                 .nonce = nonce}};
   }
 
+  // Mirrors the executor's per-transaction sequence
+  // (ExecutorContext::run_propose_transaction): the expired-uniquifier gate
+  // runs before root_invoke(), then the body, then the commit.
   ExecResult run_and_commit(Transaction const &tx)
   {
     auto handler = make_new_system_call_handler(tx, *ctx_);
+    handler.reject_if_replay_uniquifier_expired();
     handler.root_invoke();
     return handler.try_commit_transaction();
   }
@@ -118,10 +132,49 @@ TEST_F(ReplayCacheIntegrationTest, DuplicateUniquifierRejected)
 TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejected)
 {
   // Advance so the current block height is strictly greater than 0; a
-  // uniquifier whose block_expiry_height is in the past is rejected.
+  // uniquifier whose block_expiry_height is in the past is rejected as a
+  // deterministic input-validation failure before the body runs.
   advance_block();
   advance_block();
   EXPECT_EQ(run_and_commit(make_tx(0, /*nonce=*/9, /*expiry=*/0)),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
+// An expired uniquifier is rejected by the executor's pre-body gate, before the
+// root contract body can run. Previously the body executed and only the late
+// replay-cache reservation in try_commit_transaction rejected the tx (#2568).
+TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
+{
+  // Advance so expiry height 0 is already in the past.
+  advance_block();
+  advance_block();
+
+  auto handler = make_new_system_call_handler(
+      make_tx(3, /*nonce=*/10, /*expiry=*/0), *ctx_);
+  // The executor calls this before root_invoke().
+  handler.reject_if_replay_uniquifier_expired();
+  auto root_res = handler.root_invoke();
+  EXPECT_FALSE(root_res.is_root_success());
+  EXPECT_FALSE(body_ran_);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
+// Without the executor's pre-body gate, the body still runs and the late
+// replay-cache reservation rejects the expired uniquifier at commit time. This
+// pins the low-level handler primitive's unchanged contract (the gate is opt-in
+// at the executor layer, not folded into root_invoke()).
+TEST_F(ReplayCacheIntegrationTest, ExpiredHeightLateRejectionWhenGateSkipped)
+{
+  advance_block();
+  advance_block();
+
+  auto handler = make_new_system_call_handler(
+      make_tx(3, /*nonce=*/11, /*expiry=*/0), *ctx_);
+  auto root_res = handler.root_invoke();
+  EXPECT_TRUE(root_res.is_root_success());
+  EXPECT_TRUE(body_ran_);
+  EXPECT_EQ(handler.try_commit_transaction(),
             ExecResult::ExecResultTxNonDeterministicError);
 }
 

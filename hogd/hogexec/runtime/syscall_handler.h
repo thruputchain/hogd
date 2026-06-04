@@ -117,6 +117,17 @@ public:
 
   auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
+  // Reject a transaction whose replay uniquifier has already expired, before
+  // root_invoke() can run the contract body. The executor calls this once, on a
+  // current (open) block, immediately before root_invoke(); an expired
+  // uniquifier sets the cumulative result so root_invoke() short-circuits
+  // (the body never runs) and try_commit_transaction() aborts with
+  // ExecResultTxValidationFailure. The HogDB replay cache is still the
+  // authoritative atomic consume at commit time -- this is only an early gate
+  // so the body cannot run against an input final commit would reject (#2568).
+  // Must be called before root_invoke().
+  void reject_if_replay_uniquifier_expired();
+
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
   InvokeResult root_invoke();

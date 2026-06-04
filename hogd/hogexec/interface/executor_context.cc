@@ -153,6 +153,8 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, *context);
+  // Reject an already-expired replay uniquifier before the body runs (#2568).
+  syscall_handler.reject_if_replay_uniquifier_expired();
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
@@ -214,6 +216,8 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},
                                     *context);
+  // Reject an already-expired replay uniquifier before the body runs (#2568).
+  syscall_handler.reject_if_replay_uniquifier_expired();
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
