@@ -19,11 +19,11 @@
 #include <utility>
 
 #include "hogd/base/log.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/bootstrap_manifest.h"
-#include "hogd/hogd_dev/hogd_dev_node.h"
-#include "hogd/hogd_dev/manifest_parse.h"
-#include "hogd/hogd_dev/runtime_manifest.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/manifest_parse.h"
+#include "hogd/devnode/runtime_manifest.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -79,17 +79,17 @@ wait_for_shutdown(const ShutdownSignals &signals)
     // sleeping are atomic with respect to the shutdown signal.
     sigsuspend(&signals.suspend_mask);
   }
-  info("hogd-dev shutdown requested");
+  info("hog-devnode shutdown requested");
   std::fflush(stderr);
 }
 // NOLINTEND(misc-include-cleaner)
 
 void
-emit_readiness(const HogdDevNode &node, ReadinessSink sink,
+emit_readiness(const HogDevnodeNode &node, ReadinessSink sink,
                std::string_view runtime_network_id)
 {
   RuntimeManifestPointer manifest =
-      write_hogd_dev_runtime_manifest(node, runtime_network_id);
+      write_hog_devnode_runtime_manifest(node, runtime_network_id);
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{}", manifest.readiness_payload);
@@ -98,16 +98,18 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink,
 }
 
 int
-hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
-              ReadinessSink readiness_sink, std::string_view runtime_network_id,
-              BootstrapAccountConfig const &bootstrap_config)
+hog_devnode_init(std::string listen_host,
+                 std::uint16_t requested_scheduler_port,
+                 ReadinessSink readiness_sink,
+                 std::string_view runtime_network_id,
+                 BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
 
-  HogdDevNode node(std::move(listen_host), requested_scheduler_port,
-                   bootstrap_config);
+  HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
+                      bootstrap_config);
   emit_readiness(node, readiness_sink, runtime_network_id);
-  info("hogd-dev initialization complete.");
+  info("hog-devnode initialization complete.");
 
   ShutdownSignals shutdown_signals = block_shutdown_signal();
   wait_for_shutdown(shutdown_signals);
@@ -141,7 +143,7 @@ is_wildcard_listen_host(std::string_view host)
 
 namespace {
 
-struct HogdDevOptions {
+struct HogDevnodeOptions {
   std::string listen_host = "127.0.0.1";
   std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
   std::uint16_t scheduler_port = 0;
@@ -242,10 +244,10 @@ reject_manifest_shorthand_conflicts(OptionSources const &sources)
   }
 }
 
-HogdDevOptions
+HogDevnodeOptions
 parse_args(int argc, char *argv[])
 {
-  HogdDevOptions options;
+  HogDevnodeOptions options;
   OptionSources sources;
   std::optional<std::filesystem::path> bootstrap_manifest_path;
   std::optional<std::string> dev_accounts_value;
@@ -334,7 +336,7 @@ parse_args(int argc, char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  HogdDevOptions options;
+  HogDevnodeOptions options;
   try {
     options = parse_args(argc, argv);
   } catch (const std::exception &error) {
@@ -346,15 +348,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   int ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
-  hogd::info("starting hogd-dev!");
+  hogd::info("starting hog-devnode!");
 
   try {
-    return hogd::hogd_dev_init(std::move(options.listen_host),
-                               options.scheduler_port, options.readiness_sink,
-                               options.runtime_network_id,
-                               options.bootstrap_config);
+    return hogd::hog_devnode_init(std::move(options.listen_host),
+                                  options.scheduler_port,
+                                  options.readiness_sink,
+                                  options.runtime_network_id,
+                                  options.bootstrap_config);
   } catch (const std::exception &error) {
-    hogd::error("hogd-dev failed before readiness: {}", error.what());
+    hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;
   }
 }

@@ -1,14 +1,14 @@
 add_library(
-  hogd_dev
+  hog_devnode
   bootstrap_accounts.cc
   bootstrap_manifest.cc
-  hogd_dev_node.cc
-  hogd_dev_tmp_dir.cc
+  hog_devnode_node.cc
+  hog_devnode_tmp_dir.cc
   manifest_parse.cc
   runtime_manifest.cc
 )
 target_link_libraries(
-  hogd_dev
+  hog_devnode
   auth
   base
   contract_loader
@@ -26,60 +26,60 @@ target_link_libraries(
   storage_cost
 )
 add_dependencies(
-  hogd_dev
+  hog_devnode
   all_wasm_contracts
   all_wasm_headers
 )
 target_include_directories(
-  hogd_dev
+  hog_devnode
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
 add_executable(
-  hogd_dev_exec
-  hogd_dev.cc
+  hog_devnode_exec
+  hog_devnode.cc
 )
-set_property(TARGET hogd_dev_exec PROPERTY OUTPUT_NAME hogd-dev)
+set_property(TARGET hog_devnode_exec PROPERTY OUTPUT_NAME hog-devnode)
 target_link_libraries(
-  hogd_dev_exec
-  hogd_dev
+  hog_devnode_exec
+  hog_devnode
 )
 
-add_custom_target(hogd-dev DEPENDS hogd_dev_exec)
+add_custom_target(hog-devnode DEPENDS hog_devnode_exec)
 
 add_executable(
-  hogd_dev_test
-  hogd_dev_test.cc
+  hog_devnode_test
+  hog_devnode_test.cc
 )
 target_compile_definitions(
-  hogd_dev_test
+  hog_devnode_test
   PRIVATE
-  HOGD_DEV_BINARY="$<TARGET_FILE:hogd_dev_exec>"
+  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog_devnode_exec>"
 )
 target_include_directories(
-  hogd_dev_test
+  hog_devnode_test
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 target_link_libraries(
-  hogd_dev_test
+  hog_devnode_test
   contract_loader
   crypto
   genesis
-  hogd_dev
+  hog_devnode
   storage_cost
   GTest::gtest
 )
 add_dependencies(
-  hogd_dev_test
+  hog_devnode_test
   all_wasm_contracts
-  hogd_dev_exec
+  hog_devnode_exec
 )
 gtest_discover_tests(
-  hogd_dev_test
+  hog_devnode_test
   PROPERTIES
-    RESOURCE_LOCK hogd_dev
+    RESOURCE_LOCK hog_devnode
 )
 
 add_executable(
@@ -95,7 +95,7 @@ target_link_libraries(
   bootstrap_manifest_test
   contract_loader
   crypto
-  hogd_dev
+  hog_devnode
   GTest::gtest
 )
 add_dependencies(
@@ -106,24 +106,24 @@ add_dependencies(
 gtest_discover_tests(bootstrap_manifest_test)
 
 add_executable(
-  hogd_dev_fresh_launch_test
-  hogd_dev_fresh_launch_test.cc
+  hog_devnode_fresh_launch_test
+  hog_devnode_fresh_launch_test.cc
 )
 target_compile_definitions(
-  hogd_dev_fresh_launch_test
+  hog_devnode_fresh_launch_test
   PRIVATE
-  HOGD_DEV_BINARY="$<TARGET_FILE:hogd_dev_exec>"
+  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog_devnode_exec>"
 )
 add_dependencies(
-  hogd_dev_fresh_launch_test
-  hogd_dev_exec
+  hog_devnode_fresh_launch_test
+  hog_devnode_exec
 )
 add_test(
-  NAME HogdDev.FreshNonInteractiveLaunchEmitsReadiness
-  COMMAND hogd_dev_fresh_launch_test
+  NAME HogDevnode.FreshNonInteractiveLaunchEmitsReadiness
+  COMMAND hog_devnode_fresh_launch_test
 )
 set_tests_properties(
-  HogdDev.FreshNonInteractiveLaunchEmitsReadiness
+  HogDevnode.FreshNonInteractiveLaunchEmitsReadiness
   PROPERTIES
-    RESOURCE_LOCK hogd_dev
+    RESOURCE_LOCK hog_devnode
 )
