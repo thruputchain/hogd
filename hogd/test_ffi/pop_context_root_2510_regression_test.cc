@@ -65,7 +65,8 @@ TEST(TestBindingsTest, ReentrantPopContextDuringRootInvokeRejected)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 

@@ -365,7 +365,8 @@ TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -2998,7 +2999,8 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                      .entrypoint = entrypoint_from_method_id(0),
                      .gas_limit = UINT64_MAX,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3285,7 +3287,8 @@ TEST(TestBindingsTest, DuplicateMockRegistrationReplacesCallback)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3417,7 +3420,8 @@ TEST(TestBindingsTest, MockContractThrowingCallbackHandlerStillCloseable)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3455,7 +3459,8 @@ TEST(TestBindingsTest, SecondRootInvokeReturnsErrorInsteadOfAborting)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3500,7 +3505,8 @@ TEST(TestBindingsTest, RootInvokeWorksAfterRuntimeContextHandleClosed)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
