@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
 #include <format>
 #include <future>
 #include <print>
