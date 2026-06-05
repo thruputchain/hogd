@@ -133,12 +133,32 @@ struct HttpServer::EofOnExit {
   ~EofOnExit() { self->eof(); }
 };
 
+struct HttpServer::ConnectionFdGuard {
+  HttpServer &server;
+  x23::UniqueFd &fd;
+
+  ConnectionFdGuard(HttpServer &server, x23::UniqueFd &fd)
+    : server(server), fd(fd)
+  {
+    std::lock_guard lock(server.connection_fds_mutex_);
+    server.connection_fds_.insert(fd.get());
+  }
+
+  ~ConnectionFdGuard()
+  {
+    std::lock_guard lock(server.connection_fds_mutex_);
+    server.cp_.reset(fd);
+    server.connection_fds_.erase(fd.get());
+  }
+};
+
 HttpServer::~HttpServer()
 {
   if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
     cp_.poison(lfd);
     listen_fd_.wait(lfd);
   }
+  poison_connection_fds();
   destroy_wait();
 }
 
@@ -190,6 +210,7 @@ HttpServer::handle_connection_detached(x23::RefPtr<HttpServer> self,
 x23::Async<void>
 HttpServer::handle_connection(x23::UniqueFd fd)
 {
+  ConnectionFdGuard _connection{*this, fd};
   x23::Buf buf;
   std::string request;
   while (request.size() < kMaxRequestHeaderBytes &&
@@ -243,6 +264,15 @@ HttpServer::route(std::string_view method, std::string_view target)
                                               e.what()));
   } catch (...) {
     co_return plain_response(500, "Internal Server Error\n");
+  }
+}
+
+void
+HttpServer::poison_connection_fds()
+{
+  std::lock_guard lock(connection_fds_mutex_);
+  for (int fd : connection_fds_) {
+    cp_.poison(fd);
   }
 }
 

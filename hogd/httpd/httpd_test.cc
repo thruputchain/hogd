@@ -1,8 +1,11 @@
 #include "hogd/httpd/httpd.h"
 
+#include <chrono>
+#include <future>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 #include "hogd/base/types.h"
@@ -134,6 +137,42 @@ TEST_F(HttpdTest, HealthMetricsRoutesReturnExpectedResponses)
   EXPECT_NE(metrics.find("Content-Type: text/plain\r\n"), std::string::npos);
   EXPECT_NE(metrics.find("Content-Length: 0\r\n"), std::string::npos);
   EXPECT_TRUE(metrics.ends_with("\r\n\r\n"));
+}
+
+TEST(HttpServerLifetimeTest, DestructorClosesPartialRequestConnections)
+{
+  std::promise<uint16_t> port_ready;
+  std::promise<void> destroy_requested;
+  std::future<void> destroy_requested_future = destroy_requested.get_future();
+  std::future<void> server_done =
+      std::async(std::launch::async, [&port_ready, &destroy_requested_future] {
+        HttpServer server;
+        server.add_route("/health", [] {
+          return HttpResponse{.status = 200,
+                              .content_type = "text/plain",
+                              .body = "ok"};
+        });
+        port_ready.set_value(
+            server.start_server(x23::HostPort{"127.0.0.1", 0}));
+        destroy_requested_future.wait();
+      });
+
+  x23::UniqueFd client =
+      x23::tcpconnect("127.0.0.1", port_ready.get_future().get());
+  ASSERT_TRUE(client);
+  std::string_view partial_request = "GET /health HTTP/1.1\r\nHost:";
+  ASSERT_EQ(::send(client.get(), partial_request.data(), partial_request.size(),
+                   0),
+            static_cast<ssize_t>(partial_request.size()));
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  destroy_requested.set_value();
+  if (server_done.wait_for(std::chrono::seconds(2)) !=
+      std::future_status::ready) {
+    client.reset();
+    FAIL() << "HttpServer destructor did not close a partial request "
+              "connection";
+  }
 }
 
 } // namespace

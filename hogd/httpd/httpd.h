@@ -4,6 +4,8 @@
 #include <concepts>
 #include <functional>
 #include <map>
+#include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -57,11 +59,14 @@ public:
 private:
   x23::CoroPoll &cp_;
   x23::MVar<std::map<std::string, Handler>> routes_;
+  std::mutex connection_fds_mutex_;
+  std::set<int> connection_fds_;
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
   struct ResetFdOnExit;
   struct EofOnExit;
+  struct ConnectionFdGuard;
 
   static x23::Detached accept_loop(x23::CoroPoll &cp, x23::UniqueFd lfd,
                                    x23::RefPtr<HttpServer> self);
@@ -71,6 +76,7 @@ private:
   x23::Async<HttpResponse> route(std::string_view method,
                                  std::string_view target);
   void add_async_route(std::string path, Handler handler);
+  void poison_connection_fds();
   void eof() noexcept;
 };
 
