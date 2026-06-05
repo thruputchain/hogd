@@ -1,13 +1,16 @@
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
+#include <format>
 #include <future>
 #include <print>
+#include <stdexcept>
 #include <string>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/health/health.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 
@@ -18,13 +21,30 @@ constexpr uint16_t kDefaultLoadgenPort = 0;
 [[noreturn]] void
 usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
-  std::println(stderr, "Usage: {} [--port <port>] [--help]", progname);
+  std::println(stderr,
+               "Usage: {} --bind-ip <ip> [--port <port>] "
+               "[--metrics-port <port>] [--help]",
+               progname);
   std::println(stderr, "Options:");
+  std::println(stderr, "  --bind-ip <ip>  IP address to bind metrics on");
   std::println(stderr,
                "  --port <port>  Port number to listen on (default: {})",
                kDefaultLoadgenPort);
+  std::println(stderr, "  --metrics-port <port>  Health/metrics HTTP port "
+                       "(default: 0)");
   std::println(stderr, "  --help         Show this help message");
   exit(exit_code);
+}
+
+uint16_t
+parse_port(const std::string &value)
+{
+  size_t pos = 0;
+  uint64_t port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
+  return static_cast<uint16_t>(port);
 }
 
 } // namespace
@@ -39,7 +59,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const char *progname = argc > 0 ? argv[0] : "loadgen_server";
+  std::string bind_ip;
   uint16_t port = kDefaultLoadgenPort;
+  uint16_t metrics_port = 0;
 
   // Parse command line arguments
   for (int i = 1; i < argc; ++i) {
@@ -47,26 +69,34 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (arg == "--help") {
       usage(progname, EXIT_SUCCESS);
     }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
+      continue;
+    }
     if (arg == "--port" && i + 1 < argc) {
-      try {
-        int parsed_port = std::stoi(argv[++i]);
-        if (parsed_port < 0 || parsed_port > 65535) {
-          std::println(stderr, "Error: Port must be between 0 and 65535");
-          return EXIT_FAILURE;
-        }
-        port = static_cast<uint16_t>(parsed_port);
-      } catch (const std::exception &) {
-        std::println(stderr, "Error: Invalid port number '{}'", argv[i]);
-        return EXIT_FAILURE;
-      }
+      port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
       continue;
     }
     std::println(stderr, "Error: Unexpected argument '{}'", arg);
     usage(progname);
   }
 
+  if (bind_ip.empty()) {
+    usage(progname);
+  }
+
   hogd::info("Starting loadgen server on port {}", port);
   hogd::Health::instance().start_service();
+
+  hogd::HttpServer metrics_server;
+  hogd::add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port = metrics_server.start_server(
+      hogd::make_bind_host_port(bind_ip, metrics_port));
+  hogd::info("PORT loadgen.metrics={}", actual_metrics_port);
 
   // Create and start the loadgen server
   hogd::RpcServer<hogd::LoadgenRpc> server;

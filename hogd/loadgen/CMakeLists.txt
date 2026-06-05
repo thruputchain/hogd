@@ -46,6 +46,7 @@ target_link_libraries(
   loadgen_server
   loadgen
   health
+  http
   hogd
 )
 

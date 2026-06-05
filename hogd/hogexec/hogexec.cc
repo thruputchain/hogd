@@ -9,11 +9,13 @@
 #include <sys/socket.h>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
 #include "hogd/hogexec/interface/executor.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "x23/sockio.h"
 
@@ -23,9 +25,15 @@ namespace {
 
 int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
-             int nthreads, uint16_t mempool_port)
+             int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
   Health::instance().start_service();
+
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port =
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+  info("PORT hogexec.metrics={}", actual_metrics_port);
 
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
@@ -63,7 +71,8 @@ void
 usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
-               "[--nthreads <nthreads>] [--mempool-port <port>]",
+               "[--nthreads <nthreads>] [--mempool-port <port>] "
+               "[--metrics-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -93,9 +102,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string bind_ip;
   std::optional<int> nthreads;
   uint16_t mempool_port = 0;
+  uint16_t metrics_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
+      continue;
+    }
     if (arg == "--coordinator-addr" && i + 1 < argc) {
       coord_address = argv[++i];
       continue;
@@ -134,5 +148,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  return hogd::hogexec_init(coord_address, bind_ip, *nthreads, mempool_port);
+  return hogd::hogexec_init(coord_address, bind_ip, *nthreads, mempool_port,
+                            metrics_port);
 }

@@ -6,6 +6,7 @@ target_link_libraries(
   health
   base
   hogd
+  http
 )
 
 add_executable(

@@ -12,6 +12,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
+#include "hogd/http/http.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -21,6 +22,7 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -29,9 +31,15 @@ namespace {
 int
 indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t event_port,
-             uint16_t block_explorer_port)
+             uint16_t block_explorer_port, uint16_t metrics_port)
 {
   Health::instance().start_service();
+
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port =
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+  info("PORT indexer.metrics={}", actual_metrics_port);
 
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(path);
   if (!db_status) {
@@ -85,7 +93,8 @@ usage(char *argv[])
 {
   std::println("usage: {} --event-addr <host:port> --db-path <path> "
                "--bind-ip <ip> [--event-port <port>] "
-               "[--block-explorer-port <port>]",
+               "[--block-explorer-port <port>] "
+               "[--metrics-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -118,9 +127,14 @@ main(int argc, char *argv[])
   std::string bind_ip;
   uint16_t event_port = 0;
   uint16_t block_explorer_port = 0;
+  uint16_t metrics_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
+      continue;
+    }
     if (arg == "--event-addr" && i + 1 < argc) {
       event_server_addr = argv[++i];
       continue;
@@ -148,7 +162,7 @@ main(int argc, char *argv[])
     usage(argv);
   }
   return hogd::indexer_init(path, event_server_addr, bind_ip, event_port,
-                            block_explorer_port);
+                            block_explorer_port, metrics_port);
 };
 
 // NOLINTEND(bugprone-exception-escape)

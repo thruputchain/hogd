@@ -17,6 +17,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
@@ -29,9 +30,15 @@ namespace {
 
 int
 auth_init(const std::string &mempool_address, const std::string &bind_ip,
-          uint16_t db_port, uint16_t mempool_port)
+          uint16_t db_port, uint16_t mempool_port, uint16_t metrics_port)
 {
   Health::instance().start_service();
+
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
+  const uint16_t actual_metrics_port =
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+  info("PORT auth.metrics={}", actual_metrics_port);
 
   x23::HostPort host_port;
   if (!host_port.parse(mempool_address)) {
@@ -99,7 +106,8 @@ namespace {
 usage(char *argv[])
 {
   std::println("usage: {} --mempool-addr <host:port> --bind-ip <ip> "
-               "[--db-port <port>] [--mempool-port <port>]",
+               "[--db-port <port>] [--mempool-port <port>] "
+               "[--metrics-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -130,9 +138,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string bind_ip;
   uint16_t db_port = 0;
   uint16_t mempool_port = 0;
+  uint16_t metrics_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--metrics-port" && i + 1 < argc) {
+      metrics_port = parse_port(argv[++i]);
+      continue;
+    }
     if (arg == "--mempool-addr" && i + 1 < argc) {
       mempool_address = argv[++i];
       continue;
@@ -156,5 +169,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  return hogd::auth_init(mempool_address, bind_ip, db_port, mempool_port);
+  return hogd::auth_init(mempool_address, bind_ip, db_port, mempool_port,
+                         metrics_port);
 }

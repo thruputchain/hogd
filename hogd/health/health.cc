@@ -10,6 +10,7 @@
 #include <system_error>
 
 #include "hogd/base/json.h"
+#include "hogd/http/http.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -72,6 +73,25 @@ Health::instance()
 x23::Async<void>
 Health::dump_to_file(std::optional<std::filesystem::path> opt_path)
 {
+  std::string buffer = co_await dump_to_string();
+
+  std::filesystem::path path;
+  if (opt_path.has_value()) {
+    path = *opt_path;
+  }
+  else {
+    path = std::filesystem::path(CMAKE_ROOT_BINARY_DIR);
+    path = path / "health";
+    path = path / std::to_string(pid_);
+  }
+  write_file_atomically(path, buffer);
+
+  co_return;
+}
+
+x23::Async<std::string>
+Health::dump_to_string()
+{
   x23::CoroGuard g;
   co_await g(lock_);
 
@@ -88,20 +108,7 @@ Health::dump_to_file(std::optional<std::filesystem::path> opt_path)
             static_cast<std::int64_t>(current_block_height_));
   });
 
-  g.reset();
-
-  std::filesystem::path path;
-  if (opt_path.has_value()) {
-    path = *opt_path;
-  }
-  else {
-    path = std::filesystem::path(CMAKE_ROOT_BINARY_DIR);
-    path = path / "health";
-    path = path / std::to_string(pid_);
-  }
-  write_file_atomically(path, buffer);
-
-  co_return;
+  co_return buffer;
 }
 
 x23::Async<void>
@@ -124,6 +131,25 @@ Health::set_current_block_height(BlockHeight current_block_height)
   current_block_height_ = current_block_height;
 
   co_await g.reset_and_return();
+}
+
+void
+add_health_metrics_routes(HttpServer &server)
+{
+  server.add_route("/health", []() -> x23::Async<HttpResponse> {
+    co_return HttpResponse{
+        .status = 200,
+        .content_type = "application/json",
+        .body = co_await Health::instance().dump_to_string(),
+    };
+  });
+  server.add_route("/metrics", [] {
+    return HttpResponse{
+        .status = 200,
+        .content_type = "text/plain",
+        .body = "",
+    };
+  });
 }
 
 } // namespace hogd
