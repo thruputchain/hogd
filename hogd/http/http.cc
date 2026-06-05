@@ -4,6 +4,7 @@
 #include <exception>
 #include <expected>
 #include <format>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
