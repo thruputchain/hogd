@@ -75,12 +75,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--port" && i + 1 < argc) {
-      try {
-        port = parse_port(argv[++i]);
-      } catch (const std::exception &) {
-        std::println(stderr, "Error: Invalid port number '{}'", argv[i]);
-        return EXIT_FAILURE;
-      }
+      port = parse_port(argv[++i]);
       continue;
     }
     if (arg == "--metrics-port" && i + 1 < argc) {

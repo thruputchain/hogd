@@ -1,7 +1,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <expected>
 #include <format>
 #include <future>
 #include <optional>
@@ -10,7 +9,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -27,7 +25,6 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 

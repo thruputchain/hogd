@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"

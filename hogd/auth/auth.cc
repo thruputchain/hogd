@@ -5,6 +5,7 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
