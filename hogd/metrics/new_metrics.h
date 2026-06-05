@@ -44,7 +44,7 @@ public:
 
     x23::CoroGuard cg;
     co_await cg(component.lock);
-    (*component.metrics)[metric_name].sample = metric_value;
+    component.metrics[metric_name].sample = metric_value;
   }
 
   x23::Async<std::string> dump_to_prometheus_string();
@@ -59,16 +59,10 @@ private:
 
   struct Component {
     x23::CoroLock lock;
-    std::unique_ptr<std::unordered_map<std::string, Metric>> metrics;
+    std::unordered_map<std::string, Metric> metrics;
   };
 
-  Metrics()
-  {
-    for (Component &component : components_) {
-      component.metrics =
-          std::make_unique<std::unordered_map<std::string, Metric>>();
-    }
-  }
+  Metrics() = default;
 
   std::array<Component, kNumComponents> components_;
 };
