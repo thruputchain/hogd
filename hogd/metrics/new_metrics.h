@@ -1,6 +1,9 @@
 #pragma once
 
 #include <array>
+#include <format>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -37,30 +40,58 @@ public:
                           const std::string &metric_name, size_t metric_value)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    Component &metrics = components_[static_cast<size_t>(component_name)];
-    x23::CoroGuard component_cg;
-    co_await component_cg(component.lock);
-    Metric &metric = metrics[metric_name];
+    Component &component = components_[static_cast<size_t>(component_name)];
 
     x23::CoroGuard cg;
-    co_await cg(metric.lock);
-    metric.samples.push_back(metric_value);
+    co_await cg(component.lock);
+    (*component.metrics)[metric_name].samples.push_back(metric_value);
   }
+
+  x23::Async<std::string> dump_to_prometheus_string();
 
 private:
   struct Metric {
-    x23::CoroLock lock;
+    // [samples] is protected by the component lock. This synchronization is
+    // very coarse-grained and we should ultimately replace this with a
+    // synchronized map that uses [x23::CoroLock]'s rather than [std::mutex]'s.
     std::vector<size_t> samples;
   };
 
   struct Component {
     x23::CoroLock lock;
-    std::unordered_map<std::string, Metric> metrics;
+    std::unique_ptr<std::unordered_map<std::string, Metric>> metrics;
   };
 
-  Metrics() = default;
+  Metrics()
+  {
+    for (Component &component : components_) {
+      component.metrics =
+          std::make_unique<std::unordered_map<std::string, Metric>>();
+    }
+  }
 
   std::array<Component, kNumComponents> components_;
 };
 
 } // namespace hogd
+
+template<>
+struct std::formatter<hogd::Metrics::ComponentName>
+  : std::formatter<const char *> {
+  template<typename FormatContext>
+  auto format(hogd::Metrics::ComponentName component_name,
+              FormatContext &ctx) const
+  {
+    switch (component_name) {
+    case hogd::Metrics::ComponentName::kExecutor:
+      return std::formatter<const char *>::format("executor", ctx);
+    case hogd::Metrics::ComponentName::kDb:
+      return std::formatter<const char *>::format("db", ctx);
+    case hogd::Metrics::ComponentName::kMempool:
+      return std::formatter<const char *>::format("mempool", ctx);
+    default:
+      CHECK(false);
+      return std::formatter<const char *>::format("invalid", ctx);
+    }
+  }
+};
