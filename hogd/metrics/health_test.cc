@@ -1,4 +1,4 @@
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -9,6 +9,8 @@
 
 #include "hogd/base/json.h"
 #include "hogd/base/test.h"
+#include "hogd/http/http.h"
+#include "hogd/http/http_test.h"
 #include "x23/progname.h"
 #include "gtest/gtest.h"
 
@@ -176,6 +178,29 @@ TEST_F(HealthTest, DumpToFileOverwritesWithoutLeavingTempFiles)
   for (const auto &entry : std::filesystem::directory_iterator(directory)) {
     EXPECT_EQ(entry.path().filename(), path.filename());
   }
+}
+
+TEST_F(HealthTest, HealthMetricsRoutesReturnExpectedResponses)
+{
+  HttpServer server;
+
+  add_health_metrics_routes(server);
+  uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
+
+  std::string health =
+      request(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(health.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(health.find("Content-Type: application/json\r\n"),
+            std::string::npos);
+  EXPECT_NE(health.find("\"process_name\""), std::string::npos);
+  EXPECT_NE(health.find("\"status\""), std::string::npos);
+
+  std::string metrics =
+      request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(metrics.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(metrics.find("Content-Type: text/plain\r\n"), std::string::npos);
+  EXPECT_NE(metrics.find("Content-Length: 0\r\n"), std::string::npos);
+  EXPECT_TRUE(metrics.ends_with("\r\n\r\n"));
 }
 
 } // namespace

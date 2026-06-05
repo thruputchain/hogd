@@ -32,7 +32,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"

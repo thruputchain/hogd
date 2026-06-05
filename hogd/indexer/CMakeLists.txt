@@ -8,7 +8,7 @@ add_library(indexer STATIC
 target_link_libraries(indexer PUBLIC
     rocksdb
     event
-    health
+    new_metrics
     hogd
 )
 
@@ -46,6 +46,6 @@ add_executable(
 target_link_libraries(
   indexer_exec
   indexer
-  health
+  new_metrics
   http
 )

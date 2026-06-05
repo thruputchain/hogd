@@ -17,7 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

@@ -16,7 +16,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"

@@ -1,4 +1,4 @@
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 
 #include <atomic>
 #include <cstdint>

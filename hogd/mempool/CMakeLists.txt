@@ -10,7 +10,7 @@ target_link_libraries(
   base
   crypto
   exec_interface
-  health
+  new_metrics
   hogd
   http
   hogdb

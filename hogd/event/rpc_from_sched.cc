@@ -3,7 +3,7 @@
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/event/status.h"
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"

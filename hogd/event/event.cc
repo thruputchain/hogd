@@ -15,7 +15,7 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/version.h"

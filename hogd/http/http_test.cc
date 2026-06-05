@@ -1,4 +1,4 @@
-#include "hogd/http/http.h"
+#include "hogd/http/http_test.h"
 
 #include <chrono>
 #include <future>
@@ -9,47 +9,13 @@
 #include <unistd.h>
 
 #include "hogd/base/types.h"
-#include "hogd/health/health.h"
+#include "hogd/http/http.h"
 #include "x23/cleanup.h"
 #include "x23/sockio.h"
 #include "gtest/gtest.h"
 
 namespace hogd {
 namespace {
-
-std::string
-read_all(x23::BorrowedFd fd)
-{
-  std::string out;
-  char buf[1024];
-  while (true) {
-    ssize_t n = ::read(fd.get(), buf, sizeof(buf));
-    if (n <= 0) {
-      return out;
-    }
-    out.append(buf, n);
-  }
-}
-
-std::string
-request(uint16_t port, std::string_view wire)
-{
-  x23::UniqueFd client = x23::tcpconnect("127.0.0.1", port);
-  EXPECT_TRUE(client);
-  EXPECT_EQ(::send(client.get(), wire.data(), wire.size(), 0),
-            static_cast<ssize_t>(wire.size()));
-  return read_all(client);
-}
-
-class HttpTest : public ::testing::Test {
-protected:
-  HttpServer server_;
-
-  uint16_t start()
-  {
-    return server_.start_server(x23::HostPort{"127.0.0.1", 0});
-  }
-};
 
 TEST_F(HttpTest, KnownGetRouteReturnsHandlerResponse)
 {
@@ -117,27 +83,6 @@ TEST_F(HttpTest, MultipleRoutesDispatchIndependently)
       request(server_.port(), "GET /b HTTP/1.1\r\nHost: localhost\r\n\r\n");
   EXPECT_NE(b.find("HTTP/1.1 201 Created\r\n"), std::string::npos);
   EXPECT_TRUE(b.ends_with("\r\n\r\nb"));
-}
-
-TEST_F(HttpTest, HealthMetricsRoutesReturnExpectedResponses)
-{
-  add_health_metrics_routes(server_);
-  uint16_t port = start();
-
-  std::string health =
-      request(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  EXPECT_NE(health.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
-  EXPECT_NE(health.find("Content-Type: application/json\r\n"),
-            std::string::npos);
-  EXPECT_NE(health.find("\"process_name\""), std::string::npos);
-  EXPECT_NE(health.find("\"status\""), std::string::npos);
-
-  std::string metrics =
-      request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  EXPECT_NE(metrics.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
-  EXPECT_NE(metrics.find("Content-Type: text/plain\r\n"), std::string::npos);
-  EXPECT_NE(metrics.find("Content-Length: 0\r\n"), std::string::npos);
-  EXPECT_TRUE(metrics.ends_with("\r\n\r\n"));
 }
 
 TEST(HttpServerLifetimeTest, DestructorClosesPartialRequestConnections)

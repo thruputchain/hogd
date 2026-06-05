@@ -26,7 +26,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/health/health.h"
+#include "hogd/metrics/health.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"

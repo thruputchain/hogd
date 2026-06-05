@@ -26,7 +26,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/health/health.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -34,6 +33,7 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
+#include "hogd/metrics/health.h"
 #include "hogd/metrics/new_metrics.h"
 #include "hogd/version.h"
 #include "nomination.hh"
