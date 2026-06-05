@@ -10,6 +10,8 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
+#include "hogd/metrics/health.h"
+#include "hogd/metrics/new_metrics.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -31,7 +33,7 @@ add_health_metrics_routes(HttpServer &server)
     return HttpResponse{
         .status = 200,
         .content_type = "text/plain",
-        .body = "",
+        .body = co_await Metrics::instance().dump_to_prometheus_string(),
     };
   });
 }
