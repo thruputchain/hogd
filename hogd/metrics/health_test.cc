@@ -188,20 +188,13 @@ TEST_F(HealthTest, HealthMetricsRoutesReturnExpectedResponses)
   add_health_metrics_routes(server);
   uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
 
-  std::string health =
+  std::string http_response =
       request(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  EXPECT_NE(health.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
-  EXPECT_NE(health.find("Content-Type: application/json\r\n"),
+  EXPECT_NE(http_response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(http_response.find("Content-Type: application/json\r\n"),
             std::string::npos);
-  EXPECT_NE(health.find("\"process_name\""), std::string::npos);
-  EXPECT_NE(health.find("\"status\""), std::string::npos);
-
-  std::string metrics =
-      request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  EXPECT_NE(metrics.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
-  EXPECT_NE(metrics.find("Content-Type: text/plain\r\n"), std::string::npos);
-  EXPECT_NE(metrics.find("Content-Length: 0\r\n"), std::string::npos);
-  EXPECT_TRUE(metrics.ends_with("\r\n\r\n"));
+  EXPECT_NE(http_response.find("\"process_name\""), std::string::npos);
+  EXPECT_NE(http_response.find("\"status\""), std::string::npos);
 }
 
 } // namespace

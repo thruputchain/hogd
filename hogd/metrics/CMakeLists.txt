@@ -43,3 +43,14 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(health_test)
+
+add_executable(
+  new_metrics_test
+  new_metrics_test.cc
+)
+target_link_libraries(
+  new_metrics_test
+  new_metrics
+  GTest::gtest_main
+)
+gtest_discover_tests(new_metrics_test)
