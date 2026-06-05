@@ -49,6 +49,16 @@ public:
 
   x23::Async<std::string> dump_to_prometheus_string();
 
+  x23::Async<void> clear()
+  {
+    for (Component &component : components_) {
+      x23::CoroGuard cg;
+      co_await cg(component.lock);
+
+      component.metrics.clear();
+    }
+  }
+
 private:
   struct Metric {
     // [sample] is protected by the component lock. This synchronization is very

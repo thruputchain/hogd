@@ -14,6 +14,11 @@
 namespace hogd {
 namespace {
 
+class NewMetricsTest : public ::testing::Test {
+protected:
+  void SetUp() override { Metrics::instance().clear()(); }
+};
+
 std::vector<std::string_view>
 get_lines(std::string_view input)
 {
@@ -39,19 +44,19 @@ expect_dump_contains(std::string_view dump, std::string_view expected)
       << dump;
 }
 
-TEST(NewMetrics, InstanceReturnsSingleton)
+TEST_F(NewMetricsTest, InstanceReturnsSingleton)
 {
   EXPECT_EQ(&Metrics::instance(), &Metrics::instance());
 }
 
-TEST(NewMetrics, ComponentNamesFormatAsPrometheusPrefixes)
+TEST_F(NewMetricsTest, ComponentNamesFormatAsPrometheusPrefixes)
 {
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kExecutor), "executor");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kDb), "db");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kMempool), "mempool");
 }
 
-TEST(NewMetrics, DumpIncludesRecordedGaugeForComponent)
+TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -63,7 +68,7 @@ TEST(NewMetrics, DumpIncludesRecordedGaugeForComponent)
   expect_dump_contains(dump, "executor/metrics_test_executor_queue_depth 17");
 }
 
-TEST(NewMetrics, RecordingSameMetricUpdatesLatestSample)
+TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -81,7 +86,7 @@ TEST(NewMetrics, RecordingSameMetricUpdatesLatestSample)
       << dump;
 }
 
-TEST(NewMetrics, DumpIncludesMetricsFromMultipleComponents)
+TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -95,7 +100,7 @@ TEST(NewMetrics, DumpIncludesMetricsFromMultipleComponents)
   expect_dump_contains(dump, "mempool/metrics_test_multi_mempool 22");
 }
 
-TEST(NewMetrics, MetricsRouteReturnsExpectedResponse)
+TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
 {
   HttpServer server;
 
@@ -108,14 +113,13 @@ TEST(NewMetrics, MetricsRouteReturnsExpectedResponse)
 
   std::string http_response =
       request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  std::cout << http_response << std::endl;
   EXPECT_NE(http_response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
   EXPECT_NE(http_response.find("Content-Type: text/plain\r\n"),
             std::string::npos);
-  EXPECT_NE(http_response.find(
-                "\"TYPE metrics_test_executor_queue_depth gauge\""),
+  EXPECT_NE(http_response.find("TYPE metrics_test_executor_queue_depth gauge"),
             std::string::npos);
-  EXPECT_NE(http_response.find(
-                "\"executor/metrics_test_executor_queue_depth 17\""),
+  EXPECT_NE(http_response.find("executor/metrics_test_executor_queue_depth 17"),
             std::string::npos);
 }
 
