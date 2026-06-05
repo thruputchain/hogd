@@ -133,23 +133,4 @@ Health::set_current_block_height(BlockHeight current_block_height)
   co_await g.reset_and_return();
 }
 
-void
-add_health_metrics_routes(HttpServer &server)
-{
-  server.add_route("/health", []() -> x23::Async<HttpResponse> {
-    co_return HttpResponse{
-        .status = 200,
-        .content_type = "application/json",
-        .body = co_await Health::instance().dump_to_string(),
-    };
-  });
-  server.add_route("/metrics", [] {
-    return HttpResponse{
-        .status = 200,
-        .content_type = "text/plain",
-        .body = "",
-    };
-  });
-}
-
 } // namespace hogd

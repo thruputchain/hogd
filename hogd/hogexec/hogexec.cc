@@ -13,10 +13,11 @@
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/metrics/health.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
+#include "hogd/metrics/health.h"
+#include "hogd/metrics/shared.h"
 #include "x23/sockio.h"
 
 namespace hogd {

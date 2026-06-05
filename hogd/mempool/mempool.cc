@@ -25,6 +25,7 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/metrics/health.h"
+#include "hogd/metrics/shared.h"
 
 namespace hogd {
 

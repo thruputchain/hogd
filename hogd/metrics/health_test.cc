@@ -1,5 +1,3 @@
-#include "hogd/metrics/health.h"
-
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +9,8 @@
 #include "hogd/base/test.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
+#include "hogd/metrics/health.h"
+#include "hogd/metrics/shared.h"
 #include "x23/progname.h"
 #include "gtest/gtest.h"
 
