@@ -29,7 +29,7 @@ add_health_metrics_routes(HttpServer &server)
         .body = co_await Health::instance().dump_to_string(),
     };
   });
-  server.add_route("/metrics", [] {
+  server.add_route("/metrics", []() -> x23::Async<HttpResponse> {
     co_return HttpResponse{
         .status = 200,
         .content_type = "text/plain",
