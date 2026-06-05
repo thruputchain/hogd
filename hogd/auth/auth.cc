@@ -17,7 +17,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
@@ -34,8 +34,8 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 {
   Health::instance().start_service();
 
-  httpd::HttpServer metrics_server;
-  httpd::add_health_metrics_routes(metrics_server);
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT auth.metrics={}", actual_metrics_port);

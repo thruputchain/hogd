@@ -1,4 +1,4 @@
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 
 #include <chrono>
 #include <future>
@@ -13,7 +13,7 @@
 #include "x23/sockio.h"
 #include "gtest/gtest.h"
 
-namespace hogd::httpd {
+namespace hogd {
 namespace {
 
 std::string
@@ -176,4 +176,4 @@ TEST(HttpServerLifetimeTest, DestructorClosesPartialRequestConnections)
 }
 
 } // namespace
-} // namespace hogd::httpd
+} // namespace hogd

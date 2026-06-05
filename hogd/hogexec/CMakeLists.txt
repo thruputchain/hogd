@@ -17,7 +17,7 @@ target_link_libraries(
   hogexec
   exec_interface
   health
-  httpd
+  http
   hogd
   runtime
   precompiles

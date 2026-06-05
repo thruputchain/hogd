@@ -1,21 +1,21 @@
 add_library(
-  httpd
-  httpd.cc
+  http
+  http.cc
 )
 target_link_libraries(
-  httpd
+  http
   base
   health
   x23
 )
 
 add_executable(
-  httpd_test
-  httpd_test.cc
+  http_test
+  http_test.cc
 )
 target_link_libraries(
-  httpd_test
-  httpd
+  http_test
+  http
   GTest::gtest_main
 )
-gtest_discover_tests(httpd_test)
+gtest_discover_tests(http_test)

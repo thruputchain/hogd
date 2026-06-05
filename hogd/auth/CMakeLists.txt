@@ -31,6 +31,6 @@ target_link_libraries(
   auth_exec
   auth
   health
-  httpd
+  http
 )
 set_property(TARGET auth_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

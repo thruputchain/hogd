@@ -12,7 +12,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -35,8 +35,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
 {
   Health::instance().start_service();
 
-  httpd::HttpServer metrics_server;
-  httpd::add_health_metrics_routes(metrics_server);
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT indexer.metrics={}", actual_metrics_port);

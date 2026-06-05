@@ -1,4 +1,4 @@
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 
 #include <atomic>
 #include <exception>
@@ -21,7 +21,7 @@
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
-namespace hogd::httpd {
+namespace hogd {
 namespace {
 
 constexpr size_t kMaxRequestHeaderBytes = 16 * 1024;
@@ -302,4 +302,4 @@ add_health_metrics_routes(HttpServer &server)
   });
 }
 
-} // namespace hogd::httpd
+} // namespace hogd

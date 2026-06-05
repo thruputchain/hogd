@@ -15,7 +15,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/health/health.h"
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
@@ -44,8 +44,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
   // Start the health service.
   Health::instance().start_service();
 
-  httpd::HttpServer metrics_server;
-  httpd::add_health_metrics_routes(metrics_server);
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT mempool.metrics={}", actual_metrics_port);

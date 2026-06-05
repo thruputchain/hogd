@@ -36,7 +36,7 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/ramdb/db.h"
@@ -72,8 +72,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 {
   Health::instance().start_service();
 
-  httpd::HttpServer metrics_server;
-  httpd::add_health_metrics_routes(metrics_server);
+  HttpServer metrics_server;
+  add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT hogdb.metrics={}", actual_metrics_port);

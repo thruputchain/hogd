@@ -47,5 +47,5 @@ target_link_libraries(
   indexer_exec
   indexer
   health
-  httpd
+  http
 )

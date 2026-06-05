@@ -10,7 +10,7 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/health/health.h"
-#include "hogd/httpd/httpd.h"
+#include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 
@@ -92,8 +92,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("Starting loadgen server on port {}", port);
   hogd::Health::instance().start_service();
 
-  hogd::httpd::HttpServer metrics_server;
-  hogd::httpd::add_health_metrics_routes(metrics_server);
+  hogd::HttpServer metrics_server;
+  hogd::add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port = metrics_server.start_server(
       hogd::make_bind_host_port(bind_ip, metrics_port));
   hogd::info("PORT loadgen.metrics={}", actual_metrics_port);

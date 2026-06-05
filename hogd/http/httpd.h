@@ -19,7 +19,7 @@
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
 
-namespace hogd::httpd {
+namespace hogd {
 
 struct HttpResponse {
   int status = 200;
@@ -82,4 +82,4 @@ private:
 
 void add_health_metrics_routes(HttpServer &server);
 
-} // namespace hogd::httpd
+} // namespace hogd

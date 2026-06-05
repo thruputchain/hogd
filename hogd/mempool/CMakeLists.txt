@@ -12,7 +12,7 @@ target_link_libraries(
   exec_interface
   health
   hogd
-  httpd
+  http
   hogdb
   merkle
   protocol

@@ -59,7 +59,7 @@ target_link_libraries(
   hogdb_exec
   hogdb
   health
-  httpd
+  http
 )
 add_dependencies(hogdb_exec all_wasm_contracts)
 
