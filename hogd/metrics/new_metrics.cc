@@ -1,5 +1,14 @@
 #include "hogd/metrics/new_metrics.h"
 
+#include <format>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+
+#include "hogd/base/types.h"
+#include "x23/async.h"
+#include "x23/corosync.h"
+
 namespace hogd {
 
 Metrics &

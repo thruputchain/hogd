@@ -10,7 +10,6 @@
 #include <system_error>
 
 #include "hogd/base/json.h"
-#include "hogd/http/http.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"

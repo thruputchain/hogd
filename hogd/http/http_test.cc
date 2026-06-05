@@ -6,7 +6,6 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
