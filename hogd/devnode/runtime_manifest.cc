@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/runtime_manifest.h"
+#include "hogd/devnode/runtime_manifest.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -21,9 +21,9 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/hogd_dev_node.h"
-#include "hogd/hogd_dev/manifest_hex.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
@@ -118,7 +118,7 @@ write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 }
 
 std::string
-build_runtime_manifest_json(HogdDevNode const &node,
+build_runtime_manifest_json(HogDevnodeNode const &node,
                             std::string_view network_id)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
@@ -133,12 +133,12 @@ build_runtime_manifest_json(HogdDevNode const &node,
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
-    w.field("kind", "hogd-dev-runtime");
+    w.field("kind", "hog-devnode-runtime");
     w.field("networkId", network_id);
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(genesis_hash));
     w.object_field("producer", [&](json::Writer &w) {
-      w.field("binary", "hogd-dev");
+      w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);
       std::string_view commit_hash = version::kHogdGitHash;
       if (!commit_hash.empty() && commit_hash != "unknown") {
@@ -282,8 +282,8 @@ format_hex_hash(SHA256Hash const &hash)
 }
 
 RuntimeManifestPointer
-write_hogd_dev_runtime_manifest(HogdDevNode const &node,
-                                std::string_view network_id)
+write_hog_devnode_runtime_manifest(HogDevnodeNode const &node,
+                                   std::string_view network_id)
 {
   std::filesystem::path manifest_path =
       std::filesystem::path(node.runtime_dir()) / kManifestFileName;

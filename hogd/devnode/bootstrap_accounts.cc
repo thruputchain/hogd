@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/devnode/bootstrap_accounts.h"
 
 #include <cstddef>
 #include <cstdint>

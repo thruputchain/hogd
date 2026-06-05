@@ -9,13 +9,13 @@
 #include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/fake_coordinator.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/fake_coordinator.h"
-#include "hogd/hogd_dev/hogd_dev_tmp_dir.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -35,16 +35,16 @@
 
 namespace hogd {
 
-class HogdDevNode {
+class HogDevnodeNode {
 public:
-  HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-              BootstrapAccountConfig const &bootstrap_config = {});
-  ~HogdDevNode();
+  HogDevnodeNode(std::string bind_host, std::uint16_t requested_scheduler_port,
+                 BootstrapAccountConfig const &bootstrap_config = {});
+  ~HogDevnodeNode();
 
-  HogdDevNode(HogdDevNode const &) = delete;
-  HogdDevNode &operator=(HogdDevNode const &) = delete;
-  HogdDevNode(HogdDevNode &&) = delete;
-  HogdDevNode &operator=(HogdDevNode &&) = delete;
+  HogDevnodeNode(HogDevnodeNode const &) = delete;
+  HogDevnodeNode &operator=(HogDevnodeNode const &) = delete;
+  HogDevnodeNode(HogDevnodeNode &&) = delete;
+  HogDevnodeNode &operator=(HogDevnodeNode &&) = delete;
 
   std::string const &bind_host() const { return bind_host_; }
   // The supervisor calls this the scheduler endpoint; hogd exposes it through
@@ -102,12 +102,12 @@ private:
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
 
-  HogdDevTmpDir runtime_dir_;
-  HogdDevTmpDir db_dir_;
+  HogDevnodeTmpDir runtime_dir_;
+  HogDevnodeTmpDir db_dir_;
   // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
   // and the event RPC servers below borrow event_ctx_.
-  HogdDevTmpDir event_dir_;
-  HogdDevTmpDir indexer_dir_;
+  HogDevnodeTmpDir event_dir_;
+  HogDevnodeTmpDir indexer_dir_;
   std::unique_ptr<IndexDB> indexer_db_;
   // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.
