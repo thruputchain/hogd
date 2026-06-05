@@ -89,9 +89,11 @@ struct std::formatter<hogd::Metrics::ComponentName>
       return std::formatter<const char *>::format("db", ctx);
     case hogd::Metrics::ComponentName::kMempool:
       return std::formatter<const char *>::format("mempool", ctx);
-    default:
+    case hogd::Metrics::ComponentName::kComponentCount:
       CHECK(false);
       return std::formatter<const char *>::format("invalid", ctx);
     }
+    CHECK(false);
+    return std::formatter<const char *>::format("invalid", ctx);
   }
 };
