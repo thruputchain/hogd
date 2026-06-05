@@ -113,7 +113,6 @@ TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
 
   std::string http_response =
       request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  std::cout << http_response << std::endl;
   EXPECT_NE(http_response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
   EXPECT_NE(http_response.find("Content-Type: text/plain\r\n"),
             std::string::npos);
