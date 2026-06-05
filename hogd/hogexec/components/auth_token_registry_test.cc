@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <initializer_list>
 
 #include "auth_token.hh"
 #include "hogd/base/types.h"
@@ -139,6 +140,65 @@ TEST(AuthTokenRegistryTest, UnwrapTwiceReturnsSameResult)
             second_unwrap->new_token_id_start);
   ASSERT_EQ(first_unwrap->new_token_id_count,
             second_unwrap->new_token_id_count);
+}
+
+// Pins the exact id-allocation contract that issue #2543 flagged (and that is
+// working as intended): register_auth_token and unwrap_auth_token draw ids from
+// a single, monotonically increasing counter, and unwrap is idempotent. A
+// second unwrap of the same token reuses the cached child range and allocates
+// no new ids, so a register interleaved between two unwraps never collides with
+// the unwrap's children and the counter never moves backwards.
+TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
+{
+  AuthTokenRegistry registry;
+
+  auto leaf = [](uint32_t index) {
+    return AuthTokenNode{.consumer_address = make_test_address(index),
+                         .payload = make_test_payload(index),
+                         .child_nodes = {}};
+  };
+  auto token_with_children =
+      [&](std::initializer_list<AuthTokenNode> children) {
+        return AuthToken{.mint_address = make_test_address(1),
+                         .expiry_height = 100,
+                         .root_node =
+                             AuthTokenNode{.consumer_address =
+                                               make_test_address(2),
+                                           .payload = make_test_payload(0ULL),
+                                           .child_nodes = children}};
+      };
+
+  // Root token gets id 0.
+  auto root_id =
+      registry.register_auth_token(token_with_children({leaf(3), leaf(4)}));
+  ASSERT_TRUE(root_id.has_value());
+  ASSERT_EQ(root_id.value(), 0U);
+
+  // First unwrap allocates ids 1 and 2 for the two children and advances the
+  // shared counter past them.
+  auto first = registry.unwrap_auth_token(root_id.value());
+  ASSERT_TRUE(first.has_value());
+  ASSERT_EQ(first->new_token_id_start, 1U);
+  ASSERT_EQ(first->new_token_id_count, 2U);
+
+  // A register issued after the unwrap continues from the advanced counter and
+  // gets id 3 -- it does not reuse or collide with child ids 1 and 2.
+  auto mid_id = registry.register_auth_token(token_with_children({}));
+  ASSERT_TRUE(mid_id.has_value());
+  ASSERT_EQ(mid_id.value(), 3U);
+
+  // Re-unwrapping the root is idempotent: it returns the cached child range
+  // (start 1, count 2) and allocates no further ids.
+  auto second = registry.unwrap_auth_token(root_id.value());
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(second->new_token_id_start, first->new_token_id_start);
+  ASSERT_EQ(second->new_token_id_count, first->new_token_id_count);
+
+  // The idempotent re-unwrap left the counter untouched, so the next register
+  // is id 4 -- immediately after mid_id, with no gap for re-allocated children.
+  auto next_id = registry.register_auth_token(token_with_children({}));
+  ASSERT_TRUE(next_id.has_value());
+  ASSERT_EQ(next_id.value(), 4U);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
