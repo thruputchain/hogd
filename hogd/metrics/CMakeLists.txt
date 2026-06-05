@@ -15,6 +15,7 @@ add_library(
 target_link_libraries(
   new_metrics
   base
+  x23
 )
 
 # create metrics module test binary
