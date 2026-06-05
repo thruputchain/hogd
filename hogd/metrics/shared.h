@@ -30,7 +30,7 @@ add_health_metrics_routes(HttpServer &server)
     };
   });
   server.add_route("/metrics", [] {
-    return HttpResponse{
+    co_return HttpResponse{
         .status = 200,
         .content_type = "text/plain",
         .body = co_await Metrics::instance().dump_to_prometheus_string(),
