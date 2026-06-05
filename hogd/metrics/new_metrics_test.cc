@@ -64,8 +64,8 @@ TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
                  "metrics_test_executor_queue_depth", 17)();
 
   const std::string dump = metrics.dump_to_prometheus_string()();
-  expect_dump_contains(dump, "TYPE metrics_test_executor_queue_depth gauge");
-  expect_dump_contains(dump, "executor/metrics_test_executor_queue_depth 17");
+  expect_dump_contains(dump, "# TYPE metrics_test_executor_queue_depth gauge");
+  expect_dump_contains(dump, "executor_metrics_test_executor_queue_depth 17");
 }
 
 TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
@@ -78,11 +78,11 @@ TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
                  9)();
 
   const std::string dump = metrics.dump_to_prometheus_string()();
-  expect_dump_contains(dump, "db/metrics_test_db_snapshot_count 9");
+  expect_dump_contains(dump, "db_metrics_test_db_snapshot_count 9");
 
   const std::vector<std::string_view> dump_lines = get_lines(dump);
   EXPECT_FALSE(
-      std::ranges::contains(dump_lines, "db/metrics_test_db_snapshot_count 3"))
+      std::ranges::contains(dump_lines, "db_metrics_test_db_snapshot_count 3"))
       << dump;
 }
 
@@ -96,8 +96,8 @@ TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
                  22)();
 
   const std::string dump = metrics.dump_to_prometheus_string()();
-  expect_dump_contains(dump, "executor/metrics_test_multi_executor 11");
-  expect_dump_contains(dump, "mempool/metrics_test_multi_mempool 22");
+  expect_dump_contains(dump, "executor_metrics_test_multi_executor 11");
+  expect_dump_contains(dump, "mempool_metrics_test_multi_mempool 22");
 }
 
 TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
@@ -116,9 +116,10 @@ TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
   EXPECT_NE(http_response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
   EXPECT_NE(http_response.find("Content-Type: text/plain\r\n"),
             std::string::npos);
-  EXPECT_NE(http_response.find("TYPE metrics_test_executor_queue_depth gauge"),
+  EXPECT_NE(http_response.find(
+                "# TYPE metrics_test_executor_queue_depth gauge"),
             std::string::npos);
-  EXPECT_NE(http_response.find("executor/metrics_test_executor_queue_depth 17"),
+  EXPECT_NE(http_response.find("executor_metrics_test_executor_queue_depth 17"),
             std::string::npos);
 }
 

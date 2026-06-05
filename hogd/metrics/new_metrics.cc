@@ -35,8 +35,8 @@ Metrics::dump_to_prometheus_string()
     for (const auto &[name, metric] : tmp) {
       // We only support gauges for now but can easily expand this to other
       // types.
-      os << std::format("TYPE {} gauge\n", name);
-      os << std::format("{}/{} {}\n", static_cast<ComponentName>(i), name,
+      os << std::format("# TYPE {} gauge\n", name);
+      os << std::format("{}_{} {}\n", static_cast<ComponentName>(i), name,
                         metric.sample);
     }
   }
