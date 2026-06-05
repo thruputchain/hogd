@@ -28,10 +28,8 @@ Metrics::dump_to_prometheus_string()
     CHECK_PTR(component.metrics.get());
 
     for (const auto &[name, metric] : *tmp) {
-      for (size_t sample : metric.samples) {
-        os << std::format("{}/{} {}\n", static_cast<ComponentName>(i), name,
-                          sample);
-      }
+      os << std::format("{}/{} {}\n", static_cast<ComponentName>(i), name,
+                        metric.sample);
     }
   }
 

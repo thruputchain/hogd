@@ -44,17 +44,17 @@ public:
 
     x23::CoroGuard cg;
     co_await cg(component.lock);
-    (*component.metrics)[metric_name].samples.push_back(metric_value);
+    (*component.metrics)[metric_name].sample = metric_value;
   }
 
   x23::Async<std::string> dump_to_prometheus_string();
 
 private:
   struct Metric {
-    // [samples] is protected by the component lock. This synchronization is
-    // very coarse-grained and we should ultimately replace this with a
-    // synchronized map that uses [x23::CoroLock]'s rather than [std::mutex]'s.
-    std::vector<size_t> samples;
+    // [sample] is protected by the component lock. This synchronization is very
+    // coarse-grained and we should ultimately replace this with a synchronized
+    // map that uses [x23::CoroLock]'s rather than [std::mutex]'s.
+    size_t sample;
   };
 
   struct Component {
