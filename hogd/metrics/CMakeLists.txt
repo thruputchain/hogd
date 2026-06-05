@@ -8,6 +8,15 @@ target_link_libraries(
   base
 )
 
+add_library(
+  new_metrics
+  new_metrics.cc
+)
+target_link_libraries(
+  new_metrics
+  base
+)
+
 # create metrics module test binary
 add_executable(
   metrics_test
