@@ -2,7 +2,7 @@
 //
 // These tests call the parser function directly and inspect the thrown
 // exception's what() text. They are much faster than the subprocess-based
-// tests in hogd_dev_test.cc because they avoid spawning hogd-dev.
+// tests in hog_devnode_test.cc because they avoid spawning hog-devnode.
 //
 // NOLINTNEXTLINE(misc-include-cleaner)
 #include <unistd.h>
@@ -25,9 +25,9 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/bootstrap_manifest.h"
-#include "hogd/hogd_dev/manifest_hex.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
@@ -67,7 +67,7 @@ struct ManifestBuilder {
   std::string protocol = std::string(version::kHogdProtocol());
 
   bool include_dev_wallet = true;
-  std::string dev_wallet_profile = "hogd-dev-default";
+  std::string dev_wallet_profile = "hog-devnode-default";
   bool include_dev_wallet_content_hash = true;
   std::string dev_wallet_content_hash;
   std::string dev_wallet_deploy_entrypoint;
@@ -137,13 +137,13 @@ struct ManifestBuilder {
 };
 
 // Writes `contents` to a fresh temp file and returns the path. Pattern
-// mirrors hogd_dev_test.cc's write_test_bootstrap_manifest helper.
+// mirrors hog_devnode_test.cc's write_test_bootstrap_manifest helper.
 std::filesystem::path
 write_temp_manifest(std::string_view contents)
 {
   std::filesystem::path path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-unit-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-unit-{}-{}.json", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::ofstream output(path, std::ios::binary);
   if (!output) {
@@ -154,7 +154,7 @@ write_temp_manifest(std::string_view contents)
 }
 
 // Writes contents to a temp file and registers a defer to remove it.
-// Returns the path. Same call-site pattern as hogd_dev_test.cc.
+// Returns the path. Same call-site pattern as hog_devnode_test.cc.
 // `cleanup` is an erased Defer<std::function<void()>> so the helper can
 // assign into it (Defer<lambda> would be a different specialisation).
 using CleanupDefer = Defer<std::function<void()>>;
@@ -465,7 +465,7 @@ TEST(BootstrapManifest, RejectsMissingFile)
 {
   std::filesystem::path path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-missing-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-missing-{}-{}.json", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   // Ensure the file truly does not exist.
   std::filesystem::remove(path);
@@ -476,7 +476,7 @@ TEST(BootstrapManifest, RejectsDirectoryAsManifest)
 {
   std::filesystem::path dir =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-dir-{}-{}", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-dir-{}-{}", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::filesystem::create_directories(dir);
   Defer cleanup([dir] { std::filesystem::remove_all(dir); });
@@ -520,7 +520,7 @@ TEST(BootstrapManifest, RejectsDanglingSymlink)
 {
   std::filesystem::path missing_target =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-missing-target-{}-{}.json",
+      std::format("hog-devnode-bootstrap-manifest-missing-target-{}-{}.json",
                   getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   // Make doubly sure the target does not exist.
@@ -529,7 +529,8 @@ TEST(BootstrapManifest, RejectsDanglingSymlink)
 
   std::filesystem::path symlink_path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-dangling-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-dangling-{}-{}.json",
+                  getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::filesystem::create_symlink(missing_target, symlink_path);
   Defer link_cleanup([symlink_path] {
@@ -558,7 +559,7 @@ TEST(BootstrapManifest, RejectsSymlink)
 
   std::filesystem::path symlink_path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-symlink-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-symlink-{}-{}.json", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::filesystem::create_symlink(real_path, symlink_path);
   Defer link_cleanup([symlink_path] {

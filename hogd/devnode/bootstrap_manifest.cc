@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/bootstrap_manifest.h"
+#include "hogd/devnode/bootstrap_manifest.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -22,9 +22,9 @@
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/manifest_hex.h"
-#include "hogd/hogd_dev/manifest_parse.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/manifest_hex.h"
+#include "hogd/devnode/manifest_parse.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/version.h"
 
@@ -34,12 +34,12 @@ namespace {
 
 constexpr std::size_t kMaxBootstrapManifestBytes = 64 * 1024;
 constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
-// v1 supports only the hogd-dev-default contract profile and the hogd-default
-// cost-model profile. When benchmark profiles arrive (spec: Phase 5), this
-// equality check generalizes into a lookup, and the per-profile rule that
-// benchmark profiles must pin `protocol` becomes mandatory.
+// v1 supports only the hog-devnode-default contract profile and the
+// hogd-default cost-model profile. When benchmark profiles arrive (spec: Phase
+// 5), this equality check generalizes into a lookup, and the per-profile rule
+// that benchmark profiles must pin `protocol` becomes mandatory.
 constexpr std::string_view kBootstrapProfile = "local-dev";
-constexpr std::string_view kDevWalletProfile = "hogd-dev-default";
+constexpr std::string_view kDevWalletProfile = "hog-devnode-default";
 constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
 std::string
@@ -192,7 +192,7 @@ require_string_value(std::string_view actual, std::string_view expected,
   }
 }
 
-// hogd-dev only: this asserts that the manifest matches the dev-wallet WASM
+// hog-devnode only: this asserts that the manifest matches the dev-wallet WASM
 // blob the binary already has. In a non-dev backend the relationship
 // reverses — the manifest names the artifact bytes to deploy and the
 // backend verifies its deployed sha256 against the manifest's contentHash.

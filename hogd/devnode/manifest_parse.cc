@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/manifest_parse.h"
+#include "hogd/devnode/manifest_parse.h"
 
 #include <cstddef>
 #include <cstdint>

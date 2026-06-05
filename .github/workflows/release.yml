@@ -117,7 +117,7 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hogd-dev
+            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode
 
       - name: Prepare artifacts
         run: ./scripts/package_hogd_validator_release.sh build/release artifacts
@@ -136,7 +136,7 @@ jobs:
         if: always()
         uses: ./.github/actions/print-log-instructions
 
-  hog-dev-macos-arm64:
+  hog-devnode-macos-arm64:
     needs: release
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
@@ -224,22 +224,22 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
-      - name: Build hogd-dev
+      - name: Build hog-devnode
         run: |
           ./scripts/build.sh \
             -d build/release \
             -t Release \
             -c clang \
             -x "-DBUILD_BENCHMARKS=OFF" \
-            hogd-dev
+            hog-devnode
 
-      - name: Package hog-dev
+      - name: Package hog-devnode
         run: |
-          mkdir -p package/hog-dev-macos-arm64 artifacts
-          cp build/release/hogd/hogd_dev/hogd-dev package/hog-dev-macos-arm64/hog-dev
-          chmod +x package/hog-dev-macos-arm64/hog-dev
+          mkdir -p package/hog-devnode-macos-arm64 artifacts
+          cp build/release/hogd/devnode/hog-devnode package/hog-devnode-macos-arm64/hog-devnode
+          chmod +x package/hog-devnode-macos-arm64/hog-devnode
 
-          pushd package/hog-dev-macos-arm64 >/dev/null
+          pushd package/hog-devnode-macos-arm64 >/dev/null
           mkdir -p lib
 
           resolve_dep() {
@@ -276,7 +276,7 @@ jobs:
 
           while true; do
             added=0
-            for binary in hog-dev lib/*.dylib; do
+            for binary in hog-devnode lib/*.dylib; do
               [ -e "$binary" ] || continue
               while IFS= read -r dep; do
                 base="$(basename "$dep")"
@@ -294,7 +294,7 @@ jobs:
             install_name_tool -id "@executable_path/lib/$(basename "$dylib")" "$dylib"
           done
 
-          for binary in hog-dev lib/*.dylib; do
+          for binary in hog-devnode lib/*.dylib; do
             [ -e "$binary" ] || continue
             while IFS= read -r dep; do
               base="$(basename "$dep")"
@@ -304,10 +304,10 @@ jobs:
             done < <(otool -L "$binary" | awk 'NR > 1 { print $1 }')
           done
 
-          file hog-dev
-          otool -L hog-dev
+          file hog-devnode
+          otool -L hog-devnode
           set +e
-          ./hog-dev --help
+          ./hog-devnode --help
           status=$?
           set -e
           if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
@@ -315,13 +315,13 @@ jobs:
           fi
           popd >/dev/null
 
-          tar -czf artifacts/hog-dev-macos-arm64.tar.gz -C package/hog-dev-macos-arm64 hog-dev lib
+          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode lib
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
         with:
-          name: hog-dev-macos-arm64
-          path: artifacts/hog-dev-macos-arm64.tar.gz
+          name: hog-devnode-macos-arm64
+          path: artifacts/hog-devnode-macos-arm64.tar.gz
 
       - name: Show ccache stats
         if: always()
@@ -333,7 +333,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push'
-    needs: [release, hog-dev-macos-arm64]
+    needs: [release, hog-devnode-macos-arm64]
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: write
@@ -345,10 +345,10 @@ jobs:
           name: hogd-linux-release-artifacts
           path: artifacts/
 
-      - name: Download macOS hog-dev artifact
+      - name: Download macOS hog-devnode artifact
         uses: actions/download-artifact@v6
         with:
-          name: hog-dev-macos-arm64
+          name: hog-devnode-macos-arm64
           path: artifacts/
 
       - name: Generate aggregate checksums

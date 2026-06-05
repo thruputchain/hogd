@@ -46,10 +46,10 @@
 #include "hogd/base/string.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/manifest_hex.h"
+#include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
-#include "hogd/hogd_dev/manifest_hex.h"
-#include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
@@ -65,8 +65,8 @@
 #include "view_gateway.hh"
 #include "x23/serialize.h"
 
-#ifndef HOGD_DEV_BINARY
-#error "HOGD_DEV_BINARY must be defined by CMake"
+#ifndef HOG_DEVNODE_BINARY
+#error "HOG_DEVNODE_BINARY must be defined by CMake"
 #endif
 
 namespace hogd {
@@ -82,7 +82,7 @@ constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 std::chrono::seconds
 startup_timeout()
 {
-  const char *value = std::getenv("HOGD_DEV_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
   if (value == nullptr || *value == '\0') {
     return kDefaultStartupTimeout;
   }
@@ -92,7 +92,7 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOGD_DEV_STARTUP_TIMEOUT_SECS value");
+    throw std::runtime_error("invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
   }
   return std::chrono::seconds(static_cast<int>(seconds));
 }
@@ -100,7 +100,7 @@ startup_timeout()
 std::chrono::seconds
 exit_timeout()
 {
-  const char *value = std::getenv("HOGD_DEV_EXIT_TIMEOUT_SECS");
+  const char *value = std::getenv("HOG_DEVNODE_EXIT_TIMEOUT_SECS");
   if (value == nullptr || *value == '\0') {
     return kDefaultExitTimeout;
   }
@@ -110,7 +110,7 @@ exit_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOGD_DEV_EXIT_TIMEOUT_SECS value");
+    throw std::runtime_error("invalid HOG_DEVNODE_EXIT_TIMEOUT_SECS value");
   }
   return std::chrono::seconds(static_cast<int>(seconds));
 }
@@ -407,7 +407,7 @@ parse_readiness(std::string line)
   }
   std::string_view kind =
       require_string_field(*manifest, "kind", manifest_bytes);
-  if (kind != "hogd-dev-runtime") {
+  if (kind != "hog-devnode-runtime") {
     throw std::runtime_error(
         std::format("unexpected manifest kind '{}'", kind));
   }
@@ -501,9 +501,9 @@ submit_and_commit(sched_coord_client_t &scheduler,
   return tx_hashes;
 }
 
-class HogdDevProcess {
+class HogDevnodeProcess {
 public:
-  static HogdDevProcess
+  static HogDevnodeProcess
   start(std::vector<std::string> extra_args = {},
         const std::vector<std::pair<std::string, std::string>> &extra_env = {})
   {
@@ -539,7 +539,7 @@ public:
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
 
-      std::vector<std::string> args{HOGD_DEV_BINARY,
+      std::vector<std::string> args{HOG_DEVNODE_BINARY,
                                     "--listen-host",
                                     "127.0.0.1",
                                     "--scheduler-port",
@@ -562,19 +562,19 @@ public:
       }
       argv.push_back(nullptr);
 
-      execv(HOGD_DEV_BINARY, argv.data());
+      execv(HOG_DEVNODE_BINARY, argv.data());
       _exit(127);
     }
 
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
-    return HogdDevProcess(pid, stdout_pipe[0], stderr_pipe[0]);
+    return HogDevnodeProcess(pid, stdout_pipe[0], stderr_pipe[0]);
   }
 
-  HogdDevProcess(HogdDevProcess const &) = delete;
-  HogdDevProcess &operator=(HogdDevProcess const &) = delete;
+  HogDevnodeProcess(HogDevnodeProcess const &) = delete;
+  HogDevnodeProcess &operator=(HogDevnodeProcess const &) = delete;
 
-  HogdDevProcess(HogdDevProcess &&other) noexcept
+  HogDevnodeProcess(HogDevnodeProcess &&other) noexcept
     : pid_(other.pid_), stdout_fd_(other.stdout_fd_),
       stderr_fd_(other.stderr_fd_),
       stdout_buffer_(std::move(other.stdout_buffer_))
@@ -584,9 +584,9 @@ public:
     other.stderr_fd_ = -1;
   }
 
-  HogdDevProcess &operator=(HogdDevProcess &&) = delete;
+  HogDevnodeProcess &operator=(HogDevnodeProcess &&) = delete;
 
-  ~HogdDevProcess()
+  ~HogDevnodeProcess()
   {
     if (pid_ > 0) {
       // NOLINTNEXTLINE(misc-include-cleaner)
@@ -612,7 +612,7 @@ public:
   int terminate()
   {
     if (pid_ <= 0) {
-      throw std::runtime_error("hogd-dev process already reaped");
+      throw std::runtime_error("hog-devnode process already reaped");
     }
     if (kill(pid_, SIGTERM) != 0 && errno != ESRCH) {
       throw std::runtime_error(errno_message("kill SIGTERM", errno));
@@ -623,7 +623,7 @@ public:
       kill(pid_, SIGKILL);
       status = wait_for_exit(kShutdownTimeout);
       if (!status.has_value()) {
-        throw std::runtime_error("hogd-dev did not exit after SIGKILL");
+        throw std::runtime_error("hog-devnode did not exit after SIGKILL");
       }
     }
     return *status;
@@ -651,7 +651,7 @@ public:
   }
 
 private:
-  HogdDevProcess(int pid, int stdout_fd, int stderr_fd)
+  HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd)
     : pid_(pid), stdout_fd_(stdout_fd), stderr_fd_(stderr_fd)
   {}
 
@@ -666,12 +666,12 @@ private:
         return line;
       }
       if (stdout_buffer_.size() > kMaxReadinessBytes) {
-        throw std::runtime_error("hogd-dev readiness line exceeded limit");
+        throw std::runtime_error("hog-devnode readiness line exceeded limit");
       }
 
       auto now = std::chrono::steady_clock::now();
       if (now >= deadline) {
-        throw std::runtime_error("timed out waiting for hogd-dev readiness");
+        throw std::runtime_error("timed out waiting for hog-devnode readiness");
       }
       auto remaining =
           std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
@@ -685,7 +685,7 @@ private:
         throw std::runtime_error(errno_message("poll stdout", errno));
       }
       if (ready == 0) {
-        throw std::runtime_error("timed out waiting for hogd-dev readiness");
+        throw std::runtime_error("timed out waiting for hog-devnode readiness");
       }
 
       char buffer[1024];
@@ -695,7 +695,7 @@ private:
         continue;
       }
       if (count == 0) {
-        throw std::runtime_error("hogd-dev stdout closed before readiness");
+        throw std::runtime_error("hog-devnode stdout closed before readiness");
       }
       if (errno == EINTR) {
         continue;
@@ -734,7 +734,7 @@ private:
 };
 
 void
-expect_clean_exit(HogdDevProcess &process)
+expect_clean_exit(HogDevnodeProcess &process)
 {
   int status = process.terminate();
   std::string stderr_output = process.read_remaining_stderr();
@@ -761,7 +761,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("protocol", version::kHogdProtocol());
     }
     w.object_field("devWallet", [&](json::Writer &w) {
-      w.field("profile", "hogd-dev-default");
+      w.field("profile", "hog-devnode-default");
       w.field("artifactHint", "./dev-wallet.wasm");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
@@ -786,7 +786,7 @@ write_test_bootstrap_manifest(std::string_view contents)
 {
   std::filesystem::path path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-{}-{}.json", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::ofstream output(path, std::ios::binary);
   if (!output) {
@@ -801,16 +801,16 @@ missing_test_bootstrap_manifest_path()
 {
   std::filesystem::path path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-bootstrap-manifest-missing-{}-{}.json", getpid(),
+      std::format("hog-devnode-bootstrap-manifest-missing-{}-{}.json", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::error_code ec;
   std::filesystem::remove(path, ec);
   return path;
 }
 
-TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
+TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.network_id, "groundhog-local");
@@ -837,7 +837,7 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
             version::kHogdProtocol());
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
-  EXPECT_EQ(require_string_field(*producer, "binary", ""), "hogd-dev");
+  EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
   EXPECT_EQ(require_string_field(*producer, "version", ""),
             version::kHogdVersion);
   std::string_view git_hash = version::kHogdGitHash;
@@ -889,13 +889,13 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, HelpPrintsBeforeInitialization)
+TEST(HogDevnode, HelpPrintsBeforeInitialization)
 {
-  HogdDevProcess process = HogdDevProcess::start({"--help"});
+  HogDevnodeProcess process = HogDevnodeProcess::start({"--help"});
 
   std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
-    FAIL() << "hogd-dev did not exit";
+    FAIL() << "hog-devnode did not exit";
     return;
   }
   const int exit_status = status.value();
@@ -911,14 +911,14 @@ TEST(HogdDev, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
-TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
+TEST(HogDevnode, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
 {
-  HogdDevProcess process =
-      HogdDevProcess::start({"--scheduler-port", "not-a-port"});
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--scheduler-port", "not-a-port"});
 
   std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
-    FAIL() << "hogd-dev did not exit";
+    FAIL() << "hog-devnode did not exit";
     return;
   }
   const int exit_status = status.value();
@@ -933,13 +933,15 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
-TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
+TEST(HogDevnode,
+     InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
 {
-  HogdDevProcess process = HogdDevProcess::start({"--readiness", "stderr"});
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--readiness", "stderr"});
 
   std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
-    FAIL() << "hogd-dev did not exit";
+    FAIL() << "hog-devnode did not exit";
     return;
   }
   const int exit_status = status.value();
@@ -955,17 +957,17 @@ TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
-TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
+TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
 {
   for (std::string_view host : {"0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0",
                                 "[0:0:0:0:0:0:0:0]", "::0"}) {
     SCOPED_TRACE(host);
-    HogdDevProcess process =
-        HogdDevProcess::start({"--listen-host", std::string(host)});
+    HogDevnodeProcess process =
+        HogDevnodeProcess::start({"--listen-host", std::string(host)});
 
     std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
     if (!status.has_value()) {
-      FAIL() << "hogd-dev did not exit";
+      FAIL() << "hog-devnode did not exit";
       return;
     }
     const int exit_status = status.value();
@@ -982,13 +984,13 @@ TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
   }
 }
 
-TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
+TEST(HogDevnode, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
   // Disable LeakSanitizer so its print_suppressions output (which is
   // non-JSON) does not pollute stderr when running under ASAN.
-  HogdDevProcess process =
-      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
-                                 {"LSAN_OPTIONS", "detect_leaks=0"}});
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
+                                    {"LSAN_OPTIONS", "detect_leaks=0"}});
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
@@ -1000,7 +1002,7 @@ TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
   ASSERT_FALSE(stderr_output.empty());
 
   bool saw_log_record = false;
-  bool saw_hogd_dev_target = false;
+  bool saw_hog_devnode_target = false;
   std::size_t start = 0;
   while (start < stderr_output.size()) {
     std::size_t end = stderr_output.find('\n', start);
@@ -1041,25 +1043,24 @@ TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
     ASSERT_NE(line_number, nullptr) << line;
     EXPECT_TRUE(file->as_string().has_value()) << line;
     EXPECT_TRUE(line_number->as_integer().has_value()) << line;
-    if (target->as_string() == "hogd_dev") {
-      saw_hogd_dev_target = true;
+    if (target->as_string() == "devnode") {
+      saw_hog_devnode_target = true;
     }
     saw_log_record = true;
   }
   EXPECT_TRUE(saw_log_record);
-  EXPECT_TRUE(saw_hogd_dev_target);
+  EXPECT_TRUE(saw_hog_devnode_target);
 }
 
-TEST(HogdDev, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
+TEST(HogDevnode, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
 {
-  HogdDevProcess process =
-      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
-                                 {"HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START",
-                                  "1"}});
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {}, {{"HOGD_LOG_FORMAT", "json"},
+           {"HOG_DEVNODE_TEST_THROW_AFTER_EXECUTOR_START", "1"}});
 
   std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
   if (!status.has_value()) {
-    FAIL() << "hogd-dev did not exit after injected constructor failure";
+    FAIL() << "hog-devnode did not exit after injected constructor failure";
     return;
   }
   const int exit_status = status.value();
@@ -1069,29 +1070,30 @@ TEST(HogdDev, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
   std::string stdout_output = process.read_remaining_stdout();
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
-  EXPECT_TRUE(stderr_output.contains("hogd-dev failed before readiness"))
+  EXPECT_TRUE(stderr_output.contains("hog-devnode failed before readiness"))
       << stderr_output;
-  EXPECT_TRUE(stderr_output.contains("injected hogd-dev constructor failure"))
+  EXPECT_TRUE(
+      stderr_output.contains("injected hog-devnode constructor failure"))
       << stderr_output;
 }
 
-TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
+TEST(HogDevnode, FormatsSchedulerEndpointAsCanonicalHostPort)
 {
   EXPECT_EQ(format_advertised_address("127.0.0.1", 12345), "127.0.0.1:12345");
   EXPECT_EQ(format_advertised_address("::1", 12345), "[::1]:12345");
 }
 
-TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
+TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
 {
   std::filesystem::path manifest_path =
       std::filesystem::temp_directory_path() /
-      std::format("hogd-dev-test-manifest-{}.json", getpid());
+      std::format("hog-devnode-test-manifest-{}.json", getpid());
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
-      R"({"schemaVersion":1,"kind":"hogd-dev-runtime",)"
+      R"({"schemaVersion":1,"kind":"hog-devnode-runtime",)"
       R"("networkId":"groundhog-local","protocol":"hogp/test",)"
       R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
-      R"("producer":{"binary":"hogd-dev","version":"test"},)"
+      R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
       R"("bootstrapAccountDerivation":{"scheme":"groundhog-bootstrap-account-v1","seed":"test"},)"
@@ -1124,7 +1126,7 @@ TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
   EXPECT_EQ(readiness.view_gateway.port, 45678);
 }
 
-TEST(HogdDev, BootstrapAccountDerivationMatchesRustGoldens)
+TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
 {
   constexpr std::string_view kDefaultSeed = "groundhog-dev-accounts";
   const std::vector<std::string> expected = {
@@ -1146,7 +1148,7 @@ TEST(HogdDev, BootstrapAccountDerivationMatchesRustGoldens)
   }
 }
 
-TEST(HogdDev, BootstrapArtifactBuildsStableAccounts)
+TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
   BootstrapAccountConfig config{.count = 3};
 
@@ -1167,9 +1169,9 @@ TEST(HogdDev, BootstrapArtifactBuildsStableAccounts)
   }
 }
 
-TEST(HogdDev, BootstrapManifestAdvertisesAccountMetadata)
+TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 {
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
       "3",
       "--dev-account-seed",
@@ -1202,7 +1204,7 @@ TEST(HogdDev, BootstrapManifestAdvertisesAccountMetadata)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
+TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = wallet_meta::load_wasm();
@@ -1213,7 +1215,7 @@ TEST(HogdDev, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
   });
@@ -1237,7 +1239,7 @@ TEST(HogdDev, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
+TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = wallet_meta::load_wasm();
@@ -1248,7 +1250,7 @@ TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
       "--dev-accounts",
@@ -1266,10 +1268,10 @@ TEST(HogdDev, BootstrapManifestConflictsWithDevAccountShorthands)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
+TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeManifestRead)
 {
   std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       missing_path.string(),
       "--dev-accounts",
@@ -1287,10 +1289,10 @@ TEST(HogdDev, BootstrapManifestConflictDetectedBeforeManifestRead)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestConflictDetectedBeforeShorthandParsing)
+TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeShorthandParsing)
 {
   std::filesystem::path missing_path = missing_test_bootstrap_manifest_path();
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       missing_path.string(),
       "--dev-accounts",
@@ -1308,13 +1310,13 @@ TEST(HogdDev, BootstrapManifestConflictDetectedBeforeShorthandParsing)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestRejectsOversizedFile)
+TEST(HogDevnode, BootstrapManifestRejectsOversizedFile)
 {
   std::filesystem::path manifest_path =
       write_test_bootstrap_manifest(std::string((64 * 1024) + 1, ' '));
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
   });
@@ -1329,7 +1331,7 @@ TEST(HogdDev, BootstrapManifestRejectsOversizedFile)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestRejectsMismatchedDevWalletHash)
+TEST(HogDevnode, BootstrapManifestRejectsMismatchedDevWalletHash)
 {
   const std::string manifest = bootstrap_manifest_json(
       1, "manifest-seed", "42",
@@ -1337,7 +1339,7 @@ TEST(HogdDev, BootstrapManifestRejectsMismatchedDevWalletHash)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
   });
@@ -1352,7 +1354,7 @@ TEST(HogdDev, BootstrapManifestRejectsMismatchedDevWalletHash)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
+TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = wallet_meta::load_wasm();
@@ -1363,7 +1365,7 @@ TEST(HogdDev, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
   });
@@ -1379,7 +1381,7 @@ TEST(HogdDev, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
             std::string::npos);
 }
 
-TEST(HogdDev, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
+TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = wallet_meta::load_wasm();
@@ -1390,7 +1392,7 @@ TEST(HogdDev, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--bootstrap-manifest",
       manifest_path.string(),
   });
@@ -1406,9 +1408,9 @@ TEST(HogdDev, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
             std::string::npos);
 }
 
-TEST(HogdDev, RejectsDevAccountCountAboveLimit)
+TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
 {
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
       "1001",
   });
@@ -1423,9 +1425,9 @@ TEST(HogdDev, RejectsDevAccountCountAboveLimit)
             std::string::npos);
 }
 
-TEST(HogdDev, SchedulerTipReportsGenesisTipAfterReadiness)
+TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   {
@@ -1443,9 +1445,9 @@ TEST(HogdDev, SchedulerTipReportsGenesisTipAfterReadiness)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
+TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   {
@@ -1473,9 +1475,9 @@ TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
+TEST(HogDevnode, ViewGatewayEndpointAnswersIntro)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   {
@@ -1490,9 +1492,9 @@ TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, ViewGatewayViewsCommittedBootstrapWallet)
+TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 {
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
       "1",
       "--dev-account-seed",
@@ -1541,9 +1543,9 @@ TEST(HogdDev, ViewGatewayViewsCommittedBootstrapWallet)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, IndexerEndpointServesBlockExplorer)
+TEST(HogDevnode, IndexerEndpointServesBlockExplorer)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   {
@@ -1562,9 +1564,9 @@ TEST(HogdDev, IndexerEndpointServesBlockExplorer)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, CommittedTransactionsPopulateIndexerEndpoint)
+TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
 {
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
       "1",
       "--dev-account-seed",
@@ -1645,9 +1647,9 @@ TEST(HogdDev, CommittedTransactionsPopulateIndexerEndpoint)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, BootstrapAccountCanDeployCliShapedTransaction)
+TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
 {
-  HogdDevProcess process = HogdDevProcess::start({
+  HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
       "1",
       "--dev-account-seed",
@@ -1716,7 +1718,8 @@ TEST(HogdDev, BootstrapAccountCanDeployCliShapedTransaction)
         submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
     if (nominated_hashes.size() != 1UL) {
       int status = process.terminate();
-      ADD_FAILURE() << "hogd-dev exited with status " << status << "\nstderr:\n"
+      ADD_FAILURE() << "hog-devnode exited with status " << status
+                    << "\nstderr:\n"
                     << process.read_remaining_stderr();
       return;
     }

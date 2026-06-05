@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/hogd_dev_node.h"
+#include "hogd/devnode/hog_devnode_node.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -24,8 +24,8 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -60,9 +60,10 @@ constexpr char kIndexerDbSubdir[] = "indexer-db";
 void
 maybe_inject_post_executor_failure()
 {
-  const char *value = std::getenv("HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START");
+  const char *value =
+      std::getenv("HOG_DEVNODE_TEST_THROW_AFTER_EXECUTOR_START");
   if (value != nullptr && std::string_view(value) == "1") {
-    throw std::runtime_error("injected hogd-dev constructor failure");
+    throw std::runtime_error("injected hog-devnode constructor failure");
   }
 }
 
@@ -79,9 +80,9 @@ validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
 }
 } // namespace
 
-HogdDevNode::HogdDevNode(std::string bind_host,
-                         std::uint16_t requested_scheduler_port,
-                         BootstrapAccountConfig const &bootstrap_config)
+HogDevnodeNode::HogDevnodeNode(std::string bind_host,
+                               std::uint16_t requested_scheduler_port,
+                               BootstrapAccountConfig const &bootstrap_config)
   : bind_host_(std::move(bind_host)), bootstrap_config_(bootstrap_config),
     event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
@@ -157,8 +158,8 @@ HogdDevNode::HogdDevNode(std::string bind_host,
     // We start the executor server in [register_executor_with_mempool()].
 
     // Start the fake coordinator. The real coordinator lives in chuckd, but
-    // hogd-dev only needs the scheduler back-channel that the mempool requires
-    // during startup.
+    // hog-devnode only needs the scheduler back-channel that the mempool
+    // requires during startup.
     coordinator_sched_server_->max_message_size_ = kDevRpcMaxMessageSize;
     coordinator_sched_server_.start_server(make_bind_host_port(bind_host_,
                                                                /*port=*/0));
@@ -180,7 +181,7 @@ HogdDevNode::HogdDevNode(std::string bind_host,
   }
 }
 
-HogdDevNode::~HogdDevNode()
+HogDevnodeNode::~HogDevnodeNode()
 {
   try {
     // Shutdown is intentionally loud while this topology is still mirroring the
@@ -209,16 +210,16 @@ HogdDevNode::~HogdDevNode()
     // database servers are gone.
     ctx_.reset();
   } catch (const std::exception &e) {
-    error("~HogdDevNode received exception: {}", e.what());
+    error("~HogDevnodeNode received exception: {}", e.what());
     CHECK(false);
   } catch (...) {
-    error("~HogdDevNode received exception");
+    error("~HogDevnodeNode received exception");
     CHECK(false);
   }
 }
 
 void
-HogdDevNode::prepare_for_failed_construction() noexcept
+HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
     executor_.shut_down();
@@ -226,14 +227,15 @@ HogdDevNode::prepare_for_failed_construction() noexcept
       view_gateway_server_->impl()->shut_down();
     }
   } catch (const std::exception &e) {
-    error("HogdDevNode failed-start cleanup received exception: {}", e.what());
+    error("HogDevnodeNode failed-start cleanup received exception: {}",
+          e.what());
   } catch (...) {
-    error("HogdDevNode failed-start cleanup received exception");
+    error("HogDevnodeNode failed-start cleanup received exception");
   }
 }
 
 void
-HogdDevNode::init_indexer_backend()
+HogDevnodeNode::init_indexer_backend()
 {
   std::filesystem::path db_path =
       std::filesystem::path(indexer_dir_.directory()) / kIndexerDbSubdir;
@@ -258,7 +260,7 @@ HogdDevNode::init_indexer_backend()
 }
 
 void
-HogdDevNode::register_indexer_with_event_service()
+HogDevnodeNode::register_indexer_with_event_service()
 {
   auto client =
       create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
@@ -270,7 +272,7 @@ HogdDevNode::register_indexer_with_event_service()
 }
 
 void
-HogdDevNode::materialize_bootstrap_accounts(
+HogDevnodeNode::materialize_bootstrap_accounts(
     BootstrapAccountConfig const &config)
 {
   auto client = create_client<SchedulerCoord1>(bind_host_,
@@ -300,7 +302,7 @@ HogdDevNode::materialize_bootstrap_accounts(
 }
 
 void
-HogdDevNode::commit_initialization_batch(SignedTransactionBatch const &txs)
+HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
 {
   if (txs.empty()) {
     return;
@@ -323,7 +325,7 @@ HogdDevNode::commit_initialization_batch(SignedTransactionBatch const &txs)
 }
 
 void
-HogdDevNode::refresh_bootstrap_account_balances()
+HogDevnodeNode::refresh_bootstrap_account_balances()
 {
   for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
     HogDBStatus<AddressAuthData> auth_data =
@@ -342,7 +344,8 @@ HogdDevNode::refresh_bootstrap_account_balances()
 }
 
 void
-HogdDevNode::init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
+HogDevnodeNode::init_db_backend(
+    std::unique_ptr<sched_db_client_t> sched_db_client)
 {
   DBStatus<std::uint64_t> lsn =
       Database::check(db_dir_.directory(), kRamDbBytes);
@@ -361,7 +364,7 @@ HogdDevNode::init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
 }
 
 void
-HogdDevNode::register_db_with_mempool()
+HogDevnodeNode::register_db_with_mempool()
 {
   auto client = create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
   std::string exec_address =
@@ -378,7 +381,7 @@ HogdDevNode::register_db_with_mempool()
 }
 
 void
-HogdDevNode::register_event_with_mempool()
+HogDevnodeNode::register_event_with_mempool()
 {
   auto client =
       create_client<SchedEvent1>(bind_host_, sched_event_server_.port())();
@@ -395,7 +398,7 @@ HogdDevNode::register_event_with_mempool()
 }
 
 void
-HogdDevNode::register_auth_with_mempool()
+HogDevnodeNode::register_auth_with_mempool()
 {
   sched_auth_client_t client =
       create_client<MempoolAuth1>(bind_host_, mempool_auth_server_.port())();
@@ -413,7 +416,7 @@ HogdDevNode::register_auth_with_mempool()
 }
 
 void
-HogdDevNode::register_executor_with_mempool()
+HogDevnodeNode::register_executor_with_mempool()
 {
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(bind_host_, sched_exec_server_.port());
@@ -421,7 +424,7 @@ HogdDevNode::register_executor_with_mempool()
 }
 
 x23::Async<void>
-HogdDevNode::register_coordinator_with_mempool()
+HogDevnodeNode::register_coordinator_with_mempool()
 {
   auto client = create_client<SchedulerCoord1>(bind_host_,
                                                mempool_coord_server_.port())();

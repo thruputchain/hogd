@@ -1,4 +1,4 @@
-#include "hogd/hogd_dev/hogd_dev_tmp_dir.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 
 #include <filesystem>
 #include <system_error>
@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-HogdDevTmpDir::HogdDevTmpDir()
+HogDevnodeTmpDir::HogDevnodeTmpDir()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   CHECK(dir.has_value());
@@ -17,12 +17,12 @@ HogdDevTmpDir::HogdDevTmpDir()
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-HogdDevTmpDir::~HogdDevTmpDir() noexcept
+HogDevnodeTmpDir::~HogDevnodeTmpDir() noexcept
 {
   std::error_code ec;
   std::filesystem::remove_all(path_, ec);
   if (ec) {
-    warn("could not remove hogd-dev temp dir '{}': error {}", path_,
+    warn("could not remove hog-devnode temp dir '{}': error {}", path_,
          ec.value());
   }
 }

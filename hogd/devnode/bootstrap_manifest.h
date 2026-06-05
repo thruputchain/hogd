@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/devnode/bootstrap_accounts.h"
 
 namespace hogd {
 

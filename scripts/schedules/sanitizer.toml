@@ -56,7 +56,7 @@ echo 'build clang ubsan'
 
 echo 'run llvm ubsan tests'
 export UBSAN_OPTIONS=print_stacktrace=1
-export HOGD_DEV_EXIT_TIMEOUT_SECS=30
+export HOG_DEVNODE_EXIT_TIMEOUT_SECS=30
 ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
 
 """

@@ -18,8 +18,8 @@
 #include <string>
 #include <string_view>
 
-#ifndef HOGD_DEV_BINARY
-#error "HOGD_DEV_BINARY must be defined by CMake"
+#ifndef HOG_DEVNODE_BINARY
+#error "HOG_DEVNODE_BINARY must be defined by CMake"
 #endif
 
 namespace {
@@ -28,13 +28,13 @@ constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
 
-// Honor HOGD_DEV_STARTUP_TIMEOUT_SECS just like hogd_dev_test.cc, so slow
-// sanitizer schedules (e.g. TSAN, which sets it to 180) can give hogd-dev
+// Honor HOG_DEVNODE_STARTUP_TIMEOUT_SECS just like hog_devnode_test.cc, so slow
+// sanitizer schedules (e.g. TSAN, which sets it to 180) can give hog-devnode
 // enough time to reach readiness. Falls back to the default when unset.
 std::chrono::seconds
 startup_timeout()
 {
-  const char *value = std::getenv("HOGD_DEV_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
   if (value == nullptr || *value == '\0') {
     return kDefaultStartupTimeout;
   }
@@ -44,7 +44,7 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    std::println(stderr, "invalid HOGD_DEV_STARTUP_TIMEOUT_SECS value");
+    std::println(stderr, "invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
     std::exit(EXIT_FAILURE);
   }
   return std::chrono::seconds(static_cast<int>(seconds));
@@ -128,7 +128,7 @@ cleanup_child(pid_t pid)
   if (!wait_for_exit(pid, kShutdownTimeout, status)) {
     kill(pid, SIGKILL);
     if (!wait_for_exit(pid, kShutdownTimeout, status)) {
-      std::println(stderr, "hogd-dev did not exit after SIGKILL");
+      std::println(stderr, "hog-devnode did not exit after SIGKILL");
     }
   }
 }
@@ -163,7 +163,7 @@ main() // NOLINT(bugprone-exception-escape)
     setenv("HOGD_LOG_FORMAT", "json", /*overwrite=*/1);
 
     char *argv[] = {
-        const_cast<char *>(HOGD_DEV_BINARY),
+        const_cast<char *>(HOG_DEVNODE_BINARY),
         const_cast<char *>("--listen-host"),
         const_cast<char *>("127.0.0.1"),
         const_cast<char *>("--scheduler-port"),
@@ -172,7 +172,7 @@ main() // NOLINT(bugprone-exception-escape)
         const_cast<char *>("stdout"),
         nullptr,
     };
-    execv(HOGD_DEV_BINARY, argv);
+    execv(HOG_DEVNODE_BINARY, argv);
     _exit(127);
   }
 
@@ -234,11 +234,12 @@ main() // NOLINT(bugprone-exception-escape)
     }
     close_if_open(stdout_pipe[0]);
     close_if_open(stderr_pipe[0]);
-    std::println(stderr,
-                 "{} waiting for hogd-dev readiness; status={}\nstdout:\n{}\n"
-                 "stderr tail:\n{}",
-                 child_exited ? "child exited before" : "timed out",
-                 child_status, stdout_output, stderr_output);
+    std::println(
+        stderr,
+        "{} waiting for hog-devnode readiness; status={}\nstdout:\n{}\n"
+        "stderr tail:\n{}",
+        child_exited ? "child exited before" : "timed out", child_status,
+        stdout_output, stderr_output);
     return EXIT_FAILURE;
   }
 
