@@ -60,10 +60,12 @@ std::string_view
 first_line(std::string_view request)
 {
   size_t end = request.find('\n');
-  if (end == std::string_view::npos)
+  if (end == std::string_view::npos) {
     return request;
-  if (end && request[end - 1] == '\r')
+  }
+  if (end && request[end - 1] == '\r') {
     --end;
+  }
   return request.substr(0, end);
 }
 
@@ -71,13 +73,16 @@ std::optional<std::tuple<std::string_view, std::string_view, std::string_view>>
 parse_request_line(std::string_view line)
 {
   const size_t first_space = line.find(' ');
-  if (first_space == std::string_view::npos)
+  if (first_space == std::string_view::npos) {
     return std::nullopt;
+  }
   const size_t second_space = line.find(' ', first_space + 1);
-  if (second_space == std::string_view::npos)
+  if (second_space == std::string_view::npos) {
     return std::nullopt;
-  if (line.find(' ', second_space + 1) != std::string_view::npos)
+  }
+  if (line.find(' ', second_space + 1) != std::string_view::npos) {
     return std::nullopt;
+  }
 
   std::string_view method = line.substr(0, first_space);
   std::string_view target =
@@ -245,15 +250,17 @@ HttpServer::handle_connection(x23::UniqueFd fd)
 x23::Async<HttpResponse>
 HttpServer::route(std::string_view method, std::string_view target)
 {
-  if (method != "GET")
+  if (method != "GET") {
     co_return plain_response(405, "Method Not Allowed\n");
+  }
 
   std::string path(path_without_query(target));
   Handler handler;
   auto routes = routes_.take();
   auto it = routes->find(path);
-  if (it == routes->end())
+  if (it == routes->end()) {
     co_return plain_response(404, "Not Found\n");
+  }
   handler = it->second;
   routes.reset();
 
