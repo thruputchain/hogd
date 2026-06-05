@@ -80,6 +80,4 @@ private:
   void eof() noexcept;
 };
 
-void add_health_metrics_routes(HttpServer &server);
-
 } // namespace hogd

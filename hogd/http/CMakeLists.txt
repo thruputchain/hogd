@@ -5,7 +5,6 @@ add_library(
 target_link_libraries(
   http
   base
-  health
   x23
 )
 
@@ -16,6 +15,7 @@ add_executable(
 target_link_libraries(
   http_test
   http
+  health
   GTest::gtest_main
 )
 gtest_discover_tests(http_test)

@@ -99,19 +99,16 @@ echo 'launch loadgen'
 
 echo 'wait for loadgen'
 ./scripts/wait-port.sh hog7 $LOADGEN_PORT
-./scripts/wait-port.sh hog7 $LOADGEN_HTTP_PORT
 
 echo 'launch first hogexec'
 # the mempool runs on hog10
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hogexec: that's waiting on the coordinator
-./scripts/wait-port.sh hog5 $EXECUTOR_HTTP_PORT
 
 echo 'launch second hogexec'
 # the mempool runs on hog10
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hogexec: that's waiting on the coordinator
-./scripts/wait-port.sh hog6 $EXECUTOR_HTTP_PORT
 
 echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
@@ -119,19 +116,15 @@ echo 'check hogexec is running'
 
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
-./scripts/wait-port.sh hog9 $EVENT_HTTP_PORT
 
 echo 'launch indexer'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
-./scripts/wait-port.sh hog9 $INDEXER_HTTP_PORT
 
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
-./scripts/wait-port.sh hog11 $DB_HTTP_PORT
 
 echo 'launch auth'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/auth/auth_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
-./scripts/wait-port.sh hog8 $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \

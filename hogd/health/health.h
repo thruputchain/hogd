@@ -16,6 +16,8 @@
 
 namespace hogd {
 
+class HttpServer;
+
 // Writes the current health status of the process to a file of disk on a
 // periodic basis (default = 1 second). This file is hosted with a web service
 // at the [/health] URL.
@@ -128,6 +130,8 @@ private:
   Timestamp last_updated_timestamp_;
   BlockHeight current_block_height_ = -1;
 };
+
+void add_health_metrics_routes(HttpServer &server);
 
 } // namespace hogd
 

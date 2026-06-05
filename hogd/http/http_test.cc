@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "hogd/base/types.h"
+#include "hogd/health/health.h"
 #include "x23/cleanup.h"
 #include "x23/sockio.h"
 #include "gtest/gtest.h"
@@ -40,7 +41,7 @@ request(uint16_t port, std::string_view wire)
   return read_all(client);
 }
 
-class HttpdTest : public ::testing::Test {
+class HttpTest : public ::testing::Test {
 protected:
   HttpServer server_;
 
@@ -50,7 +51,7 @@ protected:
   }
 };
 
-TEST_F(HttpdTest, KnownGetRouteReturnsHandlerResponse)
+TEST_F(HttpTest, KnownGetRouteReturnsHandlerResponse)
 {
   server_.add_route("/hello", [] {
     return HttpResponse{.status = 200,
@@ -67,14 +68,14 @@ TEST_F(HttpdTest, KnownGetRouteReturnsHandlerResponse)
   EXPECT_TRUE(response.ends_with("\r\n\r\nhello"));
 }
 
-TEST_F(HttpdTest, UnknownGetRouteReturns404)
+TEST_F(HttpTest, UnknownGetRouteReturns404)
 {
   std::string response =
       request(start(), "GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n");
   EXPECT_NE(response.find("HTTP/1.1 404 Not Found\r\n"), std::string::npos);
 }
 
-TEST_F(HttpdTest, UnsupportedMethodReturns405)
+TEST_F(HttpTest, UnsupportedMethodReturns405)
 {
   server_.add_route("/health", [] {
     return HttpResponse{.status = 200,
@@ -88,13 +89,13 @@ TEST_F(HttpdTest, UnsupportedMethodReturns405)
             std::string::npos);
 }
 
-TEST_F(HttpdTest, MalformedRequestLineReturns400)
+TEST_F(HttpTest, MalformedRequestLineReturns400)
 {
   std::string response = request(start(), "GET\r\nHost: localhost\r\n\r\n");
   EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"), std::string::npos);
 }
 
-TEST_F(HttpdTest, MultipleRoutesDispatchIndependently)
+TEST_F(HttpTest, MultipleRoutesDispatchIndependently)
 {
   server_.add_route("/a", [] {
     return HttpResponse{.status = 200,
@@ -118,7 +119,7 @@ TEST_F(HttpdTest, MultipleRoutesDispatchIndependently)
   EXPECT_TRUE(b.ends_with("\r\n\r\nb"));
 }
 
-TEST_F(HttpdTest, HealthMetricsRoutesReturnExpectedResponses)
+TEST_F(HttpTest, HealthMetricsRoutesReturnExpectedResponses)
 {
   add_health_metrics_routes(server_);
   uint16_t port = start();

@@ -13,7 +13,6 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/health/health.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
@@ -288,25 +287,6 @@ HttpServer::eof() noexcept
 {
   listen_fd_ = x23::kInvalidFd;
   listen_fd_.notify_all();
-}
-
-void
-add_health_metrics_routes(HttpServer &server)
-{
-  server.add_route("/health", []() -> x23::Async<HttpResponse> {
-    co_return HttpResponse{
-        .status = 200,
-        .content_type = "application/json",
-        .body = co_await Health::instance().dump_to_string(),
-    };
-  });
-  server.add_route("/metrics", [] {
-    return HttpResponse{
-        .status = 200,
-        .content_type = "text/plain",
-        .body = "",
-    };
-  });
 }
 
 } // namespace hogd
