@@ -36,8 +36,8 @@ public:
   Metrics(Metrics &&) = delete;
   Metrics &operator=(Metrics &&) = delete;
 
-  x23::Async<void> record(ComponentName component_name,
-                          const std::string &metric_name, size_t metric_value)
+  x23::Async<void> record(ComponentName component_name, std::string metric_name,
+                          size_t metric_value)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     Component &component = components_[static_cast<size_t>(component_name)];
