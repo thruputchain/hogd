@@ -1,23 +1,13 @@
 #include "hogd/metrics/health.h"
 
-#include <atomic>
 #include <cstdint>
-#include <filesystem>
 #include <format>
-#include <fstream>
-#include <optional>
 #include <string>
-#include <system_error>
 
 #include "hogd/base/json.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-
-#include <unistd.h>
-
-#include "hogd/base/log.h"
-#include "x23/debug.h"
 
 namespace hogd {
 

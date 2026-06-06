@@ -3,7 +3,6 @@
 #include <string_view>
 
 #include "hogd/base/json.h"
-#include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
