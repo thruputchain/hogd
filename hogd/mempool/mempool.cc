@@ -14,7 +14,6 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/health/health.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
@@ -25,6 +24,8 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
+#include "hogd/metrics/health.h"
+#include "hogd/metrics/shared.h"
 
 namespace hogd {
 

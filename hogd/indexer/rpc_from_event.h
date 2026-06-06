@@ -1,8 +1,8 @@
 #pragma once
 
 #include "hogd/base/log.h"
-#include "hogd/health/health.h"
 #include "hogd/indexer/db.h"
+#include "hogd/metrics/health.h"
 #include "indexer.hh"
 #include "types.hh"
 #include "x23/async.h"

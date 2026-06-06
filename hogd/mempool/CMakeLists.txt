@@ -10,11 +10,11 @@ target_link_libraries(
   base
   crypto
   exec_interface
-  health
   hogd
   http
   hogdb
   merkle
+  new_metrics
   protocol
   runtime
 )

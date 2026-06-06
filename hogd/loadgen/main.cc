@@ -9,10 +9,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/health/health.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/metrics/health.h"
+#include "hogd/metrics/shared.h"
 
 namespace {
 

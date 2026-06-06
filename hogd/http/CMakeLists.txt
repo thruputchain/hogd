@@ -15,7 +15,6 @@ add_executable(
 target_link_libraries(
   http_test
   http
-  health
   GTest::gtest_main
 )
 gtest_discover_tests(http_test)

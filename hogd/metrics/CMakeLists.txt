@@ -8,6 +8,19 @@ target_link_libraries(
   base
 )
 
+add_library(
+  new_metrics
+  health.cc
+  new_metrics.cc
+)
+target_link_libraries(
+  new_metrics
+  base
+  hogd
+  http
+  x23
+)
+
 # create metrics module test binary
 add_executable(
   metrics_test
@@ -19,3 +32,25 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(metrics_test)
+
+add_executable(
+  health_test
+  health_test.cc
+)
+target_link_libraries(
+  health_test
+  new_metrics
+  GTest::gtest_main
+)
+gtest_discover_tests(health_test)
+
+add_executable(
+  new_metrics_test
+  new_metrics_test.cc
+)
+target_link_libraries(
+  new_metrics_test
+  new_metrics
+  GTest::gtest_main
+)
+gtest_discover_tests(new_metrics_test)
