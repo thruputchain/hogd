@@ -18,9 +18,10 @@ Metrics::instance()
   return metrics;
 }
 
+// static
 std::string
 Metrics::fully_qualified_name(Metrics::ComponentName component_name,
-                              const std::string &metric_name) const
+                              const std::string &metric_name)
 {
   return std::format("{}_{}", component_name, metric_name);
 }

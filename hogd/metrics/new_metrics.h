@@ -92,8 +92,8 @@ private:
 
   Metrics() = default;
 
-  std::string fully_qualified_name(ComponentName component_name,
-                                   const std::string &metric_name) const;
+  static std::string fully_qualified_name(ComponentName component_name,
+                                          const std::string &metric_name);
 
   std::array<Component, kNumComponents> components_;
 };
