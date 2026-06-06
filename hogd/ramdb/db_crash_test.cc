@@ -25,7 +25,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -118,7 +117,6 @@ struct Shared {
   std::atomic<bool> starting_up;
   uint64_t most_recent_snapshot_end_lsn{};
   uint64_t next_snapshot_begin_lsn{};
-  size_t last_dump_recovery_count;
   size_t snapshots_until_full{kIncrementalSnapshots};
 };
 
@@ -214,8 +212,6 @@ dump_metrics(Database &db, Shared &shared)
   info("== begin metrics ==");
   info("> {} {}", ns, samples);
   info("== end metrics ==");
-
-  shared.last_dump_recovery_count = shared.recovery_count;
 }
 
 void
