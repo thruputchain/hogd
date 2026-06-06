@@ -41,7 +41,7 @@ add_executable(
 target_link_libraries(
   db_crash_test
   ramdb
-  metrics
+  new_metrics
 )
 
 # create test binary

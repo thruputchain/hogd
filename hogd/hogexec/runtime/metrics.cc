@@ -31,20 +31,31 @@ HogexecMetrics::get_instance()
 HogexecMetrics::MetricsSnapshot
 HogexecMetrics::get_stats()
 {
-  auto samples = registry_.read();
   MetricsSnapshot snapshot{};
   snapshot.time_ns = x23::fastclock::get_ns();
-  for (auto &sample : samples) {
-    if (sample.key == "successful_proposed_tx_count") {
-      snapshot.successful_proposed_tx_count = sample.val;
-    }
-    else if (sample.key == "failed_proposed_tx_count") {
-      snapshot.failed_proposed_tx_count = sample.val;
-    }
-    else if (sample.key == "gas_consumed") {
-      snapshot.gas_consumed = sample.val;
-    }
+
+  snapshot.successful_proposed_tx_count = successful_proposed_tx_count_.get();
+  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_.get();
+  snapshot.gas_consumed = gas_consumed_.get();
+
+  Metrics &metrics = Metrics::instance();
+  if (!descriptions_registered_) {
+    metrics.set_description(Metrics::ComponentName::kExecutor,
+                            "successful_proposed_tx_count", "");
+    metrics.set_description(Metrics::ComponentName::kExecutor,
+                            "failed_proposed_tx_count", "");
+    metrics.set_description(Metrics::ComponentName::kExecutor, "gas_consumed",
+                            "");
+    descriptions_registered_ = true;
   }
+  metrics.record(Metrics::ComponentName::kExecutor,
+                 "successful_proposed_tx_count",
+                 snapshot.successful_proposed_tx_count)();
+  metrics.record(Metrics::ComponentName::kExecutor, "failed_proposed_tx_count",
+                 snapshot.failed_proposed_tx_count)();
+  metrics.record(Metrics::ComponentName::kExecutor, "gas_consumed",
+                 snapshot.gas_consumed)();
+
   return snapshot;
 }
 

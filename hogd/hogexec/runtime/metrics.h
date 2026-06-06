@@ -8,7 +8,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/metrics/metrics.h"
+#include "hogd/metrics/new_metrics.h"
 #include "rpc_types.hh"
 
 namespace hogd {
@@ -113,12 +113,7 @@ private:
   PerThreadCounter<size_t> failed_proposed_tx_count_;
   PerThreadCounter<uint64_t> gas_consumed_;
 
-  MetricRegistry registry_ =
-      MetricRegistry({make_counter_metric("successful_proposed_tx_count", "",
-                                          successful_proposed_tx_count_),
-                      make_counter_metric("failed_proposed_tx_count", "",
-                                          failed_proposed_tx_count_),
-                      make_counter_metric("gas_consumed", "", gas_consumed_)});
+  bool descriptions_registered_{false};
   std::jthread background_worker_;
   std::condition_variable_any cv_;
   std::mutex cv_mutex_;

@@ -44,7 +44,9 @@ public:
 
     // [component.descriptions] is *not* thread safe. We should generally only
     // add to it at process startup.
-    CHECK(component.descriptions.insert({metric_name, description}).second);
+    auto [it, inserted] =
+        component.descriptions.insert({metric_name, description});
+    CHECK(inserted || it->second == description);
   }
 
   x23::Async<void> record(ComponentName component_name, std::string metric_name,

@@ -22,7 +22,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/metrics/metrics.h"
+#include "hogd/metrics/new_metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
@@ -162,7 +162,8 @@ public:
   // thread safe.
   void set_active(bool yes);
 
-  void register_metrics(MetricRegistry &registry);
+  void register_metrics();
+  void record_metrics();
 
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
