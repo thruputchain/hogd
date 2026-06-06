@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <format>
-#include <stdint.h>
 #include <string>
 #include <string_view>
 #include <vector>
