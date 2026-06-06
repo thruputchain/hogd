@@ -21,6 +21,7 @@ add_library(
 target_link_libraries(
   ramdb
   hogd
+  new_metrics
 )
 
 # Build the db_bench executable
@@ -41,7 +42,6 @@ add_executable(
 target_link_libraries(
   db_crash_test
   ramdb
-  new_metrics
 )
 
 # create test binary

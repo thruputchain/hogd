@@ -132,9 +132,10 @@ Database::register_metrics()
 void
 Database::record_metrics()
 {
-  ::hogd::Metrics::instance().record(
-      ::hogd::Metrics::ComponentName::kDb, "ramdb_snap_bytes_out",
-      metrics_.snap_bytes_out_.load(std::memory_order_relaxed))();
+  ::hogd::Metrics::instance().record(::hogd::Metrics::ComponentName::kDb,
+                                     "ramdb_snap_bytes_out",
+                                     metrics_.snap_bytes_out_.load(
+                                         std::memory_order_relaxed))();
   disk_writer_.record_metrics();
 }
 
