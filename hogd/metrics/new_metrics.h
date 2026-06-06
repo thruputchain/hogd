@@ -36,7 +36,8 @@ public:
   Metrics(Metrics &&) = delete;
   Metrics &operator=(Metrics &&) = delete;
 
-  void set_description(ComponentName component_name, std::string metric_name,
+  void set_description(ComponentName component_name,
+                       const std::string &metric_name,
                        const std::string &description)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
