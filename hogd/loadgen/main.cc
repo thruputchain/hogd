@@ -12,7 +12,6 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 
 namespace {
@@ -91,8 +90,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   hogd::info("Starting loadgen server on port {}", port);
-  hogd::Health::instance().start_service();
-
   hogd::HttpServer metrics_server;
   hogd::add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port = metrics_server.start_server(

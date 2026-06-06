@@ -69,25 +69,6 @@ Health::instance()
   return health;
 }
 
-x23::Async<void>
-Health::dump_to_file(std::optional<std::filesystem::path> opt_path)
-{
-  std::string buffer = co_await dump_to_string();
-
-  std::filesystem::path path;
-  if (opt_path.has_value()) {
-    path = *opt_path;
-  }
-  else {
-    path = std::filesystem::path(CMAKE_ROOT_BINARY_DIR);
-    path = path / "health";
-    path = path / std::to_string(pid_);
-  }
-  write_file_atomically(path, buffer);
-
-  co_return;
-}
-
 x23::Async<std::string>
 Health::dump_to_string()
 {

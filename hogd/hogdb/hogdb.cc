@@ -38,7 +38,6 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"

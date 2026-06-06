@@ -19,7 +19,6 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -34,8 +33,6 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t event_port,
              uint16_t block_explorer_port, uint16_t metrics_port)
 {
-  Health::instance().start_service();
-
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =

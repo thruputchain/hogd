@@ -21,19 +21,12 @@ namespace hogd {
 // at the [/health] URL.
 //
 // Example:
-// Call this to start the health service. Some executables, such as tests, will
-// not want to run the health service.
-// Health::instance().start_service();
-//
-// Update the health status:
 // Health::instance().set_status(Health::Status::kOk);
 // Health::instance().set_current_block_height(11);
 // ...
 //
-// You can manually dump the current health status to disk with
-// [Health::instance().dump_to_file()], but there should be generally no need to
-// call this as the Health service maintains a background thread that dumps to
-// the file periodically.
+// The health status is hosted via the http service in [hogd/http/], which calls
+// [dump_to_string()] in this class.
 class Health {
 public:
   enum class Status {
@@ -42,28 +35,9 @@ public:
     kError,
   };
 
-  ~Health()
-  {
-    should_exit_ = true;
-
-    // There will be no worker thread if the health service was not started.
-    if (worker_thread_) {
-      worker_thread_->join();
-    }
-  }
-
   // Returns the [Health] singleton instance.
   static Health &instance();
 
-  // Start the health service.
-  void start_service()
-  {
-    CHECK(!worker_thread_.has_value());
-    worker_thread_ = std::thread(&Health::worker, this);
-  }
-
-  x23::Async<void>
-  dump_to_file(std::optional<std::filesystem::path> opt_path = std::nullopt);
   x23::Async<std::string> dump_to_string();
 
   x23::Async<void> set_status(Status status);
@@ -98,27 +72,12 @@ private:
     last_updated_timestamp_.timestamp = std::chrono::system_clock::now();
   }
 
-  void worker()
-  {
-    while (!should_exit_) {
-      [](Health &health) -> x23::Async<void> {
-        // We want the [dump_to_file()] coroutine to run inside the x23 thread
-        // pool, so we call [default_coropoll().pool_.bg()].
-        co_await default_coropoll().pool_.bg();
-        co_await health.dump_to_file();
-      } (*this)();
-      std::this_thread::sleep_for(kDefaultWritePeriod);
-    }
-  }
-
   void update_timestamp()
   {
     CHECK(lock_.busy());
     last_updated_timestamp_.timestamp = std::chrono::system_clock::now();
   }
 
-  std::atomic<bool> should_exit_ = false;
-  std::optional<std::thread> worker_thread_ = std::nullopt;
   mutable x23::CoroLock lock_;
 
   std::string process_name_;

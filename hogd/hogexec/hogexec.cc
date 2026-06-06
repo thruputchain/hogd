@@ -16,7 +16,6 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "x23/sockio.h"
 
@@ -28,8 +27,6 @@ int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
              int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
-  Health::instance().start_service();
-
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =

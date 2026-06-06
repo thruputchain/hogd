@@ -19,7 +19,6 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "sched_db.hh"
@@ -33,8 +32,6 @@ int
 auth_init(const std::string &mempool_address, const std::string &bind_ip,
           uint16_t db_port, uint16_t mempool_port, uint16_t metrics_port)
 {
-  Health::instance().start_service();
-
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
