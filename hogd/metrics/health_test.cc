@@ -1,12 +1,8 @@
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <string_view>
 
 #include "hogd/base/json.h"
-#include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
@@ -19,14 +15,6 @@
 
 namespace hogd {
 namespace {
-
-std::string
-read_file(const std::filesystem::path &path)
-{
-  std::ifstream in(path);
-  return std::string(std::istreambuf_iterator<char>(in),
-                     std::istreambuf_iterator<char>());
-}
 
 void
 expect_json_string_field(const json::Value &object, std::string_view field,
@@ -47,13 +35,11 @@ expect_json_integer_field(const json::Value &object, std::string_view field,
 }
 
 void
-expect_status_dump(Health::Status status, std::string_view expected_status,
-                   const std::filesystem::path &path)
+expect_status_dump(Health::Status status, std::string_view expected_status)
 {
   Health::instance().set_status(status)();
-  Health::instance().dump_to_file(path)();
 
-  auto parsed = json::parse(read_file(path));
+  auto parsed = json::parse(Health::instance().dump_to_string()());
   ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
   expect_json_string_field(*parsed, "status", expected_status);
 }
@@ -72,15 +58,9 @@ TEST_F(HealthTest, InstanceReturnsSingleton)
   EXPECT_EQ(&Health::instance(), &Health::instance());
 }
 
-TEST_F(HealthTest, DumpToFileWritesJsonHealthState)
+TEST_F(HealthTest, DumpToStringReturnsJsonHealthState)
 {
-  TmpDir tmp_dir;
-  const std::filesystem::path path =
-      std::filesystem::path(tmp_dir.directory()) / "health";
-
-  Health::instance().dump_to_file(path)();
-
-  const std::string contents = read_file(path);
+  const std::string contents = Health::instance().dump_to_string()();
   ASSERT_FALSE(contents.empty());
 
   auto parsed = json::parse(contents);
@@ -109,37 +89,12 @@ TEST_F(HealthTest, DumpToFileWritesJsonHealthState)
   expect_json_integer_field(*parsed, "current_block_height", -1);
 }
 
-TEST_F(HealthTest, DumpToFileCreatesParentDirectories)
-{
-  TmpDir tmp_dir;
-  const std::filesystem::path path =
-      std::filesystem::path(tmp_dir.directory()) / "nested" / "health" /
-      "status.json";
-
-  ASSERT_FALSE(std::filesystem::exists(path.parent_path()));
-
-  Health::instance().set_status(Health::Status::kOk)();
-  Health::instance().set_current_block_height(321)();
-  Health::instance().dump_to_file(path)();
-
-  ASSERT_TRUE(std::filesystem::exists(path));
-  auto parsed = json::parse(read_file(path));
-  ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
-  expect_json_string_field(*parsed, "status", "ok");
-  expect_json_integer_field(*parsed, "current_block_height", 321);
-}
-
 TEST_F(HealthTest, SettersUpdateDumpedJsonHealthState)
 {
-  TmpDir tmp_dir;
-  const std::filesystem::path path =
-      std::filesystem::path(tmp_dir.directory()) / "health";
-
   Health::instance().set_status(Health::Status::kError)();
   Health::instance().set_current_block_height(123)();
-  Health::instance().dump_to_file(path)();
 
-  auto parsed = json::parse(read_file(path));
+  auto parsed = json::parse(Health::instance().dump_to_string()());
   ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
 
   expect_json_string_field(*parsed, "status", "error");
@@ -148,37 +103,9 @@ TEST_F(HealthTest, SettersUpdateDumpedJsonHealthState)
 
 TEST_F(HealthTest, DumpsAllStatusValues)
 {
-  TmpDir tmp_dir;
-  const std::filesystem::path path =
-      std::filesystem::path(tmp_dir.directory()) / "health";
-
-  expect_status_dump(Health::Status::kStarting, "starting", path);
-  expect_status_dump(Health::Status::kOk, "ok", path);
-  expect_status_dump(Health::Status::kError, "error", path);
-}
-
-TEST_F(HealthTest, DumpToFileOverwritesWithoutLeavingTempFiles)
-{
-  TmpDir tmp_dir;
-  const std::filesystem::path directory = tmp_dir.directory();
-  const std::filesystem::path path = directory / "health";
-
-  Health::instance().set_status(Health::Status::kOk)();
-  Health::instance().set_current_block_height(456)();
-  Health::instance().dump_to_file(path)();
-
-  Health::instance().set_status(Health::Status::kError)();
-  Health::instance().set_current_block_height(789)();
-  Health::instance().dump_to_file(path)();
-
-  auto parsed = json::parse(read_file(path));
-  ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
-  expect_json_string_field(*parsed, "status", "error");
-  expect_json_integer_field(*parsed, "current_block_height", 789);
-
-  for (const auto &entry : std::filesystem::directory_iterator(directory)) {
-    EXPECT_EQ(entry.path().filename(), path.filename());
-  }
+  expect_status_dump(Health::Status::kStarting, "starting");
+  expect_status_dump(Health::Status::kOk, "ok");
+  expect_status_dump(Health::Status::kError, "error");
 }
 
 TEST_F(HealthTest, HealthMetricsRoutesReturnExpectedResponses)

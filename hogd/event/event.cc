@@ -17,7 +17,6 @@
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
@@ -43,8 +42,6 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
            const std::string &work_directory, uint16_t exec_port,
            uint16_t indexer_port, uint16_t mempool_port, uint16_t metrics_port)
 {
-  Health::instance().start_service();
-
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
