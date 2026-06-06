@@ -36,6 +36,17 @@ public:
   Metrics(Metrics &&) = delete;
   Metrics &operator=(Metrics &&) = delete;
 
+  void set_description(ComponentName component_name, std::string metric_name,
+                       const std::string &description)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    Component &component = components_[static_cast<size_t>(component_name)];
+
+    // [component.descriptions] is *not* thread safe. We should generally only
+    // add to it at process startup.
+    CHECK(component.descriptions.insert({metric_name, description}).second);
+  }
+
   x23::Async<void> record(ComponentName component_name, std::string metric_name,
                           size_t metric_value)
   {
@@ -52,10 +63,13 @@ public:
   x23::Async<void> clear()
   {
     for (Component &component : components_) {
-      x23::CoroGuard cg;
-      co_await cg(component.lock);
+      {
+        x23::CoroGuard cg;
+        co_await cg(component.lock);
 
-      component.metrics.clear();
+        component.metrics.clear();
+      }
+      component.descriptions.clear();
     }
   }
 
@@ -70,9 +84,15 @@ private:
   struct Component {
     x23::CoroLock lock;
     std::unordered_map<std::string, Metric> metrics;
+
+    // [descriptions] is *not* thread safe.
+    std::unordered_map<std::string, std::string> descriptions;
   };
 
   Metrics() = default;
+
+  std::string fully_qualified_name(ComponentName component_name,
+                                   const std::string &metric_name) const;
 
   std::array<Component, kNumComponents> components_;
 };

@@ -65,8 +65,68 @@ TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
                  "metrics_test_executor_queue_depth", 17)();
 
   const std::string dump = metrics.dump_to_prometheus_string()();
-  expect_dump_contains(dump, "# TYPE metrics_test_executor_queue_depth gauge");
+  expect_dump_contains(
+      dump, "# TYPE executor_metrics_test_executor_queue_depth gauge");
   expect_dump_contains(dump, "executor_metrics_test_executor_queue_depth 17");
+}
+
+TEST_F(NewMetricsTest, DumpIncludesDescriptionForDescribedMetric)
+{
+  Metrics &metrics = Metrics::instance();
+
+  metrics.set_description(Metrics::ComponentName::kMempool,
+                          "metrics_test_described_mempool_depth",
+                          "Number of transactions waiting in the mempool");
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_described_mempool_depth", 42)();
+
+  const std::string dump = metrics.dump_to_prometheus_string()();
+  expect_dump_contains(dump,
+                       "# HELP mempool_metrics_test_described_mempool_depth "
+                       "Number of transactions "
+                       "waiting in the mempool");
+  expect_dump_contains(
+      dump, "# TYPE mempool_metrics_test_described_mempool_depth gauge");
+  expect_dump_contains(dump, "mempool_metrics_test_described_mempool_depth 42");
+}
+
+TEST_F(NewMetricsTest, DumpOmitsMissingDescription)
+{
+  Metrics &metrics = Metrics::instance();
+
+  metrics.record(Metrics::ComponentName::kDb,
+                 "metrics_test_unrecorded_db_snapshot_count", 5)();
+
+  const std::string dump = metrics.dump_to_prometheus_string()();
+  const std::vector<std::string_view> dump_lines = get_lines(dump);
+  EXPECT_FALSE(std::ranges::contains(
+      dump_lines, "# HELP db_metrics_test_unrecorded_db_snapshot_count "
+                  "Snapshots known to the "
+                  "database"))
+      << dump;
+  expect_dump_contains(
+      dump, "# TYPE db_metrics_test_unrecorded_db_snapshot_count gauge");
+  expect_dump_contains(dump, "db_metrics_test_unrecorded_db_snapshot_count 5");
+}
+
+TEST_F(NewMetricsTest, DumpOmitsDescriptionForUnrecordedMetric)
+{
+  Metrics &metrics = Metrics::instance();
+
+  metrics.set_description(Metrics::ComponentName::kDb,
+                          "metrics_test_unrecorded_db_snapshot_count",
+                          "Snapshots known to the database");
+
+  const std::string dump = metrics.dump_to_prometheus_string()();
+  const std::vector<std::string_view> dump_lines = get_lines(dump);
+  EXPECT_FALSE(std::ranges::contains(
+      dump_lines, "# HELP db_metrics_test_unrecorded_db_snapshot_count "
+                  "Snapshots known to the "
+                  "database"))
+      << dump;
+  EXPECT_FALSE(std::ranges::contains(
+      dump_lines, "# TYPE db_metrics_test_unrecorded_db_snapshot_count gauge"))
+      << dump;
 }
 
 TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
@@ -103,12 +163,19 @@ TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
 
 TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
 {
+  Metrics &metrics = Metrics::instance();
+  // We set the description before starting the HTTP server because accesses to
+  // the [descriptions] map are not thread safe. The HTTP server reads the
+  // descriptions map, so we want to avoid a race.
+  metrics.set_description(Metrics::ComponentName::kExecutor,
+                          "metrics_test_executor_queue_depth",
+                          "The executor queue length.");
+
   HttpServer server;
 
   add_health_metrics_routes(server);
   uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
 
-  Metrics &metrics = Metrics::instance();
   metrics.record(Metrics::ComponentName::kExecutor,
                  "metrics_test_executor_queue_depth", 17)();
 
@@ -118,7 +185,11 @@ TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
   EXPECT_NE(http_response.find("Content-Type: text/plain\r\n"),
             std::string::npos);
   EXPECT_NE(http_response.find(
-                "# TYPE metrics_test_executor_queue_depth gauge"),
+                "# HELP executor_metrics_test_executor_queue_depth The "
+                "executor queue length."),
+            std::string::npos);
+  EXPECT_NE(http_response.find(
+                "# TYPE executor_metrics_test_executor_queue_depth gauge"),
             std::string::npos);
   EXPECT_NE(http_response.find("executor_metrics_test_executor_queue_depth 17"),
             std::string::npos);

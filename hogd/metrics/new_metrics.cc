@@ -18,6 +18,13 @@ Metrics::instance()
   return metrics;
 }
 
+std::string
+Metrics::fully_qualified_name(Metrics::ComponentName component_name,
+                              const std::string &metric_name) const
+{
+  return std::format("{}_{}", component_name, metric_name);
+}
+
 x23::Async<std::string>
 Metrics::dump_to_prometheus_string()
 {
@@ -33,10 +40,21 @@ Metrics::dump_to_prometheus_string()
     }
 
     for (const auto &[name, metric] : tmp) {
+      auto it = component.descriptions.find(name);
+      if (it != component.descriptions.end()) {
+        os << std::format("# HELP {} {}\n",
+                          fully_qualified_name(static_cast<ComponentName>(i),
+                                               name),
+                          it->second);
+      }
       // We only support gauges for now but can easily expand this to other
       // types.
-      os << std::format("# TYPE {} gauge\n", name);
-      os << std::format("{}_{} {}\n", static_cast<ComponentName>(i), name,
+      os << std::format("# TYPE {} gauge\n",
+                        fully_qualified_name(static_cast<ComponentName>(i),
+                                             name));
+      os << std::format("{} {}\n",
+                        fully_qualified_name(static_cast<ComponentName>(i),
+                                             name),
                         metric.sample);
     }
   }
