@@ -20,47 +20,6 @@
 #include "x23/debug.h"
 
 namespace hogd {
-namespace {
-
-std::filesystem::path
-make_temp_path(const std::filesystem::path &path)
-{
-  static std::atomic<std::uint64_t> next_temp_file_id{0};
-  std::filesystem::path temp_path = path;
-  temp_path += std::format(".tmp.{}.{}", getpid(), next_temp_file_id++);
-  return temp_path;
-}
-
-void
-write_file_atomically(const std::filesystem::path &path,
-                      const std::string &contents)
-{
-  // Create the parent directories in [path] if they do not already exist.
-  std::error_code ec;
-  if (const std::filesystem::path parent_path = path.parent_path();
-      !parent_path.empty()) {
-    std::filesystem::create_directories(parent_path, ec);
-    CHECK(!ec);
-  }
-
-  const std::filesystem::path temp_path = make_temp_path(path);
-  {
-    std::ofstream out(temp_path);
-    if (!out) {
-      x23::panic("failed to open health temp file {}", temp_path.string());
-    }
-    out << contents << '\n';
-    if (!out) {
-      x23::panic("failed to write health temp file {}", temp_path.string());
-    }
-  }
-
-  ec.clear();
-  std::filesystem::rename(temp_path, path, ec);
-  CHECK(!ec);
-}
-
-} // namespace
 
 Health &
 Health::instance()
