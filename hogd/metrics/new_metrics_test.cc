@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <format>
+#include <stdint.h>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
 #include "hogd/metrics/new_metrics.h"
