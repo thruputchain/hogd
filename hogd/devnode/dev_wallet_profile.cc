@@ -1,11 +1,13 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 
 #include <format>
+#include <memory>
 #include <stdexcept>
 #include <string_view>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 
 namespace hogd {
 

@@ -22,8 +22,8 @@
 #include "built_contracts/contract_loader.h"
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
@@ -361,7 +361,8 @@ parse_args(int argc, char *argv[])
     options.bootstrap_config.dev_wallet_profile =
         std::move(*dev_wallet_profile_value);
   }
-  hogd::set_contract_artifact_directories(options.contract_artifact_directories);
+  hogd::set_contract_artifact_directories(
+      options.contract_artifact_directories);
   if (bootstrap_manifest_path.has_value()) {
     hogd::BootstrapManifestConfig manifest_config =
         hogd::load_bootstrap_manifest(*bootstrap_manifest_path);

@@ -987,11 +987,9 @@ TEST(HogDevnode, ContractArtifactDirectoryPrependsAndFallsBackToDefaults)
       std::filesystem::temp_directory_path() /
       std::format("hog-devnode-missing-contract-artifacts-{}-{}", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
-  HogDevnodeProcess process =
-      HogDevnodeProcess::start({"--contract-artifacts-dir",
-                                missing_dir.string(),
-                                "--dev-wallet-profile",
-                                "hog-devnode-default"});
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--contract-artifacts-dir", missing_dir.string(), "--dev-wallet-profile",
+       "hog-devnode-default"});
   Readiness readiness = process.wait_for_readiness();
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
