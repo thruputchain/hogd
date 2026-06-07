@@ -2,6 +2,7 @@ add_library(
   hog_devnode
   bootstrap_accounts.cc
   bootstrap_manifest.cc
+  dev_wallet_profile.cc
   hog_devnode_node.cc
   hog_devnode_tmp_dir.cc
   manifest_parse.cc

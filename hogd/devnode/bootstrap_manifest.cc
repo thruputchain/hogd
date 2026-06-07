@@ -23,6 +23,7 @@
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -39,7 +40,6 @@ constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
 // 5), this equality check generalizes into a lookup, and the per-profile rule
 // that benchmark profiles must pin `protocol` becomes mandatory.
 constexpr std::string_view kBootstrapProfile = "local-dev";
-constexpr std::string_view kDevWalletProfile = "hog-devnode-default";
 constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
 std::string
@@ -196,17 +196,20 @@ require_string_value(std::string_view actual, std::string_view expected,
 // blob the binary already has. In a non-dev backend the relationship
 // reverses — the manifest names the artifact bytes to deploy and the
 // backend verifies its deployed sha256 against the manifest's contentHash.
-void
+DevWalletProfile
 validate_dev_wallet_assertions(const json::Value &dev_wallet)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
-  require_string_value(require_string_field(dev_wallet, "profile", "devWallet"),
-                       kDevWalletProfile, "devWallet.profile");
+  std::string_view profile_name =
+      require_string_field(dev_wallet, "profile", "devWallet");
+  require_string_value(profile_name, kDefaultDevWalletProfile,
+                       "devWallet.profile");
+  DevWalletProfile profile = resolve_dev_wallet_profile(profile_name);
 
   if (std::optional<std::string_view> content_hash =
           optional_string_field(dev_wallet, "contentHash", "devWallet")) {
-    auto wallet_contract = wallet_meta::load_wasm();
+    auto wallet_contract = load_dev_wallet_contract(profile);
     CHECK(wallet_contract != nullptr);
     const std::string wallet_hash = hex_string(sha256(*wallet_contract));
     require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
@@ -225,6 +228,7 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
                          entrypoint_hex(wallet_meta::entrypoint<"do_action">()),
                          "devWallet.doActionEntrypoint");
   }
+  return profile;
 }
 
 } // namespace
@@ -266,7 +270,7 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     require_string_value(*protocol, version::kHogdProtocol(), "protocol");
   }
 
-  validate_dev_wallet_assertions(
+  DevWalletProfile dev_wallet_profile = validate_dev_wallet_assertions(
       require_object_field(*parsed, "devWallet", "root"));
   const json::Value &storage_cost_model =
       require_object_field(*parsed, "storageCostModel", "root");
@@ -297,6 +301,7 @@ load_bootstrap_manifest(std::filesystem::path const &path)
           parse_u64(std::string(require_string_field(
                         accounts, "initialStorageTokens", "bootstrapAccounts")),
                     "bootstrap manifest initialStorageTokens"),
+      .dev_wallet_profile = std::string(dev_wallet_profile.name),
   };
   return {
       .network_id = std::move(network_id),

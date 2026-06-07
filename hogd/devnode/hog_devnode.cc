@@ -17,9 +17,12 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "built_contracts/contract_loader.h"
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_parse.h"
@@ -149,6 +152,7 @@ struct HogDevnodeOptions {
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   hogd::BootstrapAccountConfig bootstrap_config;
+  std::vector<std::filesystem::path> contract_artifact_directories;
 };
 
 struct OptionSources {
@@ -156,6 +160,7 @@ struct OptionSources {
   bool dev_accounts = false;
   bool dev_account_seed = false;
   bool dev_account_tokens = false;
+  bool dev_wallet_profile = false;
 };
 
 void
@@ -172,8 +177,13 @@ Options:
                                  [default: 0]
   --readiness stdout             Emit one readiness JSON line on stdout
                                  [default: stdout]
+  --contract-artifacts-dir <dir> Search this directory before default contract
+                                 artifact locations. May be repeated.
+  --dev-wallet-profile <name>    Built-in dev wallet profile
+                                 [default: hog-devnode-default]
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
-                                 dev-account shorthand flags are conflicts.
+                                 dev-account and wallet shorthand flags
+                                 conflict.
   --dev-accounts <count>         Deterministic dev accounts to bootstrap
                                  [default: 0]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
@@ -238,9 +248,10 @@ reject_manifest_shorthand_conflicts(OptionSources const &sources)
     return;
   }
   if (sources.dev_accounts || sources.dev_account_seed ||
-      sources.dev_account_tokens) {
+      sources.dev_account_tokens || sources.dev_wallet_profile) {
     throw std::runtime_error(
-        "--bootstrap-manifest conflicts with dev-account shorthand flags");
+        "--bootstrap-manifest conflicts with dev-account and wallet shorthand "
+        "flags");
   }
 }
 
@@ -253,6 +264,7 @@ parse_args(int argc, char *argv[])
   std::optional<std::string> dev_accounts_value;
   std::optional<std::string> dev_account_seed_value;
   std::optional<std::string> dev_account_tokens_value;
+  std::optional<std::string> dev_wallet_profile_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -278,6 +290,24 @@ parse_args(int argc, char *argv[])
             std::format("Invalid readiness sink: {}", readiness));
       }
       options.readiness_sink = hogd::ReadinessSink::kStdout;
+      continue;
+    }
+    if (arg == "--contract-artifacts-dir" && i + 1 < argc) {
+      std::filesystem::path dir(argv[++i]);
+      if (dir.empty()) {
+        throw std::runtime_error(
+            "Invalid contract artifacts dir: path must not be empty");
+      }
+      options.contract_artifact_directories.push_back(std::move(dir));
+      continue;
+    }
+    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
+      if (sources.dev_wallet_profile) {
+        throw std::runtime_error(
+            "--dev-wallet-profile specified more than once");
+      }
+      sources.dev_wallet_profile = true;
+      dev_wallet_profile_value = argv[++i];
       continue;
     }
     if (arg == "--bootstrap-manifest" && i + 1 < argc) {
@@ -322,6 +352,16 @@ parse_args(int argc, char *argv[])
     options.bootstrap_config.storage_tokens =
         hogd::parse_u64(*dev_account_tokens_value, "dev account tokens");
   }
+  if (dev_wallet_profile_value.has_value()) {
+    if (dev_wallet_profile_value->empty()) {
+      throw std::runtime_error(
+          "Invalid dev wallet profile: profile must not be empty");
+    }
+    hogd::resolve_dev_wallet_profile(*dev_wallet_profile_value);
+    options.bootstrap_config.dev_wallet_profile =
+        std::move(*dev_wallet_profile_value);
+  }
+  hogd::set_contract_artifact_directories(options.contract_artifact_directories);
   if (bootstrap_manifest_path.has_value()) {
     hogd::BootstrapManifestConfig manifest_config =
         hogd::load_bootstrap_manifest(*bootstrap_manifest_path);
