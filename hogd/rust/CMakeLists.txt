@@ -84,10 +84,23 @@ if(RUST_TSAN)
     # panic=abort, so rebuild libstd with panic_abort. Without -Zbuild-std,
     # std's synchronization primitives stay precompiled-and-unsanitized and
     # TSAN false-flags any Rust-internal synchronization.
+    #
+    # --cfg=rustix_use_libc forces the `rustix` crate onto its libc backend
+    # instead of the Linux `linux_raw` backend it picks by default. wasmtime
+    # mmaps/munmaps compiled-code objects through rustix; with the raw backend
+    # those are inline `syscall` instructions that bypass TSAN's libc munmap
+    # interceptor, so freeing a code mmap never clears its shadow. When the
+    # kernel later hands the same virtual address to another worker thread's
+    # fresh compilation, TSAN reports a stale write/write race in
+    # finish_object (no happens-before across the unseen munmap/mmap reuse) —
+    # a false positive with no real shared memory. Routing through libc lets
+    # the interceptor clear shadow on free, eliminating the false positive
+    # while preserving detection of genuine races on that path.
     message(STATUS "RUST_TSAN=ON: enabling Rust ThreadSanitizer instrumentation")
     corrosion_add_target_rustflags(unified_lib
         "-Zsanitizer=thread"
-        "-Zexternal-clangrt")
+        "-Zexternal-clangrt"
+        "--cfg=rustix_use_libc")
     corrosion_set_cargo_flags(unified_lib
         "-Zbuild-std=std,panic_abort")
 endif()
