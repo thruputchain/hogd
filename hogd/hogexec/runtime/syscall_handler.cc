@@ -203,7 +203,9 @@ SystemCallHandler::perform_initial_validation()
         return std::unexpected(height.error());
       }
       if (tx_uniquifier_->block_expiry_height < *height + 1) {
-        replay_uniquifier_expired_ = true;
+        // The replay cache classifies an expired uniquifier as a replay
+        // conflict; reject the transaction with that same result.
+        early_reject_result_ = ExecResult::ExecResultTxNonDeterministicError;
         return {};
       }
     }
@@ -281,11 +283,11 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  // An expired replay uniquifier skips the body; try_commit_transaction()
-  // rejects it as the replay conflict the HogDB replay cache would produce
-  // (like a duplicate uniquifier, whose body does run but whose commit is
-  // rejected the same way).
-  if (replay_uniquifier_expired_) {
+  // A transaction rejected during initial validation (an expired replay
+  // uniquifier) skips the body; try_commit_transaction() returns the stored
+  // result. This mirrors a duplicate uniquifier, whose body does run but whose
+  // commit is rejected the same way.
+  if (early_reject_result_.has_value()) {
     return cumulative_invoke_result_;
   }
 
@@ -422,18 +424,16 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
 
-  // An expired replay uniquifier was detected during initial validation and the
-  // body never ran. Reject it the way the authoritative HogDB replay cache
-  // would
-  // -- as a replay conflict (ExecResultTxNonDeterministicError), not a
-  // ValidationFailure (propose() never returns ValidationFailure). The
-  // transaction is not included and consumes nothing.
-  if (replay_uniquifier_expired_) {
+  // The transaction was rejected during initial validation and the body never
+  // ran (an expired replay uniquifier, rejected as the replay conflict the
+  // HogDB replay cache would produce -- propose() never returns
+  // ValidationFailure). Abort and return that result; nothing is consumed.
+  if (early_reject_result_.has_value()) {
     auto res = abort_transaction();
     if (!res.has_value()) {
       return to_exec_result(res.error().code());
     }
-    return ExecResult::ExecResultTxNonDeterministicError;
+    return *early_reject_result_;
   }
 
   if (!cumulative_invoke_result_.is_root_success()) {

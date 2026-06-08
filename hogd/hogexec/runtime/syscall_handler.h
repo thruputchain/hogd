@@ -429,10 +429,13 @@ private:
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
-  // Set when the replay uniquifier is found expired during initial validation.
-  // The body is then skipped and try_commit_transaction() rejects the tx as the
-  // replay conflict the HogDB replay cache would produce (#2568).
-  bool replay_uniquifier_expired_{false};
+  // Set during initial validation when the transaction is rejected before the
+  // body runs (currently: an expired replay uniquifier, #2568). root_invoke()
+  // then skips the body and try_commit_transaction() returns this result
+  // directly -- it lets us reach outcomes (like
+  // ExecResultTxNonDeterministicError for a replay conflict) that the
+  // InvokeErrorCode-based cumulative result cannot express.
+  std::optional<ExecResult> early_reject_result_;
 
   StorageSnapshotCache &snapshot_cache_;
 
