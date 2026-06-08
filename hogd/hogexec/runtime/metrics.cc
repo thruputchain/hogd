@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "hogd/base/log.h"
+#include "hogd/metrics/new_metrics.h"
 #include "x23/fastclock.h"
 
 namespace hogd {

@@ -32,7 +32,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
-#include "hogd/base/string.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -198,7 +197,7 @@ using time_point = std::chrono::high_resolution_clock::time_point;
 time_point start;
 
 void
-dump_metrics(Database &db, Shared &shared)
+dump_metrics(Database &db)
 {
   if (!kDumpMetrics)
     return;
@@ -220,10 +219,10 @@ do_child(std::string_view path, Shared &shared)
   auto db = make_db(path, kKeys, kValueSize);
 
   db->register_metrics();
-  std::jthread _([&db, &shared](std::stop_token &&stoken) {
+  std::jthread _([&db](std::stop_token &&stoken) {
     while (!stoken.stop_requested()) {
       std::this_thread::sleep_for(1s); // NOLINT(misc-include-cleaner)
-      dump_metrics(*db, shared);
+      dump_metrics(*db);
     }
   });
 
