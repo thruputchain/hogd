@@ -863,7 +863,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "deployedCodeHash", ""),
             wallet_hash);
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
-            "built_contracts/dev_wallet.wasm");
+            "contracts/dev_wallet.wasm");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
             entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
@@ -906,6 +906,8 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.contains("Usage:"));
   EXPECT_TRUE(stdout_output.contains("--listen-host <ip>"));
+  EXPECT_TRUE(stdout_output.contains("--contract-artifacts-dir <dir>"));
+  EXPECT_TRUE(stdout_output.contains("--dev-wallet-profile <name>"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
@@ -955,6 +957,49 @@ TEST(HogDevnode,
   EXPECT_TRUE(stderr_output.contains("Invalid readiness sink: stderr"))
       << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, InvalidDevWalletProfilePrintsFriendlyUsageBeforeInitialization)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--dev-wallet-profile", "not-a-profile"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("unsupported dev wallet profile"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, ContractArtifactDirectoryPrependsAndFallsBackToDefaults)
+{
+  std::filesystem::path missing_dir =
+      std::filesystem::temp_directory_path() /
+      std::format("hog-devnode-missing-contract-artifacts-{}-{}", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--contract-artifacts-dir", missing_dir.string(), "--dev-wallet-profile",
+       "hog-devnode-default"});
+  Readiness readiness = process.wait_for_readiness();
+
+  const json::Value *bootstrap = readiness.manifest.find("bootstrap");
+  ASSERT_NE(bootstrap, nullptr);
+  const json::Value *dev_wallet = bootstrap->find("devWallet");
+  ASSERT_NE(dev_wallet, nullptr);
+  EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
+            "contracts/dev_wallet.wasm");
+
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
@@ -1100,7 +1145,7 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       R"("bootstrapAccounts":[],"bootstrap":{"devWallet":{)"
       R"("contentHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("deployedCodeHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
-      R"("artifactHint":"built_contracts/dev_wallet.wasm",)"
+      R"("artifactHint":"contracts/dev_wallet.wasm",)"
       R"("deployEntrypoint":"0x0000000000000000","doActionEntrypoint":"0x0000000000000000"},)"
       R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"

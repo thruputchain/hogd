@@ -8,6 +8,7 @@
 
 #include "genesis.hh"
 #include "hogd/base/types.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -19,6 +20,7 @@ struct BootstrapAccountConfig {
   std::uint32_t count = 0;
   std::string seed = "groundhog-dev-accounts";
   std::uint64_t storage_tokens = 1'000'000'000;
+  std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
 };
 
 struct BootstrapAccountMetadata {

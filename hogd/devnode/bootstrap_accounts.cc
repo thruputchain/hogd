@@ -13,6 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -60,8 +61,10 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
   CHECK_LE(config.count, kMaxBootstrapAccounts);
 
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  DevWalletProfile wallet_profile =
+      resolve_dev_wallet_profile(config.dev_wallet_profile);
 
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   CHECK(wallet_contract != nullptr);
   const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
 
