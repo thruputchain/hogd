@@ -153,6 +153,7 @@ add_dependencies(
   runtime_objects
   generate_syscall_inner_h
   generate_syscall_meta_h
+  generate_wasmtime_ffi_h
   protocol
 )
 
