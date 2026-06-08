@@ -13,6 +13,11 @@ namespace hogd {
 void
 HogexecMetrics::launch_log_worker()
 {
+  // Ensure the process-wide metrics registry outlives this singleton. The
+  // background worker records into it, and static destruction order is the
+  // reverse of first construction.
+  (void)Metrics::instance();
+
   auto &instance = get_instance();
   if (!instance.background_worker_.joinable()) {
     instance.background_worker_ = std::jthread([](std::stop_token stoken) {
@@ -68,6 +73,9 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
   while (!stoken.stop_requested()) {
     std::unique_lock g(cv_mutex_);
     cv_.wait_for(g, stoken, std::chrono::seconds(1), [] { return false; });
+    if (stoken.stop_requested()) {
+      break;
+    }
 
     auto new_snapshot = get_stats();
     auto delta = new_snapshot - snapshot;
