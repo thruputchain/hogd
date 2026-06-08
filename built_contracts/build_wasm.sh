@@ -42,8 +42,14 @@ export CARGO_NET_GIT_FETCH_WITH_CLI=true
 INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 
 # Build with groundhog-cli
-# Pass remaining args (e.g. -F features) through to cargo
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
+# Pass remaining args (e.g. -F features) through to cargo.
+# `--lib` restricts the build to the cdylib target. Contracts that also carry a
+# `src/main.rs` (the RV32 ELF bin wrapper) would otherwise have that bin compiled
+# by the default `cargo build`, and under `lto=true, codegen-units=1` building the
+# bin perturbs the shared lib compilation -- changing the cdylib's codegen (and
+# thus gas) for an unrelated target. `--lib` keeps the wasm output independent of
+# the RV32 scaffolding.
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline --lib "$@")
 
 # Parse output paths from JSON
 WASM_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.wasm')
