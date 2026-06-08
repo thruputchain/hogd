@@ -22,6 +22,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -123,7 +124,9 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
-  auto wallet_contract = wallet_meta::load_wasm();
+  DevWalletProfile wallet_profile =
+      resolve_dev_wallet_profile(node.bootstrap_config().dev_wallet_profile);
+  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   CHECK(wallet_contract != nullptr);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
@@ -177,7 +180,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
       w.object_field("devWallet", [&](json::Writer &w) {
         w.field("contentHash", hex_string(dev_wallet_hash));
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
-        w.field("artifactHint", "built_contracts/dev_wallet.wasm");
+        w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
                 entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
         w.field("doActionEntrypoint",

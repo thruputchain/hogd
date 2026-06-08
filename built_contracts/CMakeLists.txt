@@ -285,6 +285,14 @@ add_wasm_builds(
     nocontract_wallet
 )
 
+add_executable(contract_loader_test contract_loader_test.cc)
+target_link_libraries(contract_loader_test
+  contract_loader
+  GTest::gtest_main
+)
+add_dependencies(contract_loader_test all_wasms_built)
+gtest_discover_tests(contract_loader_test)
+
 # Build the spec contracts for RV32 (each gets a [[bin]] wrapper + .rv32a).
 #
 # A few contracts are intentionally excluded because they cannot be lowered to
