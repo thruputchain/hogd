@@ -95,6 +95,43 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
   return ExecResult::ExecResultUnrecoverable;
 }
 
+bool
+SystemCallHandler::replay_uniquifier_expired(
+    Uniquifier const &uniquifier, ContractAddress const &root_address,
+    BlockHeight executing_height)
+{
+  // The initial-token-claim precompile is exempt from the replay cache (it
+  // provides its own replay protection), so add_replay_nonce_delta consumes no
+  // uniquifier for it -- and an expiry check makes no sense here.
+  if (root_address == kInitialTokenClaimPrecompileAddress) {
+    return false;
+  }
+  // ReplayCacheLock rejects a uniquifier whose block_expiry_height is strictly
+  // less than the executing block's height.
+  return uniquifier.block_expiry_height < executing_height;
+}
+
+SystemStatus<bool>
+SystemCallHandler::replay_uniquifier_expired()
+{
+  // Only real transactions carry a uniquifier (the test-harness constructor
+  // leaves it empty).
+  if (!tx_uniquifier_.has_value()) {
+    return false;
+  }
+  assert(root_invoked_address_.has_value());
+  // The executing height is the parent tip's height + 1: HogDB's BlockTx
+  // executes at parent_tip.height + 1 (see RPCContext::open_block_tx_locked)
+  // and get_block_height() reads that parent tip. A tip-read failure is
+  // propagated.
+  auto height = get_block_height();
+  if (!height.has_value()) {
+    return std::unexpected(height.error());
+  }
+  return replay_uniquifier_expired(*tx_uniquifier_, *root_invoked_address_,
+                                   *height + 1);
+}
+
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
@@ -174,40 +211,23 @@ SystemCallHandler::perform_initial_validation()
   // Reject a transaction whose replay uniquifier has already expired before any
   // attached-contract verification or body execution runs (#2568). Without this
   // the body would run to completion and the transaction would only be rejected
-  // by the late replay-cache reservation. We don't classify the outcome here:
-  // the HogDB replay cache is the authoritative check and rejects an expired
-  // uniquifier as a replay conflict, so we just mark the transaction and let
-  // try_commit_transaction() produce that same
-  // ExecResultTxNonDeterministicError
-  // -- propose() never returns ValidationFailure. Marking it first (before the
-  // checks below) means an invalid attached contract can't change the outcome.
-  //
-  // Mirror add_replay_nonce_delta's guards: only real transactions carry a
-  // uniquifier, and the initial-token-claim precompile bypasses the replay
-  // cache entirely, so neither consumes -- nor needs an expiry gate for -- a
-  // uniquifier. tx_uniquifier_ and root_invoked_address_ are populated
-  // together.
-  if (tx_uniquifier_.has_value()) {
-    assert(root_invoked_address_.has_value());
-    if (*root_invoked_address_ != kInitialTokenClaimPrecompileAddress) {
-      // ReplayCacheLock rejects a uniquifier whose block_expiry_height is
-      // strictly less than the *executing* block's height. HogDB's BlockTx
-      // executes at parent_tip.height + 1 (see
-      // RPCContext::open_block_tx_locked), while get_block_height() reads that
-      // parent tip, so the executing height is +1. Matching that comparison
-      // here marks exactly the uniquifiers the late replay-cache reservation
-      // would reject -- only earlier. A db-tip read failure is a system error
-      // and is propagated to the caller, not dropped.
-      auto height = get_block_height();
-      if (!height.has_value()) {
-        return std::unexpected(height.error());
-      }
-      if (tx_uniquifier_->block_expiry_height < *height + 1) {
-        // The replay cache classifies an expired uniquifier as a replay
-        // conflict; reject the transaction with that same result.
-        early_reject_result_ = ExecResult::ExecResultTxNonDeterministicError;
-        return {};
-      }
+  // by the late replay-cache reservation. A db-tip read failure is a system
+  // error and is propagated to the caller, not dropped.
+  {
+    auto expired = replay_uniquifier_expired();
+    if (!expired.has_value()) {
+      return std::unexpected(expired.error());
+    }
+    if (*expired) {
+      // propose() rejects expired uniquifiers at its executor gate
+      // (ExecutorContext::run_propose_transaction) before root_invoke, so only
+      // the validation path reaches here -- where an expired uniquifier in a
+      // proposed block is a deterministic validation failure. (propose() never
+      // returns ValidationFailure.)
+      CHECK(std::holds_alternative<ValidationModeData>(execution_mode_data_));
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::ValidationFailure};
+      return {};
     }
   }
 
@@ -280,14 +300,6 @@ SystemCallHandler::root_invoke()
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
     check_final_validation_data();
-    return cumulative_invoke_result_;
-  }
-
-  // A transaction rejected during initial validation (an expired replay
-  // uniquifier) skips the body; try_commit_transaction() returns the stored
-  // result. This mirrors a duplicate uniquifier, whose body does run but whose
-  // commit is rejected the same way.
-  if (early_reject_result_.has_value()) {
     return cumulative_invoke_result_;
   }
 
@@ -423,18 +435,6 @@ ExecResult
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
-
-  // The transaction was rejected during initial validation and the body never
-  // ran (an expired replay uniquifier, rejected as the replay conflict the
-  // HogDB replay cache would produce -- propose() never returns
-  // ValidationFailure). Abort and return that result; nothing is consumed.
-  if (early_reject_result_.has_value()) {
-    auto res = abort_transaction();
-    if (!res.has_value()) {
-      return to_exec_result(res.error().code());
-    }
-    return *early_reject_result_;
-  }
 
   if (!cumulative_invoke_result_.is_root_success()) {
     auto error_code = cumulative_invoke_result_.result_.error().code();

@@ -30,6 +30,10 @@ enum TestFFIErrorCode {
   // A scalar argument violated a documented precondition (e.g. a negative
   // storage-token grant, which would persist an invalid native-token balance).
   kTestFFIErrorCodeInvalidArgument = 7,
+  // The transaction's replay uniquifier has already expired, so it is rejected
+  // before the body runs -- mirroring the executor's propose() gate. The HogDB
+  // replay cache would reject it as a conflict.
+  kTestFFIErrorCodeReplayUniquifierExpired = 8,
 };
 
 enum TestFFILogLevel {

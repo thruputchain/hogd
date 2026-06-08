@@ -69,6 +69,29 @@ SyscallHandlerContext::root_invoke()
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
+  // Drop a transaction whose replay uniquifier has already expired before
+  // running the body, mirroring the executor's propose() gate
+  // (ExecutorContext::run_propose_transaction). The handler runs in proposal
+  // mode and would otherwise trip a CHECK in perform_initial_validation() on an
+  // expired uniquifier; either way the replay cache would reject it as a
+  // conflict (#2568). Abort the transaction here so the handler can be closed
+  // cleanly without a second abort.
+  auto expired = handler_.replay_uniquifier_expired();
+  if (!expired.has_value()) {
+    error("root_invoke: failed to read db tip for replay-expiry check: {}",
+          expired.error());
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+  }
+  if (*expired) {
+    mark_committed_or_aborted();
+    if (auto abort_res = handler_.abort_transaction(); !abort_res.has_value()) {
+      error("root_invoke: failed to abort expired transaction: {}",
+            abort_res.error());
+      return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+    }
+    return kMakeFFIError(kTestFFIErrorCodeReplayUniquifierExpired);
+  }
+
   if (!push_context()) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }

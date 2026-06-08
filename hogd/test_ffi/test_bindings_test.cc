@@ -389,6 +389,39 @@ TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
   EXPECT_EQ(result.serialized_events.len, 0U);
 }
 
+// A transaction whose replay uniquifier has already expired is rejected before
+// the body runs, mirroring the executor's propose() gate (#2568).
+TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // The db is at execution height >= 1, so block_expiry_height 0 is already in
+  // the past -> the uniquifier is expired.
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = ContractAddress{0x42},
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 },
+             .uniquifier = {.block_expiry_height = 0, .nonce = 1}},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeReplayUniquifierExpired);
+}
+
 // Verify that root_invoke does NOT return events when the contract reverts
 TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
 {

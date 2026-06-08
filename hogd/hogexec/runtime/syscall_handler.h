@@ -381,6 +381,24 @@ public:
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
 
+  // True if the given replay uniquifier has already expired at the executing
+  // block height -- i.e. the HogDB replay cache would reject it as a conflict.
+  // Mirrors add_replay_nonce_delta's exemption for the initial-token-claim
+  // precompile (which consumes no replay nonce). The executor's propose() gate
+  // uses this (with a tip it reads itself) to drop expired transactions before
+  // constructing a handler.
+  static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
+                                        ContractAddress const &root_address,
+                                        BlockHeight executing_height);
+
+  // Whether this handler's transaction has an already-expired replay uniquifier
+  // (reads the db tip via get_block_height(); a tip-read failure is
+  // propagated). Returns false for the test-harness constructor (no
+  // uniquifier). Used by callers that hold a handler (the test FFI's propose
+  // path) to drop an expired transaction before root_invoke(), and by
+  // perform_initial_validation().
+  SystemStatus<bool> replay_uniquifier_expired();
+
   static auto force_commit_or_abort()
   {
     debug_force_commit_abort_ = true;
@@ -429,13 +447,6 @@ private:
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
-  // Set during initial validation when the transaction is rejected before the
-  // body runs (currently: an expired replay uniquifier, #2568). root_invoke()
-  // then skips the body and try_commit_transaction() returns this result
-  // directly -- it lets us reach outcomes (like
-  // ExecResultTxNonDeterministicError for a replay conflict) that the
-  // InvokeErrorCode-based cumulative result cannot express.
-  std::optional<ExecResult> early_reject_result_;
 
   StorageSnapshotCache &snapshot_cache_;
 

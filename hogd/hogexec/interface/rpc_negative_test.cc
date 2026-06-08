@@ -43,6 +43,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcNegativeTest : public ::testing::Test {
 public:
   void SetUp() override
@@ -180,6 +181,22 @@ protected:
                                  .nonce = 1},
     };
   }
+
+  // A transaction with the given replay-uniquifier expiry, rooted at an
+  // (undeployed) ordinary address.
+  static Transaction make_tx_with_expiry(BlockHeight expiry)
+  {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address =
+                           NativeContractTestFramework::make_contract_address(
+                               1),
+                       .entrypoint = entrypoint_from_method_id(0),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = {}},
+        .uniquifier = Uniquifier{.block_expiry_height = expiry, .nonce = 1},
+    };
+  }
 };
 
 //
@@ -253,6 +270,55 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
   auto result =
       client_.executorsched_propose_transaction(999999, Transaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
+}
+
+//
+// Expired replay uniquifier: propose() rejects it as a replay conflict before
+// the body runs (#2568). block_expiry_height 0 is already in the past at the
+// execution height (>= 1). propose() never returns ValidationFailure.
+//
+TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
+{
+  init_executor();
+
+  BlockID block_id = 1010;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, make_tx_with_expiry(/*expiry=*/0))
+                .result(),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+//
+// Expired replay uniquifier on the validation path: validate() rejects it as a
+// deterministic ValidationFailure (#2568).
+//
+TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
+{
+  init_executor();
+
+  BlockID block_id = 1011;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultOK);
+  auto db_res = db_client_.dbsched_create_snapshot(
+      0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+  open_event_block(block_id);
+
+  ProposedTransaction proposed_tx{
+      .signed_tx = SignedTransaction{.tx = make_tx_with_expiry(/*expiry=*/0)},
+      .nondeterministic_proposal_data = {},
+  };
+  EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
 }
 
 //
