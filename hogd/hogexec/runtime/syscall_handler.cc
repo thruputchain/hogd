@@ -172,14 +172,15 @@ SystemStatus<void>
 SystemCallHandler::perform_initial_validation()
 {
   // Reject a transaction whose replay uniquifier has already expired before any
-  // attached-contract verification or body execution runs (#2568). This is a
-  // deterministic envelope check: the HogDB replay cache remains the
-  // authoritative atomic consume at commit time, but without this an expired
-  // transaction's body would run to completion and only be rejected by the late
-  // replay-cache reservation. Done first, and with an early return, so the
-  // checks below cannot overwrite the ValidationFailure (an expired uniquifier
-  // combined with an invalid attached contract must still surface as
-  // ValidationFailure, not the contract-verification error).
+  // attached-contract verification or body execution runs (#2568). Without this
+  // the body would run to completion and the transaction would only be rejected
+  // by the late replay-cache reservation. We don't classify the outcome here:
+  // the HogDB replay cache is the authoritative check and rejects an expired
+  // uniquifier as a replay conflict, so we just mark the transaction and let
+  // try_commit_transaction() produce that same
+  // ExecResultTxNonDeterministicError
+  // -- propose() never returns ValidationFailure. Marking it first (before the
+  // checks below) means an invalid attached contract can't change the outcome.
   //
   // Mirror add_replay_nonce_delta's guards: only real transactions carry a
   // uniquifier, and the initial-token-claim precompile bypasses the replay
@@ -194,7 +195,7 @@ SystemCallHandler::perform_initial_validation()
       // executes at parent_tip.height + 1 (see
       // RPCContext::open_block_tx_locked), while get_block_height() reads that
       // parent tip, so the executing height is +1. Matching that comparison
-      // here rejects exactly the uniquifiers the late replay-cache reservation
+      // here marks exactly the uniquifiers the late replay-cache reservation
       // would reject -- only earlier. A db-tip read failure is a system error
       // and is propagated to the caller, not dropped.
       auto height = get_block_height();
@@ -202,8 +203,7 @@ SystemCallHandler::perform_initial_validation()
         return std::unexpected(height.error());
       }
       if (tx_uniquifier_->block_expiry_height < *height + 1) {
-        cumulative_invoke_result_.result_ =
-            InvokeError{InvokeErrorCode::ValidationFailure};
+        replay_uniquifier_expired_ = true;
         return {};
       }
     }
@@ -278,6 +278,14 @@ SystemCallHandler::root_invoke()
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
     check_final_validation_data();
+    return cumulative_invoke_result_;
+  }
+
+  // An expired replay uniquifier skips the body; try_commit_transaction()
+  // rejects it as the replay conflict the HogDB replay cache would produce
+  // (like a duplicate uniquifier, whose body does run but whose commit is
+  // rejected the same way).
+  if (replay_uniquifier_expired_) {
     return cumulative_invoke_result_;
   }
 
@@ -413,6 +421,21 @@ ExecResult
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
+
+  // An expired replay uniquifier was detected during initial validation and the
+  // body never ran. Reject it the way the authoritative HogDB replay cache
+  // would
+  // -- as a replay conflict (ExecResultTxNonDeterministicError), not a
+  // ValidationFailure (propose() never returns ValidationFailure). The
+  // transaction is not included and consumes nothing.
+  if (replay_uniquifier_expired_) {
+    auto res = abort_transaction();
+    if (!res.has_value()) {
+      return to_exec_result(res.error().code());
+    }
+    return ExecResult::ExecResultTxNonDeterministicError;
+  }
+
   if (!cumulative_invoke_result_.is_root_success()) {
     auto error_code = cumulative_invoke_result_.result_.error().code();
     if (error_code == InvokeErrorCode::Unrecoverable) {

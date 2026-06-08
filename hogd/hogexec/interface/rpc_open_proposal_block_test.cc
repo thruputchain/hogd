@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <format>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -34,6 +35,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcOpenProposalBlockTest : public ::testing::Test {
 public:
   void SetUp() override
@@ -170,15 +172,28 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
             ExecResult::ExecResultOK);
 
-  // An empty Transaction{} carries the default {0,0} uniquifier, which is
-  // already expired at the execution height. The executor's pre-body replay
-  // expiry gate rejects it as a deterministic validation failure before the
-  // root body runs, so it is not included (#2568). (Previously the body faulted
-  // first and the tx was rejected only by the late replay-cache reservation.)
+  // A transaction rooted at the undeployed zero address is never included, and
+  // propose() never returns a validation failure for it:
+  //   - with a non-expired uniquifier the body faults (no contract at the zero
+  //     address) and is recorded as a deterministic fault;
+  EXPECT_EQ(
+      client_
+          .executorsched_propose_transaction(
+              test_block_id,
+              Transaction{
+                  .uniquifier = {.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 1}})
+          .result(),
+      ExecResult::ExecResultTxDeterministicError);
+
+  //   - with the default {0,0} (expired) uniquifier the executor's pre-body
+  //     expiry gate rejects it as a replay conflict before the body even runs,
+  //     so it is not included (#2568).
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
-            ExecResult::ExecResultTxValidationFailure);
+            ExecResult::ExecResultTxNonDeterministicError);
 
   client_.executorsched_finish_block(test_block_id);
 

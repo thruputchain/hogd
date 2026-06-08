@@ -128,17 +128,21 @@ TEST_F(ReplayCacheIntegrationTest, DuplicateUniquifierRejected)
 TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejected)
 {
   // Advance so the current block height is strictly greater than 0; a
-  // uniquifier whose block_expiry_height is in the past is rejected as a
-  // deterministic input-validation failure before the body runs.
+  // uniquifier whose block_expiry_height is in the past is rejected. It is the
+  // same nondeterministic-conflict result the replay cache produces -- just
+  // reached before the body runs rather than after.
   advance_block();
   advance_block();
   EXPECT_EQ(run_and_commit(make_tx(0, /*nonce=*/9, /*expiry=*/0)),
-            ExecResult::ExecResultTxValidationFailure);
+            ExecResult::ExecResultTxNonDeterministicError);
 }
 
 // An expired uniquifier is rejected during initial validation, before the root
 // contract body can run. Previously the body executed and only the late
 // replay-cache reservation in try_commit_transaction rejected the tx (#2568).
+// root_invoke() reports success (the skipped body is a no-op); try_commit
+// rejects it as the replay conflict the cache would produce, exactly like a
+// duplicate uniquifier.
 TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
 {
   // Advance so expiry height 0 is already in the past.
@@ -148,21 +152,18 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
   auto handler =
       make_new_system_call_handler(make_tx(3, /*nonce=*/10, /*expiry=*/0),
                                    *ctx_);
-  auto root_res = handler.root_invoke();
-  EXPECT_FALSE(root_res.is_root_success());
+  handler.root_invoke();
   EXPECT_FALSE(body_ran_);
   EXPECT_EQ(handler.try_commit_transaction(),
-            ExecResult::ExecResultTxValidationFailure);
+            ExecResult::ExecResultTxNonDeterministicError);
 }
 
 // An expired uniquifier combined with an invalid attached contract is still
-// rejected as the deterministic ValidationFailure -- the expiry check runs
-// first and returns before attached-contract verification can overwrite the
-// result with its Deterministic fault (which would otherwise route through
-// commit_body_discarded and report a late replay-cache NonDeterministicError).
-// The body never runs either way (#2568).
+// rejected as the replay conflict, and the body never runs -- the expiry check
+// marks the transaction and returns before attached-contract verification can
+// change the outcome to its Deterministic fault (#2568).
 TEST_F(ReplayCacheIntegrationTest,
-       ExpiredHeightWithInvalidContractStillValidationFailure)
+       ExpiredHeightWithInvalidContractStillRejected)
 {
   advance_block();
   advance_block();
@@ -173,11 +174,10 @@ TEST_F(ReplayCacheIntegrationTest,
   tx.contracts_to_deploy.push_back(*make_native_contract(99));
 
   auto handler = make_new_system_call_handler(tx, *ctx_);
-  auto root_res = handler.root_invoke();
-  EXPECT_FALSE(root_res.is_root_success());
+  handler.root_invoke();
   EXPECT_FALSE(body_ran_);
   EXPECT_EQ(handler.try_commit_transaction(),
-            ExecResult::ExecResultTxValidationFailure);
+            ExecResult::ExecResultTxNonDeterministicError);
 }
 
 // A non-expired uniquifier (default max expiry) still runs the body and

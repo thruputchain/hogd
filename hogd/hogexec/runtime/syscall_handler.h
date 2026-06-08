@@ -429,6 +429,10 @@ private:
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
+  // Set when the replay uniquifier is found expired during initial validation.
+  // The body is then skipped and try_commit_transaction() rejects the tx as the
+  // replay conflict the HogDB replay cache would produce (#2568).
+  bool replay_uniquifier_expired_{false};
 
   StorageSnapshotCache &snapshot_cache_;
 
