@@ -16,17 +16,19 @@
 namespace hogd {
 
 // Regression test for #2544: a second try_commit_transaction() on the same
-// still-live handle used to re-enter SystemCallHandler::try_commit_transaction(),
-// which asserts !transaction_committed_or_aborted_ and terminated
-// assertion-enabled builds. The exported wrapper now consults its terminal flag
-// (test_bindings.cc:738) and rejects the repeat with a structured error.
+// still-live handle used to re-enter
+// SystemCallHandler::try_commit_transaction(), which asserts
+// !transaction_committed_or_aborted_ and terminated assertion-enabled builds.
+// The exported wrapper now consults its terminal flag (test_bindings.cc:738)
+// and rejects the repeat with a structured error.
 //
 // #2518's DoubleCommitTransactionReturnsErrorInsteadOfAsserting covers the same
 // guard via the mocked-frame path (make_mocked_handler + a finished root mock
 // frame). This is the symmetric coverage for the real-invocation path: a
 // deployed mock contract driven through an honest root_invoke() before the
 // duplicate commit, matching the originally reported reproduction.
-TEST(TestBindingsTest, DoubleTryCommitAfterRealRootInvokeReturnsErrorInsteadOfAsserting)
+TEST(TestBindingsTest,
+     DoubleTryCommitAfterRealRootInvokeReturnsErrorInsteadOfAsserting)
 {
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
