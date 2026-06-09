@@ -219,12 +219,12 @@ SystemCallHandler::perform_initial_validation()
       return std::unexpected(expired.error());
     }
     if (*expired) {
-      // propose() rejects expired uniquifiers at its executor gate
-      // (ExecutorContext::run_propose_transaction) before root_invoke, so only
-      // the validation path reaches here -- where an expired uniquifier in a
-      // proposed block is a deterministic validation failure. (propose() never
-      // returns ValidationFailure.)
-      CHECK(std::holds_alternative<ValidationModeData>(execution_mode_data_));
+      // An expired uniquifier is a deterministic, proposer-attributable
+      // rejection: map it to ValidationFailure uniformly in proposal and
+      // validation mode. In proposal mode this is only reachable when the
+      // scheduler tried to propose a transaction it should have already dropped
+      // -- try_commit_transaction() asserts (debug only) that any proposal-mode
+      // ValidationFailure is in fact a bad expiry height.
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
       return {};
@@ -300,6 +300,15 @@ SystemCallHandler::root_invoke()
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
     check_final_validation_data();
+    // The root invocation is terminally rejected before any frame ran (e.g. an
+    // expired uniquifier or a failed contract verification). Mark it
+    // finished/finalized so callers treat it as a completed-but-failed root: no
+    // further frames will start, get_most_recent_frame_output() reports a
+    // Fault, and try_commit_transaction() runs its failure path. The test FFI
+    // wrapper gates commit on last_frame_finished(), so this lets a rejected
+    // transaction surface its ExecResult via try_commit().
+    last_frame_finished_ = true;
+    finalized_ = true;
     return cumulative_invoke_result_;
   }
 
@@ -452,6 +461,27 @@ SystemCallHandler::try_commit_transaction()
     if (error_code == InvokeErrorCode::Deterministic ||
         error_code == InvokeErrorCode::OutOfGas) {
       return commit_body_discarded(to_exec_result(error_code));
+    }
+
+    // Proposal mode should never reject a transaction with a ValidationFailure
+    // except when its replay uniquifier was already expired: the scheduler must
+    // not have tried to propose such a transaction in the first place. Assert
+    // that (debug only) so a future proposal-mode validation failure can't slip
+    // through silently -- generalize this once proposal mode gains other ones.
+    //
+    // The tip re-read here cannot fail: reaching a proposal-mode
+    // ValidationFailure means perform_initial_validation() already read the tip
+    // successfully (a failed read there surfaces as Abandon/Unrecoverable, not
+    // ValidationFailure), which caches it in the snapshot cache. That cache is
+    // only released when it is recycled for a new block, which cannot happen
+    // during the synchronous root_invoke() -> try_commit_transaction() window.
+    // So require has_value().
+    if constexpr (is_debug_build()) {
+      if (error_code == InvokeErrorCode::ValidationFailure &&
+          std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+        auto expired = replay_uniquifier_expired();
+        CHECK(expired.has_value() && *expired);
+      }
     }
 
     // System / unrecoverable / validation errors: the transaction is not

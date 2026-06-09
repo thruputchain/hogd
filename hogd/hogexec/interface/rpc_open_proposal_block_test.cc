@@ -172,8 +172,7 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
             ExecResult::ExecResultOK);
 
-  // A transaction rooted at the undeployed zero address is never included, and
-  // propose() never returns a validation failure for it:
+  // A transaction rooted at the undeployed zero address is never included:
   //   - with a non-expired uniquifier the body faults (no contract at the zero
   //     address) and is recorded as a deterministic fault;
   EXPECT_EQ(
@@ -187,13 +186,15 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
           .result(),
       ExecResult::ExecResultTxDeterministicError);
 
-  //   - with the default {0,0} (expired) uniquifier the executor's pre-body
-  //     expiry gate rejects it as a replay conflict before the body even runs,
-  //     so it is not included (#2568).
+  //   - with the default {0,0} (expired) uniquifier the pre-body expiry check
+  //     rejects it before the body even runs, as an
+  //     ExecResultTxValidationFailure (the scheduler should not have proposed
+  //     it), so it is not included
+  //     (#2568).
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(test_block_id);
 

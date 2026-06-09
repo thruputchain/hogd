@@ -390,7 +390,8 @@ TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
 }
 
 // A transaction whose replay uniquifier has already expired is rejected before
-// the body runs, mirroring the executor's propose() gate (#2568).
+// the body runs (#2568) and surfaces as an ExecResultTxValidationFailure via
+// try_commit_transaction().
 TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
 {
   auto *db = make_db();
@@ -418,8 +419,19 @@ TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
   auto *syscall_handler = make_syscall_handler(db, rc, stx);
   x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
 
+  // root_invoke() rejects the expired uniquifier before running the body, so it
+  // returns a faulted (but non-error) result; try_commit_transaction() then
+  // surfaces the rejection as ExecResultTxValidationFailure.
   auto result = root_invoke(syscall_handler, 0);
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeReplayUniquifierExpired);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(result.serialized_output);
+  free_ffi_data_buffer(result.serialized_trace);
+  free_ffi_data_buffer(result.serialized_events);
+
+  auto commit = try_commit_transaction(syscall_handler);
+  EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(commit.result_code,
+            std::to_underlying(ExecResult::ExecResultTxValidationFailure));
 }
 
 // Verify that root_invoke does NOT return events when the contract reverts

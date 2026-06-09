@@ -273,9 +273,11 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
 }
 
 //
-// Expired replay uniquifier: propose() rejects it as a replay conflict before
-// the body runs (#2568). block_expiry_height 0 is already in the past at the
-// execution height (>= 1). propose() never returns ValidationFailure.
+// Expired replay uniquifier: propose() rejects it before the body runs as an
+// ExecResultTxValidationFailure (#2568). block_expiry_height 0 is already in
+// the past at the execution height (>= 1). The scheduler should not have tried
+// to propose an expired transaction; the executor asserts (debug only) that any
+// proposal-mode ValidationFailure is in fact a bad expiry height.
 //
 TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
 {
@@ -290,14 +292,14 @@ TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
                 .executorsched_propose_transaction(
                     block_id, make_tx_with_expiry(/*expiry=*/0))
                 .result(),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(block_id);
 }
 
 //
-// Expired replay uniquifier on the validation path: validate() rejects it as a
-// deterministic ValidationFailure (#2568).
+// Expired replay uniquifier on the validation path: validate() rejects it with
+// the same ExecResultTxValidationFailure before the body runs (#2568).
 //
 TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
 {

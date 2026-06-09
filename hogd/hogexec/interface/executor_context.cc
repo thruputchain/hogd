@@ -150,25 +150,6 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
-  // Drop a transaction whose replay uniquifier has already expired before
-  // running the body (#2568). The HogDB replay cache would reject it as a
-  // conflict, and propose() never returns a ValidationFailure -- so report it
-  // as ExecResultTxNonDeterministicError. The handler enforces, via a CHECK in
-  // perform_initial_validation(), that proposal mode never reaches root_invoke
-  // with an expired uniquifier.
-  {
-    auto tip = snapshot_cache_->try_get_db_tip();
-    if (!tip.has_value()) {
-      return ExecProposeResult(
-          SystemCallHandler::to_exec_result(tip.error().code()));
-    }
-    if (SystemCallHandler::replay_uniquifier_expired(
-            tx.uniquifier, tx.invocation.invoked_address,
-            tip.value()->height + 1)) {
-      return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
-    }
-  }
-
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
@@ -189,7 +170,8 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
   case ExecResult::ExecResultTxValidationFailure:
   case ExecResult::ExecResultSystemError:
   case ExecResult::ExecResultUnrecoverable:
-    // nothing to do
+    // nothing to do: a rejected transaction (e.g. an expired uniquifier, #2568,
+    // which surfaces as a ValidationFailure) is not included in the proposal.
     break;
   }
 
