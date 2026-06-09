@@ -214,10 +214,10 @@ private:
   uint64_t max_snapshot_end_lsn_{0};
 
   // periodically updated stats; registered in register_metrics().
-  struct Metrics {
+  struct DbMetrics {
     std::atomic<size_t> snap_bytes_out_;
   };
-  Metrics metrics_{};
+  DbMetrics metrics_{};
 
   // called when memory is low.
   void notify_low_mem();

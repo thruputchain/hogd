@@ -113,7 +113,6 @@ private:
   PerThreadCounter<size_t> failed_proposed_tx_count_;
   PerThreadCounter<uint64_t> gas_consumed_;
 
-  bool descriptions_registered_{false};
   std::jthread background_worker_;
   std::condition_variable_any cv_;
   std::mutex cv_mutex_;

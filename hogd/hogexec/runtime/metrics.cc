@@ -14,12 +14,7 @@ namespace hogd {
 void
 HogexecMetrics::launch_log_worker()
 {
-  // Ensure the process-wide metrics registry outlives this singleton. The
-  // background worker records into it, and static destruction order is the
-  // reverse of first construction.
-  (void)Metrics::instance();
-
-  auto &instance = get_instance();
+  HogexecMetrics &instance = get_instance();
   if (!instance.background_worker_.joinable()) {
     instance.background_worker_ = std::jthread([](std::stop_token stoken) {
       get_instance().background_worker(stoken);
@@ -45,15 +40,6 @@ HogexecMetrics::get_stats()
   snapshot.gas_consumed = gas_consumed_.get();
 
   Metrics &metrics = Metrics::instance();
-  if (!descriptions_registered_) {
-    metrics.set_description(Metrics::ComponentName::kExecutor,
-                            "successful_proposed_tx_count", "");
-    metrics.set_description(Metrics::ComponentName::kExecutor,
-                            "failed_proposed_tx_count", "");
-    metrics.set_description(Metrics::ComponentName::kExecutor, "gas_consumed",
-                            "");
-    descriptions_registered_ = true;
-  }
   metrics.record(Metrics::ComponentName::kExecutor,
                  "successful_proposed_tx_count",
                  snapshot.successful_proposed_tx_count)();

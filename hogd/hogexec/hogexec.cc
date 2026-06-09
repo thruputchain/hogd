@@ -27,6 +27,13 @@ int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
              int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
+  Metrics::instance().set_description(Metrics::ComponentName::kExecutor,
+                                      "successful_proposed_tx_count", "");
+  Metrics::instance().set_description(Metrics::ComponentName::kExecutor,
+                                      "failed_proposed_tx_count", "");
+  Metrics::instance().set_description(Metrics::ComponentName::kExecutor,
+                                      "gas_consumed", "");
+
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
