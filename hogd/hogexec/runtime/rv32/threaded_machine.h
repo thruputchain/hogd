@@ -131,7 +131,9 @@ inline std::vector<std::vector<uint8_t>> &
 memory_slot_pool()
 {
   // Reserved to the cap up front so release_memory_slot's push_back never
-  // allocates (keeps release noexcept).
+  // allocates. (release is still not declared noexcept: the analyzer can't
+  // prove the reserve held, and this thread_local's own first-time
+  // construction can throw -- though in practice acquire always runs first.)
   static thread_local std::vector<std::vector<uint8_t>> pool = [] {
     std::vector<std::vector<uint8_t>> p;
     p.reserve(kMemorySlotPoolCap);
@@ -154,7 +156,7 @@ acquire_memory_slot()
 }
 
 inline void
-release_memory_slot(std::vector<uint8_t> &&slot) noexcept
+release_memory_slot(std::vector<uint8_t> &&slot)
 {
   auto &pool = memory_slot_pool();
   if (pool.size() < kMemorySlotPoolCap) {
