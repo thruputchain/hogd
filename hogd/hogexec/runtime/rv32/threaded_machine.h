@@ -199,12 +199,19 @@ public:
 
   ThreadedMachine(ThreadedMachine &&) noexcept = default;
 
-  // capacity()==0 means this machine was moved from (vector move empties the
-  // source), so the buffer is owned -- and later released -- by the move
-  // target, not here.
+  // An empty memory_ means this machine was moved from, so the buffer is
+  // owned -- and later released -- by the move target, not here. The
+  // standard guarantees vector move *construction* leaves the source empty()
+  // (post-move capacity() would be unspecified), and move construction is
+  // the only move op here (assignment is suppressed by the const members);
+  // real machines always have non-empty memory_ (zero memory_bytes is
+  // rejected at artifact validation). The pool is thread_local, so a machine
+  // must be destroyed on its constructing thread while that thread is alive
+  // -- true for the per-invocation stack machines; do not give a machine
+  // static storage duration.
   ~ThreadedMachine()
   {
-    if (memory_.capacity() != 0) {
+    if (!memory_.empty()) {
       release_memory_slot(std::move(memory_));
     }
   }
