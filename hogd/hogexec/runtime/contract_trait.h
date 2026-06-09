@@ -205,6 +205,27 @@ public:
     return entrypoint;
   }
 
+  // Canonical Runtime::MethodID for the named entrypoint.
+  //
+  // When the generated trait exposes numeric `kEntrypoints` constants, those
+  // are the source of truth: the SDK derives them from the UTF-8 method-name
+  // preimages, so they are independent of the C++ ordinary execution character
+  // set (`-fexec-charset`). Re-deriving the id here by hashing
+  // `kTraitName`/`kVersion`/`Name` would instead hash implementation-defined
+  // ordinary-literal bytes, which can diverge across honest builds. See hogd
+  // issue #2579. (`kLookupIndex` only *matches* the requested name against
+  // `kExportNames` within a single translation unit, so the index it picks is
+  // charset-safe even though the names are ordinary literals.)
+  template<StringLiteral Name> static Runtime::MethodID method_id()
+  {
+    if constexpr (requires { ContractTrait::kEntrypoints; }) {
+      return ContractTrait::kEntrypoints[kLookupIndex<Name>];
+    }
+    else {
+      return sdk_method_id(entrypoint<Name>());
+    }
+  }
+
   template<StringLiteral Name, typename... Args>
   static Calldata make_calldata(Args const &...args) requires (
       std::same_as<
