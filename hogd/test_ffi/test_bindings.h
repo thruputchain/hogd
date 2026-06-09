@@ -12,6 +12,33 @@ extern "C" {
 #define TEST_FFI_VERSION_MINOR 17
 #define TEST_FFI_VERSION_PATCH 0
 
+// THREADING CONTRACT
+// ==================
+// The DB itself is thread-safe from a memory-safety standpoint: you may open
+// multiple handles against one `db` (create_db) -- syscall handlers, runtime
+// contexts -- and drive them from different threads without data races or
+// undefined behavior (the DB is clean under ThreadSanitizer).
+//
+// DB lifecycle operations are guarded, but not serialized. advance_new_block()
+// and free_db() are rejected (kTestFFIErrorCodeUnrecoverableError) while any
+// syscall handler derived from that DB is open -- for the handler's whole
+// lifetime, from the moment open_syscall_handler() / open_mocked_syscall_
+// handler() begins constructing it (so a concurrent advance cannot replace
+// state a half-built handler is borrowing) through close_syscall_handler(). If
+// a close fails to abort its transaction, the DB is poisoned: advance_new_block
+// is refused thereafter and the DB can only be freed. Beyond that guarding the
+// harness does not order your operations: running transactions or the setup_*
+// mutators (setup_create_contract, setup_deploy_contract, ...) concurrently
+// against the same DB leaves the *result* unspecified -- sequence them yourself
+// if you need a deterministic outcome.
+//
+// A single runtime context or syscall handler is stateful and is itself NOT
+// internally synchronized -- drive each individual handle from one thread at a
+// time. In particular, the mock-contract registry behind a runtime context is a
+// plain map with no lock, so calling register_new_contract() on one thread
+// while another thread resolves a mocked invocation through the *same* context
+// is a usage error, not a library bug.
+
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
   // Nullptr passed as an argument

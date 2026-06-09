@@ -82,6 +82,16 @@ public:
   }
   bool has_open_handlers() const { return open_handler_count_ > 0; }
 
+  // Poison the DB's lifecycle. Set when a handler close failed to confirm
+  // closure of its HogDB transaction (issue #2596): the open-handler guard has
+  // already been released by the handler's destruction, but an InvokeTX may
+  // still hold a BlockTX open, so advancing the block could drive the scheduler
+  // over orphaned transaction state. Once poisoned, advance_new_block() refuses
+  // to run; free_db() (full teardown) stays the only safe lifecycle operation.
+  // One-way and atomic to match open_handler_count_.
+  void poison_lifecycle() { lifecycle_poisoned_.store(true); }
+  bool is_lifecycle_poisoned() const { return lifecycle_poisoned_.load(); }
+
   x23::Async<std::optional<TxEventLog>>
   get_tx_event_log(EphemeralTxIdentifier identifier)
   {
@@ -130,6 +140,8 @@ private:
   // Atomic to match current_tx_id_ and stay race-free if handlers are created
   // or closed from different threads on the same DBContext.
   std::atomic<int> open_handler_count_ = 0;
+  // See poison_lifecycle().
+  std::atomic<bool> lifecycle_poisoned_ = false;
 };
 
 } // namespace hogd
