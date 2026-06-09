@@ -129,12 +129,13 @@ private:
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
 //
-// Warning: These prefixes are NOT included in the db hash.
+// Not every prefix type is included in the db hash: state-item prefixes (see
+// is_state_item) are folded into the consensus DbHash, while kHogAge and
+// kGlobalMetadata are not.
 //
-// Not every prefix type is included in the db hash.
-// These bytes are written verbatim as the first byte of persisted keys and
-// (for state items) folded into the consensus DbHash, so they must be fixed
-// protocol bytes. They use `u8'...'` character literals, whose value is the
+// Because these bytes are persisted verbatim as the first byte of each key --
+// and, for state items, hashed into consensus -- they must be fixed protocol
+// bytes. They use `u8'...'` character literals, whose value is the
 // standard-mandated UTF-8 code unit (== ASCII here) regardless of the ordinary
 // execution character set (`-fexec-charset`). An ordinary `'B'` would instead
 // take an implementation-defined value, so a build with e.g. an EBCDIC
