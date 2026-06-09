@@ -12,6 +12,29 @@ extern "C" {
 #define TEST_FFI_VERSION_MINOR 17
 #define TEST_FFI_VERSION_PATCH 0
 
+// THREADING CONTRACT
+// ==================
+// The DB itself is thread-safe from a memory-safety standpoint: you may open
+// multiple handles against one `db` (create_db) -- syscall handlers, runtime
+// contexts -- and drive them from different threads without data races or
+// undefined behavior (the DB is clean under ThreadSanitizer).
+//
+// What the DB does NOT do is serialize logical operations for you. Running
+// transactions, advancing blocks (advance_new_block), and the setup_* mutators
+// (setup_create_contract, setup_deploy_contract, ...) have unspecified ordering
+// when issued concurrently against the same DB, so the *result* is not
+// predictable: a handler whose borrowed snapshot is replaced by a concurrent
+// block advance, for example, may legitimately surface a structured error or
+// abort. If you need a deterministic outcome, sequence these operations
+// yourself; do not race them and expect a particular result.
+//
+// A single runtime context or syscall handler is stateful and is itself NOT
+// internally synchronized -- drive each individual handle from one thread at a
+// time. In particular, the mock-contract registry behind a runtime context is a
+// plain map with no lock, so calling register_new_contract() on one thread
+// while another thread resolves a mocked invocation through the *same* context
+// is a usage error, not a library bug.
+
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
   // Nullptr passed as an argument

@@ -54,7 +54,7 @@ SyscallHandlerContext::SyscallHandlerContext(
 }
 
 ForeignTracedInvokeResult
-SyscallHandlerContext::root_invoke()
+SyscallHandlerContext::root_invoke(bool enable_tracing)
 {
   if (is_mocked_handler_) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
@@ -67,6 +67,16 @@ SyscallHandlerContext::root_invoke()
   if (handler_.last_frame_finished()) {
     error("root_invoke called more than once on the same handler");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  // Enable tracing only after the guards above: enable_tracing() asserts the
+  // invocation-frame stack is empty, so it must run after the mocked-handler
+  // and re-invocation rejections (which can be reached with a frame already
+  // open on a mocked handler) rather than before them (issue #2601). A genuine
+  // non-mocked root invocation starts from an empty frame stack, so the assert
+  // still holds here.
+  if (enable_tracing) {
+    handler_.enable_tracing();
   }
 
   if (!push_context()) {
@@ -262,6 +272,19 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   if (handler_.last_frame_finished()) {
     error("unrecoverable: finish_mock_invocation_frame called after last frame "
           "finished");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  // A fresh mocked handler (or one whose frames have all been finished without
+  // last_frame_finished_ being set) has an empty mock_runtime_stack_. Calling
+  // finish here would reach pop_mock_runtime(), whose only empty-stack guard is
+  // a debug assert -- aborting Debug builds and reading vector::back() out of
+  // bounds in release. Reject the out-of-order finish with a structured error
+  // instead (issue #2589). mock_runtime_stack_ is the RAII record of frames the
+  // harness still owes a finish (see can_be_closed()).
+  if (mock_runtime_stack_.empty()) {
+    error("unrecoverable: finish_mock_invocation_frame called with no open "
+          "mock invocation frame");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 

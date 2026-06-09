@@ -601,10 +601,12 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-    if (enable_tracing) {
-      context->to_handler().enable_tracing();
-    }
-    auto res = context->root_invoke();
+    // Hand enable_tracing to root_invoke() rather than applying it here:
+    // SystemCallHandler::enable_tracing() asserts the invocation-frame stack is
+    // empty, but a mocked handler may already have a mock frame open. Enabling
+    // tracing before root_invoke()'s mocked-handler guard runs would trip that
+    // assert instead of returning the structured rejection (issue #2601).
+    auto res = context->root_invoke(enable_tracing);
     return res;
   } catch (std::exception const &e) {
     log_error("unrecoverable: unhandled error during root_invoke: {}", e);
@@ -946,8 +948,16 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   auto &dao = db_cast->get_base_db().get_db();
   auto res = dao.read_wasm_code(h);
   if (!res) {
-    error(
-        "Attempt to deploy contract that has not been created in the database");
+    // setup_deploy_contract() is noexcept and this guard runs before the
+    // try/catch below, so route the diagnostic through best_effort_log: a
+    // std::bad_alloc from error()'s allocating formatter would otherwise cross
+    // the noexcept boundary and terminate an honest caller instead of returning
+    // the structured missing-contract code (issue #2584, same pattern as
+    // #2559).
+    best_effort_log([] {
+      error("Attempt to deploy contract that has not been created in the "
+            "database");
+    });
     return kTestFFIErrorCodeDeployNonexistentContract;
   }
   Contract contract;

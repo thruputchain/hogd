@@ -68,7 +68,11 @@ public:
   SyscallHandlerContext(SyscallHandlerContext &&) = delete;
   SyscallHandlerContext &operator=(SystemCallHandler &&) = delete;
 
-  ForeignTracedInvokeResult root_invoke();
+  // enable_tracing turns on syscall tracing for this root invocation. It is
+  // applied inside root_invoke(), after the mocked-handler/re-invocation
+  // guards, so that SystemCallHandler::enable_tracing()'s empty-frame-stack
+  // assertion can never fire ahead of a structured rejection (issue #2601).
+  ForeignTracedInvokeResult root_invoke(bool enable_tracing);
 
   TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
                                                InvokeFlagSet invoke_flags);
