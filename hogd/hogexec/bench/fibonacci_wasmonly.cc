@@ -84,12 +84,11 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
                                  i]() -> uint64_t {
         auto runtime_context = make_hogexec_context();
         auto tx = SignedTransaction{
-            .tx = Transaction{
-                .invocation =
-                    fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
-                                                                 nfib),
-                .uniquifier = CommonBenchState::bench_uniquifier(
-                    base_height, static_cast<uint64_t>(i))}};
+            .tx = Transaction{.invocation =
+                                  fib_client.make_invocation<"slow_fibonacci">(
+                                      UINT64_MAX, nfib),
+                              .uniquifier = CommonBenchState::bench_uniquifier(
+                                  base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
         auto r = handler.root_invoke();
