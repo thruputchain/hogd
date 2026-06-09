@@ -36,7 +36,8 @@ TEST(TestBindingsTest, FailedCloseAfterBlockAdvancePoisonsDb)
   auto *db = db_res.db;
   auto *typed_db = static_cast<DBContext *>(db);
   // free_db() is the one lifecycle op that stays valid on a poisoned DB.
-  x23::Defer free_db_defer([db] { EXPECT_EQ(free_db(db), kTestFFIErrorCodeNone); });
+  x23::Defer free_db_defer(
+      [db] { EXPECT_EQ(free_db(db), kTestFFIErrorCodeNone); });
 
   auto *rc = make_runtime_context();
   ASSERT_NE(rc, nullptr);
