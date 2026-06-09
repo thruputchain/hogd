@@ -340,6 +340,83 @@ mod tests {
         assert_eq!(result, Ed25519Result::VerificationFailed);
     }
 
+    /// Build a signed (vk, sig, msg) triple from a fresh random key.
+    fn signed_triple(message: &'static [u8]) -> ([u8; 32], [u8; 64], &'static [u8]) {
+        let mut csprng = OsRng;
+        let mut seed = [0u8; 32];
+        csprng.fill_bytes(&mut seed);
+        let signing_key = SigningKey::from_bytes(&seed);
+        let vk: [u8; 32] = signing_key.verification_key().into();
+        let sig = signing_key.sign(message).to_bytes();
+        (vk, sig, message)
+    }
+
+    #[test]
+    fn test_ed25519_verify_batch_all_valid() {
+        let triples = [
+            signed_triple(b"batch message one"),
+            signed_triple(b"batch message two"),
+            signed_triple(b"batch message three"),
+        ];
+
+        let key_ptrs: Vec<*const [u8; 32]> =
+            triples.iter().map(|(vk, _, _)| vk as *const [u8; 32]).collect();
+        let sig_ptrs: Vec<*const [u8; 64]> =
+            triples.iter().map(|(_, sig, _)| sig as *const [u8; 64]).collect();
+        let spans: Vec<MessageSpan> = triples
+            .iter()
+            .map(|(_, _, msg)| MessageSpan {
+                message_ptr: msg.as_ptr(),
+                message_len: msg.len(),
+            })
+            .collect();
+
+        let result = unsafe {
+            ed25519_dalek_verify_batch(
+                key_ptrs.as_ptr(),
+                sig_ptrs.as_ptr(),
+                spans.as_ptr(),
+                triples.len(),
+            )
+        };
+
+        assert_eq!(result, Ed25519Result::Success);
+    }
+
+    #[test]
+    fn test_ed25519_verify_batch_one_invalid_fails() {
+        let mut triples = [
+            signed_triple(b"batch message one"),
+            signed_triple(b"batch message two"),
+            signed_triple(b"batch message three"),
+        ];
+        // Corrupt the second signature so the batch must fail.
+        triples[1].1[0] ^= 0xFF;
+
+        let key_ptrs: Vec<*const [u8; 32]> =
+            triples.iter().map(|(vk, _, _)| vk as *const [u8; 32]).collect();
+        let sig_ptrs: Vec<*const [u8; 64]> =
+            triples.iter().map(|(_, sig, _)| sig as *const [u8; 64]).collect();
+        let spans: Vec<MessageSpan> = triples
+            .iter()
+            .map(|(_, _, msg)| MessageSpan {
+                message_ptr: msg.as_ptr(),
+                message_len: msg.len(),
+            })
+            .collect();
+
+        let result = unsafe {
+            ed25519_dalek_verify_batch(
+                key_ptrs.as_ptr(),
+                sig_ptrs.as_ptr(),
+                spans.as_ptr(),
+                triples.len(),
+            )
+        };
+
+        assert_eq!(result, Ed25519Result::VerificationFailed);
+    }
+
     #[test]
     fn test_ed25519_sign_empty_message() {
         let mut csprng = OsRng;
