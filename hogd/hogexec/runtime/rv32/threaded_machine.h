@@ -812,20 +812,20 @@ op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 // jalr ra, %lo(t)). Because jalr's base is exactly the auipc result and nothing
 // sits between them, the target is PC-relative and *static*, so create() only
 // installs this when that target is in range (no per-execution range check
-// here). The fused slot packs both immediates (imm[31:12] = auipc's, imm[11:0]
-// = jalr's), rs1 = the auipc/jalr-base register (!= 0, written for
-// architectural visibility), rd = jalr's link register. The jalr slot keeps its
-// standalone handler as the branch-in fallback. Like jalr it ends the run, so
-// it enters the target run (gas for this run was pre-charged at its head).
+// here). The fused slot's imm holds the finished auipc result (head_pc + %hi,
+// static, precomputed by fuse_auipc_jalr); the jalr's already-sign-extended
+// 12-bit imm is read from the preserved tail slot, so the handler does no
+// hi/lo unpacking at run time. rs1 = the auipc/jalr-base register (!= 0,
+// written for architectural visibility), rd = jalr's link register. The jalr
+// slot keeps its standalone handler as the branch-in fallback. Like jalr it
+// ends the run, so it enters the target run (gas for this run was pre-charged
+// at its head).
 template<bool Trace>
 StepResult
 op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
               uint64_t gas)
 {
-  const uint32_t pc = pc_of(c, ip);
-  const uint32_t packed = bits_from_i32(ip->imm);
-  const uint32_t auipc_val = pc + (packed & 0xFFFFF000U);
-  const uint32_t jalr_imm = sign_extend<12>(packed & 0x00000FFFU);
+  const uint32_t auipc_val = bits_from_i32(ip->imm); // head_pc + %hi, static
   // auipc dest == jalr base; visible to the callee, so write it.
   c.m->regs_[ip->rs1] = auipc_val;
   if constexpr (Trace) {
@@ -833,8 +833,10 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
     c.m->pc_ = pc_of(c, ip + 1);
     c.m->obs_->on_retire(capture(c), StepResult::kContinue);
   }
-  const uint32_t target = (auipc_val + jalr_imm) & ~uint32_t{1};
-  c.m->regs_[ip->rd] = pc + (2 * kInstructionBytes); // link == pc_jalr + 4
+  const uint32_t target =
+      (auipc_val + bits_from_i32((ip + 1)->imm)) & ~uint32_t{1};
+  c.m->regs_[ip->rd] =
+      pc_of(c, ip) + (2 * kInstructionBytes); // link == pc_jalr + 4
   const Slot *next = c.base + (target / kInstructionBytes);
   HOGD_ENTER_RUN(c, next);
 }
@@ -1376,8 +1378,9 @@ fuse_auipc_jalr(const FusionCtx &f, Slot &s)
   s.handler = f.trace ? &op_auipc_jalr<true> : &op_auipc_jalr<false>;
   s.rd = static_cast<uint8_t>(f.tail.rd);  // link reg (x0 -> trash)
   s.rs1 = static_cast<uint8_t>(f.head.rd); // auipc dest == jalr base (!= 0)
-  s.imm = static_cast<int32_t>((bits_from_i32(f.head.imm) & 0xFFFFF000U) |
-                               (bits_from_i32(f.tail.imm) & 0x00000FFFU));
+  // The finished (static) auipc result; the handler reads the jalr's 12-bit
+  // imm from the preserved tail slot, so nothing else needs packing.
+  s.imm = static_cast<int32_t>(auipc_val);
   return true;
 }
 
