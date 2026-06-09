@@ -150,6 +150,13 @@ BlockManager::get_block_data(BlockID id)
   return it->second.block_data_;
 }
 
+BlockID
+BlockManager::committed_tip_id()
+{
+  std::shared_lock lock(mtx_);
+  return last_committed_id_;
+}
+
 bool
 BlockManager::add_child(BlockID parent_id, BlockID new_id,
                         BlockExecutionMode mode)

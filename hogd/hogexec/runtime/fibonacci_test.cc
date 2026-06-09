@@ -93,10 +93,10 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        client.make_invocation<"slow_fibonacci">(2000, 20U)}},
+            .tx = Transaction{.invocation =
+                                  client.make_invocation<"slow_fibonacci">(2000,
+                                                                           20U),
+                              .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());

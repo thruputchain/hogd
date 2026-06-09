@@ -5,10 +5,8 @@ edition = "2021"
 rust-version = "1.81"
 
 [dependencies]
-lru = { workspace = true }
 wasmtime = { workspace = true }
 common = {path = "../common"}
-libc = "0.2"
 synchronized_map = { path = "../synchronized_map" }
 groundhog-wasm-meter = { workspace = true }
 

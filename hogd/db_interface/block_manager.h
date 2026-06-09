@@ -38,6 +38,10 @@ public:
   // returns nullptr if id is not active
   std::shared_ptr<BlockState> get_block_data(BlockID id);
 
+  // The id of the most recently committed block -- the parent tip of any open
+  // child block.
+  BlockID committed_tip_id();
+
   // new_id should be a new, never-before-used ID.
   // returns true if new_id is successfully linked to the parent.
   // Otherwise the parent id is no longer a valid block to link to.

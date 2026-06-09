@@ -72,6 +72,14 @@ BUILD_DIR=$1
 ./metrics_history/scripts/make_metric_file.sh payments-bench-2 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 2 >metrics_history/metrics/payments-bench-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
+## payments_bench 10 accounts, rv32 contracts (same workload as payments-bench-10, RV32 runtime)
+./metrics_history/scripts/make_metric_file.sh payments-bench-rv32-10 $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 10 rv32 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## payments_bench 2 accounts, rv32 contracts (same workload as payments-bench-2, RV32 runtime)
+./metrics_history/scripts/make_metric_file.sh payments-bench-rv32-2 $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 2 rv32 >metrics_history/metrics/payments-bench-rv32-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
 ## tx size stats
 ./metrics_history/scripts/make_metric_file.sh tx-size-stats $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/txsize.sh $BUILD_DIR >metrics_history/metrics/tx-size-stats/$GIT_branch/${GIT_commit_time}_$GIT_commit

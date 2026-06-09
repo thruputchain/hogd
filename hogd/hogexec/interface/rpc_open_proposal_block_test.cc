@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <format>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -34,6 +35,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcOpenProposalBlockTest : public ::testing::Test {
 public:
   void SetUp() override
@@ -170,13 +172,29 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
             ExecResult::ExecResultOK);
 
-  // An empty Transaction{} faults (no contract at the zero address) and then
-  // cannot reserve its replay nonce (the zero address has no balance and the
-  // default {0,0} uniquifier is already expired), so it is not included.
+  // A transaction rooted at the undeployed zero address is never included:
+  //   - with a non-expired uniquifier the body faults (no contract at the zero
+  //     address) and is recorded as a deterministic fault;
+  EXPECT_EQ(
+      client_
+          .executorsched_propose_transaction(
+              test_block_id,
+              Transaction{
+                  .uniquifier = {.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 1}})
+          .result(),
+      ExecResult::ExecResultTxDeterministicError);
+
+  //   - with the default {0,0} (expired) uniquifier the pre-body expiry check
+  //     rejects it before the body even runs, as an
+  //     ExecResultTxValidationFailure (the scheduler should not have proposed
+  //     it), so it is not included
+  //     (#2568).
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(test_block_id);
 

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <limits>
 #include <map>
 #include <memory>
@@ -96,6 +97,43 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
   return ExecResult::ExecResultUnrecoverable;
 }
 
+bool
+SystemCallHandler::replay_uniquifier_expired(
+    Uniquifier const &uniquifier, ContractAddress const &root_address,
+    BlockHeight executing_height)
+{
+  // The initial-token-claim precompile is exempt from the replay cache (it
+  // provides its own replay protection), so add_replay_nonce_delta consumes no
+  // uniquifier for it -- and an expiry check makes no sense here.
+  if (root_address == kInitialTokenClaimPrecompileAddress) {
+    return false;
+  }
+  // ReplayCacheLock rejects a uniquifier whose block_expiry_height is strictly
+  // less than the executing block's height.
+  return uniquifier.block_expiry_height < executing_height;
+}
+
+SystemStatus<bool>
+SystemCallHandler::replay_uniquifier_expired()
+{
+  // Only real transactions carry a uniquifier (the test-harness constructor
+  // leaves it empty).
+  if (!tx_uniquifier_.has_value()) {
+    return false;
+  }
+  assert(root_invoked_address_.has_value());
+  // The executing height is the parent tip's height + 1: HogDB's BlockTx
+  // executes at parent_tip.height + 1 (see RPCContext::open_block_tx_locked)
+  // and get_block_height() reads that parent tip. A tip-read failure is
+  // propagated.
+  auto height = get_block_height();
+  if (!height.has_value()) {
+    return std::unexpected(height.error());
+  }
+  return replay_uniquifier_expired(*tx_uniquifier_, *root_invoked_address_,
+                                   *height + 1);
+}
+
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
@@ -169,9 +207,32 @@ SystemCallHandler::SystemCallHandler(
     snapshot_cache_(snapshot_cache)
 {}
 
-void
+SystemStatus<void>
 SystemCallHandler::perform_initial_validation()
 {
+  // Reject a transaction whose replay uniquifier has already expired before any
+  // attached-contract verification or body execution runs (#2568). Without this
+  // the body would run to completion and the transaction would only be rejected
+  // by the late replay-cache reservation. A db-tip read failure is a system
+  // error and is propagated to the caller, not dropped.
+  {
+    auto expired = replay_uniquifier_expired();
+    if (!expired.has_value()) {
+      return std::unexpected(expired.error());
+    }
+    if (*expired) {
+      // An expired uniquifier is a deterministic, proposer-attributable
+      // rejection: map it to ValidationFailure uniformly in proposal and
+      // validation mode. In proposal mode this is only reachable when the
+      // scheduler tried to propose a transaction it should have already dropped
+      // -- try_commit_transaction() asserts (debug only) that any proposal-mode
+      // ValidationFailure is in fact a bad expiry height.
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::ValidationFailure};
+      return {};
+    }
+  }
+
   // Validate the proposal data structure before execution begins.
   // This checks well-formedness (e.g. bit count matches byte count,
   // no entropy grinding via padding bits).
@@ -180,7 +241,7 @@ SystemCallHandler::perform_initial_validation()
     if (!validation_data.validate()) {
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
-      return;
+      return {};
     }
   }
 
@@ -204,9 +265,10 @@ SystemCallHandler::perform_initial_validation()
     if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ = InvokeError{res};
-      return;
+      return {};
     }
   }
+  return {};
 }
 
 void
@@ -231,11 +293,24 @@ SystemCallHandler::check_final_validation_data()
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  perform_initial_validation();
+  // A system error here (e.g. an unreadable db tip during the replay-expiry
+  // check) is surfaced as the corresponding invoke error rather than dropped.
+  if (auto res = perform_initial_validation(); !res.has_value()) {
+    cumulative_invoke_result_.result_ = res.error().to_invoke_error();
+  }
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
     check_final_validation_data();
+    // The root invocation is terminally rejected before any frame ran (e.g. an
+    // expired uniquifier or a failed contract verification). Mark it
+    // finished/finalized so callers treat it as a completed-but-failed root: no
+    // further frames will start, get_most_recent_frame_output() reports a
+    // Fault, and try_commit_transaction() runs its failure path. The test FFI
+    // wrapper gates commit on last_frame_finished(), so this lets a rejected
+    // transaction surface its ExecResult via try_commit().
+    last_frame_finished_ = true;
+    finalized_ = true;
     return cumulative_invoke_result_;
   }
 
@@ -371,6 +446,7 @@ ExecResult
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
+
   if (!cumulative_invoke_result_.is_root_success()) {
     auto error_code = cumulative_invoke_result_.result_.error().code();
     if (error_code == InvokeErrorCode::Unrecoverable) {
@@ -387,6 +463,27 @@ SystemCallHandler::try_commit_transaction()
     if (error_code == InvokeErrorCode::Deterministic ||
         error_code == InvokeErrorCode::OutOfGas) {
       return commit_body_discarded(to_exec_result(error_code));
+    }
+
+    // Proposal mode should never reject a transaction with a ValidationFailure
+    // except when its replay uniquifier was already expired: the scheduler must
+    // not have tried to propose such a transaction in the first place. Assert
+    // that (debug only) so a future proposal-mode validation failure can't slip
+    // through silently -- generalize this once proposal mode gains other ones.
+    //
+    // The tip re-read here cannot fail: reaching a proposal-mode
+    // ValidationFailure means perform_initial_validation() already read the tip
+    // successfully (a failed read there surfaces as Abandon/Unrecoverable, not
+    // ValidationFailure), which caches it in the snapshot cache. That cache is
+    // only released when it is recycled for a new block, which cannot happen
+    // during the synchronous root_invoke() -> try_commit_transaction() window.
+    // So require has_value().
+    if constexpr (is_debug_build()) {
+      if (error_code == InvokeErrorCode::ValidationFailure &&
+          std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+        auto expired = replay_uniquifier_expired();
+        CHECK(expired.has_value() && *expired);
+      }
     }
 
     // System / unrecoverable / validation errors: the transaction is not

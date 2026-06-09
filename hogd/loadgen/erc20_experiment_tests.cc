@@ -54,55 +54,74 @@ protected:
   std::unique_ptr<RuntimeContext> runtime_context_;
 
   void SetUp() override { runtime_context_ = make_hogexec_context(); }
-};
 
-TEST_F(ERC20ExperimentTest, Basic)
-{
-  auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_addresses = 10,
-  });
-  auto result = state->generate_experiment()();
-  ASSERT_TRUE(result.has_value());
+  // Runs the full erc20 payments experiment in-process: genesis deploy, the
+  // initialization/mint blocks, then 100 wallet-authorized transfer work txs.
+  // use_rv32 selects the rv32 vs wasm contract builds; the workload is
+  // otherwise identical, which is what makes the two runtimes comparable.
+  void run_payments_experiment(bool use_rv32)
+  {
+    auto state = std::make_shared<ERC20ExperimentState>(
+        ERC20PaymentsConfig{
+            .num_addresses = 10,
+        },
+        use_rv32);
+    auto result = state->generate_experiment()();
+    ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_configuration);
-  check_initial_balance();
+    run_genesis_initialization(result.value().genesis_configuration);
+    check_initial_balance();
 
-  for (auto &init_block : result.value().initialization_txs) {
-    for (auto &tx : init_block) {
+    for (auto &init_block : result.value().initialization_txs) {
+      for (auto &tx : init_block) {
+        check_uniquifier(tx.tx.uniquifier);
+        auto handler = make_new_system_call_handler(tx, *runtime_context_);
+        auto invoke_res = handler.root_invoke();
+        ASSERT_TRUE(invoke_res.is_root_success());
+        auto res = handler.try_commit_transaction();
+        ASSERT_TRUE(res == ExecResult::ExecResultOK);
+        ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      }
+
+      advance_block();
+    }
+
+    std::optional<GasAmount> gas_used;
+
+    LoadgenStatus<LoadgenExtension> work_txs_raw =
+        state->extend_experiment(100, 10)();
+    ASSERT_TRUE(work_txs_raw.has_value());
+
+    SignedTransactionBatch work_txs;
+    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+    ASSERT_EQ(work_txs.size(), 100);
+    for (auto &tx : work_txs) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
+      if (!gas_used) {
+        gas_used = invoke_res.gas_consumed_;
+      }
+      ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     }
-
-    advance_block();
   }
+};
 
-  std::optional<GasAmount> gas_used;
+TEST_F(ERC20ExperimentTest, Basic)
+{
+  run_payments_experiment(/*use_rv32=*/false);
+}
 
-  LoadgenStatus<LoadgenExtension> work_txs_raw =
-      state->extend_experiment(100, 10)();
-  ASSERT_TRUE(work_txs_raw.has_value());
-
-  SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
-  ASSERT_EQ(work_txs.size(), 100);
-  for (auto &tx : work_txs) {
-    check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
-    ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
-    ASSERT_TRUE(res == ExecResult::ExecResultOK);
-    if (!gas_used) {
-      gas_used = invoke_res.gas_consumed_;
-    }
-    ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
-  }
+// Same payments workload, but the erc20 and wallet contracts are the compiled
+// rv32 artifacts run through the RV32 runtime. Exercises the rv32 wallet
+// do_action -> ed25519 verify -> cross-call erc20 transfer path end to end.
+TEST_F(ERC20ExperimentTest, BasicRv32)
+{
+  run_payments_experiment(/*use_rv32=*/true);
 }
 
 TEST_F(ERC20ExperimentTest, BasicAuth)

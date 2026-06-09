@@ -129,22 +129,31 @@ private:
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
 //
-// Warning: These prefixes are NOT included in the db hash.
+// Not every prefix type is included in the db hash: state-item prefixes (see
+// is_state_item) are folded into the consensus DbHash, while kHogAge and
+// kGlobalMetadata are not.
 //
-// Not every prefix type is included in the db hash.
-enum class Prefix : char {
-  kHogAge = 'A',
-  kBalance = 'B',
-  kAddressAuthData = 'D',
-  kAddressMetadata = 'M',
-  kContractDataKey = 'K',
-  kWasmCode = 'C',
-  kWasmCodeRefcount = 'R',
-  kReplayCache = 'U',
-  kRetrocausalQueueBlock = 'Q',
+// Because these bytes are persisted verbatim as the first byte of each key --
+// and, for state items, hashed into consensus -- they must be fixed protocol
+// bytes. They use `u8'...'` character literals, whose value is the
+// standard-mandated UTF-8 code unit (== ASCII here) regardless of the ordinary
+// execution character set (`-fexec-charset`). An ordinary `'B'` would instead
+// take an implementation-defined value, so a build with e.g. an EBCDIC
+// execution charset would persist different bytes and hash differently. See
+// hogd issue #2600.
+enum class Prefix : uint8_t {
+  kHogAge = u8'A',
+  kBalance = u8'B',
+  kAddressAuthData = u8'D',
+  kAddressMetadata = u8'M',
+  kContractDataKey = u8'K',
+  kWasmCode = u8'C',
+  kWasmCodeRefcount = u8'R',
+  kReplayCache = u8'U',
+  kRetrocausalQueueBlock = u8'Q',
   // global info, like the db tip, have prefixes that begin with (and may
-  // extend) this character
-  kGlobalMetadata = '<',
+  // extend) this byte
+  kGlobalMetadata = u8'<',
 };
 
 // Warning: you may have to update this if you make changes to Prefix.

@@ -35,12 +35,13 @@ namespace {
 
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                 uint16_t coord_port, uint32_t num_accounts)
+                 uint16_t coord_port, uint32_t num_accounts, bool use_rv32)
     : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
-      num_accounts_(num_accounts)
+      num_accounts_(num_accounts), use_rv32_(use_rv32)
   {}
 
   const uint32_t num_accounts_;
+  const bool use_rv32_;
 
   // TODO(geoff): This benchmark will break down when we start tracking
   // uniquifiers within hogdb.  We need to somehow clean up the benchmark state
@@ -53,9 +54,11 @@ struct BenchmarkState : public CommonBenchState {
   {
     HogexecMetrics::launch_log_worker();
 
-    auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-        .num_addresses = num_accounts_,
-    });
+    auto exp = ERC20ExperimentState(
+        ERC20PaymentsConfig{
+            .num_addresses = num_accounts_,
+        },
+        use_rv32_);
     auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
@@ -181,14 +184,16 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 void
 run_payments_bench(std::vector<std::string> const &server_addrs,
                    uint32_t exec_port, uint32_t coord_port,
-                   uint32_t num_accounts)
+                   uint32_t num_accounts, bool use_rv32)
 {
+  info("payments bench using {} contracts", use_rv32 ? "rv32" : "wasm");
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
   size_t num_reps = 10;
   uint32_t num_total_txs =
       std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
-  BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts);
+  BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts,
+                    use_rv32);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
 
@@ -221,7 +226,7 @@ usage(char *argv[])
 {
   std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr, "
                "repeated (2 required)> -a "
-               "<num_accounts>",
+               "<num_accounts> [-r (use rv32 contracts)]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -237,10 +242,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::optional<int> coord_port;
   std::vector<std::string> server_addrs;
   std::optional<int> num_accounts;
+  bool use_rv32 = false;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:s:a:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:s:a:r")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);
@@ -254,6 +260,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'a':
       num_accounts = std::stoi(optarg);
       break;
+    case 'r':
+      use_rv32 = true;
+      break;
     default:
       usage(argv);
     }
@@ -264,8 +273,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port,
-                           *num_accounts);
+  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port, *num_accounts,
+                           use_rv32);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);

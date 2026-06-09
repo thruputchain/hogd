@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -123,7 +124,11 @@ public:
                     "Return type mismatch");
     }
 
-    Runtime::MethodID id = sdk_method_id(meta_t::template entrypoint<Name>());
+    // Key the native function table off the canonical method id (the generated
+    // numeric `kEntrypoints` constant when available) rather than re-hashing
+    // ordinary string literals, whose bytes depend on `-fexec-charset`. See
+    // hogd issue #2579.
+    Runtime::MethodID id = meta_t::template method_id<Name>();
 
     constexpr auto kFormat = meta_t::kSerializationFormat;
     add<kFormat>(id, std::forward<decltype(lambda)>(lambda));
@@ -230,17 +235,29 @@ public:
 
   template<is_contract_trait ContractTrait> bool check_methods()
   {
-    for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
-      ContractEntrypointID entrypoint =
-          sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                    ContractTrait::kVersion,
-                                    ContractTrait::kExportNames[i]);
-
-      if (!functions_.contains(sdk_method_id(entrypoint))) {
-        return false;
-      }
+    // Check against the canonical method ids (see `add`), not ids re-hashed
+    // from ordinary string literals; otherwise a divergent `-fexec-charset`
+    // build would spuriously fail this check rather than expose the real
+    // dispatch-key mismatch. See hogd issue #2579.
+    if constexpr (requires { ContractTrait::kEntrypoints; }) {
+      return std::ranges::all_of(ContractTrait::kEntrypoints,
+                                 [this](Runtime::MethodID id) {
+                                   return functions_.contains(id);
+                                 });
     }
-    return true;
+    else {
+      for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
+        ContractEntrypointID entrypoint =
+            sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                      ContractTrait::kVersion,
+                                      ContractTrait::kExportNames[i]);
+
+        if (!functions_.contains(sdk_method_id(entrypoint))) {
+          return false;
+        }
+      }
+      return true;
+    }
   }
 
   static InvokeError host_fn_error_conversion(HostFnError const &err)

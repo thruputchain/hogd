@@ -147,7 +147,10 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     return RPCError::kRPCBadBlockID;
 
   auto write_contract = [itx](Contract contract) {
-    assert(contract.contract_type() == ContractType::kWasmi);
+    // request_new_contract content-addresses and stores the whole Contract
+    // regardless of type; both wasm and rv32 contracts are deployed this way.
+    assert(contract.contract_type() == ContractType::kWasmi ||
+           contract.contract_type() == ContractType::kRv32);
     return itx->request_new_contract(std::move(contract));
   };
 
@@ -477,8 +480,18 @@ HogDBExecutorRpc::get_db_tip(BlockID block_id)
   if (!tip) {
     return ExpectedDBTip(to_rpc_error(tip.error()));
   }
-  // block_id is id of current block, not the parent id (tip->id)
-  assert(tip->id != block_id);
+  // block_id is the id of the current (open) block; the returned tip is its
+  // parent. If the tip *is* block_id, this block has itself been committed out
+  // from under the reader (e.g. it was advanced while a transaction handler
+  // still held this snapshot). Report that as a bad block id, the same way the
+  // staleness check above does. DatabaseProxy::get_db_tip already treats an
+  // id == block_id tip as a recoverable error on the client side, so this just
+  // moves that handling to the server and makes both build types agree -- the
+  // assert that used to live here crashed debug builds on a condition release
+  // already handled gracefully.
+  if (tip->id == block_id) [[unlikely]] {
+    return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
 
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);

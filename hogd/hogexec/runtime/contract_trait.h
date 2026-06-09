@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -193,6 +195,26 @@ public:
     return load_contract(ContractTrait::kWasmFile);
   }
 
+  // Loads the contract's compiled RV32 artifact (<name>.rv32a, derived from
+  // kWasmFile) as a kRv32 contract. The artifact filename mirrors the wasm one
+  // produced by the build, so no separate trait field is needed.
+  static std::shared_ptr<Contract> load_rv32() requires requires {
+    { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>;
+  }
+  {
+    constexpr std::string_view kWasmSuffix = ".wasm";
+    std::string_view wasm_file = ContractTrait::kWasmFile;
+    // kWasmFile must end in .wasm to derive the matching .rv32a name.
+    x23assert(wasm_file.ends_with(kWasmSuffix));
+    std::string rv32_file(
+        wasm_file.substr(0, wasm_file.size() - kWasmSuffix.size()));
+    rv32_file += ".rv32a";
+
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract() = load_contract_blob(rv32_file);
+    return contract;
+  }
+
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
     auto entrypoint =
@@ -203,6 +225,27 @@ public:
                 sdk_method_id(entrypoint));
     }
     return entrypoint;
+  }
+
+  // Canonical Runtime::MethodID for the named entrypoint.
+  //
+  // When the generated trait exposes numeric `kEntrypoints` constants, those
+  // are the source of truth: the SDK derives them from the UTF-8 method-name
+  // preimages, so they are independent of the C++ ordinary execution character
+  // set (`-fexec-charset`). Re-deriving the id here by hashing
+  // `kTraitName`/`kVersion`/`Name` would instead hash implementation-defined
+  // ordinary-literal bytes, which can diverge across honest builds. See hogd
+  // issue #2579. (`kLookupIndex` only *matches* the requested name against
+  // `kExportNames` within a single translation unit, so the index it picks is
+  // charset-safe even though the names are ordinary literals.)
+  template<StringLiteral Name> static Runtime::MethodID method_id()
+  {
+    if constexpr (requires { ContractTrait::kEntrypoints; }) {
+      return ContractTrait::kEntrypoints[kLookupIndex<Name>];
+    }
+    else {
+      return sdk_method_id(entrypoint<Name>());
+    }
   }
 
   template<StringLiteral Name, typename... Args>
