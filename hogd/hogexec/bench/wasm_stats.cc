@@ -12,7 +12,6 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 #include "hogd/hogexec/runtime/wasm/wasmtime_runtime.h"
 #include "hogd/init.h"
@@ -23,7 +22,10 @@ namespace hogd {
 
 namespace {
 
-// Load a WASM file from disk
+// Load a WASM file from disk. The contracts in built_contracts/ are already
+// instrumented at build time by groundhog-cli (they carry the
+// __groundhog_stack_limit export and embedded spec sections), so we measure the
+// deployed artifact as-is — the runtime verifies but does not re-instrument it.
 std::vector<uint8_t>
 load_wasm_file(std::string const &filename)
 {
@@ -44,14 +46,6 @@ load_wasm_file(std::string const &filename)
     }
   }
   std::fclose(f);
-
-  auto instrumented = InstrumentedBytes::instrument(contents);
-  if (!instrumented) {
-    throw std::runtime_error("Failed to instrument WASM file: " + filename);
-  }
-  contents.clear();
-  contents.insert(contents.end(), instrumented->data().begin(),
-                  instrumented->data().end());
 
   return contents;
 }
