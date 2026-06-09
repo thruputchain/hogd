@@ -277,6 +277,18 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
+# Compile the production rv32 objects with LTO so the final node link (the
+# exec/bench targets already set INTERPROCEDURAL_OPTIMIZATION on themselves)
+# can optimize across the interpreter/translation/syscall-bridge boundary.
+# Without this, only rv32_vm_bench measured the interpreter under LTO while the
+# node ran it without -- benchmark numbers didn't reflect production codegen.
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set_property(
+    TARGET rv32_isa_core rv32_vm rv32_syscall_bridge rv32_runtime_objects
+    PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE
+  )
+endif()
+
 if(BUILD_BENCHMARKS)
   wat2wasm_target(
     rv32_fibonacci_bench_wasm
