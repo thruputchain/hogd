@@ -307,3 +307,20 @@ if(CRASHDUMP_ON_TIMEOUT)
 endif()
 
 add_subdirectory(hogd)
+
+if(BUILD_BENCHMARKS)
+  # Aggregate target: build and run every in-process (server-free) benchmark in
+  # sequence -- `cmake --build build --target local_benchmarks`. These need no
+  # bench_server / coordinator, unlike payments_bench / fibonacci_*only.
+  add_custom_target(local_benchmarks
+    COMMAND $<TARGET_FILE:rv32_vm_bench>
+    COMMAND $<TARGET_FILE:payments_exec_bench>
+    COMMAND $<TARGET_FILE:erc20_experiment_bench>
+    USES_TERMINAL
+    VERBATIM
+    COMMENT "Running all local (in-process) benchmarks")
+  add_dependencies(local_benchmarks
+    rv32_vm_bench
+    payments_exec_bench
+    erc20_experiment_bench)
+endif()

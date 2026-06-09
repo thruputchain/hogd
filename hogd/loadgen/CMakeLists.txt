@@ -118,24 +118,30 @@ add_dependencies(
 )
 
 # in-process payments execution benchmark (wasm vs rv32), no servers needed
-add_executable(
-  payments_exec_bench
-  payments_exec_bench.cc
-)
-target_link_libraries(
-  payments_exec_bench
-  loadgen
-  hogd
-  protocol
-  runtime_test_util
-  runtime_test_lib
-  precompiles
-  gtest
-)
+if(BUILD_BENCHMARKS)
+  add_executable(
+    payments_exec_bench
+    payments_exec_bench.cc
+  )
+  target_link_libraries(
+    payments_exec_bench
+    loadgen
+    hogd
+    protocol
+    runtime_test_util
+    runtime_test_lib
+    precompiles
+    gtest
+    benchmark::benchmark
+  )
 
-add_dependencies(
-  payments_exec_bench
-  all_wasm_contracts
-  all_wasm_headers
-  all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a
-)
+  add_dependencies(
+    payments_exec_bench
+    all_wasm_contracts
+    all_wasm_headers
+    all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET payments_exec_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
