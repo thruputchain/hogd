@@ -283,8 +283,8 @@ publish_results() {
     echo 'failed to collect coordinator output; skipping summary metric file' >&2
   fi
 
-  echo 'commit metrics history updates'
-  "$REPO_ROOT/scripts/commit_metrics.sh"
+  #echo 'commit metrics history updates'
+  #"$REPO_ROOT/scripts/commit_metrics.sh"
   PUBLISHED_RESULTS=1
 }
 

@@ -76,18 +76,26 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
   fib_client_t fib_client(bs.contract_addr_);
   std::optional<uint64_t> gas_consumed;
 
+  // This experiment never commits, so the block height does not advance; a
+  // single base height keeps every tx's uniquifier unexpired (expiry >= height)
+  // so root_invoke's pre-body expiry gate admits it.
+  const auto base_height = bs.block_height();
+
   for (size_t nrep = 0; nrep < 10; nrep++) {
 
     auto start_time = std::chrono::steady_clock::now();
 
     for (int i = 0; i < num_txs; i++) {
-      auto f = exec_pool.submit([&bs, &fib_client, &nfib]() -> uint64_t {
+      auto f = exec_pool.submit([&bs, &fib_client, &nfib, base_height,
+                                 i]() -> uint64_t {
         auto runtime_context = make_hogexec_context();
         auto tx = SignedTransaction{
             .tx = Transaction{
                 .invocation =
                     fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
-                                                                 nfib)}};
+                                                                 nfib),
+                .uniquifier = CommonBenchState::bench_uniquifier(
+                    base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
         auto r = handler.root_invoke();
