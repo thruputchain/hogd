@@ -66,6 +66,10 @@ public:
     return pending_ecall_;
   }
 
+  // Writable on a mutable Machine so callers (e.g. the runtime staging an
+  // artifact's initial image, or a host writing syscall output) can mutate
+  // guest data memory directly; const Machines still expose a read-only view.
+  [[nodiscard]] std::span<uint8_t> memory() { return memory_; }
   [[nodiscard]] std::span<const uint8_t> memory() const { return memory_; }
   [[nodiscard]] MachineView view();
 
