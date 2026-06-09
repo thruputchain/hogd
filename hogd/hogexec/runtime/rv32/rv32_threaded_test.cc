@@ -255,8 +255,7 @@ TEST(Rv32Threaded, movedFromMachineDoesNotReleaseItsSlot)
                                        op(3, 1, 2, 0, 0)};
   auto program = threaded_from_words(words);
 
-  std::optional<ThreadedMachine> source(
-      ThreadedMachine(*program, /*gas=*/100));
+  std::optional<ThreadedMachine> source(ThreadedMachine(*program, /*gas=*/100));
   const uint8_t *buffer = source->memory().data();
   ThreadedMachine target(std::move(*source));
   // Destroying the moved-from machine must not return the buffer now owned

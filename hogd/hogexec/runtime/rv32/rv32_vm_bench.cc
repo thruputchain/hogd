@@ -823,10 +823,11 @@ bm_rv32_threaded_instantiate(benchmark::State &state)
     store_u32_le(bytes, i * kInstructionBytes, words[i]);
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
-  const auto program = ThreadedMachinePreInstantiation::create(
-                           bytes, initial_memory, kMaxMemoryBytes,
-                           /*trace=*/false)
-                           .value();
+  const auto program =
+      ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                              kMaxMemoryBytes,
+                                              /*trace=*/false)
+          .value();
   for (auto _ : state) {
     ThreadedMachine machine(program, kBenchGasLimit);
     machine.seed_method_id(1);
