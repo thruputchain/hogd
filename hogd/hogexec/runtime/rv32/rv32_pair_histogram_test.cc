@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -185,15 +186,25 @@ public:
     ++pairs_counted_;
   }
 
+  // A fall-through triple (a; b; c) with a and b straight-line. Surfaces 3-op
+  // fusion candidates (e.g. the rotate idiom srl; sll; or).
+  void add_triple(Op a, Op b, Op c) { ++triples_[{a, b, c}]; }
+
   [[nodiscard]] uint64_t instructions() const { return instructions_; }
   [[nodiscard]] uint64_t pairs_counted() const { return pairs_counted_; }
   [[nodiscard]] const std::map<std::pair<Op, Op>, PairCounts> &pairs() const
   {
     return pairs_;
   }
+  [[nodiscard]] const std::map<std::tuple<Op, Op, Op>, uint64_t> &
+  triples() const
+  {
+    return triples_;
+  }
 
 private:
   std::map<std::pair<Op, Op>, PairCounts> pairs_;
+  std::map<std::tuple<Op, Op, Op>, uint64_t> triples_;
   uint64_t instructions_ = 0;
   uint64_t pairs_counted_ = 0;
 };
@@ -222,6 +233,20 @@ print_histogram(std::string_view name, const PairHistogram &hist)
                 static_cast<unsigned long long>(counts.dep_rs1),
                 static_cast<unsigned long long>(counts.dep_rs2),
                 static_cast<unsigned long long>(counts.independent));
+  }
+
+  std::vector<std::pair<std::tuple<Op, Op, Op>, uint64_t>> trows(
+      hist.triples().begin(), hist.triples().end());
+  std::sort(trows.begin(), trows.end(),
+            [](const auto &a, const auto &b) { return a.second > b.second; });
+  std::printf("-- top fall-through triples (straight-line; straight-line; "
+              "any) --\n");
+  for (size_t i = 0; i < trows.size(); ++i) {
+    std::printf("  %-7s -> %-7s -> %-7s %12llu\n",
+                op_name(std::get<0>(trows[i].first)),
+                op_name(std::get<1>(trows[i].first)),
+                op_name(std::get<2>(trows[i].first)),
+                static_cast<unsigned long long>(trows[i].second));
   }
 }
 
@@ -276,6 +301,8 @@ private:
 
     const DecodedInstruction *prev = nullptr;
     uint32_t prev_pc = 0;
+    const DecodedInstruction *prev2 = nullptr;
+    uint32_t prev2_pc = 0;
 
     rv32::StepResult result = rv32::StepResult::kContinue;
     for (;;) {
@@ -294,6 +321,15 @@ private:
             is_fusable_first(prev->kind)) {
           hist_->add(prev->op, cur->op, classify_dep(*prev, *cur));
         }
+        // Fall-through triple (prev2; prev; cur) with prev2, prev straight-line.
+        if (prev2 != nullptr && prev != nullptr &&
+            pc == prev_pc + rv32::kInstructionBytes &&
+            prev_pc == prev2_pc + rv32::kInstructionBytes &&
+            is_fusable_first(prev2->kind) && is_fusable_first(prev->kind)) {
+          hist_->add_triple(prev2->op, prev->op, cur->op);
+        }
+        prev2 = prev;
+        prev2_pc = prev_pc;
         prev = cur;
         prev_pc = pc;
       }

@@ -784,6 +784,246 @@ op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
+// EXPERIMENT(fuse): lui (slot ip) + addi (slot ip+1) writing the same register
+// -- the canonical `li rd, imm32` macro (lui rd, %hi; addi rd, rd, %lo). The
+// fused slot's imm holds the full 32-bit constant; we materialize it in one
+// write and skip to ip+2. Both are non-barriers, so gas was pre-charged at the
+// run head and is unchanged. The addi slot keeps its standalone handler as the
+// branch-in fallback; the fused handler jumps to ip+2 and never re-enters it.
+template<bool Trace>
+StepResult
+op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  if constexpr (Trace) {
+    // Retire the lui as its own step so the trace is byte-identical to the
+    // unfused pair: lui writes the upper immediate (the full constant minus the
+    // addi's, recovered from the preserved addi slot at ip+1).
+    c.m->regs_[ip->rd] =
+        bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm);
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  c.m->regs_[ip->rd] = bits_from_i32(ip->imm); // full 32-bit constant
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// EXPERIMENT(fuse): auipc (slot ip) + jalr (slot ip+1) whose base register is
+// the auipc dest -- the canonical far-call/long-jump thunk (auipc t, %hi;
+// jalr ra, %lo(t)). Because jalr's base is exactly the auipc result and nothing
+// sits between them, the target is PC-relative and *static*, so create() only
+// installs this when that target is in range (no per-execution range check
+// here). The fused slot packs both immediates (imm[31:12] = auipc's, imm[11:0]
+// = jalr's), rs1 = the auipc/jalr-base register (!= 0, written for
+// architectural visibility), rd = jalr's link register. The jalr slot keeps its
+// standalone handler as the branch-in fallback. Like jalr it ends the run, so
+// it enters the target run (gas for this run was pre-charged at its head).
+template<bool Trace>
+StepResult
+op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+              uint64_t gas)
+{
+  const uint32_t pc = pc_of(c, ip);
+  const uint32_t packed = bits_from_i32(ip->imm);
+  const uint32_t auipc_val = pc + (packed & 0xFFFFF000U);
+  const uint32_t jalr_imm = sign_extend<12>(packed & 0x00000FFFU);
+  // auipc dest == jalr base; visible to the callee, so write it.
+  c.m->regs_[ip->rs1] = auipc_val;
+  if constexpr (Trace) {
+    c.m->gas_remaining_ = gas;
+    c.m->pc_ = pc_of(c, ip + 1);
+    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+  }
+  const uint32_t target = (auipc_val + jalr_imm) & ~uint32_t{1};
+  c.m->regs_[ip->rd] = pc + (2 * kInstructionBytes); // link == pc_jalr + 4
+  const Slot *next = c.base + (target / kInstructionBytes);
+  HOGD_ENTER_RUN(c, next);
+}
+
+// --- Generic two-op fused handlers --------------------------------------------
+//
+// These read each op's operands straight from its own slot -- op1 from ip, op2
+// from the preserved ip+1 -- so x0 remapping (baked into the slot indices) and
+// op2's data dependence on op1's dest just work, with no repacking. They retire
+// op1 as its own step in traced mode (capturing post-op1 state) so the observed
+// trace is byte-identical to the unfused pair. Imm{1,2} pick a slot's I-type
+// (immediate) vs R-type (rs2) second operand: an I-type slot carries the wide
+// `imm`, an R-type the {imm16, rs2} arm. Memory ops trap at their own pc
+// (op1 -> ip, op2 -> ip+1); op1's load/store fault check runs before op1
+// retires, op2's after.
+
+// Spill gas + retire op1 (a non-faulting head: alu/load-ok) as a kContinue step
+// landing at op2's pc, matching the unfused trace.
+#define HOGD_RETIRE_OP1(c, ip)                                                  \
+  do {                                                                         \
+    (c).m->gas_remaining_ = gas;                                              \
+    (c).m->pc_ = pc_of((c), (ip) + 1);                                        \
+    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                \
+  } while (0)
+
+// alu ; alu  (e.g. sll;or, addi;addi, addi;sll, srl;addi)
+template<bool Trace, uint32_t (*Fn1)(uint32_t, uint32_t), bool Imm1,
+         uint32_t (*Fn2)(uint32_t, uint32_t), bool Imm2>
+StepResult
+op_alu_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
+  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *op2 = ip + 1;
+  const uint32_t b2 = Imm2 ? bits_from_i32(op2->imm) : c.m->regs_[op2->rb.rs2];
+  c.m->regs_[op2->rd] = Fn2(c.m->regs_[op2->rs1], b2);
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// alu ; store  (e.g. addi;sw -- compute an address/value, then store). The
+// store can fault, terminal at its own pc (ip+1), after op1 has retired.
+template<bool Trace, uint32_t (*Fn1)(uint32_t, uint32_t), bool Imm1,
+         uint32_t Width>
+StepResult
+op_alu_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+             uint64_t gas)
+{
+  const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
+  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *st = ip + 1;
+  const uint32_t addr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, st, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
+                                                          gas);
+  }
+  le_store<Width>(mem, addr, c.m->regs_[st->rb.rs2]);
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// alu ; load  (e.g. addi;lw -- compute an address, then load). The load can
+// fault, terminal at its own pc (ip+1), after op1 has retired.
+template<bool Trace, uint32_t (*Fn1)(uint32_t, uint32_t), bool Imm1,
+         uint32_t Width, bool SignExtend>
+StepResult
+op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
+  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *ld = ip + 1;
+  const uint32_t addr = c.m->regs_[ld->rs1] + bits_from_i32(ld->imm);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ld, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ld, mem, memsize,
+                                                          gas);
+  }
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  c.m->regs_[ld->rd] = v;
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// store ; alu  (e.g. sw;addi -- store, then advance the pointer). The store
+// (op1) faults at its own pc (ip) before retiring; op2 is a plain ALU.
+template<bool Trace, uint32_t Width, uint32_t (*Fn2)(uint32_t, uint32_t),
+         bool Imm2>
+StepResult
+op_store_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+             uint64_t gas)
+{
+  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
+  if ((addr % Width) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
+  }
+  le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *op2 = ip + 1;
+  const uint32_t b2 = Imm2 ? bits_from_i32(op2->imm) : c.m->regs_[op2->rb.rs2];
+  c.m->regs_[op2->rd] = Fn2(c.m->regs_[op2->rs1], b2);
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// load ; store  (e.g. lw;sw -- word copy / memcpy body). Either can fault,
+// terminal at its own pc: the load at ip (before it retires), the store at
+// ip+1 (after).
+template<bool Trace, uint32_t LWidth, bool LSignExtend, uint32_t SWidth>
+StepResult
+op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+              uint64_t gas)
+{
+  const uint32_t laddr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  if ((laddr % LWidth) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<LWidth>(memsize, laddr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                          gas);
+  }
+  uint32_t v = le_load<LWidth>(mem, laddr);
+  if constexpr (LSignExtend) {
+    v = sign_extend<LWidth * 8>(v);
+  }
+  c.m->regs_[ip->rd] = v;
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *st = ip + 1;
+  const uint32_t saddr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
+  if ((saddr % SWidth) != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, st, mem,
+                                                                 memsize, gas);
+  }
+  if (!memory_range_in_bounds<SWidth>(memsize, saddr)) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
+                                                          gas);
+  }
+  le_store<SWidth>(mem, saddr, c.m->regs_[st->rb.rs2]);
+  HOGD_THREAD_NEXT(c, ip + 2);
+}
+
+// alu ; conditional branch  (e.g. addi;bltu -- loop induction + bound check).
+// op2 is a barrier: it ends the run, entering the taken target or the
+// fall-through. create() only fuses when the branch target is in range, so
+// br->rb.imm16 is the resolved slot delta (as for op_branch).
+template<bool Trace, uint32_t (*Fn1)(uint32_t, uint32_t), bool Imm1,
+         bool (*Cmp)(uint32_t, uint32_t)>
+StepResult
+op_alu_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+              uint64_t gas)
+{
+  const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
+  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  if constexpr (Trace) {
+    HOGD_RETIRE_OP1(c, ip);
+  }
+  const Slot *br = ip + 1;
+  if (!Cmp(c.m->regs_[br->rs1], c.m->regs_[br->rb.rs2])) {
+    HOGD_ENTER_RUN(c, ip + 2); // not taken: past the branch
+  }
+  const Slot *next = br + br->rb.imm16; // taken: resolved target delta from br
+  HOGD_ENTER_RUN(c, next);
+}
+
 // op_ecall suspends: it advances pc, stashes the args, and yields
 // StepResult::kEcall. The ecall's instruction gas was charged at the run head
 // (enter_run); on resume, execution re-enters at the post-ecall instruction --
@@ -1082,6 +1322,292 @@ fits_int16(int32_t v)
          v <= std::numeric_limits<int16_t>::max();
 }
 
+// ---- Fusion rules -----------------------------------------------------------
+//
+// Instead of an if-else ladder in create(), each fusible pattern is a small
+// rule. A rule inspects the head (slot i) and tail (slot i+1) instructions and,
+// if they form a fusible pair, installs a fused handler on `s` (the head slot,
+// already carrying the head's decoded fields) -- overwriting its handler and,
+// where needed, repacking its operands -- and returns true. The tail slot keeps
+// its standalone handler as the branch-in fallback; the fused handler jumps
+// straight to ip+2 (or a branch/jump target) and never re-enters the tail, so
+// gas (pre-charged per run) is unchanged. create() tries the rules in order and
+// stops at the first match. Adding a fusion = adding a handler plus a rule to
+// kFusionRules. The head ops are disjoint per rule (lui / auipc / lw / ...), or
+// the rules differ on the tail, so first-match-wins needs no priority tuning.
+struct FusionCtx {
+  const Instr &head;              // slot i
+  const Instr &tail;              // slot i+1
+  uint32_t head_pc;              // head's byte pc (auipc+jalr target math)
+  const ThreadedProgram &program; // PC-relative target range checks
+  bool trace;
+};
+using FusionRule = bool (*)(const FusionCtx &, Slot &);
+
+// lui rd, %hi ; addi rd, rd, %lo  ->  li rd, imm32.
+inline bool
+fuse_lui_addi(const FusionCtx &f, Slot &s)
+{
+  if (f.head.op != Op::kLui || f.tail.op != Op::kAddi || f.head.rd == 0 ||
+      f.tail.rd != f.head.rd || f.tail.rs1 != f.head.rd) {
+    return false;
+  }
+  s.handler = f.trace ? &op_lui_addi<true> : &op_lui_addi<false>;
+  s.imm = static_cast<int32_t>(bits_from_i32(f.head.imm) +
+                               bits_from_i32(f.tail.imm));
+  return true;
+}
+
+// auipc t, %hi ; jalr ra, %lo(t)  ->  static far call. Only when the (static)
+// target is in range, so op_auipc_jalr needs no per-execution range check.
+inline bool
+fuse_auipc_jalr(const FusionCtx &f, Slot &s)
+{
+  if (f.head.op != Op::kAuipc || f.tail.op != Op::kJalr || f.head.rd == 0 ||
+      f.tail.rs1 != f.head.rd) {
+    return false;
+  }
+  const uint32_t auipc_val = f.head_pc + bits_from_i32(f.head.imm);
+  const uint32_t target =
+      (auipc_val + bits_from_i32(f.tail.imm)) & ~uint32_t{1};
+  if (!f.program.contains_pc(target)) {
+    return false;
+  }
+  s.handler = f.trace ? &op_auipc_jalr<true> : &op_auipc_jalr<false>;
+  s.rd = static_cast<uint8_t>(f.tail.rd);  // link reg (x0 -> trash)
+  s.rs1 = static_cast<uint8_t>(f.head.rd); // auipc dest == jalr base (!= 0)
+  s.imm = static_cast<int32_t>((bits_from_i32(f.head.imm) & 0xFFFFF000U) |
+                               (bits_from_i32(f.tail.imm) & 0x00000FFFU));
+  return true;
+}
+
+// lw rd, off(rs1) ; <fusible ALU consuming rd>  ->  load+use.
+inline bool
+fuse_load_use(const FusionCtx &f, Slot &s)
+{
+  const Instr &ld = f.head;
+  const Instr &alu = f.tail;
+  if (ld.rd == 0) {
+    return false;
+  }
+  const bool rs1_match = alu.rs1 == ld.rd;
+  const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
+  if (!rs1_match && !rs2_match) {
+    return false;
+  }
+  const Handler fused =
+      f.trace ? fused_load_handler<true>(ld.op, alu.op, rs1_match)
+              : fused_load_handler<false>(ld.op, alu.op, rs1_match);
+  if (fused == nullptr) {
+    return false;
+  }
+  s.handler = fused;
+  return true;
+}
+
+// <alu> ; <alu> : two adjacent straight-line ALU ops. Curated high-value pairs
+// (the shift/serialize and address-math idioms the histogram surfaced); nullptr
+// for anything else. No register condition -- op2 reads the regs op1 just wrote.
+template<bool Trace>
+Handler
+alu_alu_handler(Op op1, Op op2)
+{
+  if (op1 == Op::kSll && op2 == Op::kOr) { // shift-or combine
+    return &op_alu_alu<Trace, sll_op, false, or_op, false>;
+  }
+  if (op1 == Op::kAddi && op2 == Op::kAddi) { // back-to-back address math
+    return &op_alu_alu<Trace, add_op, true, add_op, true>;
+  }
+  if (op1 == Op::kAddi && op2 == Op::kSll) { // offset then scale
+    return &op_alu_alu<Trace, add_op, true, sll_op, false>;
+  }
+  if (op1 == Op::kSrl && op2 == Op::kAddi) { // shift then offset
+    return &op_alu_alu<Trace, srl_op, false, add_op, true>;
+  }
+  return nullptr;
+}
+
+inline bool
+fuse_alu_alu(const FusionCtx &f, Slot &s)
+{
+  const Handler h = f.trace ? alu_alu_handler<true>(f.head.op, f.tail.op)
+                            : alu_alu_handler<false>(f.head.op, f.tail.op);
+  if (h == nullptr) {
+    return false;
+  }
+  s.handler = h;
+  return true;
+}
+
+// addi ; store : compute an address/value, then store it.
+template<bool Trace>
+Handler
+alu_store_handler(Op alu, Op store)
+{
+  if (alu != Op::kAddi) {
+    return nullptr;
+  }
+  switch (store) {
+  case Op::kSb:
+    return &op_alu_store<Trace, add_op, true, 1>;
+  case Op::kSh:
+    return &op_alu_store<Trace, add_op, true, 2>;
+  case Op::kSw:
+    return &op_alu_store<Trace, add_op, true, 4>;
+  default:
+    return nullptr;
+  }
+}
+
+inline bool
+fuse_alu_store(const FusionCtx &f, Slot &s)
+{
+  const Handler h = f.trace ? alu_store_handler<true>(f.head.op, f.tail.op)
+                            : alu_store_handler<false>(f.head.op, f.tail.op);
+  if (h == nullptr) {
+    return false;
+  }
+  s.handler = h;
+  return true;
+}
+
+// addi ; load : compute an address, then load from it.
+template<bool Trace>
+Handler
+alu_load_handler(Op alu, Op load)
+{
+  if (alu != Op::kAddi) {
+    return nullptr;
+  }
+  switch (load) {
+  case Op::kLb:
+    return &op_alu_load<Trace, add_op, true, 1, true>;
+  case Op::kLh:
+    return &op_alu_load<Trace, add_op, true, 2, true>;
+  case Op::kLw:
+    return &op_alu_load<Trace, add_op, true, 4, false>;
+  case Op::kLbu:
+    return &op_alu_load<Trace, add_op, true, 1, false>;
+  case Op::kLhu:
+    return &op_alu_load<Trace, add_op, true, 2, false>;
+  default:
+    return nullptr;
+  }
+}
+
+inline bool
+fuse_alu_load(const FusionCtx &f, Slot &s)
+{
+  const Handler h = f.trace ? alu_load_handler<true>(f.head.op, f.tail.op)
+                            : alu_load_handler<false>(f.head.op, f.tail.op);
+  if (h == nullptr) {
+    return false;
+  }
+  s.handler = h;
+  return true;
+}
+
+// store ; addi : store, then advance the pointer.
+template<bool Trace>
+Handler
+store_alu_handler(Op store, Op alu)
+{
+  if (alu != Op::kAddi) {
+    return nullptr;
+  }
+  switch (store) {
+  case Op::kSb:
+    return &op_store_alu<Trace, 1, add_op, true>;
+  case Op::kSh:
+    return &op_store_alu<Trace, 2, add_op, true>;
+  case Op::kSw:
+    return &op_store_alu<Trace, 4, add_op, true>;
+  default:
+    return nullptr;
+  }
+}
+
+inline bool
+fuse_store_alu(const FusionCtx &f, Slot &s)
+{
+  const Handler h = f.trace ? store_alu_handler<true>(f.head.op, f.tail.op)
+                            : store_alu_handler<false>(f.head.op, f.tail.op);
+  if (h == nullptr) {
+    return false;
+  }
+  s.handler = h;
+  return true;
+}
+
+// lw ; sw : word copy (memcpy body).
+inline bool
+fuse_load_store(const FusionCtx &f, Slot &s)
+{
+  if (f.head.op != Op::kLw || f.tail.op != Op::kSw) {
+    return false;
+  }
+  s.handler =
+      f.trace ? &op_load_store<true, 4, false, 4> : &op_load_store<false, 4, false, 4>;
+  return true;
+}
+
+// addi ; <cond branch> : loop induction + bound check. Only when the branch
+// target is in range (so the tail slot's imm16 is the resolved delta).
+template<bool Trace>
+Handler
+alu_branch_handler(Op alu, Op branch)
+{
+  if (alu != Op::kAddi) {
+    return nullptr;
+  }
+  switch (branch) {
+  case Op::kBeq:
+    return &op_alu_branch<Trace, add_op, true, beq_cmp>;
+  case Op::kBne:
+    return &op_alu_branch<Trace, add_op, true, bne_cmp>;
+  case Op::kBlt:
+    return &op_alu_branch<Trace, add_op, true, blt_cmp>;
+  case Op::kBge:
+    return &op_alu_branch<Trace, add_op, true, bge_cmp>;
+  case Op::kBltu:
+    return &op_alu_branch<Trace, add_op, true, bltu_cmp>;
+  case Op::kBgeu:
+    return &op_alu_branch<Trace, add_op, true, bgeu_cmp>;
+  default:
+    return nullptr;
+  }
+}
+
+inline bool
+fuse_alu_branch(const FusionCtx &f, Slot &s)
+{
+  if (f.head.op != Op::kAddi || !is_conditional_branch(f.tail.op)) {
+    return false;
+  }
+  // The branch sits at head_pc + 4; only fuse an in-range target (its slot's
+  // imm16 is the resolved delta, which op_alu_branch consumes).
+  const uint32_t branch_pc = f.head_pc + kInstructionBytes;
+  const uint32_t target = branch_pc + bits_from_i32(f.tail.imm);
+  if (!f.program.contains_pc(target)) {
+    return false;
+  }
+  const Handler h = f.trace ? alu_branch_handler<true>(f.head.op, f.tail.op)
+                            : alu_branch_handler<false>(f.head.op, f.tail.op);
+  if (h == nullptr) {
+    return false;
+  }
+  s.handler = h;
+  return true;
+}
+
+// Rules are tried in order, first match wins. The head ops are disjoint per
+// rule (lui / auipc / lw / ...), or the rules differ on the tail, so the order
+// needs no priority tuning.
+inline constexpr std::array<FusionRule, 9> kFusionRules = {
+    &fuse_lui_addi,  &fuse_auipc_jalr, &fuse_load_use,
+    &fuse_alu_alu,   &fuse_alu_store,  &fuse_alu_load,
+    &fuse_store_alu, &fuse_load_store, &fuse_alu_branch};
+
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
@@ -1113,8 +1639,9 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
 
   // Backward fusion carry: `next_op` is the instruction one slot ahead (i+1,
   // processed on the previous iteration) and `next_fused` says whether that
-  // slot was itself consumed as a fused load (so it can't also be this pair's
-  // ALU tail). Seeded each iteration at the bottom of the loop.
+  // slot was itself consumed as a fusion tail, so it can't also head this
+  // pair -- a slot belongs to at most one pair. Seeded at the bottom of the
+  // loop.
   Instr next_op = {};
   bool next_fused = false;
 
@@ -1203,31 +1730,24 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     gas_overflow = gas_overflow || run_gas > 0xFFFFU;
     exec[i].gas_to_run = static_cast<uint16_t>(run_gas);
 
-    // EXPERIMENT(fuse): collapse an adjacent (lw, fusible ALU) load->use pair
-    // into one fused handler on the load's slot, saving a dispatch. Building
-    // backward, slot i is the load candidate and `next_op` (slot i+1) is the
-    // ALU. We only fuse when i+1 is a real instruction (i+1<n, not the
-    // sentinel) and was not itself consumed as a fused load (`next_fused`) -- a
-    // slot can belong to only one pair, the backward analogue of the forward
-    // pass's ++i. The ALU slot keeps its standalone handler and gas_to_run as
-    // the branch-in fallback; fusion is behavior-preserving and never changes
-    // gas.
+    // EXPERIMENT(fuse): collapse this slot and its successor into one fused
+    // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
+    // is a real instruction (not the fall-off sentinel) and was not itself
+    // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
+    // pair. The tail slot keeps its standalone handler and gas_to_run as the
+    // branch-in fallback; fusion is behavior-preserving and never changes gas.
     bool fused_here = false;
     if (i + 1 < n && !next_fused) {
-      const Instr &ld = d; // slot i: the load (writes ld.rd; x0 discards)
-      const Instr &alu = next_op; // slot i+1: the ALU that reads it
-      const bool rs1_match = alu.rs1 == ld.rd;
-      const bool rs2_match = slot_packs_rs2(alu.op) && alu.rs2 == ld.rd;
-      if (ld.rd != 0 && (rs1_match || rs2_match)) {
-        // Feed the loaded value into rs1 when it matches (covers both-match),
-        // else rs2; ignored for the I-type tail (rs1-only).
-        const bool loaded_is_rs1 = rs1_match;
-        const Handler fused =
-            trace ? fused_load_handler<true>(ld.op, alu.op, loaded_is_rs1)
-                  : fused_load_handler<false>(ld.op, alu.op, loaded_is_rs1);
-        if (fused != nullptr) {
-          exec[i].handler = fused;
+      const FusionCtx fctx{.head = d,
+                           .tail = next_op,
+                           .head_pc = static_cast<uint32_t>(i) *
+                                      kInstructionBytes,
+                           .program = *program,
+                           .trace = trace};
+      for (const FusionRule rule : kFusionRules) {
+        if (rule(fctx, exec[i])) {
           fused_here = true;
+          break;
         }
       }
     }
