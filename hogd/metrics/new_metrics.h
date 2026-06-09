@@ -61,6 +61,19 @@ public:
     component.metrics[metric_name].sample = metric_value;
   }
 
+  x23::Async<size_t> get(ComponentName component_name, std::string metric_name)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    Component &component = components_[static_cast<size_t>(component_name)];
+
+    x23::CoroGuard cg;
+    co_await cg(component.lock);
+
+    auto it = component.metrics.find(metric_name);
+    CHECK(it != component.metrics.end());
+    co_return it->second.sample;
+  }
+
   x23::Async<std::string> dump_to_prometheus_string();
 
   x23::Async<void> clear()

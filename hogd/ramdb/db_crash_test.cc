@@ -31,6 +31,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
+#include "hogd/base/string.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -115,6 +116,7 @@ struct Shared {
   std::atomic<bool> starting_up;
   uint64_t most_recent_snapshot_end_lsn{};
   uint64_t next_snapshot_begin_lsn{};
+  size_t last_dump_recovery_count;
   size_t snapshots_until_full{kIncrementalSnapshots};
 };
 
@@ -193,23 +195,64 @@ db_size(hogd::Database &db)
 
 using time_point = std::chrono::high_resolution_clock::time_point;
 
+struct MetricSample {
+  std::string key;
+  size_t val;
+};
+
+std::vector<MetricSample> prev_samples;
 time_point start;
 
+std::vector<MetricSample>
+read_metrics(Database &db)
+{
+  db.record_metrics();
+
+  Metrics &metrics = Metrics::instance();
+  return {
+      {"db_ramdb_snap_bytes_out",
+       metrics.get(Metrics::ComponentName::kDb, "ramdb_snap_bytes_out")()},
+      {"db_ramdb_disk_writer_bytes_out",
+       metrics.get(Metrics::ComponentName::kDb,
+                   "ramdb_disk_writer_bytes_out")()},
+  };
+}
+
 void
-dump_metrics(Database &db)
+dump_metrics(Database &db, Shared &shared)
 {
   if (!kDumpMetrics)
     return;
 
-  db.record_metrics();
-  std::string samples = Metrics::instance().dump_to_prometheus_string()();
+  std::vector<MetricSample> samples = read_metrics(db);
 
   time_point now = std::chrono::high_resolution_clock::now();
   size_t ns = (now - start).count();
 
   info("== begin metrics ==");
-  info("> {} {}", ns, samples);
+  for (MetricSample &sample : samples)
+    info("> {} {} {}", ns, sample.key, sample.val);
   info("== end metrics ==");
+
+  bool skip_diff = shared.last_dump_recovery_count != shared.recovery_count;
+  shared.last_dump_recovery_count = shared.recovery_count;
+
+  if (!skip_diff) {
+    std::vector<MetricSample> diff = samples;
+
+    if (diff.size() == prev_samples.size()) {
+      for (size_t i = 0; i < diff.size(); ++i)
+        diff[i].val -= prev_samples[i].val;
+    }
+
+    info("== begin delta metrics ==");
+    for (MetricSample &sample : diff)
+      info("Δ {} {} {} {}/s", ns, sample.key, sample.val,
+           print_iec_bytes(sample.val, true));
+    info("== end delta metrics ==");
+  }
+
+  prev_samples = std::move(samples);
 }
 
 void
@@ -218,10 +261,10 @@ do_child(std::string_view path, Shared &shared)
   auto db = make_db(path, kKeys, kValueSize);
 
   db->register_metrics();
-  std::jthread _([&db](std::stop_token &&stoken) {
+  std::jthread _([&db, &shared](std::stop_token &&stoken) {
     while (!stoken.stop_requested()) {
       std::this_thread::sleep_for(1s); // NOLINT(misc-include-cleaner)
-      dump_metrics(*db);
+      dump_metrics(*db, shared);
     }
   });
 
