@@ -85,12 +85,17 @@ SyscallHandlerContext::root_invoke()
 
   if (res.result_.has_value() ||
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
-      res.result_.error().code() == InvokeErrorCode::OutOfGas) {
+      res.result_.error().code() == InvokeErrorCode::OutOfGas ||
+      res.result_.error().code() == InvokeErrorCode::ValidationFailure) {
 
     // handler_.root_invoke() above finalized the root frame, so the result is
-    // committable. If we then fail to serialize it for the caller, the result
-    // was never handed back; mark the handler so try_commit_transaction()
-    // refuses to commit a hidden result (issue #2508), mirroring
+    // committable: the caller can hand it to try_commit_transaction(). A
+    // proposal-mode ValidationFailure means an expired replay uniquifier
+    // rejected before any frame ran (output is a Fault); try_commit_transaction
+    // then returns ExecResultTxValidationFailure.
+    // If we then fail to serialize the result for the caller, it was never
+    // handed back; mark the handler so try_commit_transaction() refuses to
+    // commit a hidden result (issue #2508), mirroring
     // finish_mock_invocation_frame().
     auto serialization_handoff_failure = [this](TestFFIErrorCode code) {
       if (handler_.last_frame_finished()) {
@@ -159,13 +164,13 @@ SyscallHandlerContext::root_invoke()
   case InvokeErrorCode::None:
   case InvokeErrorCode::Deterministic:
   case InvokeErrorCode::OutOfGas:
+  // ValidationFailure (an expired uniquifier in proposal mode) is handled as a
+  // committable result above, so it does not reach here.
+  case InvokeErrorCode::ValidationFailure:
     panic("unreachable per above checks");
   case InvokeErrorCode::Unrecoverable:
     error("Unrecoverable: root_invoke got Unrecoverable");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
-  case InvokeErrorCode::ValidationFailure:
-    // TODO(geoff): this will need to be handled differently if we
-    // add support in the SDK for testing transactions in validation mode.
   case InvokeErrorCode::Abandon:
     // Abandon should be unreachable in the test harness.
     // Can only occur if someone holds a tx open across a call to advancing the

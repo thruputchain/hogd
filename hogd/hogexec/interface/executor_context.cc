@@ -149,6 +149,7 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
 {
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kProposing);
+
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
@@ -169,7 +170,8 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
   case ExecResult::ExecResultTxValidationFailure:
   case ExecResult::ExecResultSystemError:
   case ExecResult::ExecResultUnrecoverable:
-    // nothing to do
+    // nothing to do: a rejected transaction (e.g. an expired uniquifier, #2568,
+    // which surfaces as a ValidationFailure) is not included in the proposal.
     break;
   }
 

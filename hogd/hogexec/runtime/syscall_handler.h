@@ -442,11 +442,29 @@ private:
 
   bool hack_DONTUSE_TEST_BYPASS_allow_reentrance_{false};
 
+  // True if the given replay uniquifier has already expired at the executing
+  // block height -- i.e. the HogDB replay cache would reject it as a conflict.
+  // Mirrors add_replay_nonce_delta's exemption for the initial-token-claim
+  // precompile (which consumes no replay nonce).
+  static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
+                                        ContractAddress const &root_address,
+                                        BlockHeight executing_height);
+
+  // Whether this handler's transaction has an already-expired replay uniquifier
+  // (reads the db tip via get_block_height(); a tip-read failure is
+  // propagated). Returns false for the test-harness constructor (no
+  // uniquifier). Used by perform_initial_validation() to reject the transaction
+  // before the body runs, and by try_commit_transaction()'s debug-only check
+  // that a proposal-mode ValidationFailure is in fact a bad expiry height.
+  SystemStatus<bool> replay_uniquifier_expired();
+
   // Validate that the transaction can be run safely.
-  // Ensures, for example, that the wasms are valid.
-  // Sets cumulative_invoke_result_ to the appropriate error if validation
-  // fails.
-  void perform_initial_validation();
+  // Ensures, for example, that the wasms are valid, and that the replay
+  // uniquifier has not already expired.
+  // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
+  // validation failure; returns a system error (e.g. an unreadable db tip)
+  // through the SystemStatus so the caller can surface it rather than drop it.
+  SystemStatus<void> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode

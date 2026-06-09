@@ -365,7 +365,8 @@ TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -386,6 +387,51 @@ TEST(TestBindingsTest, RootInvokeUndeployedTargetReturnsFault)
   // No frame ever ran, so no events are returned.
   EXPECT_EQ(result.serialized_events.data, nullptr);
   EXPECT_EQ(result.serialized_events.len, 0U);
+}
+
+// A transaction whose replay uniquifier has already expired is rejected before
+// the body runs (#2568) and surfaces as an ExecResultTxValidationFailure via
+// try_commit_transaction().
+TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // The db is at execution height >= 1, so block_expiry_height 0 is already in
+  // the past -> the uniquifier is expired.
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = ContractAddress{0x42},
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 },
+             .uniquifier = {.block_expiry_height = 0, .nonce = 1}},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  // root_invoke() rejects the expired uniquifier before running the body, so it
+  // returns a faulted (but non-error) result; try_commit_transaction() then
+  // surfaces the rejection as ExecResultTxValidationFailure.
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(result.serialized_output);
+  free_ffi_data_buffer(result.serialized_trace);
+  free_ffi_data_buffer(result.serialized_events);
+
+  auto commit = try_commit_transaction(syscall_handler);
+  EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(commit.result_code,
+            std::to_underlying(ExecResult::ExecResultTxValidationFailure));
 }
 
 // Verify that root_invoke does NOT return events when the contract reverts
@@ -2998,7 +3044,8 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                      .entrypoint = entrypoint_from_method_id(0),
                      .gas_limit = UINT64_MAX,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3285,7 +3332,8 @@ TEST(TestBindingsTest, DuplicateMockRegistrationReplacesCallback)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3417,7 +3465,8 @@ TEST(TestBindingsTest, MockContractThrowingCallbackHandlerStillCloseable)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3455,7 +3504,8 @@ TEST(TestBindingsTest, SecondRootInvokeReturnsErrorInsteadOfAborting)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
@@ -3500,7 +3550,8 @@ TEST(TestBindingsTest, RootInvokeWorksAfterRuntimeContextHandleClosed)
                      .entrypoint = entrypoint_from_method_id(0x1234),
                      .gas_limit = 1'000'000,
                      .calldata = {},
-                 }},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
       .signatures = {},
   };
 
