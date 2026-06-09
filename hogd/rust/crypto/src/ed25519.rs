@@ -341,7 +341,9 @@ mod tests {
     }
 
     /// Build a signed (vk, sig, msg) triple from a fresh random key.
-    fn signed_triple(message: &'static [u8]) -> ([u8; 32], [u8; 64], &'static [u8]) {
+    fn signed_triple(
+        message: &'static [u8],
+    ) -> ([u8; 32], [u8; 64], &'static [u8]) {
         let mut csprng = OsRng;
         let mut seed = [0u8; 32];
         csprng.fill_bytes(&mut seed);
@@ -359,10 +361,14 @@ mod tests {
             signed_triple(b"batch message three"),
         ];
 
-        let key_ptrs: Vec<*const [u8; 32]> =
-            triples.iter().map(|(vk, _, _)| vk as *const [u8; 32]).collect();
-        let sig_ptrs: Vec<*const [u8; 64]> =
-            triples.iter().map(|(_, sig, _)| sig as *const [u8; 64]).collect();
+        let key_ptrs: Vec<*const [u8; 32]> = triples
+            .iter()
+            .map(|(vk, _, _)| vk as *const [u8; 32])
+            .collect();
+        let sig_ptrs: Vec<*const [u8; 64]> = triples
+            .iter()
+            .map(|(_, sig, _)| sig as *const [u8; 64])
+            .collect();
         let spans: Vec<MessageSpan> = triples
             .iter()
             .map(|(_, _, msg)| MessageSpan {
@@ -393,10 +399,14 @@ mod tests {
         // Corrupt the second signature so the batch must fail.
         triples[1].1[0] ^= 0xFF;
 
-        let key_ptrs: Vec<*const [u8; 32]> =
-            triples.iter().map(|(vk, _, _)| vk as *const [u8; 32]).collect();
-        let sig_ptrs: Vec<*const [u8; 64]> =
-            triples.iter().map(|(_, sig, _)| sig as *const [u8; 64]).collect();
+        let key_ptrs: Vec<*const [u8; 32]> = triples
+            .iter()
+            .map(|(vk, _, _)| vk as *const [u8; 32])
+            .collect();
+        let sig_ptrs: Vec<*const [u8; 64]> = triples
+            .iter()
+            .map(|(_, sig, _)| sig as *const [u8; 64])
+            .collect();
         let spans: Vec<MessageSpan> = triples
             .iter()
             .map(|(_, _, msg)| MessageSpan {
