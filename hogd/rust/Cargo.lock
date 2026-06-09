@@ -1678,8 +1678,6 @@ version = "0.1.0"
 dependencies = [
  "common",
  "groundhog-wasm-meter",
- "libc",
- "lru",
  "synchronized_map",
  "wasmtime",
  "wat",
