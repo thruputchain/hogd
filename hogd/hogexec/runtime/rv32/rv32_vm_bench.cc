@@ -809,6 +809,31 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
   state.SetItemsProcessed(state.iterations() * instructions);
 }
 
+// Per-invocation startup cost in isolation: machine construction (memory
+// buffer setup + initial-image copy + register init) plus method-id seeding,
+// no execution. This is the path the thread-local memory slot pool targets.
+// Uses full-size memory (kMaxMemoryBytes, not kBenchMemoryBytes): deployed
+// artifacts default to the maximum, so this is the production-shaped cost.
+void
+bm_rv32_threaded_instantiate(benchmark::State &state)
+{
+  const std::vector<uint32_t> words = recursive_fibonacci_words();
+  std::vector<uint8_t> bytes(words.size() * kInstructionBytes);
+  for (size_t i = 0; i < words.size(); ++i) {
+    store_u32_le(bytes, i * kInstructionBytes, words[i]);
+  }
+  std::vector<uint8_t> initial_memory; // all zero initial memory
+  const auto program = ThreadedMachinePreInstantiation::create(
+                           bytes, initial_memory, kMaxMemoryBytes,
+                           /*trace=*/false)
+                           .value();
+  for (auto _ : state) {
+    ThreadedMachine machine(program, kBenchGasLimit);
+    machine.seed_method_id(1);
+    benchmark::DoNotOptimize(machine.memory().data());
+  }
+}
+
 // Compute-bound (ALU/dispatch-heavy, no loads/stores) counterpart to fib, on
 // the canonical switch interpreter's untraced run().
 void
@@ -1081,6 +1106,7 @@ BENCHMARK(bm_load_store_loop);
 BENCHMARK(bm_rv32_fibonacci_recursive_20);
 BENCHMARK(bm_rv32_run_fibonacci_recursive_20);
 BENCHMARK(bm_rv32_threaded_fibonacci_recursive_20);
+BENCHMARK(bm_rv32_threaded_instantiate);
 BENCHMARK(bm_rv32_run_compute_loop);
 BENCHMARK(bm_rv32_threaded_compute_loop);
 BENCHMARK(bm_rv32_threaded_compute_loop_independent);
