@@ -34,12 +34,13 @@ private:
 
   bool check_config_valid() const { return config_.num_addresses >= 2; }
 
-  // Outer gas limit for a wallet do_action tx. The rv32 builds interpret many
-  // more instructions for the same work than the wasm builds, so they need a
-  // larger envelope to cover do_action + the cross-called erc20 transfer/mint.
+  // Outer gas limit for a wallet do_action tx. rv32 meters one gas per
+  // instruction, so the same do_action + cross-called erc20 transfer/mint costs
+  // ~2.4x the wasm gas (measured ~29k for a transfer vs ~12k on wasm); the rv32
+  // envelope is sized to cover that plus first-touch storage on the mint path.
   GasAmount work_gas_limit() const
   {
-    return use_rv32_ ? GasAmount{2'000'000} : GasAmount{20'000};
+    return use_rv32_ ? GasAmount{100'000} : GasAmount{20'000};
   }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);
