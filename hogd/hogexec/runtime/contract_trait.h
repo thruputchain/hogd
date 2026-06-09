@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -191,6 +193,26 @@ public:
   }
   {
     return load_contract(ContractTrait::kWasmFile);
+  }
+
+  // Loads the contract's compiled RV32 artifact (<name>.rv32a, derived from
+  // kWasmFile) as a kRv32 contract. The artifact filename mirrors the wasm one
+  // produced by the build, so no separate trait field is needed.
+  static std::shared_ptr<Contract> load_rv32() requires requires {
+    { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>;
+  }
+  {
+    constexpr std::string_view kWasmSuffix = ".wasm";
+    std::string_view wasm_file = ContractTrait::kWasmFile;
+    // kWasmFile must end in .wasm to derive the matching .rv32a name.
+    x23assert(wasm_file.ends_with(kWasmSuffix));
+    std::string rv32_file(
+        wasm_file.substr(0, wasm_file.size() - kWasmSuffix.size()));
+    rv32_file += ".rv32a";
+
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract() = load_contract_blob(rv32_file);
+    return contract;
   }
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()

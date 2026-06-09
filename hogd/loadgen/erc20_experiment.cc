@@ -86,8 +86,10 @@ ERC20ExperimentState::generate_experiment()
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
 
-  auto erc20_contract = erc20_meta::load_wasm();
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto erc20_contract =
+      use_rv32_ ? erc20_meta::load_rv32() : erc20_meta::load_wasm();
+  auto wallet_contract =
+      use_rv32_ ? wallet_meta::load_rv32() : wallet_meta::load_wasm();
   assert(erc20_contract);
   assert(wallet_contract);
 
@@ -159,7 +161,7 @@ ERC20ExperimentState::generate_experiment()
                     Invocation{
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                        .gas_limit = GasAmount{20'000},
+                        .gas_limit = work_gas_limit(),
                         .calldata = std::move(calldata),
                     },
                 .uniquifier =
@@ -253,7 +255,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
-                .gas_limit = GasAmount{20'000},
+                .gas_limit = work_gas_limit(),
                 .calldata = wallet_meta::make_calldata<"do_action">(
                     ed25519_sign(wallets_[sender].secret_key, internal_calldata)
                         .value(),

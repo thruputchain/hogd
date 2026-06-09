@@ -75,6 +75,12 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+add_dependencies(
+  payments_bench
+  all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a (payments_bench -r)
+  all_wasm_headers # for built_contracts/itc_erc20.h / simple_wallet.h
+)
+
 set_property(TARGET payments_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
