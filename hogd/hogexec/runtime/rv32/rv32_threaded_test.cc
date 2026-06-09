@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -194,6 +196,81 @@ TEST(Rv32Threaded, runsBasicArithmetic)
   EXPECT_EQ(machine.reg(2), 12U);
   EXPECT_EQ(machine.reg(3), 17U);
   EXPECT_EQ(machine.reg(0), 0U);
+}
+
+TEST(Rv32Threaded, memorySlotRecycledAndReinitializedAcrossMachines)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5), addi(2, 1, 7),
+                                       op(3, 1, 2, 0, 0)};
+  // Different memory sizes on purpose: the system allocator can hand the next
+  // same-size allocation the just-freed block (which would fake a recycling
+  // signal), but it cannot serve a kMaxMemoryBytes request from a freed
+  // 256-byte block. Pool slots are reserved to kMaxMemoryBytes, so only real
+  // pool recycling reproduces the first machine's buffer address here.
+  auto small_program = threaded_from_words(words, /*total_memory_size=*/256);
+  auto full_program =
+      threaded_from_words(words, /*total_memory_size=*/kMaxMemoryBytes);
+
+  const uint8_t *first_buffer = nullptr;
+  {
+    ThreadedMachine machine(*small_program, /*gas=*/100);
+    first_buffer = machine.memory().data();
+    // Dirty the buffer so recycling without re-initialization is detectable.
+    std::ranges::fill(machine.memory(), uint8_t{0xab});
+  } // destructor releases the buffer to the thread-local slot pool
+
+  // LIFO pool on a single thread: the next machine must reuse the buffer the
+  // first machine just released...
+  ThreadedMachine machine(*full_program, /*gas=*/100);
+  EXPECT_EQ(machine.memory().data(), first_buffer);
+  // ...fully re-initialized from the (all-zero) image, no residue.
+  for (size_t i = 0; i < machine.memory().size(); ++i) {
+    ASSERT_EQ(machine.memory()[i], 0U) << "residue at byte " << i;
+  }
+  // And execution on the recycled slot behaves like a fresh machine.
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(3), 17U);
+}
+
+TEST(Rv32Threaded, liveMachinesHoldDistinctMemorySlots)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5)};
+  auto program = threaded_from_words(words);
+  // Nested TryInvoke keeps multiple machines live on one thread; each must
+  // hold its own buffer.
+  ThreadedMachine a(*program, /*gas=*/100);
+  ThreadedMachine b(*program, /*gas=*/100);
+  EXPECT_NE(a.memory().data(), b.memory().data());
+  std::ranges::fill(a.memory(), uint8_t{0xaa});
+  std::ranges::fill(b.memory(), uint8_t{0xbb});
+  EXPECT_EQ(a.memory()[0], 0xaaU);
+  EXPECT_EQ(b.memory()[0], 0xbbU);
+}
+
+TEST(Rv32Threaded, movedFromMachineDoesNotReleaseItsSlot)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5), addi(2, 1, 7),
+                                       op(3, 1, 2, 0, 0)};
+  auto program = threaded_from_words(words);
+
+  std::optional<ThreadedMachine> source(ThreadedMachine(*program, /*gas=*/100));
+  const uint8_t *buffer = source->memory().data();
+  ThreadedMachine target(std::move(*source));
+  // Destroying the moved-from machine must not return the buffer now owned
+  // by the move target.
+  source.reset();
+  EXPECT_EQ(target.memory().data(), buffer);
+
+  // If the moved-from destructor had wrongly released it, this machine would
+  // acquire a buffer aliasing target's live memory.
+  ThreadedMachine fresh(*program, /*gas=*/100);
+  EXPECT_NE(fresh.memory().data(), target.memory().data());
+
+  RecordingHost host;
+  EXPECT_EQ(target.run(host), StepResult::kTrap);
+  EXPECT_EQ(target.reg(3), 17U);
 }
 
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
