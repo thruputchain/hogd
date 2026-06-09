@@ -58,7 +58,6 @@ TEST(TestBindingsTest,
 
   auto *syscall_handler = make_syscall_handler(db, rc, stx);
   ASSERT_NE(syscall_handler, nullptr);
-  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
 
   auto invoke_result = root_invoke(syscall_handler, 0);
   ASSERT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
@@ -77,8 +76,8 @@ TEST(TestBindingsTest,
   auto second_commit = try_commit_transaction(syscall_handler);
   EXPECT_EQ(second_commit.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
-  // The handle is still in a clean terminal state and closes normally (the
-  // Defer above runs close_syscall_handler).
+  // The handle is still in a clean terminal state and closes normally.
+  EXPECT_EQ(close_syscall_handler(syscall_handler), kTestFFIErrorCodeNone);
 }
 
 } // namespace hogd
