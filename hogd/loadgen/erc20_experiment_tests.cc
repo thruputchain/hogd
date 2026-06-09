@@ -111,7 +111,10 @@ protected:
   }
 };
 
-TEST_F(ERC20ExperimentTest, Basic) { run_payments_experiment(/*use_rv32=*/false); }
+TEST_F(ERC20ExperimentTest, Basic)
+{
+  run_payments_experiment(/*use_rv32=*/false);
+}
 
 // Same payments workload, but the erc20 and wallet contracts are the compiled
 // rv32 artifacts run through the RV32 runtime. Exercises the rv32 wallet

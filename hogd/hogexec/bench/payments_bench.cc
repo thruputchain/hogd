@@ -273,8 +273,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port,
-                           *num_accounts, use_rv32);
+  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port, *num_accounts,
+                           use_rv32);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);

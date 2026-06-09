@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
-#include <cstdio>
 #include <map>
 #include <memory>
+#include <optional>
+#include <print>
 #include <string>
-#include <tuple>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -15,7 +15,6 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
-#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
@@ -32,6 +31,7 @@
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -212,41 +212,33 @@ private:
 void
 print_histogram(std::string_view name, const PairHistogram &hist)
 {
-  std::printf("\n=== %.*s ===\n", static_cast<int>(name.size()), name.data());
-  std::printf("executed instructions:      %llu\n",
-              static_cast<unsigned long long>(hist.instructions()));
-  std::printf("fall-through fusable pairs: %llu  (%zu distinct)\n",
-              static_cast<unsigned long long>(hist.pairs_counted()),
-              hist.pairs().size());
+  std::println("\n=== {} ===", name);
+  std::println("executed instructions:      {}", hist.instructions());
+  std::println("fall-through fusable pairs: {}  ({} distinct)",
+               hist.pairs_counted(), hist.pairs().size());
 
   std::vector<std::pair<std::pair<Op, Op>, PairCounts>> rows(
       hist.pairs().begin(), hist.pairs().end());
-  std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) {
+  std::ranges::sort(rows, [](const auto &a, const auto &b) {
     return a.second.total() > b.second.total();
   });
 
   for (const auto &[key, counts] : rows) {
-    std::printf("  %-7s -> %-7s %12llu   [rd->rs1 %llu, rd->rs2 %llu, indep "
-                "%llu]\n",
-                op_name(key.first), op_name(key.second),
-                static_cast<unsigned long long>(counts.total()),
-                static_cast<unsigned long long>(counts.dep_rs1),
-                static_cast<unsigned long long>(counts.dep_rs2),
-                static_cast<unsigned long long>(counts.independent));
+    std::println("  {:<7} -> {:<7} {:>12}   [rd->rs1 {}, rd->rs2 {}, indep {}]",
+                 op_name(key.first), op_name(key.second), counts.total(),
+                 counts.dep_rs1, counts.dep_rs2, counts.independent);
   }
 
   std::vector<std::pair<std::tuple<Op, Op, Op>, uint64_t>> trows(
       hist.triples().begin(), hist.triples().end());
-  std::sort(trows.begin(), trows.end(),
-            [](const auto &a, const auto &b) { return a.second > b.second; });
-  std::printf("-- top fall-through triples (straight-line; straight-line; "
-              "any) --\n");
-  for (size_t i = 0; i < trows.size(); ++i) {
-    std::printf("  %-7s -> %-7s -> %-7s %12llu\n",
-                op_name(std::get<0>(trows[i].first)),
-                op_name(std::get<1>(trows[i].first)),
-                op_name(std::get<2>(trows[i].first)),
-                static_cast<unsigned long long>(trows[i].second));
+  std::ranges::sort(trows, [](const auto &a, const auto &b) {
+    return a.second > b.second;
+  });
+  std::println("-- top fall-through triples (straight-line; straight-line; "
+               "any) --");
+  for (const auto &[key, count] : trows) {
+    std::println("  {:<7} -> {:<7} -> {:<7} {:>12}", op_name(std::get<0>(key)),
+                 op_name(std::get<1>(key)), op_name(std::get<2>(key)), count);
   }
 }
 
@@ -259,8 +251,9 @@ to_host_result(const TrampolineResult &result)
 {
   switch (result.panic) {
   case std::to_underlying(HostFnErrorCode::NoneOrRecoverable):
-    return rv32::HostResult::continue_with(
-        static_cast<uint32_t>(result.result_code), result.gas_consumed);
+    return rv32::HostResult::continue_with(static_cast<uint32_t>(
+                                               result.result_code),
+                                           result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Return):
     return rv32::HostResult::halt(0, result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Exit):
@@ -293,8 +286,7 @@ private:
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
     rv32::Machine machine(image_.program, image_.memory_bytes, gas_limit);
-    std::copy(image_.initial_memory.begin(), image_.initial_memory.end(),
-              machine.memory().begin());
+    std::ranges::copy(image_.initial_memory, machine.memory().begin());
     machine.seed_method_id(method_id);
 
     ExternHostCallContext host_fn_ctx = syscall_handler_;
@@ -321,7 +313,8 @@ private:
             is_fusable_first(prev->kind)) {
           hist_->add(prev->op, cur->op, classify_dep(*prev, *cur));
         }
-        // Fall-through triple (prev2; prev; cur) with prev2, prev straight-line.
+        // Fall-through triple (prev2; prev; cur) with prev2, prev
+        // straight-line.
         if (prev2 != nullptr && prev != nullptr &&
             pc == prev_pc + rv32::kInstructionBytes &&
             prev_pc == prev2_pc + rv32::kInstructionBytes &&
@@ -338,7 +331,11 @@ private:
         continue;
       }
       if (result == rv32::StepResult::kEcall) {
-        const rv32::EcallArgs args = machine.pending_ecall().value();
+        const std::optional<rv32::EcallArgs> pending = machine.pending_ecall();
+        if (!pending.has_value()) {
+          break; // unreachable: kEcall always stashes args
+        }
+        const rv32::EcallArgs args = *pending;
         WasmContext wasm_context = {
             .memory = LinearMemorySlice{.mem = machine.memory().data(),
                                         .sz = machine.memory().size()},
@@ -389,7 +386,8 @@ public:
     const ContractBlob *blob = nullptr;
     if (deployed_contract.entry != nullptr) {
       blob = &deployed_contract.entry->contract.rv32_contract();
-    } else {
+    }
+    else {
       auto contract =
           syscall_handler->resolve_contract(deployed_contract.hash.hash);
       if (!contract.has_value()) {
@@ -405,8 +403,9 @@ public:
     if (!image.has_value()) {
       return SystemError{SystemErrorCode::Unrecoverable};
     }
-    return std::make_unique<TracingRv32Runtime>(
-        std::move(image.value()), syscall_handler, active_histogram);
+    return std::make_unique<TracingRv32Runtime>(std::move(image.value()),
+                                                syscall_handler,
+                                                active_histogram);
   }
 
 private:
@@ -446,9 +445,9 @@ protected:
   {
     runtime_context_.active_histogram = &histograms_[bucket];
     auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation = std::move(invocation),
-                              .uniquifier = make_new_uniquifier()}},
+        SignedTransaction{.tx =
+                              Transaction{.invocation = std::move(invocation),
+                                          .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     bool ok = handler.root_invoke().is_root_success();
     if (ok) {
@@ -478,17 +477,19 @@ TEST_F(Rv32PairHistogramTest, TraceFibonacciAndErc20)
     ContractTraitClient<itc_erc20::ERC20> client(addr);
     const auto owner = make_contract_address(99);
     const auto spender = make_contract_address(100);
-    EXPECT_TRUE(trace_invocation(
-        "itc_erc20",
-        client.make_invocation<"initialize">(kSufficientGas, owner)));
+    EXPECT_TRUE(
+        trace_invocation("itc_erc20",
+                         client.make_invocation<"initialize">(kSufficientGas,
+                                                              owner)));
     EXPECT_TRUE(trace_invocation(
         "itc_erc20", client.make_invocation<"total_supply">(kSufficientGas)));
     EXPECT_TRUE(trace_invocation(
         "itc_erc20",
         client.make_invocation<"get_balance_of">(kSufficientGas, owner)));
-    EXPECT_TRUE(trace_invocation(
-        "itc_erc20",
-        client.make_invocation<"allowance">(kSufficientGas, owner, spender)));
+    EXPECT_TRUE(
+        trace_invocation("itc_erc20",
+                         client.make_invocation<"allowance">(kSufficientGas,
+                                                             owner, spender)));
   }
 
   for (auto const &[name, hist] : histograms_) {

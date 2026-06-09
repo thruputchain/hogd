@@ -798,8 +798,7 @@ op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     // Retire the lui as its own step so the trace is byte-identical to the
     // unfused pair: lui writes the upper immediate (the full constant minus the
     // addi's, recovered from the preserved addi slot at ip+1).
-    c.m->regs_[ip->rd] =
-        bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm);
+    c.m->regs_[ip->rd] = bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm);
     c.m->gas_remaining_ = gas;
     c.m->pc_ = pc_of(c, ip + 1);
     c.m->obs_->on_retire(capture(c), StepResult::kContinue);
@@ -840,7 +839,8 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_ENTER_RUN(c, next);
 }
 
-// --- Generic two-op fused handlers --------------------------------------------
+// --- Generic two-op fused handlers
+// --------------------------------------------
 //
 // These read each op's operands straight from its own slot -- op1 from ip, op2
 // from the preserved ip+1 -- so x0 remapping (baked into the slot indices) and
@@ -854,11 +854,11 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 
 // Spill gas + retire op1 (a non-faulting head: alu/load-ok) as a kContinue step
 // landing at op2's pc, matching the unfused trace.
-#define HOGD_RETIRE_OP1(c, ip)                                                  \
+#define HOGD_RETIRE_OP1(c, ip)                                                 \
   do {                                                                         \
-    (c).m->gas_remaining_ = gas;                                              \
-    (c).m->pc_ = pc_of((c), (ip) + 1);                                        \
-    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                \
+    (c).m->gas_remaining_ = gas;                                               \
+    (c).m->pc_ = pc_of((c), (ip) + 1);                                         \
+    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
   } while (0)
 
 // alu ; alu  (e.g. sll;or, addi;addi, addi;sll, srl;addi)
@@ -1338,7 +1338,7 @@ fits_int16(int32_t v)
 struct FusionCtx {
   const Instr &head;              // slot i
   const Instr &tail;              // slot i+1
-  uint32_t head_pc;              // head's byte pc (auipc+jalr target math)
+  uint32_t head_pc;               // head's byte pc (auipc+jalr target math)
   const ThreadedProgram &program; // PC-relative target range checks
   bool trace;
 };
@@ -1407,7 +1407,8 @@ fuse_load_use(const FusionCtx &f, Slot &s)
 
 // <alu> ; <alu> : two adjacent straight-line ALU ops. Curated high-value pairs
 // (the shift/serialize and address-math idioms the histogram surfaced); nullptr
-// for anything else. No register condition -- op2 reads the regs op1 just wrote.
+// for anything else. No register condition -- op2 reads the regs op1 just
+// wrote.
 template<bool Trace>
 Handler
 alu_alu_handler(Op op1, Op op2)
@@ -1546,8 +1547,8 @@ fuse_load_store(const FusionCtx &f, Slot &s)
   if (f.head.op != Op::kLw || f.tail.op != Op::kSw) {
     return false;
   }
-  s.handler =
-      f.trace ? &op_load_store<true, 4, false, 4> : &op_load_store<false, 4, false, 4>;
+  s.handler = f.trace ? &op_load_store<true, 4, false, 4>
+                      : &op_load_store<false, 4, false, 4>;
   return true;
 }
 
@@ -1740,8 +1741,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     if (i + 1 < n && !next_fused) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
-                           .head_pc = static_cast<uint32_t>(i) *
-                                      kInstructionBytes,
+                           .head_pc =
+                               static_cast<uint32_t>(i) * kInstructionBytes,
                            .program = *program,
                            .trace = trace};
       for (const FusionRule rule : kFusionRules) {

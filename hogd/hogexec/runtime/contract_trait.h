@@ -206,8 +206,8 @@ public:
     std::string_view wasm_file = ContractTrait::kWasmFile;
     // kWasmFile must end in .wasm to derive the matching .rv32a name.
     x23assert(wasm_file.ends_with(kWasmSuffix));
-    std::string rv32_file(wasm_file.substr(0, wasm_file.size() -
-                                                  kWasmSuffix.size()));
+    std::string rv32_file(
+        wasm_file.substr(0, wasm_file.size() - kWasmSuffix.size()));
     rv32_file += ".rv32a";
 
     auto contract = std::make_shared<Contract>(ContractType::kRv32);
