@@ -37,6 +37,13 @@ target_link_libraries(
   gtest
 )
 
+add_dependencies(
+  loadgen_tests
+  all_wasm_contracts
+  all_wasm_headers
+  all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a (BasicRv32 test)
+)
+
 add_executable(
   loadgen_server
   main.cc

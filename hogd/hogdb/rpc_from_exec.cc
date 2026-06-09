@@ -147,7 +147,10 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     return RPCError::kRPCBadBlockID;
 
   auto write_contract = [itx](Contract contract) {
-    assert(contract.contract_type() == ContractType::kWasmi);
+    // request_new_contract content-addresses and stores the whole Contract
+    // regardless of type; both wasm and rv32 contracts are deployed this way.
+    assert(contract.contract_type() == ContractType::kWasmi ||
+           contract.contract_type() == ContractType::kRv32);
     return itx->request_new_contract(std::move(contract));
   };
 
