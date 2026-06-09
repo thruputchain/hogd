@@ -127,18 +127,19 @@ private:
 // than the cap fall back to plain allocation.
 inline constexpr size_t kMemorySlotPoolCap = 8;
 
-inline std::vector<std::vector<uint8_t>> &
-memory_slot_pool()
+// Fixed-capacity LIFO: a std::array of vectors so the thread_local's
+// construction never allocates and release is a vector move-assignment --
+// both noexcept, which keeps release_memory_slot (called from the machine
+// destructor) provably non-throwing.
+struct MemorySlotPool {
+  std::array<std::vector<uint8_t>, kMemorySlotPoolCap> slots;
+  size_t count = 0;
+};
+
+inline MemorySlotPool &
+memory_slot_pool() noexcept
 {
-  // Reserved to the cap up front so release_memory_slot's push_back never
-  // allocates. (release is still not declared noexcept: the analyzer can't
-  // prove the reserve held, and this thread_local's own first-time
-  // construction can throw -- though in practice acquire always runs first.)
-  static thread_local std::vector<std::vector<uint8_t>> pool = [] {
-    std::vector<std::vector<uint8_t>> p;
-    p.reserve(kMemorySlotPoolCap);
-    return p;
-  }();
+  static thread_local MemorySlotPool pool;
   return pool;
 }
 
@@ -147,20 +148,19 @@ acquire_memory_slot()
 {
   auto &pool = memory_slot_pool();
   std::vector<uint8_t> slot;
-  if (!pool.empty()) {
-    slot = std::move(pool.back());
-    pool.pop_back();
+  if (pool.count != 0) {
+    slot = std::move(pool.slots[--pool.count]);
   }
   slot.reserve(kMaxMemoryBytes);
   return slot;
 }
 
 inline void
-release_memory_slot(std::vector<uint8_t> &&slot)
+release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 {
   auto &pool = memory_slot_pool();
-  if (pool.size() < kMemorySlotPoolCap) {
-    pool.push_back(std::move(slot));
+  if (pool.count < kMemorySlotPoolCap) {
+    pool.slots[pool.count++] = std::move(slot);
   }
 }
 
