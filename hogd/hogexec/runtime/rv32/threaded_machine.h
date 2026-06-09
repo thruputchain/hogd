@@ -117,6 +117,51 @@ private:
   friend class ThreadedMachine;
 };
 
+// Thread-local recycling pool for machine guest-memory buffers. A machine is
+// constructed per method invocation, and nested TryInvoke machines (up to
+// kMaxSavepointDepth deep) are live simultaneously on one thread -- so this
+// is a free list of *released* buffers, not a single slot: every live machine
+// owns its own buffer, and the pool only bounds how many freed buffers are
+// retained for reuse. Acquire reserves kMaxMemoryBytes so any recycled buffer
+// satisfies any artifact's memory size without reallocating; bursts deeper
+// than the cap fall back to plain allocation.
+inline constexpr size_t kMemorySlotPoolCap = 8;
+
+inline std::vector<std::vector<uint8_t>> &
+memory_slot_pool()
+{
+  // Reserved to the cap up front so release_memory_slot's push_back never
+  // allocates (keeps release noexcept).
+  static thread_local std::vector<std::vector<uint8_t>> pool = [] {
+    std::vector<std::vector<uint8_t>> p;
+    p.reserve(kMemorySlotPoolCap);
+    return p;
+  }();
+  return pool;
+}
+
+[[nodiscard]] inline std::vector<uint8_t>
+acquire_memory_slot()
+{
+  auto &pool = memory_slot_pool();
+  std::vector<uint8_t> slot;
+  if (!pool.empty()) {
+    slot = std::move(pool.back());
+    pool.pop_back();
+  }
+  slot.reserve(kMaxMemoryBytes);
+  return slot;
+}
+
+inline void
+release_memory_slot(std::vector<uint8_t> &&slot) noexcept
+{
+  auto &pool = memory_slot_pool();
+  if (pool.size() < kMemorySlotPoolCap) {
+    pool.push_back(std::move(slot));
+  }
+}
+
 // alignas(64): pin the base to a cache-line boundary so member offsets map
 // deterministically to cache lines. This is load-bearing for *consistent*
 // benchmarking (without it base-mod-64 varies per allocation and the same
@@ -134,6 +179,10 @@ public:
   {
     const auto &image = pre_instantiation.initial_memory_image_;
     assert(image.size() <= kMaxMemoryBytes);
+    // The recycled slot is dirty, but the image is full-size (zero-padded to
+    // total_memory_size), so this assign fully overwrites it -- and the
+    // reserved capacity means no allocation on a pool hit.
+    memory_ = acquire_memory_slot();
     memory_.assign(image.begin(), image.end());
 
     regs_.fill(0);
@@ -147,6 +196,16 @@ public:
   }
 
   ThreadedMachine(ThreadedMachine &&) noexcept = default;
+
+  // capacity()==0 means this machine was moved from (vector move empties the
+  // source), so the buffer is owned -- and later released -- by the move
+  // target, not here.
+  ~ThreadedMachine()
+  {
+    if (memory_.capacity() != 0) {
+      release_memory_slot(std::move(memory_));
+    }
+  }
 
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,
