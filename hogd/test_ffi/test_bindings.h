@@ -19,14 +19,18 @@ extern "C" {
 // contexts -- and drive them from different threads without data races or
 // undefined behavior (the DB is clean under ThreadSanitizer).
 //
-// What the DB does NOT do is serialize logical operations for you. Running
-// transactions, advancing blocks (advance_new_block), and the setup_* mutators
-// (setup_create_contract, setup_deploy_contract, ...) have unspecified ordering
-// when issued concurrently against the same DB, so the *result* is not
-// predictable: a handler whose borrowed snapshot is replaced by a concurrent
-// block advance, for example, may legitimately surface a structured error or
-// abort. If you need a deterministic outcome, sequence these operations
-// yourself; do not race them and expect a particular result.
+// DB lifecycle operations are guarded, but not serialized. advance_new_block()
+// and free_db() are rejected (kTestFFIErrorCodeUnrecoverableError) while any
+// syscall handler derived from that DB is open -- for the handler's whole
+// lifetime, from the moment open_syscall_handler() / open_mocked_syscall_
+// handler() begins constructing it (so a concurrent advance cannot replace
+// state a half-built handler is borrowing) through close_syscall_handler(). If
+// a close fails to abort its transaction, the DB is poisoned: advance_new_block
+// is refused thereafter and the DB can only be freed. Beyond that guarding the
+// harness does not order your operations: running transactions or the setup_*
+// mutators (setup_create_contract, setup_deploy_contract, ...) concurrently
+// against the same DB leaves the *result* unspecified -- sequence them yourself
+// if you need a deterministic outcome.
 //
 // A single runtime context or syscall handler is stateful and is itself NOT
 // internally synchronized -- drive each individual handle from one thread at a

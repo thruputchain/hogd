@@ -59,8 +59,8 @@ public:
     // so reaching this point uncommitted is a programming error.
     CHECK(transaction_committed_or_aborted_);
     CHECK(mock_runtime_stack_.empty());
-    // This handler no longer borrows the DB; allow it to be freed/advanced.
-    db_.unregister_open_handler();
+    // The open-handler guard is released by open_handler_guard_'s destructor
+    // (declared before handler_, destroyed after it), not here -- see #2572.
   }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
@@ -135,6 +135,10 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
+  // The DBContext this handler borrows. Exposed so close_syscall_handler() can
+  // poison the DB lifecycle if the implicit abort fails (issue #2596).
+  DBContext &borrowed_db() { return db_; }
+
   x23::Async<std::optional<TxEventLog>> get_tx_event_log()
   {
     return db_.get_tx_event_log(identifier_);
@@ -191,6 +195,30 @@ public:
   }
 
 private:
+  // RAII for the DBContext open-handler guard. Declared as a member *before*
+  // handler_ so it raises open_handler_count_ before handler_ borrows the DB's
+  // snapshot and proxies in the member-init list. Previously the guard was
+  // raised in the constructor body, i.e. after handler_ had already borrowed
+  // DB state, leaving a window where a concurrent advance_new_block() saw a
+  // zero count and replaced the snapshot the half-built handler referenced
+  // (issue #2572). Released in the destructor (members destroyed in reverse
+  // declaration order, so after handler_).
+  class OpenHandlerGuard {
+  public:
+    explicit OpenHandlerGuard(DBContext &db) : db_(db)
+    {
+      db_.register_open_handler();
+    }
+    ~OpenHandlerGuard() { db_.unregister_open_handler(); }
+    OpenHandlerGuard(OpenHandlerGuard const &) = delete;
+    OpenHandlerGuard &operator=(OpenHandlerGuard const &) = delete;
+    OpenHandlerGuard(OpenHandlerGuard &&) = delete;
+    OpenHandlerGuard &operator=(OpenHandlerGuard &&) = delete;
+
+  private:
+    DBContext &db_;
+  };
+
   constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
   constexpr static auto kMakeFFIError =
       [](TestFFIErrorCode code) -> ForeignTracedInvokeResult {
@@ -207,6 +235,9 @@ private:
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
+
+  // Raised before handler_ borrows DB state; see OpenHandlerGuard (#2572).
+  OpenHandlerGuard open_handler_guard_;
 
   // Keep the MockRuntimeContext alive for the handler's whole lifetime: the
   // embedded SystemCallHandler stores a RuntimeContext& into it, so closing the

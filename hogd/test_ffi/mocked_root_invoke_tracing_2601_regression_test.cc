@@ -71,8 +71,9 @@ TEST(TestBindingsTest, MockedRootInvokeWithTracingRejectsInsteadOfAsserting)
   free_ffi_data_buffer(res.serialized_events);
 
   // The handler is unharmed: finish the open frame and close cleanly.
-  auto finish = finish_mock_invocation_frame(
-      handler.syscall_handler, std::to_underlying(InvokeErrorCode::None));
+  auto finish =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish.serialized_output);
   free_ffi_data_buffer(finish.serialized_trace);

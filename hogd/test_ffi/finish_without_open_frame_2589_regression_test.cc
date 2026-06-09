@@ -39,8 +39,9 @@ TEST(TestBindingsTest, FinishWithoutOpenFrameReturnsStructuredError)
   // No mock invocation frame has been opened, so mock_runtime_stack_ is empty.
   // finish must reject with a structured error instead of popping an empty
   // stack (issue #2589).
-  auto res = finish_mock_invocation_frame(
-      handler.syscall_handler, std::to_underlying(InvokeErrorCode::None));
+  auto res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
   free_ffi_data_buffer(res.serialized_output);
   free_ffi_data_buffer(res.serialized_trace);

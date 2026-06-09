@@ -349,6 +349,19 @@ advance_new_block(void *db) noexcept
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // A prior close_syscall_handler() failed to confirm closure of its HogDB
+  // transaction and poisoned this DB (issue #2596). The open-handler guard is
+  // gone, but an orphaned InvokeTX may still hold a BlockTX open, so advancing
+  // (which closes/commits the current snapshot and opens a new one) is unsafe.
+  // Refuse it; free_db() remains the only safe operation on a poisoned DB.
+  if (ptr->is_lifecycle_poisoned()) {
+    best_effort_log([] {
+      error("advance_new_block called on a DB poisoned by a failed handler "
+            "close; the DB can no longer be advanced and must be freed");
+    });
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
   try {
     ptr->advance_new_block();
     return kTestFFIErrorCodeNone;
@@ -547,19 +560,29 @@ open_mocked_syscall_handler(void *db, void *rc,
 TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
 {
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  if (context == nullptr) {
+    return kTestFFIErrorCodeNone;
+  }
+  if (!context->can_be_closed()) {
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  // Reference the borrowed DB before taking ownership: if the implicit abort
+  // below fails (or throws), the handler -- and with it its open-handler guard
+  // -- is destroyed, but the HogDB InvokeTX may still be open. Poison the DB's
+  // lifecycle through this reference so advance_new_block() cannot proceed past
+  // the now-absent guard into the scheduler over orphaned transaction state
+  // (issue #2596). The DBContext is owned by the caller and outlives the
+  // handler, so this reference stays valid after `owned` is destroyed,
+  // including during exception unwind.
+  DBContext &db = context->borrowed_db();
+
+  // Take ownership so the handler is freed on every path below, including when
+  // the abort reports an error or throws.
+  std::unique_ptr<SyscallHandlerContext> owned(context);
+
   try {
-    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-    if (context == nullptr) {
-      return kTestFFIErrorCodeNone;
-    }
-    if (!context->can_be_closed()) {
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
-
-    // Take ownership so the handler is freed on every path below, including
-    // when the abort reports an error or throws.
-    std::unique_ptr<SyscallHandlerContext> owned(context);
-
     // The handler destructor requires the transaction to have been committed or
     // aborted. Abort any still-open transaction here, inside this try/catch, so
     // a throwing abort RPC becomes kTestFFIErrorCodeUnrecoverableError rather
@@ -572,6 +595,7 @@ close_syscall_handler(void *syscall_handler) noexcept
       auto res = owned->to_handler().abort_transaction();
       if (!res.has_value()) {
         error("error aborting transaction during close: {}", res.error());
+        db.poison_lifecycle();
         return kTestFFIErrorCodeUnrecoverableError;
       }
     }
@@ -579,6 +603,7 @@ close_syscall_handler(void *syscall_handler) noexcept
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
     log_error("error closing syscall handler: {}", e);
+    db.poison_lifecycle();
     return kTestFFIErrorCodeUnrecoverableError;
   }
 }
