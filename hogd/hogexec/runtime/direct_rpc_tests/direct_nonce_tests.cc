@@ -530,6 +530,90 @@ TEST_P(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
             static_cast<std::int64_t>(final_meta->heights.size()));
 }
 
+// Regression for #2581: expired heights must not permanently consume the
+// active-height budget. Genuinely fill the replay cache to the height cap in a
+// single block, advance one block so the lowest height expires, then verify a
+// brand-new height can still be inserted -- the freed (expired) slot must be
+// reclaimable. Pre-fix, get_base() counted the expired height against the cap
+// and rejected the insert, leaving the cache permanently locked out.
+TEST_P(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  auto contract_addr = make_contract_address(43);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto consume = [&](BlockHeight expiry, std::uint64_t nonce) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = expiry, .nonce = nonce}),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx.try_push_current_subtransaction();
+    if (!r.has_value() || !r.value()) {
+      return std::make_pair(r.has_value(), r.has_value() && r.value());
+    }
+    EXPECT_TRUE(tx.commit_transaction().has_value());
+    return std::make_pair(true, true);
+  };
+
+  // Block 0: genuinely consume kReplayCacheHeightsMaxLen uniquifiers, each at a
+  // distinct expiry height, filling the active-height budget exactly to the
+  // cap. The lowest height equals the current block so it expires next block.
+  const auto base_height = static_cast<BlockHeight>(get_block_number());
+  for (std::int64_t i = 0; i < kReplayCacheHeightsMaxLen; ++i) {
+    const BlockHeight expiry = base_height + static_cast<BlockHeight>(i);
+    auto [ok, admitted] = consume(expiry, static_cast<std::uint64_t>(i));
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(admitted) << "height index " << i << " must fit under the cap";
+  }
+
+  // One more distinct height in the SAME block exceeds the cap and is rejected.
+  {
+    const BlockHeight over_cap =
+        base_height + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen);
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(Uniquifier{.block_expiry_height = over_cap,
+                                             .nonce = 9999}),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_FALSE(r.value())
+        << "the " << (kReplayCacheHeightsMaxLen + 1)
+        << "th distinct height in one block must exceed the cap";
+    ASSERT_TRUE(tx.abort_transaction().has_value());
+  }
+
+  // Advance one block: the lowest seeded height (base_height) is now expired,
+  // freeing exactly one active-height slot.
+  advance_block();
+  ASSERT_EQ(base_height + 1, get_block_number());
+
+  // A fresh height must now be admitted: the expired height must not count
+  // against the cap.
+  const BlockHeight fresh_height =
+      base_height + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) + 1;
+  auto [ok, admitted] = consume(fresh_height, 12345);
+  ASSERT_TRUE(ok);
+  ASSERT_TRUE(admitted)
+      << "an expired height freed a slot; the fresh height must be admitted "
+         "(#2581)";
+
+  advance_block();
+
+  // The expired base_height row was GC'd at block close. The cache holds the
+  // 3999 still-live seeded heights plus the freshly inserted one == the cap.
+  auto meta = get_hogdb_dao().read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(static_cast<std::int64_t>(kReplayCacheHeightsMaxLen),
+            static_cast<std::int64_t>(meta->heights.size()));
+  EXPECT_EQ(base_height + 1, meta->heights.front().height);
+  EXPECT_EQ(fresh_height, meta->heights.back().height);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNonceTests,
