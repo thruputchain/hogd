@@ -42,11 +42,11 @@ HogexecMetrics::get_stats()
   Metrics &metrics = Metrics::instance();
   metrics.record(Metrics::ComponentName::kExecutor,
                  "successful_proposed_tx_count",
-                 snapshot.successful_proposed_tx_count)();
+                 snapshot.successful_proposed_tx_count);
   metrics.record(Metrics::ComponentName::kExecutor, "failed_proposed_tx_count",
-                 snapshot.failed_proposed_tx_count)();
+                 snapshot.failed_proposed_tx_count);
   metrics.record(Metrics::ComponentName::kExecutor, "gas_consumed",
-                 snapshot.gas_consumed)();
+                 snapshot.gas_consumed);
 
   return snapshot;
 }

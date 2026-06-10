@@ -238,7 +238,7 @@ DiskWriter::print_stats()
 void
 DiskWriter::register_metrics()
 {
-  Metrics::instance().set_description(
+  Metrics::instance().init_metric(
       Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out",
       "Number of bytes written to log files since the last database recovery.");
   record_metrics();
@@ -249,7 +249,7 @@ DiskWriter::record_metrics()
 {
   Metrics::instance().record(Metrics::ComponentName::kDb,
                              "ramdb_disk_writer_bytes_out",
-                             bytes_out_.load(std::memory_order_relaxed))();
+                             bytes_out_.load(std::memory_order_relaxed));
 }
 
 void

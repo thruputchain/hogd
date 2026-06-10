@@ -42,7 +42,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   info("NETWORK ID={:#x}", network_id);
 
-  Metrics::instance().set_description(
+  Metrics::instance().init_metric(
       Metrics::ComponentName::kMempool, "current_block_height",
       "The height of the last block committed by the mempool.");
   // We finish setting descriptions for all metrics *before* we start the HTTP
