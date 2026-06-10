@@ -127,9 +127,7 @@ public:
   {
     for (size_t i = 0; i < components_.size(); i++) {
       ComponentName component_name = static_cast<ComponentName>(i);
-      if (done_with_init(component_name)) {
-        mark_done_with_init(component_name, /*mark=*/false);
-      }
+      mark_done_with_init(component_name, /*mark=*/false);
 
       Component &component = components_[i];
       component.metrics.clear();

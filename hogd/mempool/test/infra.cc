@@ -31,8 +31,10 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
                                          kNetworkId, mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
-  // registration at the beginning of each test.
+  // registration and metrics at the beginning of each test.
   Registration::registration().clear();
+  Metrics::instance().clear();
+  init_metrics();
 
   mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
 

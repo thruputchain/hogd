@@ -14,6 +14,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
@@ -27,16 +28,7 @@ int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
              int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
-  Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "successful_proposed_tx_count", "",
-                                  Metrics::SampleType::kSizeT);
-  Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "failed_proposed_tx_count", "",
-                                  Metrics::SampleType::kSizeT);
-  Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "gas_consumed", "",
-                                  Metrics::SampleType::kSizeT);
-  Metrics::instance().mark_done_with_init(Metrics::ComponentName::kExecutor);
+  init_metrics();
 
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
