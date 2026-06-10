@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <format>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -45,6 +47,15 @@ expect_dump_contains(std::string_view dump, std::string_view expected)
       << dump;
 }
 
+void
+init_metric(Metrics &metrics, Metrics::ComponentName component_name,
+            const std::string &metric_name, const std::string &description,
+            Metrics::SampleType sample_type = Metrics::SampleType::kSizeT)
+{
+  metrics.init_metric(component_name, metric_name, description, sample_type);
+  metrics.mark_done_with_init(component_name);
+}
+
 TEST_F(NewMetricsTest, InstanceReturnsSingleton)
 {
   EXPECT_EQ(&Metrics::instance(), &Metrics::instance());
@@ -61,6 +72,8 @@ TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
 {
   Metrics &metrics = Metrics::instance();
 
+  init_metric(metrics, Metrics::ComponentName::kExecutor,
+              "metrics_test_executor_queue_depth", "");
   metrics.record(Metrics::ComponentName::kExecutor,
                  "metrics_test_executor_queue_depth", 17);
 
@@ -74,9 +87,9 @@ TEST_F(NewMetricsTest, DumpIncludesDescriptionForDescribedMetric)
 {
   Metrics &metrics = Metrics::instance();
 
-  metrics.init_metric(Metrics::ComponentName::kMempool,
-                      "metrics_test_described_mempool_depth",
-                      "Number of transactions waiting in the mempool");
+  init_metric(metrics, Metrics::ComponentName::kMempool,
+              "metrics_test_described_mempool_depth",
+              "Number of transactions waiting in the mempool");
   metrics.record(Metrics::ComponentName::kMempool,
                  "metrics_test_described_mempool_depth", 42);
 
@@ -94,6 +107,8 @@ TEST_F(NewMetricsTest, DumpOmitsMissingDescription)
 {
   Metrics &metrics = Metrics::instance();
 
+  init_metric(metrics, Metrics::ComponentName::kDb,
+              "metrics_test_unrecorded_db_snapshot_count", "");
   metrics.record(Metrics::ComponentName::kDb,
                  "metrics_test_unrecorded_db_snapshot_count", 5);
 
@@ -109,30 +124,29 @@ TEST_F(NewMetricsTest, DumpOmitsMissingDescription)
   expect_dump_contains(dump, "db_metrics_test_unrecorded_db_snapshot_count 5");
 }
 
-TEST_F(NewMetricsTest, DumpOmitsDescriptionForUnrecordedMetric)
+TEST_F(NewMetricsTest, InitializedMetricStartsAtZero)
 {
   Metrics &metrics = Metrics::instance();
 
-  metrics.init_metric(Metrics::ComponentName::kDb,
-                      "metrics_test_unrecorded_db_snapshot_count",
-                      "Snapshots known to the database");
+  init_metric(metrics, Metrics::ComponentName::kDb,
+              "metrics_test_unrecorded_db_snapshot_count",
+              "Snapshots known to the database");
 
   const std::string dump = metrics.dump_to_prometheus_string();
-  const std::vector<std::string_view> dump_lines = get_lines(dump);
-  EXPECT_FALSE(std::ranges::contains(
-      dump_lines, "# HELP db_metrics_test_unrecorded_db_snapshot_count "
-                  "Snapshots known to the "
-                  "database"))
-      << dump;
-  EXPECT_FALSE(std::ranges::contains(
-      dump_lines, "# TYPE db_metrics_test_unrecorded_db_snapshot_count gauge"))
-      << dump;
+  expect_dump_contains(dump,
+                       "# HELP db_metrics_test_unrecorded_db_snapshot_count "
+                       "Snapshots known to the database");
+  expect_dump_contains(
+      dump, "# TYPE db_metrics_test_unrecorded_db_snapshot_count gauge");
+  expect_dump_contains(dump, "db_metrics_test_unrecorded_db_snapshot_count 0");
 }
 
 TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
 {
   Metrics &metrics = Metrics::instance();
 
+  init_metric(metrics, Metrics::ComponentName::kDb,
+              "metrics_test_db_snapshot_count", "");
   metrics.record(Metrics::ComponentName::kDb, "metrics_test_db_snapshot_count",
                  3);
   metrics.record(Metrics::ComponentName::kDb, "metrics_test_db_snapshot_count",
@@ -147,10 +161,33 @@ TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
       << dump;
 }
 
+TEST_F(NewMetricsTest, AddUpdatesSizeTMetric)
+{
+  Metrics &metrics = Metrics::instance();
+
+  init_metric(metrics, Metrics::ComponentName::kDb,
+              "metrics_test_db_added_snapshot_count", "");
+  metrics.record(Metrics::ComponentName::kDb,
+                 "metrics_test_db_added_snapshot_count", 3);
+  metrics.add(Metrics::ComponentName::kDb,
+              "metrics_test_db_added_snapshot_count", 4);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "db_metrics_test_db_added_snapshot_count 7");
+}
+
 TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
 {
   Metrics &metrics = Metrics::instance();
 
+  metrics.init_metric(Metrics::ComponentName::kExecutor,
+                      "metrics_test_multi_executor", "",
+                      Metrics::SampleType::kSizeT);
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+  metrics.init_metric(Metrics::ComponentName::kMempool,
+                      "metrics_test_multi_mempool", "",
+                      Metrics::SampleType::kSizeT);
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
   metrics.record(Metrics::ComponentName::kExecutor,
                  "metrics_test_multi_executor", 11);
   metrics.record(Metrics::ComponentName::kMempool, "metrics_test_multi_mempool",
@@ -161,15 +198,46 @@ TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
   expect_dump_contains(dump, "mempool_metrics_test_multi_mempool 22");
 }
 
+TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSamples)
+{
+  Metrics &metrics = Metrics::instance();
+  init_metric(metrics, Metrics::ComponentName::kExecutor,
+              "metrics_test_per_thread", "",
+              Metrics::SampleType::kPerThreadSizeT);
+
+  metrics.record(Metrics::ComponentName::kExecutor, "metrics_test_per_thread",
+                 3);
+
+  std::atomic<bool> recorded = false;
+  std::atomic<bool> done = false;
+  std::thread worker([&] {
+    metrics.add(Metrics::ComponentName::kExecutor, "metrics_test_per_thread",
+                4);
+    recorded.store(true, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  });
+  while (!recorded.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "executor_metrics_test_per_thread 7");
+
+  done.store(true, std::memory_order_release);
+  worker.join();
+}
+
 TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
   // We set the description before starting the HTTP server because accesses to
   // the [descriptions] map are not thread safe. The HTTP server reads the
   // descriptions map, so we want to avoid a race.
-  metrics.init_metric(Metrics::ComponentName::kExecutor,
-                      "metrics_test_executor_queue_depth",
-                      "The executor queue length.");
+  init_metric(metrics, Metrics::ComponentName::kExecutor,
+              "metrics_test_executor_queue_depth",
+              "The executor queue length.");
 
   HttpServer server;
 

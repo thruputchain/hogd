@@ -44,7 +44,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   Metrics::instance().init_metric(
       Metrics::ComponentName::kMempool, "current_block_height",
-      "The height of the last block committed by the mempool.");
+      "The height of the last block committed by the mempool.",
+      Metrics::SampleType::kSizeT);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kMempool);
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.

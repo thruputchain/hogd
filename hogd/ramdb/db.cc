@@ -124,7 +124,8 @@ Database::register_metrics()
   Metrics::instance().init_metric(
       Metrics::ComponentName::kDb, "ramdb_snap_bytes_out",
       "Number of bytes written to all snapshot files since the last database "
-      "recovery.");
+      "recovery.",
+      Metrics::SampleType::kSizeT);
   disk_writer_.register_metrics();
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kDb);
 

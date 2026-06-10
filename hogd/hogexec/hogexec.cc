@@ -28,11 +28,14 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
              int nthreads, uint16_t mempool_port, uint16_t metrics_port)
 {
   Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "successful_proposed_tx_count", "");
+                                  "successful_proposed_tx_count", "",
+                                  Metrics::SampleType::kSizeT);
   Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "failed_proposed_tx_count", "");
+                                  "failed_proposed_tx_count", "",
+                                  Metrics::SampleType::kSizeT);
   Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
-                                  "gas_consumed", "");
+                                  "gas_consumed", "",
+                                  Metrics::SampleType::kSizeT);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kExecutor);
 
   HttpServer metrics_server;

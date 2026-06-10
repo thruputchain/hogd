@@ -5,10 +5,13 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "x23/corosync.h"
 
@@ -25,6 +28,11 @@ public:
     kComponentCount
   };
 
+  enum class SampleType {
+    kSizeT,
+    kPerThreadSizeT,
+  };
+
   static constexpr size_t kNumComponents =
       static_cast<size_t>(ComponentName::kComponentCount);
 
@@ -37,13 +45,16 @@ public:
   Metrics &operator=(Metrics &&) = delete;
 
   void init_metric(ComponentName component_name, const std::string &metric_name,
-                   const std::string &description)
+                   const std::string &description, SampleType sample_type)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
     CHECK(component.descriptions.insert({metric_name, description}).second);
+    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    CHECK(inserted);
+    it->second.init_sample(sample_type);
   }
   void mark_done_with_init(ComponentName component_name, bool mark = true)
   {
@@ -65,7 +76,38 @@ public:
     Component &component = components_[static_cast<size_t>(component_name)];
     auto it = component.metrics.find(metric_name);
     CHECK(it != component.metrics.end());
-    it->second.sample = metric_value;
+    std::visit(
+        [metric_value](auto &sample) {
+          using T = std::decay_t<decltype(sample)>;
+          if constexpr (std::is_same_v<T, size_t>) {
+            sample = metric_value;
+          }
+          else {
+            *sample = metric_value;
+          }
+        },
+        it->second.sample);
+  }
+
+  void add(ComponentName component_name, std::string metric_name, size_t delta)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    auto it = component.metrics.find(metric_name);
+    CHECK(it != component.metrics.end());
+    std::visit(
+        [delta](auto &sample) {
+          using T = std::decay_t<decltype(sample)>;
+          if constexpr (std::is_same_v<T, size_t>) {
+            sample += delta;
+          }
+          else {
+            *sample += delta;
+          }
+        },
+        it->second.sample);
   }
 
   size_t get(ComponentName component_name, std::string metric_name)
@@ -76,7 +118,7 @@ public:
     Component &component = components_[static_cast<size_t>(component_name)];
     auto it = component.metrics.find(metric_name);
     CHECK(it != component.metrics.end());
-    return it->second.sample;
+    return it->second.value();
   }
 
   std::string dump_to_prometheus_string();
@@ -85,20 +127,54 @@ public:
   {
     for (size_t i = 0; i < components_.size(); i++) {
       ComponentName component_name = static_cast<ComponentName>(i);
-      CHECK(done_with_init(component_name));
-      mark_done_with_init(component_name, /*mark=*/false);
+      if (done_with_init(component_name)) {
+        mark_done_with_init(component_name, /*mark=*/false);
+      }
 
       Component &component = components_[i];
       component.metrics.clear();
       component.descriptions.clear();
-
-      mark_done_with_init(component_name, /*mark=*/true);
     }
   }
 
 private:
   struct Metric {
-    size_t sample;
+    using Sample = std::variant<size_t, PerThread<size_t>>;
+
+    void init_sample(SampleType sample_type)
+    {
+      switch (sample_type) {
+      case SampleType::kSizeT:
+        sample = size_t{0};
+        return;
+      case SampleType::kPerThreadSizeT:
+        sample = PerThread<size_t>{};
+        return;
+      }
+      CHECK(false);
+    }
+
+    size_t value()
+    {
+      return std::visit(
+          [](auto &sample) -> size_t {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, size_t>) {
+              return sample;
+            }
+            else {
+              size_t total = 0;
+              std::unique_lock ul = sample.lock_threads();
+              sample.for_each(ul, [&total](const size_t &thread_sample) {
+                total += thread_sample;
+              });
+              return total;
+            }
+          },
+          sample);
+    }
+
+    Sample sample;
   };
 
   struct Component {
