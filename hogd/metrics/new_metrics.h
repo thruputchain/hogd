@@ -40,23 +40,38 @@ public:
                    const std::string &description)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
     CHECK(component.descriptions.insert({metric_name, description}).second);
+  }
+  void mark_done_with_init(ComponentName component_name, bool mark = true)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+
+    std::atomic<bool> &component =
+        done_with_init_[static_cast<size_t>(component_name)];
+    bool expected = !mark;
+    CHECK(component.compare_exchange_strong(expected, /*desired=*/mark,
+                                            std::memory_order_release));
   }
 
   void record(ComponentName component_name, std::string metric_name,
               size_t metric_value)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
-    component.metrics[metric_name].sample = metric_value;
+    auto it = component.metrics.find(metric_name);
+    CHECK(it != component.metrics.end());
+    it->second.sample = metric_value;
   }
 
   size_t get(ComponentName component_name, std::string metric_name)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
     auto it = component.metrics.find(metric_name);
@@ -68,9 +83,16 @@ public:
 
   void clear()
   {
-    for (Component &component : components_) {
+    for (size_t i = 0; i < components_.size(); i++) {
+      ComponentName component_name = static_cast<ComponentName>(i);
+      CHECK(done_with_init(component_name));
+      mark_done_with_init(component_name, /*mark=*/false);
+
+      Component &component = components_[i];
       component.metrics.clear();
       component.descriptions.clear();
+
+      mark_done_with_init(component_name, /*mark=*/true);
     }
   }
 
@@ -92,6 +114,16 @@ private:
   static std::string fully_qualified_name(ComponentName component_name,
                                           const std::string &metric_name);
 
+  bool done_with_init(ComponentName component_name)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+
+    std::atomic<bool> &component =
+        done_with_init_[static_cast<size_t>(component_name)];
+    return component.load(std::memory_order_acquire);
+  }
+
+  std::array<std::atomic<bool>, kNumComponents> done_with_init_{};
   std::array<Component, kNumComponents> components_;
 };
 

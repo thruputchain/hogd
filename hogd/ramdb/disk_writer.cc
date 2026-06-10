@@ -241,7 +241,6 @@ DiskWriter::register_metrics()
   Metrics::instance().init_metric(
       Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out",
       "Number of bytes written to log files since the last database recovery.");
-  record_metrics();
 }
 
 void

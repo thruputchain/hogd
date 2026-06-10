@@ -33,6 +33,7 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
                                   "failed_proposed_tx_count", "");
   Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
                                   "gas_consumed", "");
+  Metrics::instance().mark_done_with_init(Metrics::ComponentName::kExecutor);
 
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
