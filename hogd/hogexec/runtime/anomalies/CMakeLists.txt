@@ -18,6 +18,13 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+# try_invoke_admission_trusted_test.cc includes the generated
+# built_contracts/itc_erc20.h, so the wasm headers must be generated first.
+add_dependencies(
+  anomalies_test_objects
+  all_wasm_headers
+)
+
 add_executable(
   anomalies_test
   anomalies_test_main.cc

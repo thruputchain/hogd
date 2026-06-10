@@ -13,11 +13,12 @@
 // observation-bearing key is still an RCQ/unmodified view (see
 // invocation_frame.cc finish_frame, the ValidationModeData branch).
 //
-// Consequently a proposer can forge the bit for a child whose only proposal-mode
-// failure was a storage-balance lock (no RCQ observation involved): a forged
-// true bit makes validation take the child-success branch even though honest
-// proposal recorded failure, and a forged false bit makes validation take the
-// child-failure branch even though honest proposal recorded success.
+// Consequently a proposer can forge the bit for a child whose only
+// proposal-mode failure was a storage-balance lock (no RCQ observation
+// involved): a forged true bit makes validation take the child-success branch
+// even though honest proposal recorded failure, and a forged false bit makes
+// validation take the child-failure branch even though honest proposal recorded
+// success.
 //
 // Why this is tolerated (working-as-intended).
 //   - The TryInvoke bit is a nondeterministic value the proposer is *trusted*
@@ -113,7 +114,8 @@ protected:
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
   {
     return std::make_tuple(static_cast<uint64_t>(amount >> 64),
-                           static_cast<uint64_t>(amount & 0xffffffffffffffffULL));
+                           static_cast<uint64_t>(amount &
+                                                 0xffffffffffffffffULL));
   }
 
   // Build a NativeContract from a list of method lambdas (IDs 0, 1, ...).
@@ -137,7 +139,8 @@ protected:
   {
     return Transaction{.invocation =
                            Invocation{.invoked_address = kAddrRoot,
-                                      .entrypoint = entrypoint_from_method_id(0),
+                                      .entrypoint =
+                                          entrypoint_from_method_id(0),
                                       .gas_limit = UINT64_MAX,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
@@ -225,17 +228,16 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   constexpr std::string_view kPayload = "unfunded-child-write";
 
   auto const *cost_model = get_default_cost_model();
-  int128_t transfer_amount =
-      cost_model->get_bytestring_cost(kPayload.size()) +
-      cost_model->get_balance_cost();
+  int128_t transfer_amount = cost_model->get_bytestring_cost(kPayload.size()) +
+                             cost_model->get_balance_cost();
   ASSERT_GT(transfer_amount, 0);
   auto transfer_amount_xdr =
       make_amount(static_cast<uint128_t>(transfer_amount));
 
   auto child = make_contract(make_child_write(kPayload));
   auto parent = make_contract(
-      [transfer_amount_xdr](NativeSyscallContext &ctx) noexcept
-          -> InvokeStatus<void> {
+      [transfer_amount_xdr](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         CopyableInvokeOutputs outputs{};
         auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
         if (!child_res.has_value()) {
@@ -243,8 +245,8 @@ TEST_F(TryInvokeAdmissionTrustedTest,
         }
 
         auto token = ContractTraitClient<itc_erc20::ERC20>(kAddrToken);
-        auto transfer_res = token.invoke_opt<"transfer">(ctx, kAddrChild,
-                                                          transfer_amount_xdr);
+        auto transfer_res =
+            token.invoke_opt<"transfer">(ctx, kAddrChild, transfer_amount_xdr);
         if (!transfer_res.has_value() || !transfer_res.value().has_value() ||
             !transfer_res.value().value().has_value() ||
             !transfer_res.value().value().value().is_ok()) {
@@ -273,7 +275,8 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK)());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
@@ -300,9 +303,8 @@ TEST_F(TryInvokeAdmissionTrustedTest,
 
   advance_block();
 
-  auto item =
-      lookup_storage_item_from_db(make_contract_data_addrkey(kAddrChild,
-                                                             "child-key"));
+  auto item = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kAddrChild, "child-key"));
   ASSERT_TRUE(item.has_value())
       << "the child write rides the affordable aggregate commit and persists";
   ASSERT_EQ(item.value().bytestring(), make_bytestring(kPayload));
@@ -323,8 +325,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
 {
   constexpr std::string_view kPayload = "unfunded-child-write";
 
-  auto child =
-      make_contract(make_child_write(kPayload), make_child_delete());
+  auto child = make_contract(make_child_write(kPayload), make_child_delete());
   auto parent = make_contract(
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         CopyableInvokeOutputs outputs{};
@@ -355,7 +356,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK)());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
@@ -376,9 +378,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
 
   advance_block();
 
-  auto item =
-      lookup_storage_item_from_db(make_contract_data_addrkey(kAddrChild,
-                                                             "child-key"));
+  auto item = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kAddrChild, "child-key"));
   ASSERT_FALSE(item.has_value())
       << "the deleted child write never persists; the child paid nothing "
          "because the net aggregate delta is empty";
@@ -443,7 +444,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK)());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
@@ -469,16 +471,14 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
 
   // The parent committed its fallback branch, and the child's affordable write
   // was dropped.
-  auto branch =
-      lookup_storage_item_from_db(make_contract_data_addrkey(kAddrRoot,
-                                                             "root-branch"));
+  auto branch = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kAddrRoot, "root-branch"));
   ASSERT_TRUE(branch.has_value());
   ASSERT_EQ(branch.value().bytestring(), make_bytestring("fallback"))
       << "the forged false bit steered the parent to its fallback branch";
 
-  auto child_item =
-      lookup_storage_item_from_db(make_contract_data_addrkey(kAddrChild,
-                                                             "child-key"));
+  auto child_item = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kAddrChild, "child-key"));
   ASSERT_FALSE(child_item.has_value())
       << "the discarded child frame's affordable write did not persist";
 }
