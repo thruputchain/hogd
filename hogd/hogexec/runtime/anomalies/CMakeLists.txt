@@ -3,6 +3,7 @@ add_library(anomalies_test_objects OBJECT
   rcq_observation_by_value_not_index_test.cc
   rcq_observation_on_fault_test.cc
   replay_cache_height_budget_leak_test.cc
+  try_invoke_admission_trusted_test.cc
 )
 
 target_link_libraries(
@@ -25,6 +26,7 @@ add_executable(
 
 target_link_libraries(
   anomalies_test
+  precompiles
   runtime_test_lib
   storage_cost
   model_checker
