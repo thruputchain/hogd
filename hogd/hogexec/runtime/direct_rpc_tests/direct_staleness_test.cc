@@ -23,7 +23,11 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/ramdb/constants.h"
+#include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
+#include "x23/serialize.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -189,6 +193,70 @@ TEST_F(DirectStalenessTest,
   // The invoke transaction reference should have been released, so the first
   // abandon actually removes the stale block and the second abandon fails to
   // find it.
+  auto abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
+  EXPECT_EQ(abandon, DbSchedResult::DbSchedResultOK);
+  auto second_abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
+  EXPECT_EQ(second_abandon, DbSchedResult::DbSchedResultError);
+}
+
+// Regression test for issue #2599.
+//
+// Same shape as StaleNewContractCommitReturnsAbandonAndReleasesBlock, but the
+// contract body exceeds RAMDB's per-item size limit. The oversized-code
+// preflight in InvokeTX::request_new_contract() returns kTooBig before
+// reaching the stale-aware lock in BlockTX::lock(), so without an explicit
+// staleness re-check on the failure path the commit surfaces
+// kRPCTransactionFailed (executor Unrecoverable) instead of kRPCBadBlockID
+// (Abandon) on a block already invalidated by a committed sibling. Staleness
+// must take precedence regardless of contract size.
+TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
+{
+  auto contract_addr = make_contract_address(3);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  advance_block();
+
+  auto [block_a, block_b] = create_sibling();
+
+  Contract contract(ContractType::kWasmi);
+  auto &data = contract.wasmi_contract().data;
+  data = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+  data.resize(data.size() + kBigItemThreshold);
+  auto contract_ptr = std::make_shared<const Contract>(contract);
+  auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
+
+  // The serialized contract must exceed RAMDB's item size limit so the final
+  // new-contract write fails the kTooBig preflight rather than the stale-aware
+  // lock.
+  ASSERT_FALSE(
+      Database::item_fits(make_wasm_code_key(deployed_contract_hash.hash).size(),
+                          x23::xdr_size(contract)));
+
+  constexpr TransactionID kTxId = 43;
+  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);
+  AddressAndKey addrkey{.address = contract_addr,
+                        .key = StorageKey(StorageKeyType::Metadata)};
+  StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = deployed_contract_hash;
+  tx.add_delta(addrkey, std::move(delta),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto push = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(push.has_value());
+  ASSERT_TRUE(push.value());
+
+  close_and_commit_block(block_a);
+
+  BorrowedContractBatch::hash_set_t hashes{deployed_contract_hash.hash};
+  BorrowedContractBatch::contract_map_t contracts;
+  contracts.emplace(deployed_contract_hash.hash,
+                    std::make_unique<const Contract>(contract));
+  BorrowedContractBatch new_contracts(hashes, contracts);
+
+  auto commit = tx.commit_transaction(new_contracts);
+  ASSERT_FALSE(commit.has_value());
+  EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
+
+  // The commit released the invoke transaction's block reference, so the first
+  // abandon removes the stale block and the second no longer finds it.
   auto abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
   EXPECT_EQ(abandon, DbSchedResult::DbSchedResultOK);
   auto second_abandon = get_coord_client().dbsched_abandon_snapshot(block_b);

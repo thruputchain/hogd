@@ -163,6 +163,14 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
             r.error().code() == HogDBCode::kTooBig);
       itx->abort();
       ctx_.close_invoke_tx(block, tx, itx);
+      // Staleness outranks kTooBig: request_new_contract's size preflight runs
+      // before the stale-aware lock, so on an already-invalidated block an
+      // oversized contract would otherwise surface kRPCTransactionFailed
+      // (executor Unrecoverable) instead of the stale kRPCBadBlockID
+      // (executor Abandon) that any other contract gets (#2599).
+      if (ctx_.is_snapshot_read_stale(block)) {
+        return RPCError::kRPCBadBlockID;
+      }
       return to_rpc_error(r.error());
     }
   }
