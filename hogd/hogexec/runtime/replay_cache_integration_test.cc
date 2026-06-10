@@ -28,6 +28,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -85,21 +86,55 @@ public:
   }
 
   static constexpr ContractAddress kAddr = make_contract_address(7);
+  static constexpr ContractAddress kControlAddr = make_contract_address(8);
   std::unique_ptr<NativeContext> ctx_;
   bool body_ran_ = false;
 
   static Transaction
-  make_tx(uint32_t method, uint64_t nonce,
-          BlockHeight expiry = std::numeric_limits<BlockHeight>::max())
+  make_tx_for(ContractAddress const &addr, uint32_t method, uint64_t nonce,
+              BlockHeight expiry = std::numeric_limits<BlockHeight>::max())
   {
     return Transaction{.invocation =
-                           Invocation{.invoked_address = kAddr,
+                           Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
                                       .gas_limit = UINT64_MAX,
                                       .calldata = {}},
                        .uniquifier = Uniquifier{.block_expiry_height = expiry,
                                                 .nonce = nonce}};
+  }
+
+  static Transaction
+  make_tx(uint32_t method, uint64_t nonce,
+          BlockHeight expiry = std::numeric_limits<BlockHeight>::max())
+  {
+    return make_tx_for(kAddr, method, nonce, expiry);
+  }
+
+  // Seed an address's persisted replay cache with `height_count` heights that
+  // are all already expired at the current block (height < current height),
+  // each holding a single nonce.
+  void seed_expired_replay_cache(ContractAddress const &addr,
+                                 std::int64_t height_count)
+  {
+    auto &dao = get_hogdb_dao();
+    const auto current_height = static_cast<BlockHeight>(get_block_number());
+    const BlockHeight first_height = current_height - height_count;
+
+    ReplayCacheMetadata meta;
+    meta.size = height_count;
+    meta.heights.reserve(height_count);
+    for (std::int64_t i = 0; i < height_count; ++i) {
+      const BlockHeight h = first_height + static_cast<BlockHeight>(i);
+      ASSERT_LT(h, current_height);
+      meta.heights.push_back(
+          ReplayCacheHeightCount{.height = h, .nonce_count = 1});
+
+      ReplayCacheData data;
+      data.nonces.push_back(static_cast<uint64_t>(i + 1));
+      ASSERT_TRUE(dao.write_address_replay_cache_data(addr, h, data));
+    }
+    ASSERT_TRUE(dao.write_address_replay_cache_meta(addr, meta));
   }
 
   ExecResult run_and_commit(Transaction const &tx)
@@ -219,6 +254,56 @@ TEST_F(ReplayCacheIntegrationTest, NonceSharedAcrossOutcomes)
   EXPECT_EQ(run_and_commit(make_tx(0, 400)), ExecResult::ExecResultOK);
   EXPECT_EQ(run_and_commit(make_tx(2, 400)),
             ExecResult::ExecResultTxNonDeterministicError);
+}
+
+// Expired replay-cache heights must not consume the active-height budget. An
+// address sitting at exactly kReplayCacheHeightsMaxLen *expired* heights must
+// still admit a fresh root uniquifier, and block close must prune the expired
+// rows down to the single live height. Regression for #2581: get_base()
+// previously counted expired snapshot heights against the cap, rejecting the
+// fresh transaction that would have triggered close-time GC -- a circular
+// lockout (no admission -> no GC -> no admission).
+TEST_F(ReplayCacheIntegrationTest,
+       ExpiredHeightCapStillAdmitsFreshRootUniquifierAndRunsGc)
+{
+  auto contract_xdr = make_native_contract(0);
+  write_deployment(kControlAddr, contract_xdr);
+  setup_grant_storage_token(kControlAddr, 1'000'000'000);
+
+  auto &dao = get_hogdb_dao();
+
+  // Control: one slot below the cap admits and prunes today and after the fix.
+  seed_expired_replay_cache(kControlAddr, kReplayCacheHeightsMaxLen - 1);
+  const BlockHeight control_expiry =
+      static_cast<BlockHeight>(get_block_number()) + 100;
+  EXPECT_EQ(run_and_commit(make_tx_for(kControlAddr, 0, 500, control_expiry)),
+            ExecResult::ExecResultOK);
+  advance_block();
+
+  auto control_meta = dao.read_address_replay_cache_meta(kControlAddr);
+  ASSERT_TRUE(control_meta);
+  EXPECT_EQ(1, control_meta->size);
+  ASSERT_EQ(1, control_meta->heights.size());
+  EXPECT_EQ(control_expiry, control_meta->heights[0].height);
+  EXPECT_EQ(1U, control_meta->heights[0].nonce_count);
+
+  // Exactly at the cap with all-expired heights: the fresh uniquifier must
+  // still be admitted because every snapshot height is expired.
+  seed_expired_replay_cache(kAddr, kReplayCacheHeightsMaxLen);
+  const BlockHeight live_expiry =
+      static_cast<BlockHeight>(get_block_number()) + 100;
+  EXPECT_EQ(run_and_commit(make_tx(0, 600, live_expiry)),
+            ExecResult::ExecResultOK);
+
+  advance_block();
+
+  // Block close prunes the expired rows, leaving only the fresh live height.
+  auto meta_after_close = dao.read_address_replay_cache_meta(kAddr);
+  ASSERT_TRUE(meta_after_close);
+  EXPECT_EQ(1, meta_after_close->size);
+  ASSERT_EQ(1, meta_after_close->heights.size());
+  EXPECT_EQ(live_expiry, meta_after_close->heights[0].height);
+  EXPECT_EQ(1U, meta_after_close->heights[0].nonce_count);
 }
 
 // NOLINTEND(bugprone-exception-escape,bugprone-unchecked-optional-access)

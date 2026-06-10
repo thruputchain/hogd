@@ -147,14 +147,22 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     if (base.error() != HogDBCode::kNotFound) {
       return base.error();
     }
-    // New height. Check global active height limit.
+    // New height. Check global active height limit. The cap counts only
+    // unexpired heights (protocol/storage_item.x): heights below the current
+    // block are pruned by stage_committed_changes(), so they must not consume
+    // the budget here -- otherwise a snapshot full of expired heights would
+    // reject the fresh change that triggers their close-time GC (#2581).
     auto meta = get_meta(&ctx);
     if (!meta) {
       return meta.error();
     }
+    const auto &heights = meta.value()->heights;
+    auto live_begin = std::ranges::lower_bound(heights, ctx.block_height, {},
+                                               &ReplayCacheHeightCount::height);
+    auto live_height_count =
+        static_cast<size_t>(std::distance(live_begin, heights.end()));
     auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
-    if (meta.value()->heights.size() + pending + 1 >
-        kReplayCacheHeightsMaxLen) {
+    if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
       pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
       return HogDBError{HogDBCode::kConflict};
     }
