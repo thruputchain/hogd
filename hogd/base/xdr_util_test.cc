@@ -158,6 +158,25 @@ TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
   }
 }
 
+// A small batch must not be able to force a huge [objs] allocation by claiming
+// far more segment tokens than the payload bytes could possibly encode. The two
+// maxed-out token counts sum to more than the decoded vector's max_size(), so
+// the pre-fix unbounded [objs.resize(total_segment_tokens)] threw an
+// XdrLengthError instead of rejecting cleanly; the empty payload also means no
+// token could legitimately be decoded.
+// Regression test for groundhogchain/hogd#1645.
+TEST(ParallelBatchToTTest, RejectsTokenCountExceedingPayloadBytes)
+{
+  ParallelBatch batch{
+      .segment_tokens = {0xffffffff, 0xffffffff},
+      .segment_bytes = {0, 0},
+      .xdr = {},
+  };
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
 TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
 {
   using BoundedUint32Vec = x23::Vec<std::uint32_t, 1>;
