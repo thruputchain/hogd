@@ -1,7 +1,5 @@
-#include <gtest/gtest.h>
-
+#include "hogd/hogexec/test_main.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/init.h"
 
 namespace hogd {
 
@@ -34,9 +32,5 @@ TEST(RuntimeTest, MethodIDFormat)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  return hogd::run_hogexec_tests(argc, argv);
 }

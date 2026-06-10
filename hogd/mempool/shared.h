@@ -88,7 +88,7 @@ generate_block_hash(const BlockHeader &header)
   return sha256(header);
 }
 
-void
+inline void
 init_metrics()
 {
   Metrics::instance().init_metric(
