@@ -24,6 +24,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/ramdb/db.h"
 #include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
@@ -654,20 +655,24 @@ InvokeTX::assert_is_valid() const noexcept
 HogDBStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
-  // Reject an oversized contract here, per transaction: the wasm code row (the
-  // serialized contract) is written to RAMDB verbatim, so an item exceeding
-  // the size limit must fail this tx rather than the whole block at write-back,
-  // where apply() leaves earlier writes visible and the commit error aborts the
-  // node (#1775). hash is computed outside make_contract_code_item_key to dodge
-  // an observed gcc-CI miscompile.
-  auto hash = sha256(contract);
-  // xdr_size computes the serialized length without allocating; it equals the
-  // x23::serialize(contract) byte count NewContractLock writes for the code
-  // row.
-  if (!Database::item_fits(make_wasm_code_key(hash).size(),
-                           x23::xdr_size(contract)))
-    return HogDBError(HogDBCode::kTooBig);
+  // hogexec rejects attached contract blobs above kMaxContractSizeBytes in
+  // perform_initial_validation(), before execution, and storage stores any
+  // legal row (chunked across RAMDB items if necessary; see
+  // for_each_wasm_code_item). A serialized row above the bound here
+  // therefore means the executor is misbehaving, not that the contract is
+  // merely large. xdr_size computes the serialized length without
+  // allocating; it equals the byte count NewContractLock stages.
+  if (x23::xdr_size(contract) > kMaxSerializedContractBytes)
+    return HogDBError(HogDBCode::kInvalidExecutorBehavior);
 
+  // One-byte chunk indexes must cover the largest row hogdb accepts.
+  static_assert((kMaxSerializedContractBytes + kWasmCodeChunkPayloadSize - 1) /
+                    kWasmCodeChunkPayloadSize <=
+                255);
+
+  // hash is computed outside make_contract_code_item_key to dodge an
+  // observed gcc-CI miscompile.
+  auto hash = sha256(contract);
   return request_change(make_contract_code_item_key(hash),
                         NewContractData(std::move(contract)));
 }

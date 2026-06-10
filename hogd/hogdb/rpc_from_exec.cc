@@ -59,8 +59,10 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
   case HogDBCode::kTooBig:
-    // A staged item exceeds RAMDB's size limit (e.g. an oversized contract
-    // code row); fail this transaction rather than the whole block.
+    // A staged item exceeds RAMDB's size limit (e.g. an oversized
+    // bytestring); fail this transaction rather than the whole block.
+    // Contract code rows no longer produce kTooBig: they are chunked, and
+    // rows above the serialized bound are kInvalidExecutorBehavior (#2569).
     return RPCError::kRPCTransactionFailed;
   case HogDBCode::kStaleBlock:
     return RPCError::kRPCBadBlockID;
@@ -156,18 +158,21 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
 
   for (auto &contract : new_contracts) {
     // write_contract fails if a sibling block commits and this block is
-    // abandoned (kStaleBlock), or if the contract's code row exceeds RAMDB's
-    // size limit (kTooBig, #1775). Either way, abort just this transaction.
+    // abandoned (kStaleBlock), or if the serialized contract exceeds
+    // kMaxSerializedContractBytes (kInvalidExecutorBehavior): hogexec
+    // enforces the contract size limit before execution and storage chunks
+    // any legal row, so an oversized row here means the executor is buggy.
+    // Either way, abort just this transaction.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
       CHECK(r.error().code() == HogDBCode::kStaleBlock ||
-            r.error().code() == HogDBCode::kTooBig);
+            r.error().code() == HogDBCode::kInvalidExecutorBehavior);
       itx->abort();
       ctx_.close_invoke_tx(block, tx, itx);
-      // Staleness outranks kTooBig: request_new_contract's size preflight runs
-      // before the stale-aware lock, so on an already-invalidated block an
-      // oversized contract would otherwise surface kRPCTransactionFailed
-      // (executor Unrecoverable) instead of the stale kRPCBadBlockID
-      // (executor Abandon) that any other contract gets (#2599).
+      // Staleness outranks the size guard: request_new_contract's preflight
+      // runs before the stale-aware lock, so on an already-invalidated block
+      // an oversized row would otherwise surface kRPCUnrecoverable instead
+      // of the stale kRPCBadBlockID (executor Abandon) that any other
+      // contract gets (#2599).
       if (ctx_.is_snapshot_read_stale(block)) {
         return RPCError::kRPCBadBlockID;
       }

@@ -226,7 +226,7 @@ make_code_bytes(size_t size)
   x23::Vec<uint8_t> buf;
   buf.resize_uninitialized(size);
   for (size_t i = 0; i < size; ++i) {
-    buf[i] = static_cast<uint8_t>(i * 31 + 7);
+    buf[i] = static_cast<uint8_t>((i * 31) + 7);
   }
   return buf;
 }
@@ -250,8 +250,8 @@ TEST_F(HogDBTest, WasmCodeChunkedRoundtrip)
   const std::array<size_t, 5> sizes = {
       max_inline,                        // largest inline row
       max_inline + 1,                    // smallest chunked row
-      2 * kWasmCodeChunkPayloadSize,     // exact multiple of chunk payload
-      2 * kWasmCodeChunkPayloadSize + 1, // one byte into a final chunk
+      (2 * kWasmCodeChunkPayloadSize),     // exact multiple of chunk payload
+      (2 * kWasmCodeChunkPayloadSize) + 1, // one byte into a final chunk
       kMaxSerializedContractBytes,       // largest row hogdb accepts
   };
   uint8_t which = 0;
@@ -350,7 +350,7 @@ TEST_F(HogDBTest, WasmCodeChunkedItemsEmitHeadLast)
 {
   SHA256Hash hash{};
   hash[0] = 0xC4;
-  auto buf = make_code_bytes(2 * kWasmCodeChunkPayloadSize + 1);
+  auto buf = make_code_bytes((2 * kWasmCodeChunkPayloadSize) + 1);
 
   std::vector<std::pair<size_t, uint8_t>> emitted; // (key length, type)
   for_each_wasm_code_item(hash, std::as_bytes(std::span(buf)),
@@ -1272,14 +1272,38 @@ TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
   });
 }
 
-// Regression for #1775: a contract whose serialized code row exceeds RAMDB's
-// item-size limit must be rejected when its transaction stages it (kTooBig),
-// not at block write-back, where apply() would leave earlier writes visible and
-// the commit error would abort the node.
-TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
+// A contract row bigger than one RAMDB item commits chunked: the staged
+// chunk items' incremental db_hash delta matches a full state-hash
+// recompute, and the DAO reassembles the row byte-identically.
+TEST_F(HogDBTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 {
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(kBigItemThreshold);
+  contract.wasmi_contract().data.resize_uninitialized(2 * kBigItemThreshold);
+  for (size_t i = 0; i < contract.wasmi_contract().data.size(); ++i) {
+    contract.wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  }
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_new_contract(contract));
+  });
+
+  auto rcode = db_.read_wasm_code(sha256(contract));
+  ASSERT_TRUE(rcode);
+  auto expected = x23::serialize(contract);
+  EXPECT_TRUE(std::ranges::equal(std::as_bytes(std::span(expected)), *rcode));
+}
+
+// Regression for #1775/#2569: a serialized contract row larger than
+// kMaxSerializedContractBytes is executor misbehavior -- hogexec enforces
+// kMaxContractSizeBytes on attached blobs before execution, and hogdb stores
+// any legal row (chunked if necessary). Reject at staging with
+// kInvalidExecutorBehavior, not at block write-back, where apply() would
+// leave earlier writes visible and the commit error would abort the node.
+TEST_F(HogDBTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract().data.resize_uninitialized(
+      kMaxSerializedContractBytes + 1);
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
@@ -1289,7 +1313,7 @@ TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
 
   auto ret = invoke_tx.request_new_contract(contract);
   ASSERT_FALSE(ret);
-  EXPECT_EQ(HogDBCode::kTooBig, ret.error().code());
+  EXPECT_EQ(HogDBCode::kInvalidExecutorBehavior, ret.error().code());
 
   invoke_tx.abort();
   invoke_tx.release_blocktx_reference();
