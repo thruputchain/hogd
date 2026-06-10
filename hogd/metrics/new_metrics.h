@@ -98,9 +98,6 @@ public:
 
 private:
   struct Metric {
-    // [sample] is protected by the component lock. This synchronization is very
-    // coarse-grained and we should ultimately replace this with a synchronized
-    // map that uses [x23::CoroLock]'s rather than [std::mutex]'s.
     size_t sample;
   };
 
