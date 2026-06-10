@@ -51,6 +51,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -218,7 +219,94 @@ make_hog_age(const Address &addr, uint128_t to_schedule,
   };
 }
 
+// Deterministic non-trivial payload so chunk reassembly errors are visible.
+x23::Vec<uint8_t>
+make_code_bytes(size_t size)
+{
+  x23::Vec<uint8_t> buf;
+  buf.resize_uninitialized(size);
+  for (size_t i = 0; i < size; ++i) {
+    buf[i] = static_cast<uint8_t>(i * 31 + 7);
+  }
+  return buf;
+}
+
+// Largest value length that stores inline under the 33-byte wasm-code key.
+size_t
+max_inline_wasm_code_size()
+{
+  size_t size = kBigItemThreshold;
+  while (!Database::item_fits(make_wasm_code_key(SHA256Hash{}).size(), size)) {
+    --size;
+  }
+  return size;
+}
+
 } // namespace
+
+TEST_F(HogDBTest, WasmCodeChunkedRoundtrip)
+{
+  const size_t max_inline = max_inline_wasm_code_size();
+  const std::array<size_t, 5> sizes = {
+      max_inline,                        // largest inline row
+      max_inline + 1,                    // smallest chunked row
+      2 * kWasmCodeChunkPayloadSize,     // exact multiple of chunk payload
+      2 * kWasmCodeChunkPayloadSize + 1, // one byte into a final chunk
+      kMaxSerializedContractBytes,       // largest row hogdb accepts
+  };
+  uint8_t which = 0;
+  for (size_t size : sizes) {
+    SHA256Hash hash{};
+    hash[0] = 0xC0;
+    hash[1] = which++;
+    auto buf = make_code_bytes(size);
+    auto buf_span = std::as_bytes(std::span(buf));
+    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
+    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_TRUE(rcode) << size;
+    EXPECT_TRUE(std::ranges::equal(buf_span, *rcode)) << size;
+    // Re-writing the same row is idempotent (content-addressed rows can be
+    // staged again by a later transaction deploying the same contract).
+    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
+    auto rcode2 = db_.read_wasm_code(hash);
+    ASSERT_TRUE(rcode2) << size;
+    EXPECT_TRUE(std::ranges::equal(buf_span, *rcode2)) << size;
+  }
+}
+
+// Guards db_hash compatibility: a row that fits one item must keep the exact
+// pre-chunking layout (type 0 at the 33-byte key, no chunk items), so
+// chunking changes nothing for existing state.
+TEST_F(HogDBTest, WasmCodeSmallRowKeepsLegacyInlineLayout)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC1;
+  auto buf = make_code_bytes(100);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto key = make_wasm_code_key(hash);
+  auto type = db_.get_ramdb().get_type(std::as_bytes(std::span(key)));
+  ASSERT_TRUE(type);
+  EXPECT_EQ(*type, kWasmCodeInline);
+
+  auto chunk_key = make_wasm_code_chunk_key(hash, 0);
+  EXPECT_FALSE(db_.get_ramdb().get_type(std::as_bytes(std::span(chunk_key))));
+}
+
+TEST_F(HogDBTest, WasmCodeMissingChunkIsCorruption)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC2;
+  auto buf = make_code_bytes(kMaxSerializedContractBytes);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto chunk_key = make_wasm_code_chunk_key(hash, 1);
+  ASSERT_TRUE(db_.get_ramdb().remove(std::as_bytes(std::span(chunk_key))));
+
+  auto rcode = db_.read_wasm_code(hash);
+  ASSERT_FALSE(rcode);
+  EXPECT_EQ(rcode.error().code(), HogDBCode::kCorruption);
+}
 
 TEST_F(HogDBTest, DataAccessObject)
 {
