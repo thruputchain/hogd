@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cassert>
@@ -192,12 +193,33 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     co_return false;
   }
 
+  // Each decoded object consumes at least [kMinObjectSize] bytes of [xdr], so
+  // the payload can encode at most [total_segment_bytes / kMinObjectSize]
+  // objects, and an XDR vector can hold at most 0xffffffff objects regardless.
+  // Enforcing this bound before [objs.resize] below stops a small batch from
+  // overclaiming segment tokens to force an enormous allocation (#1645). We
+  // divide rather than multiply so the bound cannot overflow [size_t]. The sum
+  // itself cannot overflow either: [segment_tokens] holds at most 0xffffffff
+  // entries each at most 0xffffffff, so the total is below SIZE_MAX.
+  constexpr size_t kMinObjectSize = x23::detail::xdr_size_bounds<T>().min_;
+  static_assert(kMinObjectSize > 0,
+                "ParallelBatch element type must have a nonzero minimum XDR "
+                "size, else token counts cannot bound the allocation");
+  const size_t max_total_segment_tokens =
+      std::min<size_t>(0xffffffffUL, total_segment_bytes / kMinObjectSize);
+
   std::vector<size_t> obj_offsets;
   obj_offsets.reserve(parallel.segment_tokens.size());
   size_t total_segment_tokens = 0;
   for (unsigned int segment_tokens : parallel.segment_tokens) {
     obj_offsets.push_back(total_segment_tokens);
     total_segment_tokens += segment_tokens;
+  }
+  if (total_segment_tokens > max_total_segment_tokens) {
+    info("failed to deserialize: claimed {} segment tokens exceeds the maximum "
+         "{} that {} payload bytes can encode",
+         total_segment_tokens, max_total_segment_tokens, total_segment_bytes);
+    co_return false;
   }
   objs.resize(total_segment_tokens, {});
 
