@@ -308,6 +308,66 @@ TEST_F(HogDBTest, WasmCodeMissingChunkIsCorruption)
   EXPECT_EQ(rcode.error().code(), HogDBCode::kCorruption);
 }
 
+// The chunked-head sanity checks (unknown type byte, fits-inline total,
+// out-of-range chunk count) all reject with kCorruption -- and they run
+// before read_wasm_code allocates `total` bytes, so a hostile head cannot
+// drive a huge allocation (the 0xFFFFFFFF case would be a 4 GiB buffer).
+TEST_F(HogDBTest, WasmCodeTamperedHeadIsCorruption)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC3;
+  auto buf = make_code_bytes(kMaxSerializedContractBytes);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto key = make_wasm_code_key(hash);
+  auto key_span = std::as_bytes(std::span(key));
+
+  auto expect_corrupt_after = [&](uint8_t type,
+                                  std::span<const std::byte> value) {
+    ASSERT_TRUE(db_.get_ramdb().put(key_span, type, value));
+    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_FALSE(rcode);
+    EXPECT_EQ(rcode.error().code(), HogDBCode::kCorruption);
+  };
+
+  // Unknown head type byte.
+  auto valid_len = x23::serialize(static_cast<uint32_t>(buf.size()));
+  expect_corrupt_after(7, std::as_bytes(std::span(valid_len)));
+
+  // Chunked head describing a row small enough to be stored inline.
+  auto small_len = x23::serialize(static_cast<uint32_t>(100));
+  expect_corrupt_after(kWasmCodeChunkedHead, std::as_bytes(std::span(small_len)));
+
+  // Chunked head describing more chunks than a one-byte index addresses.
+  auto huge_len = x23::serialize(static_cast<uint32_t>(0xFFFFFFFF));
+  expect_corrupt_after(kWasmCodeChunkedHead, std::as_bytes(std::span(huge_len)));
+}
+
+// for_each_wasm_code_item emits payload chunks before the chunked head, so a
+// reader that observes a head always finds complete chunks. Pin that
+// ordering: it is documented behavior the read path relies on.
+TEST_F(HogDBTest, WasmCodeChunkedItemsEmitHeadLast)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC4;
+  auto buf = make_code_bytes(2 * kWasmCodeChunkPayloadSize + 1);
+
+  std::vector<std::pair<size_t, uint8_t>> emitted; // (key length, type)
+  for_each_wasm_code_item(hash, std::as_bytes(std::span(buf)),
+                          [&](std::span<const std::byte> key, uint8_t type,
+                              std::span<const std::byte> /*value*/) {
+                            emitted.emplace_back(key.size(), type);
+                          });
+
+  ASSERT_EQ(emitted.size(), 4U); // 3 chunks + head
+  for (size_t i = 0; i + 1 < emitted.size(); ++i) {
+    EXPECT_EQ(emitted[i].first, sizeof(SHA256Hash) + 2) << i;
+    EXPECT_EQ(emitted[i].second, kWasmCodeChunk) << i;
+  }
+  EXPECT_EQ(emitted.back().first, sizeof(SHA256Hash) + 1);
+  EXPECT_EQ(emitted.back().second, kWasmCodeChunkedHead);
+}
+
 TEST_F(HogDBTest, DataAccessObject)
 {
   //
