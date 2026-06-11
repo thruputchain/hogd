@@ -661,19 +661,40 @@ TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
          "transfer_from self";
 }
 
-// An over-balance transfer to a *distinct* recipient. Here the debit and credit
-// hit different keys, so the deficit is NOT netted away: the native precompile
-// returns Ok at invoke but fails at commit (the balance lock rejects the
-// negative delta), while itc_erc20 rejects at invoke. This divergence lives in
-// the commit ExecResult, which is why the captured outcome includes it.
-TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientParity)
+// A non-self over-balance transfer is the one case the two backends are
+// *allowed* to differ. itc_erc20 rejects at invoke (its strict per-debit
+// check), while the native precompile defers to commit-time validation -- it
+// must, because system flows like the genesis token claim rely on deferred
+// netting (transferring nearly the whole balance, with storage costs that only
+// balance out at commit; a strict per-debit check would reject the transient
+// deficit). The native strict check therefore applies only to self-transfers
+// (#2134/#1969), where the same-key debit/credit net to zero and the deferred
+// check is structurally blind. Both backends still reject the over-balance
+// transfer; they just reject at different layers, so the captured outcomes
+// legitimately differ. This test pins down that expected divergence.
+TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientDivergesByLayer)
 {
   auto [native_record, wasm_record] =
       run_transfer_parity(/*start_balance=*/10, /*transfer_amount=*/100,
                           kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on over-balance "
-         "transfer to recipient";
+
+  // Native: the transfer returns Ok at invoke, so the captured outcome is just
+  // the (non-OK) commit ExecResult -- the negative balance delta is rejected by
+  // the commit-time lock and the record write is rolled back with it.
+  ASSERT_EQ(native_record.size(), 1U);
+  EXPECT_NE(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
+      << "native should reject the over-balance transfer at commit";
+
+  // itc_erc20: the transaction commits (the reverted child stages nothing), and
+  // the transfer itself aborted at invoke.
+  ASSERT_GE(wasm_record.size(), 3U);
+  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK)
+      << "itc commits cleanly (nothing staged)";
+  EXPECT_EQ(wasm_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
+      << "itc rejects the over-balance transfer at invoke";
+
+  EXPECT_NE(native_record, wasm_record);
 }
 
 // transfer_from with sufficient balance but insufficient allowance. The native

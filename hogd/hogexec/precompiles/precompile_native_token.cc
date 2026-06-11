@@ -237,15 +237,21 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // Strict solvency check before staging, mirroring itc_erc20's strict debit:
-  // a self-transfer would otherwise net the same-key debit and credit to zero
-  // and slip past commit-time balance validation (#2134).
-  auto covers = balance_covers(ctx, *owner, amount_signed_int);
-  if (!covers.has_value()) {
-    return covers.error();
-  }
-  if (!covers.value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  // Strict solvency check for a self-transfer only (#2134): when owner ==
+  // receiver the debit and credit net to zero on the same balance key, so the
+  // deferred commit-time validation never sees the over-debit. For a distinct
+  // recipient the debit is a real negative delta that commit validates, and
+  // system flows (e.g. the genesis token claim, which transfers the supply
+  // minus storage costs that only net out at commit) rely on that deferred
+  // behavior -- so we must not force-load the balance there.
+  if (receiver == *owner) {
+    auto covers = balance_covers(ctx, *owner, amount_signed_int);
+    if (!covers.has_value()) {
+      return covers.error();
+    }
+    if (!covers.value()) {
+      return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    }
   }
 
   // subtract amount from owner's balance
@@ -324,13 +330,17 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     }
   }
 
-  // Strict solvency check for the owner debit (see transfer_impl).
-  auto covers = balance_covers(ctx, owner, amount_signed_int);
-  if (!covers.has_value()) {
-    return covers.error();
-  }
-  if (!covers.value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  // Strict solvency check for the owner debit only when it is a self-transfer
+  // (owner == receiver); otherwise the deferred commit-time check applies (see
+  // transfer_impl).
+  if (receiver == owner) {
+    auto covers = balance_covers(ctx, owner, amount_signed_int);
+    if (!covers.has_value()) {
+      return covers.error();
+    }
+    if (!covers.value()) {
+      return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    }
   }
 
   // subtract amount from owner's balance
