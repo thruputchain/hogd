@@ -14,6 +14,7 @@
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
@@ -34,6 +35,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // registration and metrics at the beginning of each test.
   Registration::registration().clear();
   Metrics::instance().clear();
+  init_hogexec_metrics();
   init_metrics();
 
   mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;

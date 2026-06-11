@@ -10,7 +10,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/init.h"
+#include "hogd/hogexec/test_main.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "hogd/loadgen/status.h"
@@ -245,9 +245,5 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  return hogd::run_hogexec_tests(argc, argv);
 }

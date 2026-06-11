@@ -5,7 +5,7 @@
 namespace hogd {
 
 inline void
-init_metrics()
+init_hogexec_metrics()
 {
   Metrics::instance().init_metric(Metrics::ComponentName::kExecutor,
                                   "successful_proposed_tx_count", "",
