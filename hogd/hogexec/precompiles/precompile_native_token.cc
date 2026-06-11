@@ -163,7 +163,11 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     output_add = 0;
   }
   else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return false;
+    // An unexpected syscall code (e.g. a type mismatch on the allowance key) is
+    // a storage anomaly, not an insufficient allowance: surface it as a
+    // deterministic fault rather than letting callers report ERC20Error::
+    // TooLarge, matching get_allowance_impl.
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   if (integer_add_overflow(output_add, amount)) {
@@ -285,7 +289,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
   }
-  if (!r1.value()) {
+  if (!r1.value().has_value()) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
