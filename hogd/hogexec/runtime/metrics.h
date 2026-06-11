@@ -16,6 +16,7 @@ namespace hogd {
 class HogexecMetrics {
 public:
   static void launch_log_worker();
+  static void stop_log_worker();
 
   static void mark_tx_failed(InvokeResult const &result,
                              BlockExecutionMode mode)
@@ -76,14 +77,7 @@ public:
     get_instance().gas_consumed_.inc(gas);
   }
 
-  ~HogexecMetrics()
-  {
-    if (background_worker_.joinable()) {
-      background_worker_.request_stop();
-      cv_.notify_all();
-      background_worker_.join();
-    }
-  }
+  ~HogexecMetrics() { stop_background_worker(); }
 
 private:
   static HogexecMetrics &get_instance();
@@ -108,20 +102,16 @@ private:
 
   MetricsSnapshot get_stats();
   void background_worker(std::stop_token &stoken);
+  void stop_background_worker();
 
   PerThreadCounter<size_t> successful_proposed_tx_count_;
   PerThreadCounter<size_t> failed_proposed_tx_count_;
   PerThreadCounter<uint64_t> gas_consumed_;
 
-  MetricRegistry registry_ =
-      MetricRegistry({make_counter_metric("successful_proposed_tx_count", "",
-                                          successful_proposed_tx_count_),
-                      make_counter_metric("failed_proposed_tx_count", "",
-                                          failed_proposed_tx_count_),
-                      make_counter_metric("gas_consumed", "", gas_consumed_)});
   std::jthread background_worker_;
   std::condition_variable_any cv_;
   std::mutex cv_mutex_;
+  std::mutex background_worker_mutex_;
 };
 
 } // namespace hogd

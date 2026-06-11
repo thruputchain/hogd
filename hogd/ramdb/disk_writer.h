@@ -92,7 +92,8 @@ public:
   // print_stats prints disk usage statistics.
   void print_stats();
 
-  void register_metrics(MetricRegistry &registry);
+  static void register_metrics();
+  void record_metrics();
 
   size_t get_bytes_out() const
   {

@@ -162,7 +162,8 @@ public:
   // thread safe.
   void set_active(bool yes);
 
-  void register_metrics(MetricRegistry &registry);
+  void register_metrics();
+  void record_metrics();
 
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
@@ -213,10 +214,10 @@ private:
   uint64_t max_snapshot_end_lsn_{0};
 
   // periodically updated stats; registered in register_metrics().
-  struct Metrics {
+  struct DbMetrics {
     std::atomic<size_t> snap_bytes_out_;
   };
-  Metrics metrics_{};
+  DbMetrics metrics_{};
 
   // called when memory is low.
   void notify_low_mem();

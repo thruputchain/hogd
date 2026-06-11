@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
+#include "hogd/hogexec/test_main.h"
 
 #include <format>
+#include <gtest/gtest.h>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -18,7 +19,6 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
-#include "hogd/init.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -238,9 +238,5 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  return hogd::run_hogexec_tests(argc, argv);
 }

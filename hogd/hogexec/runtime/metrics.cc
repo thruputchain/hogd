@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "hogd/base/log.h"
+#include "hogd/metrics/metrics.h"
 #include "x23/fastclock.h"
 
 namespace hogd {
@@ -13,12 +14,19 @@ namespace hogd {
 void
 HogexecMetrics::launch_log_worker()
 {
-  auto &instance = get_instance();
+  HogexecMetrics &instance = get_instance();
+  std::scoped_lock g(instance.background_worker_mutex_);
   if (!instance.background_worker_.joinable()) {
     instance.background_worker_ = std::jthread([](std::stop_token stoken) {
       get_instance().background_worker(stoken);
     });
   }
+}
+
+void
+HogexecMetrics::stop_log_worker()
+{
+  get_instance().stop_background_worker();
 }
 
 HogexecMetrics &
@@ -31,20 +39,22 @@ HogexecMetrics::get_instance()
 HogexecMetrics::MetricsSnapshot
 HogexecMetrics::get_stats()
 {
-  auto samples = registry_.read();
   MetricsSnapshot snapshot{};
   snapshot.time_ns = x23::fastclock::get_ns();
-  for (auto &sample : samples) {
-    if (sample.key == "successful_proposed_tx_count") {
-      snapshot.successful_proposed_tx_count = sample.val;
-    }
-    else if (sample.key == "failed_proposed_tx_count") {
-      snapshot.failed_proposed_tx_count = sample.val;
-    }
-    else if (sample.key == "gas_consumed") {
-      snapshot.gas_consumed = sample.val;
-    }
-  }
+
+  snapshot.successful_proposed_tx_count = successful_proposed_tx_count_.get();
+  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_.get();
+  snapshot.gas_consumed = gas_consumed_.get();
+
+  Metrics &metrics = Metrics::instance();
+  metrics.record(Metrics::ComponentName::kExecutor,
+                 "successful_proposed_tx_count",
+                 snapshot.successful_proposed_tx_count);
+  metrics.record(Metrics::ComponentName::kExecutor, "failed_proposed_tx_count",
+                 snapshot.failed_proposed_tx_count);
+  metrics.record(Metrics::ComponentName::kExecutor, "gas_consumed",
+                 snapshot.gas_consumed);
+
   return snapshot;
 }
 
@@ -57,6 +67,9 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
   while (!stoken.stop_requested()) {
     std::unique_lock g(cv_mutex_);
     cv_.wait_for(g, stoken, std::chrono::seconds(1), [] { return false; });
+    if (stoken.stop_requested()) {
+      break;
+    }
 
     auto new_snapshot = get_stats();
     auto delta = new_snapshot - snapshot;
@@ -71,6 +84,18 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
          delta.gas_consumed / time_delta_s, time_delta_s);
     snapshot = new_snapshot;
   }
+}
+
+void
+HogexecMetrics::stop_background_worker()
+{
+  std::scoped_lock g(background_worker_mutex_);
+  if (!background_worker_.joinable()) {
+    return;
+  }
+  background_worker_.request_stop();
+  cv_.notify_all();
+  background_worker_.join();
 }
 
 } // namespace hogd

@@ -1,33 +1,56 @@
 #include "hogd/metrics/metrics.h"
 
-#include <algorithm>
-#include <functional>
-#include <ranges>
-#include <vector>
+#include <format>
+#include <sstream>
+#include <string>
+
+#include "hogd/base/types.h"
 
 namespace hogd {
 
-std::vector<Metric>
-MetricRegistry::get_metrics() const
+Metrics &
+Metrics::instance()
 {
-  auto tmp = sources_ | std::views::transform(&MetricSource::first);
-  return {tmp.begin(), tmp.end()};
+  static Metrics metrics;
+  return metrics;
 }
 
-std::vector<Sample>
-MetricRegistry::read() const
+// static
+std::string
+Metrics::fully_qualified_name(Metrics::ComponentName component_name,
+                              const std::string &metric_name)
 {
-  // run read observer functions.
-  std::ranges::for_each(read_fns_, [](const std::function<void()> &fn) {
-    if (fn)
-      fn();
-  });
+  return std::format("{}_{}", component_name, metric_name);
+}
 
-  // gather samples
-  auto tmp = sources_ | std::views::transform([](const MetricSource &src) {
-               return Sample{.key = src.first.key, .val = src.second()};
-             });
-  return {tmp.begin(), tmp.end()};
+std::string
+Metrics::dump_to_prometheus_string()
+{
+  std::ostringstream os;
+  for (size_t i = 0; i < components_.size(); i++) {
+    Component &component = components_[i];
+
+    for (auto &[name, metric] : component.metrics) {
+      auto it = component.descriptions.find(name);
+      if (it != component.descriptions.end() && !it->second.empty()) {
+        os << std::format("# HELP {} {}\n",
+                          fully_qualified_name(static_cast<ComponentName>(i),
+                                               name),
+                          it->second);
+      }
+      // We only support gauges for now but can easily expand this to other
+      // types.
+      os << std::format("# TYPE {} gauge\n",
+                        fully_qualified_name(static_cast<ComponentName>(i),
+                                             name));
+      os << std::format("{} {}\n",
+                        fully_qualified_name(static_cast<ComponentName>(i),
+                                             name),
+                        metric.value());
+    }
+  }
+
+  return os.str();
 }
 
 } // namespace hogd

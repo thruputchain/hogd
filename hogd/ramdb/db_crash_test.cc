@@ -19,13 +19,11 @@
 #include <future>
 #include <memory>
 #include <print>
-#include <ranges>
 #include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -197,24 +195,41 @@ db_size(hogd::Database &db)
 
 using time_point = std::chrono::high_resolution_clock::time_point;
 
-std::vector<Sample> prev_samples;
+struct MetricSample {
+  std::string key;
+  ssize_t val;
+};
+
+std::vector<MetricSample> prev_samples;
 time_point start;
 
+std::vector<MetricSample>
+read_metrics(Database &db)
+{
+  db.record_metrics();
+
+  Metrics &metrics = Metrics::instance();
+  return {
+      {"db_ramdb_snap_bytes_out",
+       metrics.get(Metrics::ComponentName::kDb, "ramdb_snap_bytes_out")},
+      {"db_ramdb_disk_writer_bytes_out",
+       metrics.get(Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out")},
+  };
+}
+
 void
-dump_metrics(MetricRegistry &registry,
-             std::unordered_set<std::string_view> const &cumulative_fields,
-             Shared &shared)
+dump_metrics(Database &db, Shared &shared)
 {
   if (!kDumpMetrics)
     return;
 
-  std::vector<Sample> samples = registry.read();
+  std::vector<MetricSample> samples = read_metrics(db);
 
   time_point now = std::chrono::high_resolution_clock::now();
   size_t ns = (now - start).count();
 
   info("== begin metrics ==");
-  for (Sample &sample : samples)
+  for (MetricSample &sample : samples)
     info("> {} {} {}", ns, sample.key, sample.val);
   info("== end metrics ==");
 
@@ -222,18 +237,15 @@ dump_metrics(MetricRegistry &registry,
   shared.last_dump_recovery_count = shared.recovery_count;
 
   if (!skip_diff) {
-    std::vector<Sample> diff = samples;
+    std::vector<MetricSample> diff = samples;
 
     if (diff.size() == prev_samples.size()) {
-      for (size_t i = 0; i < diff.size(); ++i) {
-        if (cumulative_fields.contains(diff[i].key)) {
-          diff[i].val -= prev_samples[i].val;
-        }
-      }
+      for (size_t i = 0; i < diff.size(); ++i)
+        diff[i].val -= prev_samples[i].val;
     }
 
     info("== begin delta metrics ==");
-    for (Sample &sample : diff)
+    for (MetricSample &sample : diff)
       info("Δ {} {} {} {}/s", ns, sample.key, sample.val,
            print_iec_bytes(sample.val, true));
     info("== end delta metrics ==");
@@ -245,25 +257,13 @@ dump_metrics(MetricRegistry &registry,
 void
 do_child(std::string_view path, Shared &shared)
 {
-  MetricRegistry registry{};
-
   auto db = make_db(path, kKeys, kValueSize);
 
-  db->register_metrics(registry);
-  std::jthread _([&registry, &shared](std::stop_token &&stoken) {
-    // this is expensive to build. should only do it once, worst case.
-    std::vector<Metric> metrics = registry.get_metrics();
-    // note cumulative_fields is borrowing views of strings in metrics.
-    std::unordered_set<std::string_view> cumulative_fields =
-        metrics |
-        std::views::filter([](const Metric &m) { return m.cumulative; }) |
-        std::views::transform(
-            [](const Metric &m) { return std::string_view{m.key}; }) |
-        std::ranges::to<std::unordered_set<std::string_view>>();
-
+  db->register_metrics();
+  std::jthread _([&db, &shared](std::stop_token &&stoken) {
     while (!stoken.stop_requested()) {
       std::this_thread::sleep_for(1s); // NOLINT(misc-include-cleaner)
-      dump_metrics(registry, cumulative_fields, shared);
+      dump_metrics(*db, shared);
     }
   });
 
