@@ -11,13 +11,13 @@
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/metrics/shared.h"
 
 namespace hogd {
 namespace {
 
-class NewMetricsTest : public ::testing::Test {
+class MetricsTest : public ::testing::Test {
 protected:
   void SetUp() override { Metrics::instance().clear(); }
 };
@@ -56,19 +56,19 @@ init_metric(Metrics &metrics, Metrics::ComponentName component_name,
   metrics.mark_done_with_init(component_name);
 }
 
-TEST_F(NewMetricsTest, InstanceReturnsSingleton)
+TEST_F(MetricsTest, InstanceReturnsSingleton)
 {
   EXPECT_EQ(&Metrics::instance(), &Metrics::instance());
 }
 
-TEST_F(NewMetricsTest, ComponentNamesFormatAsPrometheusPrefixes)
+TEST_F(MetricsTest, ComponentNamesFormatAsPrometheusPrefixes)
 {
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kExecutor), "executor");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kDb), "db");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kMempool), "mempool");
 }
 
-TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
+TEST_F(MetricsTest, DumpIncludesRecordedGaugeForComponent)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -83,7 +83,7 @@ TEST_F(NewMetricsTest, DumpIncludesRecordedGaugeForComponent)
   expect_dump_contains(dump, "executor_metrics_test_executor_queue_depth 17");
 }
 
-TEST_F(NewMetricsTest, DumpIncludesDescriptionForDescribedMetric)
+TEST_F(MetricsTest, DumpIncludesDescriptionForDescribedMetric)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -103,7 +103,7 @@ TEST_F(NewMetricsTest, DumpIncludesDescriptionForDescribedMetric)
   expect_dump_contains(dump, "mempool_metrics_test_described_mempool_depth 42");
 }
 
-TEST_F(NewMetricsTest, DumpOmitsMissingDescription)
+TEST_F(MetricsTest, DumpOmitsMissingDescription)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -124,7 +124,7 @@ TEST_F(NewMetricsTest, DumpOmitsMissingDescription)
   expect_dump_contains(dump, "db_metrics_test_unrecorded_db_snapshot_count 5");
 }
 
-TEST_F(NewMetricsTest, InitializedMetricStartsAtZero)
+TEST_F(MetricsTest, InitializedMetricStartsAtZero)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -141,7 +141,7 @@ TEST_F(NewMetricsTest, InitializedMetricStartsAtZero)
   expect_dump_contains(dump, "db_metrics_test_unrecorded_db_snapshot_count 0");
 }
 
-TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
+TEST_F(MetricsTest, RecordingSameMetricUpdatesLatestSample)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -161,7 +161,7 @@ TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
       << dump;
 }
 
-TEST_F(NewMetricsTest, AddUpdatesSSizeTMetric)
+TEST_F(MetricsTest, AddUpdatesSSizeTMetric)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -176,7 +176,7 @@ TEST_F(NewMetricsTest, AddUpdatesSSizeTMetric)
   expect_dump_contains(dump, "db_metrics_test_db_added_snapshot_count 7");
 }
 
-TEST_F(NewMetricsTest, SamplesSupportSignedValues)
+TEST_F(MetricsTest, SamplesSupportSignedValues)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -195,7 +195,7 @@ TEST_F(NewMetricsTest, SamplesSupportSignedValues)
   expect_dump_contains(dump, "db_metrics_test_signed_snapshot_delta -7");
 }
 
-TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
+TEST_F(MetricsTest, DumpIncludesMetricsFromMultipleComponents)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -217,7 +217,7 @@ TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
   expect_dump_contains(dump, "mempool_metrics_test_multi_mempool 22");
 }
 
-TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSamples)
+TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
 {
   Metrics &metrics = Metrics::instance();
   init_metric(metrics, Metrics::ComponentName::kExecutor,
@@ -248,7 +248,7 @@ TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSamples)
   worker.join();
 }
 
-TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
+TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
 {
   Metrics &metrics = Metrics::instance();
   init_metric(metrics, Metrics::ComponentName::kExecutor,
@@ -283,7 +283,7 @@ TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
   worker.join();
 }
 
-TEST_F(NewMetricsTest, MetricsRouteReturnsExpectedResponse)
+TEST_F(MetricsTest, MetricsRouteReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
   // We set the description before starting the HTTP server because accesses to

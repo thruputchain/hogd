@@ -1,10 +1,10 @@
 add_library(
-  new_metrics
+  metrics
   health.cc
-  new_metrics.cc
+  metrics.cc
 )
 target_link_libraries(
-  new_metrics
+  metrics
   base
   hogd
   http
@@ -17,18 +17,18 @@ add_executable(
 )
 target_link_libraries(
   health_test
-  new_metrics
+  metrics
   GTest::gtest_main
 )
 gtest_discover_tests(health_test)
 
 add_executable(
-  new_metrics_test
-  new_metrics_test.cc
+  metrics_test
+  metrics_test.cc
 )
 target_link_libraries(
-  new_metrics_test
-  new_metrics
+  metrics_test
+  metrics
   GTest::gtest_main
 )
-gtest_discover_tests(new_metrics_test)
+gtest_discover_tests(metrics_test)

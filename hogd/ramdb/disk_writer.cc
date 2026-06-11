@@ -26,7 +26,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 

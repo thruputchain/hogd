@@ -46,7 +46,7 @@ target_link_libraries(
   components_library_exception
   hogexec_common
   hogd
-  new_metrics
+  metrics
   GTest::gtest
 )
 gtest_discover_tests(components_test)

@@ -143,7 +143,7 @@ target_link_libraries(
   components
   unified_lib
   protocol
-  new_metrics
+  metrics
   event
   rv32_vm
   hogd

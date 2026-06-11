@@ -21,7 +21,7 @@ add_library(
 target_link_libraries(
   ramdb
   hogd
-  new_metrics
+  metrics
 )
 
 # Build the db_bench executable

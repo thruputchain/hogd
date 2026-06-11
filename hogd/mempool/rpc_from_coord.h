@@ -34,7 +34,7 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/metrics/health.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "parallel.hh"
