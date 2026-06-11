@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -27,13 +26,9 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
-#include "invoke_args.hh"
-#include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
-#include "syscall.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -622,11 +617,13 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   EXPECT_EQ(from_xdr(balance_item->nnint()), kInitialBalance);
 }
 
-// 8. transfer_from succeeds when the allowance has an unmaterialized
-// intermediate value above INT128_MAX. The NNInt delta system works on net
-// deltas, so the intermediate overflow is fine as long as the committed
-// value is valid.
-TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
+// 7. Strict allowance rejects an overflowing adjust_allowance at invoke time,
+// mirroring itc_erc20's try_strict_inc. The allowance is checked against its
+// committed snapshot value at the point of the add (not deferred to commit),
+// so an increment that would push the committed allowance above INT128_MAX is
+// aborted immediately and leaves the prior allowance intact. (Balance, unlike
+// allowance, stays deferred -- see erc20_parity_test.cc for that gap.)
+TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(190);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(191);
@@ -636,10 +633,10 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
   constexpr static int128_t kOverflowIncrement = 10;
   constexpr static uint128_t kTransferAmount = 10'000;
 
-  // kOwnerAddr commits 1 tx (Tx1) and kSpenderAddr commits 1 tx (Tx2); grant
-  // each enough to pay the replay-cache storage cost.
+  // kOwnerAddr commits 2 txs (Tx1 seed, Tx2 adjust) and kSpenderAddr commits 1
+  // tx (Tx3 transfer_from); grant each enough to pay the replay-cache cost.
   setup_grant_storage_token(kOwnerAddr,
-                            1'000'000 + replay_cache_cost_charged(1));
+                            1'000'000 + replay_cache_cost_charged(2));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
   setup_grant_storage_token(
@@ -647,7 +644,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
       get_default_cost_model()->get_nnint_cost() * 4);
 
   // Owner method 0: seed allowance for spender.
-  // Owner method 1: adjust allowance for spender by +10.
+  // Owner method 1: adjust allowance for spender by +10 (must abort: overflow).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -670,36 +667,23 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_adj = client.invoke_opt<"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kOverflowIncrement));
-        if (!r_adj.has_value() || !r_adj.value().has_value() ||
-            !r_adj.value().value().has_value() ||
-            !r_adj.value().value().value().is_ok()) {
-          ADD_FAILURE() << "overflowing adjust_allowance(+10) should succeed";
+        // Strict allowance must reject the overflowing increment at invoke.
+        if (r_adj.has_value() && r_adj.value().has_value() &&
+            r_adj.value().value().has_value() &&
+            r_adj.value().value().value().is_ok()) {
+          ADD_FAILURE()
+              << "overflowing adjust_allowance(+10) should be rejected";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
 
-  // Spender method 0: invoke owner method 1 (adjust +10), then
-  // transfer_from. Both hit the same (owner, spender) allowance in one tx.
+  // Spender method 0: transfer_from kTransferAmount. The allowance is still the
+  // seeded INT128_MAX - 5 (the +10 adjust aborted), so this succeeds.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = uint64_t{1},
-            .gas_limit = static_cast<GasAmount>(UINT64_MAX),
-            .flags = InvokeFlagSet{0},
-        };
-        auto inv =
-            ctx.syscall<SyscallNo::kInvoke>(kOwnerAddr,
-                                            std::span<const std::byte>{},
-                                            std::span<const std::byte>{},
-                                            inputs, CopyableInvokeOutputs{});
-        if (!inv.has_value() ||
-            *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "invoke owner for adjust_allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_xfer =
@@ -708,8 +692,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
         if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
             !r_xfer.value().value().has_value() ||
             !r_xfer.value().value().value().is_ok()) {
-          ADD_FAILURE()
-              << "transfer_from from overflowed allowance should succeed";
+          ADD_FAILURE() << "transfer_from against seeded allowance should "
+                           "succeed";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -755,139 +739,16 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
 
   advance_block();
 
-  // Tx 2: spender invokes owner (adjust +10) then transfer_from(10000).
-  // Net allowance delta = +10 - 10000 = -9990; committed = INT128_MAX - 9995.
-  {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kSpenderAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
-  }
-}
-
-// 9. transfer_from from an overflowed allowance fails at commit when the
-// transfer does not reduce the net delta below the overflow threshold.
-TEST_F(NativeTokenAllowanceTest,
-       OverflowedAllowanceTransferFromRejectsIfNotReduced)
-{
-  constexpr static ContractAddress kOwnerAddr = make_contract_address(193);
-  constexpr static ContractAddress kSpenderAddr = make_contract_address(194);
-  constexpr static ContractAddress kReceiverAddr = make_contract_address(195);
-  constexpr static int128_t kSeedAllowance =
-      std::numeric_limits<int128_t>::max() - 5;
-
-  // kOwnerAddr commits 1 tx (Tx1); grant it enough to pay the replay-cache
-  // storage cost. (Tx2 by kSpenderAddr fails to commit, consuming no entry.)
-  setup_grant_storage_token(kOwnerAddr,
-                            1'000'000 + replay_cache_cost_charged(1));
-  setup_grant_storage_token(kReceiverAddr, 0);
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost() * 4);
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
-  fns_owner.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
-                                                       make_difference(
-                                                           kSeedAllowance));
-        if (!r.has_value() || !r.value().has_value() ||
-            !r.value().value().has_value() ||
-            !r.value().value().value().is_ok()) {
-          ADD_FAILURE() << "seed adjust_allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-  fns_owner.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_adj = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
-                                                           make_difference(10));
-        if (!r_adj.has_value() || !r_adj.value().has_value() ||
-            !r_adj.value().value().has_value() ||
-            !r_adj.value().value().value().is_ok()) {
-          ADD_FAILURE() << "overflowing adjust_allowance(+10) should succeed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-  auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
-
-  // Spender method 0: invoke owner method 1 (adjust +10), then
-  // transfer_from(3). Net delta = +7, committed = INT128_MAX + 2 → overflow.
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
-  fns_spender.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = uint64_t{1},
-            .gas_limit = static_cast<GasAmount>(UINT64_MAX),
-            .flags = InvokeFlagSet{0},
-        };
-        auto inv =
-            ctx.syscall<SyscallNo::kInvoke>(kOwnerAddr,
-                                            std::span<const std::byte>{},
-                                            std::span<const std::byte>{},
-                                            inputs, CopyableInvokeOutputs{});
-        if (!inv.has_value() ||
-            *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "invoke owner for adjust_allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_xfer =
-            client.invoke_opt<"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
-                                               make_amount(3));
-        if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
-            !r_xfer.value().value().has_value() ||
-            !r_xfer.value().value().value().is_ok()) {
-          ADD_FAILURE() << "transfer_from(3) should succeed at invoke time";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-  auto spender_contract =
-      std::make_unique<NativeContract>(std::move(fns_spender));
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr int32_t kOwnerNativeId = 31;
-  constexpr int32_t kSpenderNativeId = 34;
-  contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
-  contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
-  contract_map.emplace(
-      std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
-      make_native_token_contract());
-  auto runtime_context =
-      std::make_unique<NativeContext>(std::move(contract_map));
-
-  auto owner_xdr = make_native_contract(kOwnerNativeId);
-  write_contract(owner_xdr);
-  write_deployment(kOwnerAddr, owner_xdr);
-  auto spender_xdr = make_native_contract(kSpenderNativeId);
-  write_contract(spender_xdr);
-  write_deployment(kSpenderAddr, spender_xdr);
-
+  // Tx 2: owner adjusts allowance by +10. Strict allowance aborts the add
+  // (would overflow the committed INT128_MAX - 5); the owner method swallows
+  // the abort and commits with the allowance unchanged.
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   Invocation{.invoked_address = kOwnerAddr,
                                              .entrypoint =
-                                                 entrypoint_from_method_id(0),
+                                                 entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
@@ -899,8 +760,8 @@ TEST_F(NativeTokenAllowanceTest,
 
   advance_block();
 
-  // Tx 2: spender invokes owner (adjust +10) then transfer_from only 3.
-  // Net allowance delta = +7; committed value = INT128_MAX + 2, overflow.
+  // Tx 3: spender transfer_from(10000) against the intact INT128_MAX - 5
+  // allowance succeeds.
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
@@ -913,11 +774,12 @@ TEST_F(NativeTokenAllowanceTest,
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
   }
 }
 
-// 10. adjust_allowance for self (owner == spender) must fail.
+// 8. adjust_allowance for self (owner == spender) must fail.
 TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(196);
@@ -974,7 +836,7 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
   ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 }
 
-// 11. transfer_from where owner == caller skips allowance: no allowance
+// 9. transfer_from where owner == caller skips allowance: no allowance
 // row is created and no storage cost is consumed by the native token contract.
 TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 {

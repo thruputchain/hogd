@@ -77,14 +77,15 @@ using CapturedRecord = std::vector<uint8_t>;
 
 // Drives the native HOG precompile and the WASM itc_erc20 contract through the
 // same ERC20 operations, capturing each call's commit ExecResult plus the
-// literal return/abort bytes. For valid operations the two backends agree
-// byte-for-byte (the *Parity tests, which guard against regressions). For
-// over-balance / over-allowance operations they intentionally diverge: the
-// native token validates the net at commit (deferred), so it accepts a
-// same-key self-transfer that nets to zero and defers other rejections to
-// commit, while itc_erc20 enforces a strict per-debit check at invoke. That
-// gap is inherent -- the native token's deferred netting underpins system
-// flows like the genesis token claim -- and the *Diverges tests pin it down.
+// literal return/abort bytes. The two backends agree byte-for-byte on valid
+// operations *and* on allowance handling (the native token's allowance check is
+// strict like itc's) -- the *Parity tests guard that. They diverge only on the
+// *balance*: the native token validates the net balance at commit (deferred),
+// so it accepts a same-key self-transfer that nets to zero and defers other
+// balance rejections to commit, while itc_erc20 enforces a strict per-debit
+// balance check at invoke. That gap is inherent -- the native token's deferred
+// balance netting underpins system flows like the genesis token claim -- and
+// the *Diverges tests pin it down.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Erc20ParityTest : public ::testing::Test,
                         public NativeContractTestFramework {
@@ -724,25 +725,17 @@ TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientDivergesByLayer)
   EXPECT_NE(native_record, wasm_record);
 }
 
-// transfer_from with sufficient balance but insufficient allowance. The native
-// token stages a negative allowance delta that is only rejected at commit,
-// while itc_erc20's strict allowance decrement rejects at invoke -- the
-// allowance analogue of the deferred-vs-strict gap.
-TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromDiverges)
+// transfer_from with sufficient balance but insufficient allowance. The
+// allowance has no genesis-style deferred-netting constraint, so the native
+// token's allowance debit is strict like itc_erc20's: both reject at invoke
+// with ERC20Error::TooLarge, byte-identically.
+TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(
       /*owner_balance=*/1'000, /*allowance=*/10, /*transfer_amount=*/100);
-  // Native: returns Ok at invoke, fails at commit (negative allowance delta).
-  ASSERT_EQ(native_record.size(), 1U);
-  EXPECT_NE(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
-      << "native rejects insufficient allowance at commit";
-  // itc_erc20: rejects at invoke; the surrounding tx commits.
-  ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK);
-  EXPECT_EQ(wasm_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc_erc20 rejects insufficient allowance at invoke";
-  EXPECT_NE(native_record, wasm_record);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on insufficient-"
+         "allowance transfer_from";
 }
 
 // A funded transfer to the all-zero address. The native HOG precompile treats
@@ -771,28 +764,15 @@ TEST_F(Erc20ParityTest, ZeroAmountTransferParity)
          "transfer";
 }
 
-// adjust_allowance(self, +amount): the caller grants itself an allowance. Both
-// backends reject it, but differently: the native precompile aborts with a
-// generic deterministic fault, while itc_erc20 rejects it as a contract-level
-// ERC20Error::Internal. Same outcome (rejected), different representation.
-TEST_F(Erc20ParityTest, AdjustAllowanceToSelfDiverges)
+// adjust_allowance(self, +amount): granting oneself an allowance is rejected by
+// both backends with ERC20Error::Internal at invoke, byte-identically.
+TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
 {
   auto [native_record, wasm_record] =
       run_adjust_allowance_self_parity(/*amount=*/100);
-  // Native: deterministic fault (frame Fault).
-  ASSERT_GE(native_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
-            ExecResult::ExecResultOK);
-  EXPECT_EQ(native_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Fault))
-      << "native rejects self-allowance with a deterministic fault";
-  // itc_erc20: contract-level revert (frame Abort with ERC20Error::Internal).
-  ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK);
-  EXPECT_EQ(wasm_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc_erc20 rejects self-allowance with ERC20Error::Internal";
-  EXPECT_NE(native_record, wasm_record);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on adjust_allowance "
+         "to self";
 }
 
 // NOLINTEND(bugprone-exception-escape)

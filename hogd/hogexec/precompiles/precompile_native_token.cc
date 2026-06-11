@@ -125,6 +125,19 @@ allowance_key(ContractAddress owner, ContractAddress spender)
   return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
 }
 
+// Return an ERC20 contract-level revert carrying `code`, byte-identical to the
+// reference contract throwing the same ERC20Error (same selector + CXS body).
+InvokeStatus<Result<void, ERC20Exception>>
+erc20_error(itc_erc20::ERC20Error code)
+{
+  return {Result<void, ERC20Exception>::make_err(ERC20Exception{code})};
+}
+
+// Strict allowance adjustment, mirroring itc_erc20::add_to_allowance (the SDK's
+// non_negative_int_try_strict_inc): force-load the committed allowance and
+// reject an out-of-range running total at invoke (returns false), rather than
+// deferring to commit. Allowance has no genesis-style transient-dip concern, so
+// the native token can match the strict ERC20 reference here.
 InvokeStatus<bool>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
@@ -134,13 +147,19 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, false, output_set,
-                                                 output_set_opt, output_add);
+  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      allow_key, /*load_from_snapshot=*/true, output_set, output_set_opt,
+      output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
-  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+  if (*r == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    // Never-written allowance: treat as an explicit zero, matching
+    // try_get_values_force().unwrap_or((0, 0)) + set_add(Some(0), ...).
+    output_set = 0;
+    output_set_opt = true;
+    output_add = 0;
+  } else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return false;
   }
 
@@ -148,6 +167,10 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     return false;
   }
   int128_t new_add = output_add + amount;
+  // Strict non-negativity on the committed base + accumulated increments.
+  if (integer_add_overflow(output_set, new_add) || (output_set + new_add) < 0) {
+    return false;
+  }
 
   const int128_t *set_ptr = output_set_opt ? &output_set : nullptr;
   auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
@@ -273,13 +296,16 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
+  // Spending one's own tokens needs no allowance; otherwise the (strict)
+  // allowance debit rejects an insufficient allowance at invoke with
+  // ERC20Error::TooLarge, mirroring itc_erc20.
   if (owner != *spender) {
     auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
       return allow_res.error();
     }
     if (!allow_res.value()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
+      return erc20_error(itc_erc20::ERC20Error::TooLarge);
     }
   }
 
@@ -314,8 +340,10 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     return owner.error();
   }
 
+  // Granting oneself an allowance is meaningless; itc_erc20 rejects it at
+  // get_allowance_key with ERC20Error::Internal -- mirror that.
   if (*owner == spender) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::Internal);
   }
 
   int128_t amount_signed_int =
@@ -326,7 +354,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     return r.error();
   }
   if (!r.value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   auto event_buf =
