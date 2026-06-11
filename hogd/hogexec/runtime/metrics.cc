@@ -42,18 +42,15 @@ HogexecMetrics::get_stats()
   MetricsSnapshot snapshot{};
   snapshot.time_ns = x23::fastclock::get_ns();
 
-  snapshot.successful_proposed_tx_count = successful_proposed_tx_count_.get();
-  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_.get();
-  snapshot.gas_consumed = gas_consumed_.get();
-
   Metrics &metrics = Metrics::instance();
-  metrics.record(Metrics::ComponentName::kExecutor,
-                 "successful_proposed_tx_count",
-                 snapshot.successful_proposed_tx_count);
-  metrics.record(Metrics::ComponentName::kExecutor, "failed_proposed_tx_count",
-                 snapshot.failed_proposed_tx_count);
-  metrics.record(Metrics::ComponentName::kExecutor, "gas_consumed",
-                 snapshot.gas_consumed);
+  snapshot.successful_proposed_tx_count =
+      metrics.get(Metrics::ComponentName::kExecutor,
+                  "successful_proposed_tx_count");
+  snapshot.failed_proposed_tx_count =
+      metrics.get(Metrics::ComponentName::kExecutor,
+                  "failed_proposed_tx_count");
+  snapshot.gas_consumed =
+      metrics.get(Metrics::ComponentName::kExecutor, "gas_consumed");
 
   return snapshot;
 }
