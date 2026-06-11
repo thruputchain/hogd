@@ -11,7 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/metrics/health.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"

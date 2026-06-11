@@ -16,7 +16,7 @@ add_executable(
 target_link_libraries(
   hogexec
   exec_interface
-  new_metrics
+  metrics
   http
   hogd
   runtime

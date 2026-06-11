@@ -44,7 +44,7 @@ target_link_libraries(
   hogdb
   ramdb
   hogd
-  new_metrics
+  metrics
   genesis
   storage_cost
 )
@@ -58,7 +58,7 @@ set_property(TARGET hogdb_exec PROPERTY OUTPUT_NAME hogdb)
 target_link_libraries(
   hogdb_exec
   hogdb
-  new_metrics
+  metrics
   http
 )
 add_dependencies(hogdb_exec all_wasm_contracts)

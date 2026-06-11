@@ -17,7 +17,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "loadgen.hh"
 #include "parallel.hh"
 #include "sched_coord.hh"

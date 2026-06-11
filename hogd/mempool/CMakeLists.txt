@@ -14,7 +14,7 @@ target_link_libraries(
   http
   hogdb
   merkle
-  new_metrics
+  metrics
   protocol
   runtime
 )

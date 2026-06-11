@@ -1,4 +1,4 @@
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 
 #include <format>
 #include <sstream>

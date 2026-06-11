@@ -8,7 +8,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/metrics/metrics.h"
 #include "rpc_types.hh"
 
 namespace hogd {
