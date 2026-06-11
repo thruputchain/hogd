@@ -102,7 +102,7 @@ private:
     }
   };
 
-  MetricsSnapshot get_stats();
+  static MetricsSnapshot get_stats();
   void background_worker(std::stop_token &stoken);
   void stop_background_worker();
 

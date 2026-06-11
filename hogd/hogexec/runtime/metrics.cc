@@ -36,6 +36,7 @@ HogexecMetrics::get_instance()
   return instance;
 }
 
+// static
 HogexecMetrics::MetricsSnapshot
 HogexecMetrics::get_stats()
 {
