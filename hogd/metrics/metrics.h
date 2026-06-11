@@ -139,21 +139,27 @@ public:
 
 private:
   struct Metric {
+    // [PerThread<T>] requires [T] to have a move constructor as it places
+    // elements of type [T] into an [std::vector<T>]. [T = std::atomic<ssize_t>]
+    // does not have a move constructor, so we have to implement the
+    // [PerThreadAtomicSample] class below and add one ourselves.
     struct PerThreadAtomicSample {
       std::atomic<ssize_t> value{0};
 
       PerThreadAtomicSample() = default;
-      PerThreadAtomicSample(const PerThreadAtomicSample &) = delete;
-      PerThreadAtomicSample &
-      operator=(const PerThreadAtomicSample &) = delete;
 
+      // Disable copy.
+      PerThreadAtomicSample(const PerThreadAtomicSample &) = delete;
+      PerThreadAtomicSample &operator=(const PerThreadAtomicSample &) = delete;
+
+      // Implement move.
       PerThreadAtomicSample(PerThreadAtomicSample &&other) noexcept
         : value(other.value.load(std::memory_order_relaxed))
       {
         other.value.store(0, std::memory_order_relaxed);
       }
-      PerThreadAtomicSample &
-      operator=(PerThreadAtomicSample &&other) noexcept
+
+      PerThreadAtomicSample &operator=(PerThreadAtomicSample &&other) noexcept
       {
         if (this == &other) [[unlikely]]
           return *this;
@@ -167,10 +173,12 @@ private:
       {
         value.store(metric_value, order);
       }
+
       ssize_t fetch_add(ssize_t delta, std::memory_order order)
       {
         return value.fetch_add(delta, order);
       }
+
       ssize_t load(std::memory_order order) const { return value.load(order); }
     };
 
