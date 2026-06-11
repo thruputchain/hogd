@@ -85,7 +85,7 @@ public:
             sample.store(metric_value, std::memory_order_relaxed);
           }
           else {
-            *sample = metric_value;
+            sample->store(metric_value, std::memory_order_relaxed);
           }
         },
         it->second.sample);
@@ -107,7 +107,7 @@ public:
             sample.fetch_add(delta, std::memory_order_relaxed);
           }
           else {
-            *sample += delta;
+            sample->fetch_add(delta, std::memory_order_relaxed);
           }
         },
         it->second.sample);
@@ -139,7 +139,43 @@ public:
 
 private:
   struct Metric {
-    using Sample = std::variant<std::atomic<ssize_t>, PerThread<ssize_t>>;
+    struct PerThreadAtomicSample {
+      std::atomic<ssize_t> value{0};
+
+      PerThreadAtomicSample() = default;
+      PerThreadAtomicSample(const PerThreadAtomicSample &) = delete;
+      PerThreadAtomicSample &
+      operator=(const PerThreadAtomicSample &) = delete;
+
+      PerThreadAtomicSample(PerThreadAtomicSample &&other) noexcept
+        : value(other.value.load(std::memory_order_relaxed))
+      {
+        other.value.store(0, std::memory_order_relaxed);
+      }
+      PerThreadAtomicSample &
+      operator=(PerThreadAtomicSample &&other) noexcept
+      {
+        if (this == &other) [[unlikely]]
+          return *this;
+        value.store(other.value.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed);
+        other.value.store(0, std::memory_order_relaxed);
+        return *this;
+      }
+
+      void store(ssize_t metric_value, std::memory_order order)
+      {
+        value.store(metric_value, order);
+      }
+      ssize_t fetch_add(ssize_t delta, std::memory_order order)
+      {
+        return value.fetch_add(delta, order);
+      }
+      ssize_t load(std::memory_order order) const { return value.load(order); }
+    };
+
+    using Sample =
+        std::variant<std::atomic<ssize_t>, PerThread<PerThreadAtomicSample>>;
 
     void init_sample(SampleType sample_type)
     {
@@ -148,7 +184,7 @@ private:
         sample.template emplace<std::atomic<ssize_t>>(0);
         return;
       case SampleType::kPerThreadSsizeT:
-        sample = PerThread<ssize_t>{};
+        sample = PerThread<PerThreadAtomicSample>{};
         return;
       }
       CHECK(false);
@@ -165,9 +201,10 @@ private:
             else {
               ssize_t total = 0;
               std::unique_lock ul = sample.lock_threads();
-              sample.for_each(ul, [&total](const ssize_t &thread_sample) {
-                total += thread_sample;
-              });
+              sample.for_each(
+                  ul, [&total](const PerThreadAtomicSample &thread_sample) {
+                    total += thread_sample.load(std::memory_order_relaxed);
+                  });
               return total;
             }
           },
