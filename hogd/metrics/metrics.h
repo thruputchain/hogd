@@ -85,7 +85,7 @@ public:
             sample.store(metric_value, std::memory_order_relaxed);
           }
           else {
-            sample->store(metric_value, std::memory_order_relaxed);
+            sample.set(metric_value);
           }
         },
         it->second.sample);
@@ -107,7 +107,7 @@ public:
             sample.fetch_add(delta, std::memory_order_relaxed);
           }
           else {
-            sample->fetch_add(delta, std::memory_order_relaxed);
+            sample.add(delta);
           }
         },
         it->second.sample);
@@ -139,51 +139,8 @@ public:
 
 private:
   struct Metric {
-    // [PerThread<T>] requires [T] to have a move constructor as it places
-    // elements of type [T] into an [std::vector<T>]. [T = std::atomic<ssize_t>]
-    // does not have a move constructor, so we have to implement the
-    // [PerThreadAtomicSample] class below and add one ourselves.
-    struct PerThreadAtomicSample {
-      std::atomic<ssize_t> value{0};
-
-      PerThreadAtomicSample() = default;
-
-      // Disable copy.
-      PerThreadAtomicSample(const PerThreadAtomicSample &) = delete;
-      PerThreadAtomicSample &operator=(const PerThreadAtomicSample &) = delete;
-
-      // Implement move.
-      PerThreadAtomicSample(PerThreadAtomicSample &&other) noexcept
-        : value(other.value.load(std::memory_order_relaxed))
-      {
-        other.value.store(0, std::memory_order_relaxed);
-      }
-
-      PerThreadAtomicSample &operator=(PerThreadAtomicSample &&other) noexcept
-      {
-        if (this == &other) [[unlikely]]
-          return *this;
-        value.store(other.value.load(std::memory_order_relaxed),
-                    std::memory_order_relaxed);
-        other.value.store(0, std::memory_order_relaxed);
-        return *this;
-      }
-
-      void store(ssize_t metric_value, std::memory_order order)
-      {
-        value.store(metric_value, order);
-      }
-
-      ssize_t fetch_add(ssize_t delta, std::memory_order order)
-      {
-        return value.fetch_add(delta, order);
-      }
-
-      ssize_t load(std::memory_order order) const { return value.load(order); }
-    };
-
     using Sample =
-        std::variant<std::atomic<ssize_t>, PerThread<PerThreadAtomicSample>>;
+        std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>>;
 
     void init_sample(SampleType sample_type)
     {
@@ -192,7 +149,7 @@ private:
         sample.template emplace<std::atomic<ssize_t>>(0);
         return;
       case SampleType::kPerThreadSsizeT:
-        sample = PerThread<PerThreadAtomicSample>{};
+        sample = PerThreadCounter<ssize_t>{};
         return;
       }
       CHECK(false);
@@ -207,13 +164,7 @@ private:
               return sample.load(std::memory_order_relaxed);
             }
             else {
-              ssize_t total = 0;
-              std::unique_lock ul = sample.lock_threads();
-              sample.for_each(
-                  ul, [&total](const PerThreadAtomicSample &thread_sample) {
-                    total += thread_sample.load(std::memory_order_relaxed);
-                  });
-              return total;
+              return sample.get();
             }
           },
           sample);

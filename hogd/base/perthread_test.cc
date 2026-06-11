@@ -65,27 +65,27 @@ TEST(PerThreadTest, Counters)
   std::vector<std::jthread> joins;
   joins.reserve(kThreads);
   for (int i = 0; i < kThreads; ++i) {
-    joins.emplace_back([&cnt] { cnt.inc(); });
+    joins.emplace_back([&cnt] { cnt.add(); });
   }
   joins.clear();
   EXPECT_EQ(cnt.get(), kThreads);
 
   // test threads that are still active.
   std::jthread([&cnt] {
-    cnt.inc();
+    cnt.add();
     EXPECT_EQ(cnt.get(), kThreads + 1);
   }).join();
-  cnt.inc();
+  cnt.add();
   EXPECT_EQ(cnt.get(), kThreads + 2);
 }
 
 TEST(PerThreadTest, CounterResize)
 {
   PerThreadCounter<int> cnt;
-  cnt.inc(1);
+  cnt.add(1);
 
   PerThreadCounter<int> cnt2;
-  cnt2.inc(1);
+  cnt2.add(1);
 
   EXPECT_EQ(cnt.get(), 1);
   EXPECT_EQ(cnt2.get(), 1);

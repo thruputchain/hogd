@@ -270,8 +270,17 @@ public:
     return cnt;
   }
 
-  // inc increments the count by val.
-  void inc(T val = 1)
+  // [set] sets the count to [val].
+  void set(T val)
+  {
+    TLCounter &tl_count = *tl_counters_;
+    tl_count.count.store(val, std::memory_order_relaxed);
+    if (!tl_count.global_count) [[unlikely]]
+      tl_count.global_count = &global_counter_;
+  }
+
+  // [add] adds [val] to the count.
+  void add(T val = 1)
   {
     TLCounter &tl_count = *tl_counters_;
     tl_count.count.fetch_add(val, std::memory_order_relaxed);
@@ -281,7 +290,7 @@ public:
 
   PerThreadCounter &operator+=(const T &rhs)
   {
-    inc(rhs);
+    add(rhs);
     return *this;
   }
   bool operator==(const T &rhs) const { return get() == rhs; }
