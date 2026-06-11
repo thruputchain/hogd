@@ -443,19 +443,19 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   }();
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(
-      0,
-      [big_hash](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto deploy_result =
-            ctx.handler().deploy_contract(kDeployNonce, big_hash);
-        if (!deploy_result.has_value()) {
-          return deploy_result.error().to_invoke_error();
-        }
-        if (!deploy_result.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
+  fns_0.emplace(0,
+                [big_hash](
+                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto deploy_result =
+                      ctx.handler().deploy_contract(kDeployNonce, big_hash);
+                  if (!deploy_result.has_value()) {
+                    return deploy_result.error().to_invoke_error();
+                  }
+                  if (!deploy_result.value().has_value()) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -508,18 +508,17 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kWasmi);
-  oversized.wasmi_contract().data.resize_uninitialized(kMaxContractSizeBytes
-                                                       + 1);
+  oversized.wasmi_contract().data.resize_uninitialized(kMaxContractSizeBytes +
+                                                       1);
   auto oversized_hash = sha256(oversized);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(0,
-                [](NativeSyscallContext & /*ctx*/) noexcept
-                    -> InvokeStatus<void> {
-                  ADD_FAILURE() << "transaction body must not execute when an "
-                                   "attached contract is oversized";
-                  return InvokeError{InvokeErrorCode::Deterministic};
-                });
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "transaction body must not execute when an "
+                         "attached contract is oversized";
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));

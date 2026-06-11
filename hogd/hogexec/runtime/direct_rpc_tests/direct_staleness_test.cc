@@ -13,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/common/limits.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
@@ -24,14 +25,13 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
-#include "x23/serialize.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -225,9 +225,9 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
   // stored chunked, #2569). The stale-aware lock fires on the first chunk
   // write, returning kStaleBlock -- the Abandon path is identical to the
   // small-contract case.
-  ASSERT_FALSE(
-      Database::item_fits(make_wasm_code_key(deployed_contract_hash.hash).size(),
-                          x23::xdr_size(contract)));
+  ASSERT_FALSE(Database::item_fits(
+      make_wasm_code_key(deployed_contract_hash.hash).size(),
+      x23::xdr_size(contract)));
 
   constexpr TransactionID kTxId = 43;
   PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);

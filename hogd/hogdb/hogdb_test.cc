@@ -50,8 +50,8 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/init.h"
 #include "hogd/hogexec/common/limits.h"
+#include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -248,11 +248,11 @@ TEST_F(HogDBTest, WasmCodeChunkedRoundtrip)
 {
   const size_t max_inline = max_inline_wasm_code_size();
   const std::array<size_t, 5> sizes = {
-      max_inline,                        // largest inline row
-      max_inline + 1,                    // smallest chunked row
+      max_inline,                          // largest inline row
+      max_inline + 1,                      // smallest chunked row
       (2 * kWasmCodeChunkPayloadSize),     // exact multiple of chunk payload
       (2 * kWasmCodeChunkPayloadSize) + 1, // one byte into a final chunk
-      kMaxSerializedContractBytes,       // largest row hogdb accepts
+      kMaxSerializedContractBytes,         // largest row hogdb accepts
   };
   uint8_t which = 0;
   for (size_t size : sizes) {
@@ -336,11 +336,13 @@ TEST_F(HogDBTest, WasmCodeTamperedHeadIsCorruption)
 
   // Chunked head describing a row small enough to be stored inline.
   auto small_len = x23::serialize(static_cast<uint32_t>(100));
-  expect_corrupt_after(kWasmCodeChunkedHead, std::as_bytes(std::span(small_len)));
+  expect_corrupt_after(kWasmCodeChunkedHead,
+                       std::as_bytes(std::span(small_len)));
 
   // Chunked head describing more chunks than a one-byte index addresses.
   auto huge_len = x23::serialize(static_cast<uint32_t>(0xFFFFFFFF));
-  expect_corrupt_after(kWasmCodeChunkedHead, std::as_bytes(std::span(huge_len)));
+  expect_corrupt_after(kWasmCodeChunkedHead,
+                       std::as_bytes(std::span(huge_len)));
 }
 
 // for_each_wasm_code_item emits payload chunks before the chunked head, so a

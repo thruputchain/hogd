@@ -42,8 +42,8 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "x23/serialize.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
