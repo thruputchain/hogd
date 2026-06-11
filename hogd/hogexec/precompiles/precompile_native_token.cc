@@ -147,9 +147,11 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      allow_key, /*load_from_snapshot=*/true, output_set, output_set_opt,
-      output_add);
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key,
+                                                 /*load_from_snapshot=*/true,
+                                                 output_set, output_set_opt,
+                                                 output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -159,7 +161,8 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     output_set = 0;
     output_set_opt = true;
     output_add = 0;
-  } else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+  }
+  else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return false;
   }
 
