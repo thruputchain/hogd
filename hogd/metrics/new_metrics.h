@@ -127,8 +127,7 @@ public:
   void clear()
   {
     for (size_t i = 0; i < components_.size(); i++) {
-      ComponentName component_name = static_cast<ComponentName>(i);
-      mark_done_with_init(component_name, /*mark=*/false);
+      done_with_init_[i].store(false, std::memory_order_release);
 
       Component &component = components_[i];
       component.metrics.clear();

@@ -239,12 +239,15 @@ public:
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
-    if (log || do_logging_env()) {
+    bool logging_enabled = log || do_logging_env();
+    if (logging_enabled) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
-    HogexecMetrics::launch_log_worker();
+    if (logging_enabled) {
+      HogexecMetrics::launch_log_worker();
+    }
   }
 
   static bool do_logging_env() noexcept
@@ -276,6 +279,7 @@ public:
 
   ~NativeContractTestFramework()
   {
+    HogexecMetrics::stop_log_worker();
     if (previous_logger_) {
       swap_logger(std::move(previous_logger_));
     }

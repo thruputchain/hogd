@@ -15,11 +15,18 @@ void
 HogexecMetrics::launch_log_worker()
 {
   HogexecMetrics &instance = get_instance();
+  std::scoped_lock g(instance.background_worker_mutex_);
   if (!instance.background_worker_.joinable()) {
     instance.background_worker_ = std::jthread([](std::stop_token stoken) {
       get_instance().background_worker(stoken);
     });
   }
+}
+
+void
+HogexecMetrics::stop_log_worker()
+{
+  get_instance().stop_background_worker();
 }
 
 HogexecMetrics &
@@ -77,6 +84,18 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
          delta.gas_consumed / time_delta_s, time_delta_s);
     snapshot = new_snapshot;
   }
+}
+
+void
+HogexecMetrics::stop_background_worker()
+{
+  std::scoped_lock g(background_worker_mutex_);
+  if (!background_worker_.joinable()) {
+    return;
+  }
+  background_worker_.request_stop();
+  cv_.notify_all();
+  background_worker_.join();
 }
 
 } // namespace hogd
