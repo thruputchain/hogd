@@ -85,7 +85,14 @@ public:
             sample.store(metric_value, std::memory_order_relaxed);
           }
           else {
-            sample.set(metric_value);
+            // You cannot use [record] on a per-thread value as this does not
+            // make sense. You would only be setting your own thread's value and
+            // not touching the values set by other threads, so which value is
+            // authoritative?
+            //
+            // You should either be calling [add] instead or using a raw
+            // [ssize_t].
+            CHECK(false);
           }
         },
         it->second.sample);
@@ -107,7 +114,7 @@ public:
             sample.fetch_add(delta, std::memory_order_relaxed);
           }
           else {
-            sample.add(delta);
+            sample.inc(delta);
           }
         },
         it->second.sample);
