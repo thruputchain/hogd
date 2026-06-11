@@ -224,8 +224,7 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
               "metrics_test_per_thread", "",
               Metrics::SampleType::kPerThreadSsizeT);
 
-  metrics.record(Metrics::ComponentName::kExecutor, "metrics_test_per_thread",
-                 3);
+  metrics.add(Metrics::ComponentName::kExecutor, "metrics_test_per_thread", 3);
 
   std::atomic<bool> recorded = false;
   std::atomic<bool> done = false;
@@ -255,8 +254,8 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
               "metrics_test_per_thread_signed", "",
               Metrics::SampleType::kPerThreadSsizeT);
 
-  metrics.record(Metrics::ComponentName::kExecutor,
-                 "metrics_test_per_thread_signed", -3);
+  metrics.add(Metrics::ComponentName::kExecutor,
+              "metrics_test_per_thread_signed", -3);
 
   std::atomic<bool> recorded = false;
   std::atomic<bool> done = false;
