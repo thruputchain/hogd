@@ -1,13 +1,7 @@
-#include <gtest/gtest.h>
-
-#include <memory>
-
-#include "hogd/base/log.h"
+#include "hogd/hogexec/test_main.h"
 
 int
 main(int argc, char *argv[])
 {
-  testing::InitGoogleTest(&argc, argv);
-  hogd::log_init(std::make_unique<hogd::ConsoleLogger>());
-  return RUN_ALL_TESTS();
+  return hogd::run_hogexec_tests(argc, argv);
 }

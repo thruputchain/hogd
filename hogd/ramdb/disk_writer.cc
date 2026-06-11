@@ -26,7 +26,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/metrics/metrics.h"
+#include "hogd/metrics/new_metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -235,13 +235,22 @@ DiskWriter::print_stats()
   prev_stats_time_ = now;
 }
 
+// static
 void
-DiskWriter::register_metrics(MetricRegistry &registry)
+DiskWriter::register_metrics()
 {
-  registry.add("ramdb_disk_writer_bytes_out",
-               "Number of bytes written to log files "
-               "since the last database recovery.",
-               true, bytes_out_);
+  Metrics::instance().init_metric(
+      Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out",
+      "Number of bytes written to log files since the last database recovery.",
+      Metrics::SampleType::kSsizeT);
+}
+
+void
+DiskWriter::record_metrics()
+{
+  Metrics::instance().record(Metrics::ComponentName::kDb,
+                             "ramdb_disk_writer_bytes_out",
+                             bytes_out_.load(std::memory_order_relaxed));
 }
 
 void

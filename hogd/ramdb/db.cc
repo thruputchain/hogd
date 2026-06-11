@@ -27,7 +27,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/metrics/metrics.h"
+#include "hogd/metrics/new_metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
@@ -119,13 +119,27 @@ Database::set_active(bool yes)
 }
 
 void
-Database::register_metrics(MetricRegistry &registry)
+Database::register_metrics()
 {
-  registry.add("ramdb_snap_bytes_out",
-               "Number of bytes written to all snapshot files "
-               "since the last database recovery.",
-               true, metrics_.snap_bytes_out_);
-  disk_writer_.register_metrics(registry);
+  Metrics::instance().init_metric(
+      Metrics::ComponentName::kDb, "ramdb_snap_bytes_out",
+      "Number of bytes written to all snapshot files since the last database "
+      "recovery.",
+      Metrics::SampleType::kSsizeT);
+  DiskWriter::register_metrics();
+  Metrics::instance().mark_done_with_init(Metrics::ComponentName::kDb);
+
+  record_metrics();
+}
+
+void
+Database::record_metrics()
+{
+  Metrics::instance().record(Metrics::ComponentName::kDb,
+                             "ramdb_snap_bytes_out",
+                             metrics_.snap_bytes_out_.load(
+                                 std::memory_order_relaxed));
+  disk_writer_.record_metrics();
 }
 
 void

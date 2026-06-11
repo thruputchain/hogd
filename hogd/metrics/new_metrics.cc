@@ -3,11 +3,8 @@
 #include <format>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 
 #include "hogd/base/types.h"
-#include "x23/async.h"
-#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -26,23 +23,16 @@ Metrics::fully_qualified_name(Metrics::ComponentName component_name,
   return std::format("{}_{}", component_name, metric_name);
 }
 
-x23::Async<std::string>
+std::string
 Metrics::dump_to_prometheus_string()
 {
   std::ostringstream os;
-  std::unordered_map<std::string, Metric> tmp;
   for (size_t i = 0; i < components_.size(); i++) {
     Component &component = components_[i];
-    {
-      x23::CoroGuard cg;
-      co_await cg(component.lock);
 
-      tmp = component.metrics;
-    }
-
-    for (const auto &[name, metric] : tmp) {
+    for (auto &[name, metric] : component.metrics) {
       auto it = component.descriptions.find(name);
-      if (it != component.descriptions.end()) {
+      if (it != component.descriptions.end() && !it->second.empty()) {
         os << std::format("# HELP {} {}\n",
                           fully_qualified_name(static_cast<ComponentName>(i),
                                                name),
@@ -56,11 +46,11 @@ Metrics::dump_to_prometheus_string()
       os << std::format("{} {}\n",
                         fully_qualified_name(static_cast<ComponentName>(i),
                                              name),
-                        metric.sample);
+                        metric.value());
     }
   }
 
-  co_return os.str();
+  return os.str();
 }
 
 } // namespace hogd

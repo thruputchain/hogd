@@ -24,7 +24,7 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "hogd/metrics/new_metrics.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/metrics/shared.h"
 
 namespace hogd {
@@ -42,9 +42,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   info("NETWORK ID={:#x}", network_id);
 
-  Metrics::instance().set_description(
-      Metrics::ComponentName::kMempool, "current_block_height",
-      "The height of the last block committed by the mempool.");
+  init_metrics();
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
   HttpServer metrics_server;
