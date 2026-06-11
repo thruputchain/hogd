@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "address_auth.hh"

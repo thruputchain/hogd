@@ -1,6 +1,8 @@
 #include "hogd/hogdb/item_lock/new_contract_lock.h"
 
 #include <cassert>
+#include <cstddef>
+#include <span>
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"

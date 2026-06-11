@@ -1,5 +1,6 @@
 #include "hogd/hogdb/hogdb_dao.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
