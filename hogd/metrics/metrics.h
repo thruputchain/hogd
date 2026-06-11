@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <format>
 #include <memory>
 #include <sstream>
@@ -80,8 +81,8 @@ public:
     std::visit(
         [metric_value](auto &sample) {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, ssize_t>) {
-            sample = metric_value;
+          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+            sample.store(metric_value, std::memory_order_relaxed);
           }
           else {
             *sample = metric_value;
@@ -102,8 +103,8 @@ public:
     std::visit(
         [delta](auto &sample) {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, ssize_t>) {
-            sample += delta;
+          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+            sample.fetch_add(delta, std::memory_order_relaxed);
           }
           else {
             *sample += delta;
@@ -138,13 +139,13 @@ public:
 
 private:
   struct Metric {
-    using Sample = std::variant<ssize_t, PerThread<ssize_t>>;
+    using Sample = std::variant<std::atomic<ssize_t>, PerThread<ssize_t>>;
 
     void init_sample(SampleType sample_type)
     {
       switch (sample_type) {
       case SampleType::kSsizeT:
-        sample = ssize_t{0};
+        sample.template emplace<std::atomic<ssize_t>>(0);
         return;
       case SampleType::kPerThreadSsizeT:
         sample = PerThread<ssize_t>{};
@@ -158,8 +159,8 @@ private:
       return std::visit(
           [](auto &sample) -> ssize_t {
             using T = std::decay_t<decltype(sample)>;
-            if constexpr (std::is_same_v<T, ssize_t>) {
-              return sample;
+            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+              return sample.load(std::memory_order_relaxed);
             }
             else {
               ssize_t total = 0;
