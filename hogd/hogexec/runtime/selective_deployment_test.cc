@@ -10,8 +10,8 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/common/limits.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/item/deployed_contract.h"
@@ -499,6 +499,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 
   auto lookup = lookup_contract_from_db(big_hash);
   ASSERT_TRUE(lookup.has_value());
+  EXPECT_EQ(sha256(lookup.value()), big_hash);
 }
 
 // An attached contract blob above kMaxContractSizeBytes is rejected
@@ -552,6 +553,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 
   auto res = handler.root_invoke();
   EXPECT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
   EXPECT_EQ(handler.try_commit_transaction(),
             ExecResult::ExecResultTxDeterministicError);
   advance_block();
