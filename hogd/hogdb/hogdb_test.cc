@@ -1305,11 +1305,21 @@ TEST_F(HogDBTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
   contract.wasmi_contract().data.resize_uninitialized(
       kMaxSerializedContractBytes + 1);
 
+  // A row at exactly the bound is accepted (the preflight is >, not >=).
+  // Blob of (bound - 8) serializes to exactly kMaxSerializedContractBytes:
+  // 4-byte union tag + 4-byte opaque length + data (multiple of 4, no pad).
+  Contract at_bound_contract(ContractType::kWasmi);
+  at_bound_contract.wasmi_contract().data.resize_uninitialized(
+      kMaxSerializedContractBytes - 8);
+  ASSERT_EQ(x23::xdr_size(at_bound_contract), kMaxSerializedContractBytes);
+
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(invoke_tx.request_new_contract(at_bound_contract));
 
   auto ret = invoke_tx.request_new_contract(contract);
   ASSERT_FALSE(ret);
