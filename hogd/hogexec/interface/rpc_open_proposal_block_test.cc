@@ -1,6 +1,7 @@
 #include "hogd/hogexec/test_main.h"
 
 #include <format>
+#include <gtest/gtest.h>
 #include <limits>
 #include <stdexcept>
 #include <utility>

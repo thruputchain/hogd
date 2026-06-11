@@ -235,6 +235,7 @@ DiskWriter::print_stats()
   prev_stats_time_ = now;
 }
 
+// static
 void
 DiskWriter::register_metrics()
 {

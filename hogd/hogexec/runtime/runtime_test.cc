@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/test_main.h"
 
