@@ -206,17 +206,36 @@ make_wasm_code_key(const SHA256Hash &hash)
   return ret;
 }
 
-// Item-type bytes for Prefix::kWasmCode rows. A code row whose serialized
-// Contract fits one RAMDB item is stored inline (kWasmCodeInline) -- the
-// exact layout that predates chunking, so existing state and its db_hash
-// contribution are unchanged. A larger row is stored as a head item (same
-// 33-byte key, type kWasmCodeChunkedHead, value = XDR uint32 total length)
-// plus payload chunks at 34-byte keys (prefix || hash || chunk index), type
-// kWasmCodeChunk. The layout is a pure function of the serialized size, so
-// every node produces identical items (and identical db_hash deltas).
-inline constexpr uint8_t kWasmCodeInline = 0;
-inline constexpr uint8_t kWasmCodeChunkedHead = 1;
-inline constexpr uint8_t kWasmCodeChunk = 2;
+// Item type identifiers; stored in the type field in ramdb. This is the one
+// enum for item type bytes: values must never overlap, even though some are
+// only meaningful under particular key prefixes. Every value is
+// consensus-frozen once shipped -- the (key, type, value) triple of each
+// state item feeds the db_hash.
+//
+// kNNInt128/kBytes/kRetrocausalQueue are used where multiple types can be
+// stored at an address (ItemKeys; address balances are also marked as
+// kNNInt128 since hogdb treats them like a special ItemKey for native
+// tokens).
+//
+// The kWasmCode* types mark Prefix::kWasmCode rows. A code row whose
+// serialized Contract fits one RAMDB item is stored inline (kWasmCodeInline)
+// -- the exact layout that predates chunking, so existing state and its
+// db_hash contribution are unchanged. A larger row is stored as a head item
+// (same 33-byte key, type kWasmCodeChunkedHead, value = XDR uint32 total
+// length) plus payload chunks at 34-byte keys (prefix || hash || chunk
+// index), type kWasmCodeChunk. The layout is a pure function of the
+// serialized size, so every node produces identical items (and identical
+// db_hash deltas).
+enum : uint8_t {
+  // Predates chunking (and the other type identifiers); must stay 0.
+  kWasmCodeInline = 0,
+  kNNInt128 = 1,
+  kBytes = 2,
+  kRetrocausalQueue = 3,
+  // Chunked wasm code rows (#2569).
+  kWasmCodeChunkedHead = 4,
+  kWasmCodeChunk = 5,
+};
 
 // Payload bytes per chunk item, sized so every chunk satisfies item_fits for
 // a 34-byte chunk key. This keeps the RAMDB item ceiling private to
@@ -295,17 +314,6 @@ make_contract_data_key(const ItemKey &key)
   std::ranges::copy(key_bytes, std::begin(ret) + 1);
   return ret;
 }
-
-// Item type identifiers; stored in the type field in ramdb.
-//
-// These are only used in cases where multiple types can be stored at an
-// address. Currently this is for ItemKeys. Address balances are also marked as
-// kNNInt128 since hogdb treats them like a special ItemKey for native tokens.
-enum {
-  kNNInt128 = 1,
-  kBytes = 2,
-  kRetrocausalQueue = 3,
-};
 
 // ItemLockCacheData is the data we use to cache type-specific info,
 // like the nnint base value, so we don't have to load that on each

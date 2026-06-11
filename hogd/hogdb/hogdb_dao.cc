@@ -245,23 +245,24 @@ HogDBStatus<OwningSpan<const std::byte>>
 HogDBDAO::read_wasm_code(const SHA256Hash &hash)
 {
   auto key = make_wasm_code_key(hash);
-  auto key_span = std::as_bytes(std::span(key));
 
-  auto type = db_.get_type(key_span);
-  if (!type)
-    return type.error(); // kNotFound passes through unchanged
-  if (*type == kWasmCodeInline)
-    return db_.get_if_type(key_span, kWasmCodeInline);
-  if (*type != kWasmCodeChunkedHead)
+  // One lookup covers both layouts: get() returns the type byte and the
+  // value together, so the inline path (every pre-chunking row, and the
+  // common case) costs a single read.
+  auto item = db_.get(std::as_bytes(std::span(key)));
+  if (!item)
+    return item.error(); // kNotFound passes through unchanged
+  if (item->type == kWasmCodeInline)
+    return std::move(item->value);
+  if (item->type != kWasmCodeChunkedHead)
     return HogDBError(HogDBCode::kCorruption);
 
-  std::array<std::byte, sizeof(uint32_t)> len_bytes{};
-  if (auto head = db_.get_if_type(key_span, kWasmCodeChunkedHead, len_bytes);
-      !head)
+  // The chunked head's value is the XDR uint32 total serialized length.
+  if (item->value.size() != sizeof(uint32_t))
     return HogDBError(HogDBCode::kCorruption);
   uint32_t total = 0;
   try {
-    x23::deserialize(&total, x23::BufViewEnd(std::span(len_bytes)));
+    x23::deserialize(&total, x23::BufViewEnd(std::span(item->value)));
   } catch (x23::XdrException &) {
     return HogDBError(HogDBCode::kCorruption);
   }
