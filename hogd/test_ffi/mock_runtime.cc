@@ -3,7 +3,6 @@
 
 #include <cassert>
 #include <memory>
-#include <string_view>
 
 #include "contract.hh"
 #include "ffi_enums.hh"

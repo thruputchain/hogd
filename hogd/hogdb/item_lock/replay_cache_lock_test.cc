@@ -726,6 +726,60 @@ TEST(ReplayCacheLockHeightCap, RejectsNewHeightWhenMetadataAlreadyAtCap)
   EXPECT_EQ(HogDBError(HogDBCode::kConflict), r.error());
 }
 
+// Regression for #2581: the height cap counts only *unexpired* heights. An
+// address whose snapshot is full of expired heights (all below the current
+// block) must still admit a fresh height, because those expired rows are
+// pruned at block close. Counting them against the cap would create a
+// lockout: no fresh change can enter, so the expired rows are never GC'd.
+TEST(ReplayCacheLockHeightCap, AdmitsNewHeightWhenMetadataIsAllExpiredAtCap)
+{
+  auto dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+
+  constexpr size_t kHeapSize = 10_MiB;
+  auto db = Database::open(dir->get_path(),
+                           Database::estimate_heap_size(kHeapSize), 0);
+  ASSERT_TRUE(db);
+  HogDBDAO dao(RAMDB(std::move(*db)));
+
+  // Seed exactly kReplayCacheHeightsMaxLen heights, all strictly below the
+  // current block height, so every one of them is expired.
+  Address addr = make_address(0xabc123);
+  constexpr BlockHeight kSeedBase = 100;
+
+  ReplayCacheMetadata meta;
+  meta.size = kReplayCacheHeightsMaxLen;
+  meta.heights.reserve(kReplayCacheHeightsMaxLen);
+  for (std::int64_t i = 0; i < kReplayCacheHeightsMaxLen; ++i) {
+    BlockHeight h = kSeedBase + static_cast<BlockHeight>(i);
+    meta.heights.push_back(
+        ReplayCacheHeightCount{.height = h, .nonce_count = 1});
+
+    ReplayCacheData data;
+    data.nonces.push_back(static_cast<int64_t>(h));
+    ASSERT_TRUE(dao.write_address_replay_cache_data(addr, h, data));
+  }
+  ASSERT_TRUE(dao.write_address_replay_cache_meta(addr, meta));
+
+  ReplayCacheLock lock;
+  ItemKey rckey = make_replay_cache_item_key(addr);
+  // Current height sits above every seeded height: all are expired.
+  BlockHeight current_height =
+      kSeedBase + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) + 1;
+  LockContext ctx(&dao, current_height, rckey, &kTestCostModel);
+
+  // A fresh, unexpired height (>= current_height). Pre-fix this is rejected
+  // because the 4000 expired snapshot heights fill the budget.
+  BlockHeight new_height = current_height + 1000;
+  PointerItem<ReplayCacheIt> item(u(new_height, 42));
+
+  auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
+
+  ASSERT_TRUE(r.has_value())
+      << "expired snapshot heights must not consume the active-height budget; "
+         "the fresh height was wrongly rejected (#2581)";
+}
+
 TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
 {
   // Regression for issue #1447: build_result must not compute

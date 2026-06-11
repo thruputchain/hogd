@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 17
-#define TEST_FFI_VERSION_PATCH 0
+#define TEST_FFI_VERSION_PATCH 1
 
 // THREADING CONTRACT
 // ==================
