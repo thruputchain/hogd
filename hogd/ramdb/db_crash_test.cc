@@ -197,7 +197,7 @@ using time_point = std::chrono::high_resolution_clock::time_point;
 
 struct MetricSample {
   std::string key;
-  size_t val;
+  ssize_t val;
 };
 
 std::vector<MetricSample> prev_samples;

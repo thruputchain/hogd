@@ -1,6 +1,6 @@
-#include "hogd/hogexec/test_main.h"
-
 #include <utility>
+
+#include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -202,9 +202,3 @@ TEST(ExecutionModeTest, NondeterministicBitOverflowGuard)
 }
 
 } // namespace hogd
-
-int
-main(int argc, char *argv[])
-{
-  return hogd::run_hogexec_tests(argc, argv);
-}

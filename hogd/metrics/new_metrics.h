@@ -5,6 +5,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <sys/types.h>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
@@ -29,8 +30,8 @@ public:
   };
 
   enum class SampleType {
-    kSizeT,
-    kPerThreadSizeT,
+    kSsizeT,
+    kPerThreadSsizeT,
   };
 
   static constexpr size_t kNumComponents =
@@ -68,7 +69,7 @@ public:
   }
 
   void record(ComponentName component_name, std::string metric_name,
-              size_t metric_value)
+              ssize_t metric_value)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(done_with_init(component_name));
@@ -79,7 +80,7 @@ public:
     std::visit(
         [metric_value](auto &sample) {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, size_t>) {
+          if constexpr (std::is_same_v<T, ssize_t>) {
             sample = metric_value;
           }
           else {
@@ -89,7 +90,7 @@ public:
         it->second.sample);
   }
 
-  void add(ComponentName component_name, std::string metric_name, size_t delta)
+  void add(ComponentName component_name, std::string metric_name, ssize_t delta)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(done_with_init(component_name));
@@ -100,7 +101,7 @@ public:
     std::visit(
         [delta](auto &sample) {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, size_t>) {
+          if constexpr (std::is_same_v<T, ssize_t>) {
             sample += delta;
           }
           else {
@@ -110,7 +111,7 @@ public:
         it->second.sample);
   }
 
-  size_t get(ComponentName component_name, std::string metric_name)
+  ssize_t get(ComponentName component_name, std::string metric_name)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(done_with_init(component_name));
@@ -137,33 +138,33 @@ public:
 
 private:
   struct Metric {
-    using Sample = std::variant<size_t, PerThread<size_t>>;
+    using Sample = std::variant<ssize_t, PerThread<ssize_t>>;
 
     void init_sample(SampleType sample_type)
     {
       switch (sample_type) {
-      case SampleType::kSizeT:
-        sample = size_t{0};
+      case SampleType::kSsizeT:
+        sample = ssize_t{0};
         return;
-      case SampleType::kPerThreadSizeT:
-        sample = PerThread<size_t>{};
+      case SampleType::kPerThreadSsizeT:
+        sample = PerThread<ssize_t>{};
         return;
       }
       CHECK(false);
     }
 
-    size_t value()
+    ssize_t value()
     {
       return std::visit(
-          [](auto &sample) -> size_t {
+          [](auto &sample) -> ssize_t {
             using T = std::decay_t<decltype(sample)>;
-            if constexpr (std::is_same_v<T, size_t>) {
+            if constexpr (std::is_same_v<T, ssize_t>) {
               return sample;
             }
             else {
-              size_t total = 0;
+              ssize_t total = 0;
               std::unique_lock ul = sample.lock_threads();
-              sample.for_each(ul, [&total](const size_t &thread_sample) {
+              sample.for_each(ul, [&total](const ssize_t &thread_sample) {
                 total += thread_sample;
               });
               return total;

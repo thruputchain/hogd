@@ -36,7 +36,10 @@ target_link_libraries(
 )
 target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})
 
-add_executable(components_test $<TARGET_OBJECTS:components_test_objects>)
+add_executable(components_test
+  components_test_main.cc
+  $<TARGET_OBJECTS:components_test_objects>
+)
 target_link_libraries(
   components_test
   components

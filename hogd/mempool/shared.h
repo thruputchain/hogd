@@ -94,7 +94,7 @@ init_metrics()
   Metrics::instance().init_metric(
       Metrics::ComponentName::kMempool, "current_block_height",
       "The height of the last block committed by the mempool.",
-      Metrics::SampleType::kSizeT);
+      Metrics::SampleType::kSsizeT);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kMempool);
 }
 

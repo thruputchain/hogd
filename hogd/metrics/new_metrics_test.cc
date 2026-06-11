@@ -50,7 +50,7 @@ expect_dump_contains(std::string_view dump, std::string_view expected)
 void
 init_metric(Metrics &metrics, Metrics::ComponentName component_name,
             const std::string &metric_name, const std::string &description,
-            Metrics::SampleType sample_type = Metrics::SampleType::kSizeT)
+            Metrics::SampleType sample_type = Metrics::SampleType::kSsizeT)
 {
   metrics.init_metric(component_name, metric_name, description, sample_type);
   metrics.mark_done_with_init(component_name);
@@ -161,7 +161,7 @@ TEST_F(NewMetricsTest, RecordingSameMetricUpdatesLatestSample)
       << dump;
 }
 
-TEST_F(NewMetricsTest, AddUpdatesSizeTMetric)
+TEST_F(NewMetricsTest, AddUpdatesSSizeTMetric)
 {
   Metrics &metrics = Metrics::instance();
 
@@ -176,17 +176,36 @@ TEST_F(NewMetricsTest, AddUpdatesSizeTMetric)
   expect_dump_contains(dump, "db_metrics_test_db_added_snapshot_count 7");
 }
 
+TEST_F(NewMetricsTest, SamplesSupportSignedValues)
+{
+  Metrics &metrics = Metrics::instance();
+
+  init_metric(metrics, Metrics::ComponentName::kDb,
+              "metrics_test_signed_snapshot_delta", "");
+  metrics.record(Metrics::ComponentName::kDb,
+                 "metrics_test_signed_snapshot_delta", -3);
+  metrics.add(Metrics::ComponentName::kDb, "metrics_test_signed_snapshot_delta",
+              -4);
+
+  EXPECT_EQ(metrics.get(Metrics::ComponentName::kDb,
+                        "metrics_test_signed_snapshot_delta"),
+            -7);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "db_metrics_test_signed_snapshot_delta -7");
+}
+
 TEST_F(NewMetricsTest, DumpIncludesMetricsFromMultipleComponents)
 {
   Metrics &metrics = Metrics::instance();
 
   metrics.init_metric(Metrics::ComponentName::kExecutor,
                       "metrics_test_multi_executor", "",
-                      Metrics::SampleType::kSizeT);
+                      Metrics::SampleType::kSsizeT);
   metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
   metrics.init_metric(Metrics::ComponentName::kMempool,
                       "metrics_test_multi_mempool", "",
-                      Metrics::SampleType::kSizeT);
+                      Metrics::SampleType::kSsizeT);
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
   metrics.record(Metrics::ComponentName::kExecutor,
                  "metrics_test_multi_executor", 11);
@@ -203,7 +222,7 @@ TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSamples)
   Metrics &metrics = Metrics::instance();
   init_metric(metrics, Metrics::ComponentName::kExecutor,
               "metrics_test_per_thread", "",
-              Metrics::SampleType::kPerThreadSizeT);
+              Metrics::SampleType::kPerThreadSsizeT);
 
   metrics.record(Metrics::ComponentName::kExecutor, "metrics_test_per_thread",
                  3);
@@ -224,6 +243,41 @@ TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSamples)
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "executor_metrics_test_per_thread 7");
+
+  done.store(true, std::memory_order_release);
+  worker.join();
+}
+
+TEST_F(NewMetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
+{
+  Metrics &metrics = Metrics::instance();
+  init_metric(metrics, Metrics::ComponentName::kExecutor,
+              "metrics_test_per_thread_signed", "",
+              Metrics::SampleType::kPerThreadSsizeT);
+
+  metrics.record(Metrics::ComponentName::kExecutor,
+                 "metrics_test_per_thread_signed", -3);
+
+  std::atomic<bool> recorded = false;
+  std::atomic<bool> done = false;
+  std::thread worker([&] {
+    metrics.add(Metrics::ComponentName::kExecutor,
+                "metrics_test_per_thread_signed", -4);
+    recorded.store(true, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  });
+  while (!recorded.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_EQ(metrics.get(Metrics::ComponentName::kExecutor,
+                        "metrics_test_per_thread_signed"),
+            -7);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "executor_metrics_test_per_thread_signed -7");
 
   done.store(true, std::memory_order_release);
   worker.join();
