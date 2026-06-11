@@ -3,6 +3,7 @@ add_library(anomalies_test_objects OBJECT
   rcq_observation_by_value_not_index_test.cc
   rcq_observation_on_fault_test.cc
   replay_cache_height_budget_leak_test.cc
+  try_invoke_admission_trusted_test.cc
 )
 
 target_link_libraries(
@@ -17,6 +18,13 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+# try_invoke_admission_trusted_test.cc includes the generated
+# built_contracts/itc_erc20.h, so the wasm headers must be generated first.
+add_dependencies(
+  anomalies_test_objects
+  all_wasm_headers
+)
+
 add_executable(
   anomalies_test
   anomalies_test_main.cc
@@ -25,6 +33,7 @@ add_executable(
 
 target_link_libraries(
   anomalies_test
+  precompiles
   runtime_test_lib
   storage_cost
   model_checker
