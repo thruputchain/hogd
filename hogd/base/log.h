@@ -169,7 +169,7 @@ should_log_first_n(int n)
   static LossyCounter<int> c;
   if (c >= n)
     return false;
-  c.add();
+  c.inc();
   return true;
 }
 
@@ -178,7 +178,7 @@ bool
 should_log_every_n(int n)
 {
   static LossyCounter<uint32_t> c;
-  return c.add() % static_cast<uint32_t>(n) == 0;
+  return c.inc() % static_cast<uint32_t>(n) == 0;
 }
 
 template<typename Tag>

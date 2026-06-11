@@ -10,10 +10,10 @@ namespace hogd {
 // LossyCounter is concurrent counter that trades the possibility of lost
 // increments for speed. Thus, it maintains counts that are <= the actual count.
 //
-// Generally it is best to use add() to add one count at a time, since larger
+// Generally it is best to use inc() to add one count at a time, since larger
 // values could result a greater amount of lost increments.
 //
-// Using the return value of add() is also a little faster than an additional
+// Using the return value of inc() is also a little faster than an additional
 // call to get() but not required.
 template<std::integral T> class LossyCounter {
 public:
@@ -24,7 +24,7 @@ public:
   T get() const { return val_.load(std::memory_order_relaxed); }
 
   // inc increments the count by val and returns the current count.
-  T add(T val = 1)
+  T inc(T val = 1)
   {
     T tmp = get() + val;
     val_.store(tmp, std::memory_order_relaxed);
@@ -33,7 +33,7 @@ public:
 
   LossyCounter &operator+=(const T &rhs)
   {
-    add(rhs);
+    inc(rhs);
     return *this;
   }
   bool operator==(const T &rhs) const { return get() == rhs; }
@@ -52,12 +52,12 @@ public:
   // get returns the current count
   T get() const { return val_.load(std::memory_order_acquire); }
 
-  // add increments the count by val and returns the current count.
-  T add(T val = 1) { return val_.fetch_add(val, std::memory_order_release); }
+  // inc increments the count by val and returns the current count.
+  T inc(T val = 1) { return val_.fetch_add(val, std::memory_order_release); }
 
   AtomicCounter &operator+=(const T &rhs)
   {
-    add(rhs);
+    inc(rhs);
     return *this;
   }
   bool operator==(const T &rhs) const { return get() == rhs; }

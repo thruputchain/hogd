@@ -256,36 +256,32 @@ private:
 // is expensive.
 template<std::integral T> class PerThreadCounter {
 public:
-  PerThreadCounter() = default;
+  PerThreadCounter() : global_counter_(0) {}
+  PerThreadCounter(T val) : global_counter_(val) {}
 
   // get returns the current count.
   T get()
   {
     std::unique_lock ul = tl_counters_.lock_threads();
-    T cnt = 0;
+    T cnt = global_counter_;
     tl_counters_.for_each(ul, [&cnt](const TLCounter &val) {
       cnt += val.count.load(std::memory_order_relaxed);
     });
     return cnt;
   }
 
-  // [set] sets the count to [val].
-  void set(T val)
-  {
-    TLCounter &tl_count = *tl_counters_;
-    tl_count.count.store(val, std::memory_order_relaxed);
-  }
-
-  // [add] adds [val] to the count.
-  void add(T val = 1)
+  // inc increments the count by val.
+  void inc(T val = 1)
   {
     TLCounter &tl_count = *tl_counters_;
     tl_count.count.fetch_add(val, std::memory_order_relaxed);
+    if (!tl_count.global_count) [[unlikely]]
+      tl_count.global_count = &global_counter_;
   }
 
   PerThreadCounter &operator+=(const T &rhs)
   {
-    add(rhs);
+    inc(rhs);
     return *this;
   }
   bool operator==(const T &rhs) const { return get() == rhs; }
@@ -294,14 +290,16 @@ public:
 private:
   struct TLCounter {
     std::atomic<T> count{0};
+    T *global_count{nullptr};
 
     TLCounter() = default;
-    ~TLCounter() = default;
 
     TLCounter(TLCounter &&other) noexcept
-      : count(other.count.load(std::memory_order_relaxed))
+      : count(other.count.load(std::memory_order_relaxed)),
+        global_count(other.global_count)
     {
       other.count.store(0, std::memory_order_relaxed);
+      other.global_count = nullptr;
     }
 
     TLCounter &operator=(TLCounter &&other) noexcept
@@ -310,11 +308,22 @@ private:
         return *this;
       count = other.count.load(std::memory_order_relaxed);
       other.count.store(0, std::memory_order_relaxed);
+      global_count = other.global_count;
+      other.global_count = nullptr;
       return *this;
+    }
+
+    // The threads lock is held when this destructor is called, synchronizing
+    // access to global_counter_.
+    ~TLCounter()
+    {
+      if (global_count)
+        *global_count += count.load(std::memory_order_relaxed);
     }
   };
 
   PerThread<TLCounter> tl_counters_;
+  T global_counter_;
 };
 
 } // namespace hogd
