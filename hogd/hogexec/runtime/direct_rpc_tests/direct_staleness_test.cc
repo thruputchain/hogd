@@ -221,9 +221,10 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
   auto contract_ptr = std::make_shared<const Contract>(contract);
   auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
 
-  // The serialized contract exceeds RAMDB's single-item limit, so the final
-  // new-contract write takes the chunked-storage path (#2569) before failing
-  // at the stale-aware lock.
+  // The serialized contract exceeds RAMDB's single-item limit (it would be
+  // stored chunked, #2569). The stale-aware lock fires on the first chunk
+  // write, returning kStaleBlock -- the Abandon path is identical to the
+  // small-contract case.
   ASSERT_FALSE(
       Database::item_fits(make_wasm_code_key(deployed_contract_hash.hash).size(),
                           x23::xdr_size(contract)));
@@ -305,6 +306,10 @@ TEST_F(DirectStalenessTest, StaleOverlimitNewContractCommitReturnsAbandon)
   ASSERT_FALSE(commit.has_value());
   EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
 
+  // request_new_contract returned early (kInvalidExecutorBehavior) without
+  // acquiring any lock, but commit_transaction still aborted and closed the
+  // invoke tx, releasing the block reference: the first abandon removes the
+  // stale block and the second no longer finds it.
   auto abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
   EXPECT_EQ(abandon, DbSchedResult::DbSchedResultOK);
   auto second_abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
