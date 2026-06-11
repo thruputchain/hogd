@@ -416,8 +416,9 @@ public:
     // in sdk_rs macros/src/static_hash.rs. (It previously hashed the quoted
     // token source, input.token().to_string(); the derivation was updated, so
     // this helper hashes the raw bytes to stay in step.)
-    return StorageKeyContractData{sha256(std::span<const uint8_t>(
-        reinterpret_cast<const uint8_t *>(str.data()), str.size()))};
+    return StorageKeyContractData{sha256(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(str.data()),
+                                 str.size()))};
   }
   constexpr static AddressAndKey
   make_contract_data_addrkey_matching_static_key_sdk_macro(

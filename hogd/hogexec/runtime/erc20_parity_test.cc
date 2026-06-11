@@ -136,15 +136,13 @@ protected:
   // `Name` entrypoint with `args`, then records (tag, frame_status, literal
   // return bytes) into `result_key` so the test can read it back from the DB.
   template<StringLiteral Name, typename... Args>
-  NativeContract::function_t make_capture_driver(ContractAddress target,
-                                                 StorageKeyContractData
-                                                     result_key,
-                                                 Args... args)
+  NativeContract::function_t
+  make_capture_driver(ContractAddress target, StorageKeyContractData result_key,
+                      Args... args)
   {
     auto calldata = erc20_meta::make_calldata<Name>(args...);
     Runtime::MethodID method_id = erc20_meta::method_id<Name>();
-    return [target, result_key, method_id,
-            calldata = std::move(calldata)](
+    return [target, result_key, method_id, calldata = std::move(calldata)](
                NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
       CopyableInvokeOutputs outputs{};
       CopyableInvokeInputs inputs{
@@ -153,8 +151,7 @@ protected:
           .flags = std::to_underlying(InvokeFlag::None),
       };
       auto r = ctx.syscall<SyscallNo::kInvoke>(
-          target,
-          std::as_bytes(std::span(calldata.data(), calldata.size())),
+          target, std::as_bytes(std::span(calldata.data(), calldata.size())),
           std::span<uint32_t>{}, inputs, outputs);
 
       std::vector<uint8_t> record;
@@ -163,11 +160,13 @@ protected:
         // paths, but record it distinctly rather than hiding it.
         record.push_back(0xEE);
         record.push_back(static_cast<uint8_t>(r.error().code()));
-      } else if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      }
+      else if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         // Invoke rejected before any child frame ran.
         record.push_back(0x01);
         record.push_back(static_cast<uint8_t>(r.value()));
-      } else {
+      }
+      else {
         record.push_back(0x00);
         record.push_back(static_cast<uint8_t>(outputs.frame_status));
         auto rb = ctx.handler().get_return_buffer();
@@ -176,15 +175,15 @@ protected:
           for (auto byte_val : *buf) {
             record.push_back(static_cast<uint8_t>(byte_val));
           }
-        } else {
+        }
+        else {
           // Fault: frame ran but produced no return buffer.
           record.push_back(0xFF);
         }
       }
 
       auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
-          result_key,
-          std::as_bytes(std::span(record.data(), record.size())),
+          result_key, std::as_bytes(std::span(record.data(), record.size())),
           std::to_underlying(StorageDeltaFlags::None));
       if (!set_r.has_value() ||
           set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -219,8 +218,9 @@ protected:
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   Invocation{.invoked_address = addr,
-                                             .entrypoint = entrypoint_from_method_id(
-                                                 method_id),
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(
+                                                     method_id),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
@@ -262,7 +262,8 @@ protected:
       advance_block();
       auto rec = read_record(addr, result_key);
       outcome.insert(outcome.end(), rec.begin(), rec.end());
-    } else {
+    }
+    else {
       advance_block();
     }
     return outcome;
@@ -305,8 +306,9 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_admin_fns;
     wasm_admin_fns.emplace(
-        0, [start_balance](NativeSyscallContext &ctx) noexcept
-               -> InvokeStatus<void> {
+        0,
+        [start_balance](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
           auto init = client.invoke_opt<"initialize">(ctx, kWasmAdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
@@ -385,8 +387,8 @@ protected:
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
                          uint128_t amt) -> NativeContract::function_t {
-      return [token, spender, amt](NativeSyscallContext &ctx) noexcept
-                 -> InvokeStatus<void> {
+      return [token, spender,
+              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = client.invoke_opt<"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
@@ -402,41 +404,42 @@ protected:
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_owner_fns;
-    native_owner_fns.emplace(
-        0, make_grant(kNativeTokenAddr, kNativeSpenderAddr, allowance));
+    native_owner_fns.emplace(0, make_grant(kNativeTokenAddr, kNativeSpenderAddr,
+                                           allowance));
     auto native_owner =
         std::make_unique<NativeContract>(std::move(native_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_owner_fns;
-    wasm_owner_fns.emplace(
-        0, make_grant(kWasmTokenAddr, kWasmSpenderAddr, allowance));
+    wasm_owner_fns.emplace(0, make_grant(kWasmTokenAddr, kWasmSpenderAddr,
+                                         allowance));
     auto wasm_owner =
         std::make_unique<NativeContract>(std::move(wasm_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_spender_fns;
-    native_spender_fns.emplace(
-        0, make_capture_driver<"transfer_from">(
-               kNativeTokenAddr, native_result_key, kNativeOwnerAddr,
-               kNativeOwnerAddr, make_amount(transfer_amount)));
+    native_spender_fns.emplace(0, make_capture_driver<"transfer_from">(
+                                      kNativeTokenAddr, native_result_key,
+                                      kNativeOwnerAddr, kNativeOwnerAddr,
+                                      make_amount(transfer_amount)));
     auto native_spender =
         std::make_unique<NativeContract>(std::move(native_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_spender_fns;
     wasm_spender_fns.emplace(
-        0, make_capture_driver<"transfer_from">(
-               kWasmTokenAddr, wasm_result_key, kWasmOwnerAddr, kWasmOwnerAddr,
-               make_amount(transfer_amount)));
+        0, make_capture_driver<"transfer_from">(kWasmTokenAddr, wasm_result_key,
+                                                kWasmOwnerAddr, kWasmOwnerAddr,
+                                                make_amount(transfer_amount)));
     auto wasm_spender =
         std::make_unique<NativeContract>(std::move(wasm_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_admin_fns;
     wasm_admin_fns.emplace(
-        0, [owner_balance](NativeSyscallContext &ctx) noexcept
-               -> InvokeStatus<void> {
+        0,
+        [owner_balance](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
           auto init = client.invoke_opt<"initialize">(ctx, kWasmAdminAddr);
           if (!init.has_value() || !init.value().has_value()) {

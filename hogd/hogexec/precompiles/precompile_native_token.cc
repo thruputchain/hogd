@@ -137,9 +137,11 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   // Force-load the committed allowance so an out-of-range running total is
   // rejected here (at invoke), mirroring the SDK's
   // non_negative_int_try_strict_inc used by itc_erc20::add_to_allowance.
-  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      allow_key, /*load_from_snapshot=*/true, output_set, output_set_opt,
-      output_add);
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key,
+                                                 /*load_from_snapshot=*/true,
+                                                 output_set, output_set_opt,
+                                                 output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -149,7 +151,8 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     output_set = 0;
     output_set_opt = true;
     output_add = 0;
-  } else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+  }
+  else if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return false;
   }
 

@@ -564,9 +564,9 @@ TEST_F(BalanceCostTrackingTest, OverBalanceTransferRevertsAtInvoke)
 
   // The strict revert means no negative delta is ever staged (verified inside
   // the contract above). This contrived transaction's only operation reverted,
-  // so it has no committable forward progress and does not commit -- but, unlike
-  // the original #1503 path, that is because nothing was staged, not because a
-  // negative balance reached the commit-time lock.
+  // so it has no committable forward progress and does not commit -- but,
+  // unlike the original #1503 path, that is because nothing was staged, not
+  // because a negative balance reached the commit-time lock.
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
