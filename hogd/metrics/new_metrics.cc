@@ -5,8 +5,6 @@
 #include <string>
 
 #include "hogd/base/types.h"
-#include "x23/async.h"
-#include "x23/corosync.h"
 
 namespace hogd {
 

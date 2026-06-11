@@ -68,7 +68,7 @@ public:
                                             std::memory_order_release));
   }
 
-  void record(ComponentName component_name, std::string metric_name,
+  void record(ComponentName component_name, const std::string &metric_name,
               ssize_t metric_value)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
@@ -90,7 +90,8 @@ public:
         it->second.sample);
   }
 
-  void add(ComponentName component_name, std::string metric_name, ssize_t delta)
+  void add(ComponentName component_name, const std::string &metric_name,
+           ssize_t delta)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(done_with_init(component_name));
@@ -111,7 +112,7 @@ public:
         it->second.sample);
   }
 
-  ssize_t get(ComponentName component_name, std::string metric_name)
+  ssize_t get(ComponentName component_name, const std::string &metric_name)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(done_with_init(component_name));
