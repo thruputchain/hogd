@@ -13,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -201,14 +202,10 @@ TEST_F(DirectStalenessTest,
 
 // Regression test for issue #2599.
 //
-// Same shape as StaleNewContractCommitReturnsAbandonAndReleasesBlock, but the
-// contract body exceeds RAMDB's per-item size limit. The oversized-code
-// preflight in InvokeTX::request_new_contract() returns kTooBig before
-// reaching the stale-aware lock in BlockTX::lock(), so without an explicit
-// staleness re-check on the failure path the commit surfaces
-// kRPCTransactionFailed (executor Unrecoverable) instead of kRPCBadBlockID
-// (Abandon) on a block already invalidated by a committed sibling. Staleness
-// must take precedence regardless of contract size.
+// Same shape as StaleNewContractCommitReturnsAbandonAndReleasesBlock, with a
+// contract body that exceeds one RAMDB item (stored chunked since #2569). On
+// an invalidated block the commit fails at the stale-aware lock and must
+// return Abandon, exactly like the small-contract control.
 TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
 {
   auto contract_addr = make_contract_address(3);
@@ -224,9 +221,9 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
   auto contract_ptr = std::make_shared<const Contract>(contract);
   auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
 
-  // The serialized contract must exceed RAMDB's item size limit so the final
-  // new-contract write fails the kTooBig preflight rather than the stale-aware
-  // lock.
+  // The serialized contract exceeds RAMDB's single-item limit, so the final
+  // new-contract write takes the chunked-storage path (#2569) before failing
+  // at the stale-aware lock.
   ASSERT_FALSE(
       Database::item_fits(make_wasm_code_key(deployed_contract_hash.hash).size(),
                           x23::xdr_size(contract)));
@@ -257,6 +254,57 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
 
   // The commit released the invoke transaction's block reference, so the first
   // abandon removes the stale block and the second no longer finds it.
+  auto abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
+  EXPECT_EQ(abandon, DbSchedResult::DbSchedResultOK);
+  auto second_abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
+  EXPECT_EQ(second_abandon, DbSchedResult::DbSchedResultError);
+}
+
+// A row above kMaxSerializedContractBytes on an already-invalidated block:
+// the preflight rejects it (kInvalidExecutorBehavior) before the stale-aware
+// lock, and the staleness re-check in commit_transaction must still win,
+// returning Abandon rather than Unrecoverable (#2599, #2569).
+TEST_F(DirectStalenessTest, StaleOverlimitNewContractCommitReturnsAbandon)
+{
+  auto contract_addr = make_contract_address(4);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  advance_block();
+
+  auto [block_a, block_b] = create_sibling();
+
+  Contract contract(ContractType::kWasmi);
+  auto &data = contract.wasmi_contract().data;
+  data = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+  data.resize(data.size() + kMaxSerializedContractBytes);
+  auto contract_ptr = std::make_shared<const Contract>(contract);
+  auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
+
+  ASSERT_GT(x23::xdr_size(contract), kMaxSerializedContractBytes);
+
+  constexpr TransactionID kTxId = 44;
+  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);
+  AddressAndKey addrkey{.address = contract_addr,
+                        .key = StorageKey(StorageKeyType::Metadata)};
+  StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = deployed_contract_hash;
+  tx.add_delta(addrkey, std::move(delta),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto push = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(push.has_value());
+  ASSERT_TRUE(push.value());
+
+  close_and_commit_block(block_a);
+
+  BorrowedContractBatch::hash_set_t hashes{deployed_contract_hash.hash};
+  BorrowedContractBatch::contract_map_t contracts;
+  contracts.emplace(deployed_contract_hash.hash,
+                    std::make_unique<const Contract>(contract));
+  BorrowedContractBatch new_contracts(hashes, contracts);
+
+  auto commit = tx.commit_transaction(new_contracts);
+  ASSERT_FALSE(commit.has_value());
+  EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
+
   auto abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
   EXPECT_EQ(abandon, DbSchedResult::DbSchedResultOK);
   auto second_abandon = get_coord_client().dbsched_abandon_snapshot(block_b);
