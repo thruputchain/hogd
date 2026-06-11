@@ -455,11 +455,13 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   EXPECT_EQ(receiver_balance, 0);
 }
 
-// Regression test for #1503: overspending via transfer leaves a deferred
-// negative delta on the sender's balance item. A subsequent get_balance in the
-// same transaction must surface as a Deterministic error rather than aborting
-// on an assertion (debug) or wrapping to a huge unsigned value (release).
-TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
+// With the strict balance debit (mirroring itc_erc20::add_to_balance), an
+// over-balance transfer now reverts at invoke with ERC20Error::TooLarge: the
+// negative delta is never staged, so the deferred-negative-readback path of
+// the original #1503 scenario is unreachable via transfer. The over-spending
+// transfer must abort, the sender's balance must be intact (get_balance
+// returns it normally), and the transaction must commit cleanly.
+TEST_F(BalanceCostTrackingTest, OverBalanceTransferRevertsAtInvoke)
 {
   constexpr static ContractAddress kSenderAddr = make_contract_address(160);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(161);
@@ -481,10 +483,11 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         GenesisConfigurationLoader::kPresetNativeTokenAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // Overspend via transfer: records deferred-negative delta on
-    // sender, returns local success.
+    // Over-balance transfer must revert at invoke (frame Abort) rather than
+    // defer a negative delta.
     auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
+    CopyableInvokeOutputs r_transfer_outputs{};
     auto r_transfer = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
@@ -494,18 +497,18 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
       return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
                                              calldata_transfer,
                                              std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
+                                             inputs, r_transfer_outputs);
     }();
 
     if (!r_transfer.has_value() ||
-        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "overspending transfer did not return success";
+        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+        r_transfer_outputs.frame_status != InvocationFrameStatusCode::Abort) {
+      ADD_FAILURE() << "over-balance transfer should revert (Abort) at invoke";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
-    // Reading sender's balance must now surface as a deterministic
-    // fault: the child frame runs but traps, so the invoke syscall returns
-    // kSyscallErrorCodeNone with frame_status == Fault.
+    // The sender's balance is untouched, so get_balance returns normally
+    // (frame Return) rather than trapping on a deferred negative value.
     auto calldata_get = erc20_meta::make_calldata<"get_balance">();
     CopyableInvokeOutputs r_get_outputs{};
     auto r_get = [&]() {
@@ -522,9 +525,8 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 
     if (!r_get.has_value() ||
         r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-        r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-      ADD_FAILURE() << "get_balance after overspend did not return a "
-                       "deterministic fault";
+        r_get_outputs.frame_status != InvocationFrameStatusCode::Return) {
+      ADD_FAILURE() << "get_balance after a reverted transfer should succeed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
@@ -560,11 +562,12 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  // HogDB's commit-time balance-lock must still reject the transaction because
-  // the sender's persisted balance would go negative; try_commit_transaction
-  // internally aborts on failure.
-  auto commit_res = handler.try_commit_transaction();
-  ASSERT_NE(commit_res, ExecResult::ExecResultOK);
+  // The strict revert means no negative delta is ever staged (verified inside
+  // the contract above). This contrived transaction's only operation reverted,
+  // so it has no committable forward progress and does not commit -- but, unlike
+  // the original #1503 path, that is because nothing was staged, not because a
+  // negative balance reached the commit-time lock.
+  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
 // Companion to NegativeBalanceReadbackReturnsDeterministic that exercises the

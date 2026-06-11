@@ -1763,6 +1763,13 @@ SystemCallHandler::get_native_token_balance(
       }
     }
     auto const &base_item = unmodified_item->base_item();
+    // A never-written balance key reads as zero (mirrors the NNInt snapshot
+    // path below, and the SDK's try_get_values_force().unwrap_or). Without this
+    // the strict balance precheck in the native-token precompile would assert
+    // on an owner that has never held a balance.
+    if (!base_item.type().has_value()) {
+      return int128_t{0};
+    }
     assert(base_item.type() == ItemViewType::kNativeTokenBalance);
     assert(base_item.native_token_balance() >= 0);
     return base_item.native_token_balance();

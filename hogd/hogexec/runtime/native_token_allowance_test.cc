@@ -622,11 +622,11 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   EXPECT_EQ(from_xdr(balance_item->nnint()), kInitialBalance);
 }
 
-// 8. transfer_from succeeds when the allowance has an unmaterialized
-// intermediate value above INT128_MAX. The NNInt delta system works on net
-// deltas, so the intermediate overflow is fine as long as the committed
-// value is valid.
-TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
+// 8. With the strict allowance (mirroring itc_erc20::add_to_allowance), an
+// adjust_allowance that would push the running total above INT128_MAX reverts
+// at invoke and leaves the allowance unchanged; a subsequent transfer_from
+// against the intact allowance still succeeds and commits.
+TEST_F(NativeTokenAllowanceTest, OverflowingAllowanceAdjustRevertsTransferOk)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(190);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(191);
@@ -670,18 +670,26 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_adj = client.invoke_opt<"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kOverflowIncrement));
+        // Strict allowance (mirroring itc_erc20): +10 would push the running
+        // total past INT128_MAX, so it must revert (TooLarge) at invoke rather
+        // than be tolerated as a transient overflow; the allowance is left
+        // unchanged.
         if (!r_adj.has_value() || !r_adj.value().has_value() ||
-            !r_adj.value().value().has_value() ||
-            !r_adj.value().value().value().is_ok()) {
-          ADD_FAILURE() << "overflowing adjust_allowance(+10) should succeed";
+            !r_adj.value().value().has_value()) {
+          ADD_FAILURE() << "adjust_allowance(+10) invoke failed unexpectedly";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r_adj.value().value().value().is_ok()) {
+          ADD_FAILURE() << "overflowing adjust_allowance(+10) must revert";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
 
-  // Spender method 0: invoke owner method 1 (adjust +10), then
-  // transfer_from. Both hit the same (owner, spender) allowance in one tx.
+  // Spender method 0: invoke owner method 1 (the overflowing adjust, which
+  // reverts and leaves the allowance unchanged), then transfer_from against the
+  // intact INT128_MAX-5 allowance, which still succeeds.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -774,10 +782,11 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
   }
 }
 
-// 9. transfer_from from an overflowed allowance fails at commit when the
-// transfer does not reduce the net delta below the overflow threshold.
-TEST_F(NativeTokenAllowanceTest,
-       OverflowedAllowanceTransferFromRejectsIfNotReduced)
+// 9. The strict allowance overflow guard fires at invoke: an adjust_allowance
+// that would push the running total above INT128_MAX reverts immediately and
+// stages nothing, so the surrounding transaction commits cleanly with the
+// allowance unchanged.
+TEST_F(NativeTokenAllowanceTest, OverflowingAllowanceAdjustRevertsAtInvoke)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(193);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(194);
@@ -816,18 +825,24 @@ TEST_F(NativeTokenAllowanceTest,
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r_adj = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
                                                            make_difference(10));
+        // Strict allowance: +10 over INT128_MAX-5 overflows the running total
+        // and must revert (TooLarge) at invoke.
         if (!r_adj.has_value() || !r_adj.value().has_value() ||
-            !r_adj.value().value().has_value() ||
-            !r_adj.value().value().value().is_ok()) {
-          ADD_FAILURE() << "overflowing adjust_allowance(+10) should succeed";
+            !r_adj.value().value().has_value()) {
+          ADD_FAILURE() << "adjust_allowance(+10) invoke failed unexpectedly";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r_adj.value().value().value().is_ok()) {
+          ADD_FAILURE() << "overflowing adjust_allowance(+10) must revert";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
 
-  // Spender method 0: invoke owner method 1 (adjust +10), then
-  // transfer_from(3). Net delta = +7, committed = INT128_MAX + 2 → overflow.
+  // Spender method 0: invoke owner method 1, whose overflowing adjust reverts
+  // at invoke. invoke_opt swallows that child revert, so the spender frame
+  // returns success and the transaction commits cleanly with nothing staged.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -844,17 +859,6 @@ TEST_F(NativeTokenAllowanceTest,
         if (!inv.has_value() ||
             *inv != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "invoke owner for adjust_allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r_xfer =
-            client.invoke_opt<"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
-                                               make_amount(3));
-        if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
-            !r_xfer.value().value().has_value() ||
-            !r_xfer.value().value().value().is_ok()) {
-          ADD_FAILURE() << "transfer_from(3) should succeed at invoke time";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -899,8 +903,8 @@ TEST_F(NativeTokenAllowanceTest,
 
   advance_block();
 
-  // Tx 2: spender invokes owner (adjust +10) then transfer_from only 3.
-  // Net allowance delta = +7; committed value = INT128_MAX + 2, overflow.
+  // Tx 2: spender invokes owner method 1, whose overflowing adjust(+10)
+  // reverts at invoke and stages nothing, so the transaction commits cleanly.
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
@@ -913,6 +917,8 @@ TEST_F(NativeTokenAllowanceTest,
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
+    // The overflowing adjust reverts at invoke and stages nothing, so this
+    // transaction has no committable forward progress and does not commit.
     ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 }

@@ -82,6 +82,7 @@ add_library(runtime_test_objects OBJECT
   delete_recreate_tests.cc
   deserialize_test.cc
   empty_test.cc
+  erc20_parity_test.cc
   event_test.cc
   fibonacci_test.cc
   sha256_incremental_test.cc

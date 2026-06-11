@@ -236,14 +236,16 @@ public:
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
+      TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true,
+      std::optional<StorageCostModelXdr> const &genesis_cost_model =
+          std::nullopt)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     if (log || do_logging_env()) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode, empty_genesis);
+    initialize(mode, empty_genesis, genesis_cost_model);
     HogexecMetrics::launch_log_worker();
   }
 
@@ -405,13 +407,13 @@ public:
   static StorageKeyContractData
   make_storage_key_matching_static_key_sdk_macro(std::string_view str)
   {
-    // the sdk puts quotes around the string input to the static_key macro
-    std::string sdk_input = "\"" + std::string(str) + "\"";
-    return StorageKeyContractData{
-        // include the null terminator
-        sha256(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                            sdk_input.data()),
-                                        sdk_input.size()))};
+    // The sdk's static_key macro hashes the string literal's *value* -- the raw
+    // contents, without the surrounding quotes: Sha256::digest(input.value())
+    // in sdk_rs macros/src/static_hash.rs. (It previously hashed the quoted
+    // token source, input.token().to_string(); the derivation was updated, so
+    // this helper hashes the raw bytes to stay in step.)
+    return StorageKeyContractData{sha256(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(str.data()), str.size()))};
   }
   constexpr static AddressAndKey
   make_contract_data_addrkey_matching_static_key_sdk_macro(
@@ -648,7 +650,9 @@ private:
   void open_event_block(BlockID block_id);
   void close_event_block(BlockID block_id);
 
-  void initialize(BlockExecutionMode mode, bool empty_genesis)
+  void initialize(BlockExecutionMode mode, bool empty_genesis,
+                  std::optional<StorageCostModelXdr> const &genesis_cost_model =
+                      std::nullopt)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
@@ -672,7 +676,8 @@ private:
 
     {
       GenesisConfiguration genesis_configuration{
-          .storage_cost_model = get_default_cost_model()->to_xdr(),
+          .storage_cost_model =
+              genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
       };
       uint64_t network_id = 0x0;
       SHA256Hash txset_hash{};
