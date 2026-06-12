@@ -525,6 +525,20 @@ TEST(Rv32Threaded, outOfBoundsStoreTraps)
   EXPECT_EQ(machine.trap(), Trap::kBadMemory);
 }
 
+TEST(Rv32Threaded, endOverlapLoadTraps)
+{
+  using test_program::load;
+  // x1=254; lw x4,0(x1): 254 is in [0,256) but 254+4 overruns the 256-byte
+  // memory -> kBadMemory (unaligned end-overlap; alignment itself is legal).
+  const std::vector<uint32_t> words = {addi(1, 0, 254), load(4, 2, 1, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+  EXPECT_EQ(machine.reg(4), 0U); // load never wrote
+}
+
 // --- load + reg-arith fusion (EXPERIMENT(fuse)) -----------------------------
 // A lw immediately followed by a fusible R-type runs through op_load_rr (one
 // dispatch for the pair). The corpus differential test is the broad net; these
