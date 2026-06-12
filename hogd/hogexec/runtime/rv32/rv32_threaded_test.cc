@@ -463,11 +463,15 @@ TEST(Rv32Threaded, unalignedLoadReassemblesLittleEndian)
 {
   using test_program::load;
   using test_program::store;
-  // sw x3 (0x100) at 16, then lw at 17: bytes 17..20 are 01 00 00 00 -> x4=1.
+  // sw x3 (0x100) at 16 and sw x5 (0x77) at 20, then lw at 17: bytes 17..20
+  // are 01 00 00 77 -> x4 = 0x77000001. The nonzero byte at 20 pins the
+  // cross-boundary read (a zero there could not tell "read" from "zeroed").
   const std::vector<uint32_t> words = {
       addi(1, 0, 16),    // x1 = 16
       addi(3, 0, 0x100), // x3 = 0x100
       store(1, 3, 0, 2), // sw x3, 0(x1)
+      addi(5, 0, 0x77),  // x5 = 0x77
+      store(1, 5, 4, 2), // sw x5, 4(x1) -> nonzero sentinel at 20
       addi(2, 1, 1),     // x2 = 17
       load(4, 2, 2, 0),  // lw x4, 0(x2) -> unaligned address 17
   };
@@ -476,35 +480,43 @@ TEST(Rv32Threaded, unalignedLoadReassemblesLittleEndian)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
-  EXPECT_EQ(machine.reg(4), 1U);
+  EXPECT_EQ(machine.reg(4), 0x77000001U);
 }
 
 TEST(Rv32Threaded, unalignedStoreWritesExactBytes)
 {
   using test_program::load;
   using test_program::store;
-  // sw x3 (0x1ff) at address 1: bytes 1..4 = ff 01 00 00. The two aligned
-  // word reads around it prove exactly four bytes moved.
+  using test_program::u_type;
+  // Pre-fill words at 0 and 4 with 0x11111111, then sw x3 (0x1ff) at address
+  // 1: bytes 0..7 become 11 ff 01 00 00 11 11 11. The nonzero fill proves the
+  // store wrote exactly bytes 1..4 (byte 4's 0x00 came from the store, not
+  // from untouched memory).
   const std::vector<uint32_t> words = {
-      addi(3, 0, 0x1ff), // x3 = 0x1ff
-      store(0, 3, 1, 2), // sw x3, 1(x0) -> unaligned address 1
-      load(4, 2, 0, 0),  // lw x4, 0(x0) -> bytes 0..3 = 00 ff 01 00
-      load(5, 2, 0, 4),  // lw x5, 4(x0) -> bytes 4..7 = 00 00 00 00
+      addi(6, 0, 0x111),  // x6 = 0x111
+      u_type(0x37U, 7, 0x11111000U), // lui x7, 0x11111
+      op(6, 7, 6, 0, 0),  // add x6, x7, x6 -> x6 = 0x11111111
+      store(0, 6, 0, 2),  // sw x6, 0(x0)
+      store(0, 6, 4, 2),  // sw x6, 4(x0)
+      addi(3, 0, 0x1ff),  // x3 = 0x1ff
+      store(0, 3, 1, 2),  // sw x3, 1(x0) -> unaligned address 1
+      load(4, 2, 0, 0),   // lw x4, 0(x0) -> bytes 0..3 = 11 ff 01 00
+      load(5, 2, 0, 4),   // lw x5, 4(x0) -> bytes 4..7 = 00 11 11 11
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
-  EXPECT_EQ(machine.reg(4), 0x0001ff00U);
-  EXPECT_EQ(machine.reg(5), 0U);
+  EXPECT_EQ(machine.reg(4), 0x0001ff11U);
+  EXPECT_EQ(machine.reg(5), 0x11111100U);
 }
 
 TEST(Rv32Threaded, outOfBoundsStoreTraps)
 {
   using test_program::store;
   // x1=0; sw x3, 2044(x1) -> address 2044 >= memory size 256 -> kBadMemory.
-  // 2044 is 4-byte aligned so alignment check passes; bounds check fires.
+  // 2044 + 4 overruns the 256-byte memory, so the bounds check fires.
   const std::vector<uint32_t> words = {addi(1, 0, 0), store(1, 3, 2044, 2)};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
