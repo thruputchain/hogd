@@ -363,6 +363,8 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
                  node,
                  /*idx=*/static_cast<size_t>(k.get(remaining_key_size - 1)),
                  prev_hash);
+        // [remaining_key_size] could underflow here, so be careful not to use
+        // it if [ok] is false.
         remaining_key_size--;
       }
       else {
@@ -380,16 +382,20 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
       ok = ok && (remaining_key_size >= node.path.size()) &&
            (k.get_subarray(remaining_key_size - node.path.size(),
                            remaining_key_size) == node.path);
-      remaining_key_size -= node.path.size();
       ok = ok && (node.child_hashes[0] == prev_hash);
+      // [remaining_key_size] could underflow here, so be careful not to use it
+      // if [ok] is false.
+      remaining_key_size -= node.path.size();
       break;
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
       ok = ok && (remaining_key_size >= node.path.size()) &&
            (k.get_subarray(remaining_key_size - node.path.size(),
                            remaining_key_size) == node.path);
-      remaining_key_size -= node.path.size();
       ok = ok && node.value_hash && (*node.value_hash == sha256(value));
+      // [remaining_key_size] could underflow here, so be careful not to use it
+      // if [ok] is false.
+      remaining_key_size -= node.path.size();
       break;
 
     default:
