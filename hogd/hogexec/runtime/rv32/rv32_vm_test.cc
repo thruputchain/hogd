@@ -1070,7 +1070,7 @@ TEST(Rv32ExecutionTest, jalr_clears_low_target_bit)
   EXPECT_EQ(machine.reg(3), 2U);
 }
 
-TEST(Rv32ExecutionTest, traps_on_bad_fetch_memory_and_alignment)
+TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
 {
   {
     const auto program = make_program({addi(1, 0, 1)});
@@ -1133,10 +1133,13 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     Trap trap;
   };
 
-  const std::array<LoadTrapCase, 3> load_cases = {{
+  const std::array<LoadTrapCase, 5> load_cases = {{
       {"lb_bad_memory", 0, 16, Trap::kBadMemory},
       {"lh_bad_memory", 1, 16, Trap::kBadMemory},
       {"lw_bad_memory", 2, 16, Trap::kBadMemory},
+      // End-overlap: address in bounds but address+width exceeds memory size.
+      {"lh_end_overlap", 1, 15, Trap::kBadMemory},  // 15+2=17 > 16
+      {"lw_end_overlap", 2, 13, Trap::kBadMemory},  // 13+4=17 > 16
   }};
 
   for (const auto &test_case : load_cases) {
@@ -1159,10 +1162,13 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     Trap trap;
   };
 
-  const std::array<StoreTrapCase, 3> store_cases = {{
+  const std::array<StoreTrapCase, 5> store_cases = {{
       {"sb_bad_memory", 0, 16, Trap::kBadMemory},
       {"sh_bad_memory", 1, 16, Trap::kBadMemory},
       {"sw_bad_memory", 2, 16, Trap::kBadMemory},
+      // End-overlap: address in bounds but address+width exceeds memory size.
+      {"sh_end_overlap", 1, 15, Trap::kBadMemory},  // 15+2=17 > 16
+      {"sw_end_overlap", 2, 13, Trap::kBadMemory},  // 13+4=17 > 16
   }};
 
   for (const auto &test_case : store_cases) {
