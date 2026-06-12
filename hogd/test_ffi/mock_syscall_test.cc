@@ -15,7 +15,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
-#include "hogd/init.h"
+#include "hogd/hogexec/test_main.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_contract.h"
@@ -489,9 +489,5 @@ TEST(MockSyscallTest, ErrorSyscallTest)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  return hogd::run_hogexec_tests(argc, argv);
 }

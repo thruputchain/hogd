@@ -27,6 +27,7 @@
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 
@@ -109,6 +110,7 @@ hog_devnode_init(std::string listen_host,
                  BootstrapAccountConfig const &bootstrap_config)
 {
   install_signal_handler();
+  init_hogexec_metrics();
   init_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,

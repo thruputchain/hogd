@@ -14,7 +14,7 @@ run_hogexec_tests(int argc, char *argv[])
   if (ret != 0)
     return ret;
 
-  init_metrics();
+  init_hogexec_metrics();
 
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

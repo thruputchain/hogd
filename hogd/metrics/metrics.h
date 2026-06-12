@@ -85,7 +85,14 @@ public:
             sample.store(metric_value, std::memory_order_relaxed);
           }
           else {
-            *sample = metric_value;
+            // You cannot use [record] on a per-thread value as this does not
+            // make sense. You would only be setting your own thread's value and
+            // not touching the values set by other threads, so which value is
+            // authoritative?
+            //
+            // You should either be calling [add] instead or using a raw
+            // [ssize_t].
+            CHECK(false);
           }
         },
         it->second.sample);
@@ -107,7 +114,7 @@ public:
             sample.fetch_add(delta, std::memory_order_relaxed);
           }
           else {
-            *sample += delta;
+            sample.inc(delta);
           }
         },
         it->second.sample);
@@ -139,7 +146,8 @@ public:
 
 private:
   struct Metric {
-    using Sample = std::variant<std::atomic<ssize_t>, PerThread<ssize_t>>;
+    using Sample =
+        std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>>;
 
     void init_sample(SampleType sample_type)
     {
@@ -148,7 +156,7 @@ private:
         sample.template emplace<std::atomic<ssize_t>>(0);
         return;
       case SampleType::kPerThreadSsizeT:
-        sample = PerThread<ssize_t>{};
+        sample = PerThreadCounter<ssize_t>{};
         return;
       }
       CHECK(false);
@@ -163,12 +171,7 @@ private:
               return sample.load(std::memory_order_relaxed);
             }
             else {
-              ssize_t total = 0;
-              std::unique_lock ul = sample.lock_threads();
-              sample.for_each(ul, [&total](const ssize_t &thread_sample) {
-                total += thread_sample;
-              });
-              return total;
+              return sample.get();
             }
           },
           sample);

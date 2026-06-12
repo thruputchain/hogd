@@ -5,7 +5,6 @@
 #include <stop_token>
 #include <thread>
 
-#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/metrics/metrics.h"
@@ -56,11 +55,13 @@ public:
 
   static void mark_successful_proposed_tx()
   {
-    get_instance().successful_proposed_tx_count_.inc();
+    Metrics::instance().add(Metrics::ComponentName::kExecutor,
+                            "successful_proposed_tx_count", 1);
   }
   static void mark_failed_proposed_tx()
   {
-    get_instance().failed_proposed_tx_count_.inc();
+    Metrics::instance().add(Metrics::ComponentName::kExecutor,
+                            "failed_proposed_tx_count", 1);
   }
 
   static void mark_successful_validation_tx()
@@ -74,7 +75,8 @@ public:
 
   static void mark_gas_consumed(uint64_t gas)
   {
-    get_instance().gas_consumed_.inc(gas);
+    Metrics::instance().add(Metrics::ComponentName::kExecutor, "gas_consumed",
+                            static_cast<ssize_t>(gas));
   }
 
   ~HogexecMetrics() { stop_background_worker(); }
@@ -83,9 +85,9 @@ private:
   static HogexecMetrics &get_instance();
 
   struct MetricsSnapshot {
-    size_t successful_proposed_tx_count = 0;
-    size_t failed_proposed_tx_count = 0;
-    uint64_t gas_consumed = 0;
+    ssize_t successful_proposed_tx_count = 0;
+    ssize_t failed_proposed_tx_count = 0;
+    ssize_t gas_consumed = 0;
     uint64_t time_ns = 0;
 
     MetricsSnapshot operator-(const MetricsSnapshot &other) const
@@ -100,13 +102,9 @@ private:
     }
   };
 
-  MetricsSnapshot get_stats();
+  static MetricsSnapshot get_stats();
   void background_worker(std::stop_token &stoken);
   void stop_background_worker();
-
-  PerThreadCounter<size_t> successful_proposed_tx_count_;
-  PerThreadCounter<size_t> failed_proposed_tx_count_;
-  PerThreadCounter<uint64_t> gas_consumed_;
 
   std::jthread background_worker_;
   std::condition_variable_any cv_;
