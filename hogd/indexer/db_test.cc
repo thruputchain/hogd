@@ -872,6 +872,66 @@ TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
   EXPECT_FALSE(db->get_tx_events(tx4).has_value());
 }
 
+TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{log_with_tx(addr, 0x01)}));
+  // Out-of-order: block 12 lands before block 11.
+  ASSERT_TRUE(db->consume_events(12, std::vector{log_with_tx(addr, 0x03)}));
+  ASSERT_EQ(db->latest_block(), 10);
+
+  // Ascending full scan stops at the watermark: block 12's rows are
+  // ingested but not servable, and the page reports exhaustion
+  // (empty cursor) at a consistent cut.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(make_query(
+        std::move(filters), IterationOrder::IterationOrderAscending,
+        BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 10);
+    EXPECT_TRUE(page->cursor.empty());
+    EXPECT_EQ(page->latest_block, 10);
+  }
+
+  // Descending from an explicit anchor above the watermark clamps
+  // down to it instead of exposing the pending block.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters),
+                   IterationOrder::IterationOrderDescending,
+                   anchor_at_height(12)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 10);
+  }
+
+  // Once the gap fills, everything becomes servable.
+  ASSERT_TRUE(db->consume_events(11, std::vector{log_with_tx(addr, 0x02)}));
+  ASSERT_EQ(db->latest_block(), 12);
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(make_query(
+        std::move(filters), IterationOrder::IterationOrderAscending,
+        BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 3);
+    EXPECT_EQ(page->events[0].block_height, 10);
+    EXPECT_EQ(page->events[1].block_height, 11);
+    EXPECT_EQ(page->events[2].block_height, 12);
+  }
+}
+
 // NOLINTEND(misc-include-cleaner)
 
 } // namespace hogd

@@ -963,8 +963,10 @@ struct Position {
 class ContractIter {
 public:
   ContractIter(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *cf,
-               ContractAddress addr)
-    : contract_(addr), iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
+               ContractAddress addr, IterationOrder order,
+               BlockHeight max_block)
+    : contract_(addr), order_(order), max_block_(max_block),
+      iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
   {}
 
   ContractAddress const &contract() const { return contract_; }
@@ -1073,10 +1075,23 @@ private:
       has_current_ = false;
       return;
     }
+    if (order_ == IterationOrder::IterationOrderAscending &&
+        current_.block > max_block_) {
+      // Rows above the contiguous watermark are not servable: they
+      // (or a block below them) may still be ingesting, so they are
+      // not yet immutable.  Ascending keys only grow, so this
+      // iterator is exhausted for the current query.  Descending
+      // never gets here — its seek anchor is clamped to the
+      // watermark before iteration starts.
+      has_current_ = false;
+      return;
+    }
     has_current_ = true;
   }
 
   ContractAddress contract_;
+  IterationOrder order_;
+  BlockHeight max_block_;
   std::unique_ptr<rocksdb::Iterator> iter_;
   std::vector<std::size_t> filter_indices_;
   Position current_{};
@@ -1093,7 +1108,11 @@ IndexDB::get_events(EventQuery const &query) const
   }
 
   EventPage page;
-  page.latest_block = latest_block();
+  // The serving bound for this entire query: rows above this height
+  // are ingested-but-mutable (a lower gap may still be filling) and
+  // must not be observed by the page or its continuation cursor.
+  const BlockHeight max_serve_block = latest_block();
+  page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
   // Validate: filters non-empty, each filter's contract_addresses
@@ -1159,12 +1178,20 @@ IndexDB::get_events(EventQuery const &query) const
         // the highest indexed block.
         return page;
       }
-      anchor_block = latest_block();
+      anchor_block = max_serve_block;
       break;
     case BlockAnchorKind::AnchorAtHeight:
       anchor_block = query.anchor.height();
       break;
     }
+  }
+
+  // Descending scans seek from the anchor downward; clamp the start
+  // to the watermark so pending rows are never visited.  Ascending
+  // scans are bounded inside ContractIter instead.
+  if (order == IterationOrder::IterationOrderDescending &&
+      anchor_block > max_serve_block) {
+    anchor_block = max_serve_block;
   }
 
   // Dedupe contracts across all filters.  For each unique contract,
@@ -1178,7 +1205,8 @@ IndexDB::get_events(EventQuery const &query) const
         it->add_filter(fidx);
       }
       else {
-        iters.emplace_back(db_.get(), contract_cf_handle_, addr);
+        iters.emplace_back(db_.get(), contract_cf_handle_, addr, order,
+                           max_serve_block);
         iters.back().add_filter(fidx);
       }
     }
