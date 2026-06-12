@@ -1837,6 +1837,26 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   allocator.free(leaf);
 }
 
+bool
+proof_has_node_type(const std::vector<std::vector<std::byte>> &node_encodings,
+                    Node::Type node_type)
+{
+  for (const std::vector<std::byte> &node_encoding : node_encodings) {
+    size_t idx = 0;
+    Node::Raw node;
+    if (!Node::get_node_from_encoding(node_encoding, idx, node)) {
+      return false;
+    }
+    if (idx != node_encoding.size()) {
+      return false;
+    }
+    if (node.type == node_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TEST(MerkleTrie, ProveRejectsWrongLeafPath)
 {
   MerkleTrie trie;
@@ -1852,7 +1872,11 @@ TEST(MerkleTrie, ProveRejectsWrongLeafPath)
   EXPECT_TRUE(trie.insert(real_key, value_span));
   trie.generate_all_hashes();
 
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kLeaf));
   const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
@@ -1875,7 +1899,11 @@ TEST(MerkleTriePrefix, ProveRejectsWrongLeafPath)
   EXPECT_TRUE(trie.insert(real_key, value_span));
   trie.generate_all_hashes();
 
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kLeaf));
   const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
@@ -1901,7 +1929,11 @@ TEST(MerkleTrie, ProveRejectsWrongBranchSlot)
   EXPECT_TRUE(trie.insert(real_key, value_span));
   trie.generate_all_hashes();
 
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kBranch));
   const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
@@ -1937,7 +1969,11 @@ TEST(MerkleTriePrefix, ProveRejectsWrongBranchSlot)
   EXPECT_TRUE(trie.insert(real_key, value_span));
   trie.generate_all_hashes();
 
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kBranch));
   const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
@@ -1945,26 +1981,6 @@ TEST(MerkleTriePrefix, ProveRejectsWrongBranchSlot)
                                        forged_prefix_branch_key, value_span));
   EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings,
                                        forged_child_branch_key, value_span));
-}
-
-bool
-proof_has_extension_node(
-    const std::vector<std::vector<std::byte>> &node_encodings)
-{
-  for (const std::vector<std::byte> &node_encoding : node_encodings) {
-    size_t idx = 0;
-    Node::Raw node;
-    if (!Node::get_node_from_encoding(node_encoding, idx, node)) {
-      return false;
-    }
-    if (idx != node_encoding.size()) {
-      return false;
-    }
-    if (node.type == Node::Type::kExtension) {
-      return true;
-    }
-  }
-  return false;
 }
 
 TEST(MerkleTrie, ProveRejectsWrongExtensionPath)
@@ -1992,11 +2008,12 @@ TEST(MerkleTrie, ProveRejectsWrongExtensionPath)
   EXPECT_TRUE(trie.insert(sibling_key, sibling_value_span));
   trie.generate_all_hashes();
 
-  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(
+      proof_has_node_type(node_encodings_by_node, Node::Type::kExtension));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
   EXPECT_EQ(root_hash, root_hash_by_node);
-  ASSERT_TRUE(proof_has_extension_node(node_encodings_by_node));
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
@@ -2030,11 +2047,12 @@ TEST(MerkleTriePrefix, ProveRejectsWrongExtensionPath)
   EXPECT_TRUE(trie.insert(sibling_key, sibling_value_span));
   trie.generate_all_hashes();
 
-  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(
+      proof_has_node_type(node_encodings_by_node, Node::Type::kExtension));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
   EXPECT_EQ(root_hash, root_hash_by_node);
-  ASSERT_TRUE(proof_has_extension_node(node_encodings_by_node));
   ASSERT_FALSE(node_encodings.empty());
   EXPECT_TRUE(
       MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
