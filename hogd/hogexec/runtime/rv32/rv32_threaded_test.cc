@@ -459,29 +459,84 @@ TEST(Rv32Threaded, signedByteLoadSignExtends)
   EXPECT_EQ(machine.reg(5), 0x80U);       // lbu: zero-extended
 }
 
-TEST(Rv32Threaded, misalignedLoadTraps)
+TEST(Rv32Threaded, unalignedLoadReassemblesLittleEndian)
 {
   using test_program::load;
-  // x1=1; lw x4,0(x1) -> address 1, misaligned -> kMisalignedAccess.
-  const std::vector<uint32_t> words = {addi(1, 0, 1), load(4, 2, 1, 0)};
+  using test_program::store;
+  // sw x3 (0x100) at 16 and sw x5 (0x77) at 20, then lw at 17: bytes 17..20
+  // are 01 00 00 77 -> x4 = 0x77000001. The nonzero byte at 20 pins the
+  // cross-boundary read (a zero there could not tell "read" from "zeroed").
+  const std::vector<uint32_t> words = {
+      addi(1, 0, 16),    // x1 = 16
+      addi(3, 0, 0x100), // x3 = 0x100
+      store(1, 3, 0, 2), // sw x3, 0(x1)
+      addi(5, 0, 0x77),  // x5 = 0x77
+      store(1, 5, 4, 2), // sw x5, 4(x1) -> nonzero sentinel at 20
+      addi(2, 1, 1),     // x2 = 17
+      load(4, 2, 2, 0),  // lw x4, 0(x2) -> unaligned address 17
+  };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
-  EXPECT_EQ(machine.run(host), StepResult::kTrap);
-  EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(4), 0x77000001U);
+}
+
+TEST(Rv32Threaded, unalignedStoreWritesExactBytes)
+{
+  using test_program::load;
+  using test_program::store;
+  using test_program::u_type;
+  // Pre-fill words at 0 and 4 with 0x11111111, then sw x3 (0x1ff) at address
+  // 1: bytes 0..7 become 11 ff 01 00 00 11 11 11. The nonzero fill proves the
+  // store wrote exactly bytes 1..4 (byte 4's 0x00 came from the store, not
+  // from untouched memory).
+  const std::vector<uint32_t> words = {
+      addi(6, 0, 0x111),             // x6 = 0x111
+      u_type(0x37U, 7, 0x11111000U), // lui x7, 0x11111
+      op(6, 7, 6, 0, 0),             // add x6, x7, x6 -> x6 = 0x11111111
+      store(0, 6, 0, 2),             // sw x6, 0(x0)
+      store(0, 6, 4, 2),             // sw x6, 4(x0)
+      addi(3, 0, 0x1ff),             // x3 = 0x1ff
+      store(0, 3, 1, 2),             // sw x3, 1(x0) -> unaligned address 1
+      load(4, 2, 0, 0),              // lw x4, 0(x0) -> bytes 0..3 = 11 ff 01 00
+      load(5, 2, 0, 4),              // lw x5, 4(x0) -> bytes 4..7 = 00 11 11 11
+  };
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap); // falls off end
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(4), 0x0001ff11U);
+  EXPECT_EQ(machine.reg(5), 0x11111100U);
 }
 
 TEST(Rv32Threaded, outOfBoundsStoreTraps)
 {
   using test_program::store;
   // x1=0; sw x3, 2044(x1) -> address 2044 >= memory size 256 -> kBadMemory.
-  // 2044 is 4-byte aligned so alignment check passes; bounds check fires.
+  // 2044 + 4 overruns the 256-byte memory, so the bounds check fires.
   const std::vector<uint32_t> words = {addi(1, 0, 0), store(1, 3, 2044, 2)};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+}
+
+TEST(Rv32Threaded, endOverlapLoadTraps)
+{
+  using test_program::load;
+  // x1=254; lw x4,0(x1): 254 is in [0,256) but 254+4 overruns the 256-byte
+  // memory -> kBadMemory (unaligned end-overlap; alignment itself is legal).
+  const std::vector<uint32_t> words = {addi(1, 0, 254), load(4, 2, 1, 0)};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+  EXPECT_EQ(machine.reg(4), 0U); // load never wrote
 }
 
 // --- load + reg-arith fusion (EXPERIMENT(fuse)) -----------------------------
@@ -586,20 +641,20 @@ TEST(Rv32Threaded, fusedLoadFaultSuppressesRegArith)
 {
   using test_program::load;
   using test_program::op;
-  // Misaligned lw (addr 1) fused with a load->use add x5,x4,x6 (reads x4, the
-  // load's dest). The load faults (kMisalignedAccess) and the add must NOT
-  // execute -> x5 stays 0.
+  // Out-of-bounds lw (addr 1024 >= memory size 256) fused with a load->use add
+  // x5,x4,x6 (reads x4, the load's dest). The load faults (kBadMemory) and the
+  // add must NOT execute -> x5 stays 0.
   const std::vector<uint32_t> words = {
-      addi(1, 0, 1),     // x1 = 1 (misaligned base)
+      addi(1, 0, 1024),  // x1 = 1024 (out of bounds base)
       addi(6, 0, 5),     // x6 = 5
-      load(4, 2, 1, 0),  // lw x4, 0(x1) -> addr 1, misaligned  <- fused head
-      op(5, 4, 6, 0, 0), // add x5, x4, x6 (uses x4)            <- fused tail
+      load(4, 2, 1, 0),  // lw x4, 0(x1) -> addr 1024, OOB  <- fused head
+      op(5, 4, 6, 0, 0), // add x5, x4, x6 (uses x4)        <- fused tail
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
-  EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+  EXPECT_EQ(machine.trap(), Trap::kBadMemory);
   EXPECT_EQ(machine.reg(4), 0U); // load never wrote
   EXPECT_EQ(machine.reg(5), 0U); // add never ran (fault is terminal)
 }

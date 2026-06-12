@@ -99,10 +99,11 @@ the field from comparison. Getting this list right is most of the work.
 Subtle config/semantic items that will manufacture spurious divergences if
 missed — these are the ones worth pinning explicitly:
 
-- **Misaligned access:** we *trap* (`kMisalignedAccess`). Spike by default
-  *handles* misaligned loads/stores silently; it must be configured to trap.
-  Sail has a `misaligned` config knob. Mismatch here looks like "oracle
-  succeeded, we trapped."
+- **Misaligned access:** we *allow* unaligned data loads/stores (bounds-only
+  checking). Spike traps by default; it must run with the `Zicclsm` ISA
+  extension (`--isa=rv32im_zicclsm` -- the old `--misaligned` flag no longer
+  exists) to match. Sail has a `misaligned` config knob. Mismatch here looks
+  like "we succeeded, oracle trapped."
 - **Division/remainder by zero & signed overflow:** we follow the RISC-V
   defined results (DIV/0 → −1, REM/0 → dividend, DIV overflow → INT_MIN,
   REM overflow → 0). Oracles agree — a *non*-divergence worth asserting so a
@@ -110,8 +111,8 @@ missed — these are the ones worth pinning explicitly:
 - **Control-flow target alignment:** we require pc%4==0; JALR clears bit 0 per
   spec, so a 2-aligned JALR/branch target traps `kBadPc` for us and raises
   mcause 0 (instruction-address-misaligned) on the oracle. This is a current
-  trap-taxonomy choice, not `kMisalignedAccess` (data only). Maps cleanly; just
-  don't compare past it.
+  trap-taxonomy choice (data accesses have no alignment requirement at all).
+  Maps cleanly; just don't compare past it.
 - **x0 writes, FENCE as no-op:** both match a stock oracle; note for
   completeness.
 
@@ -155,8 +156,6 @@ fuzzing mode** over the random corpus. Both consume the same `ArchState`.
 | `kInvalidInstruction` | 2 (illegal instruction) | unreachable post-load-validation in practice |
 | `kBadPc` (misaligned) | 0 (instr addr misaligned) | from JALR odd targets |
 | `kBadPc` (out of image) | 1 (instr access fault) | also fires for control-transfer targets outside the program |
-| `kMisalignedAccess` (load) | 4 (load addr misaligned) | enum doesn't carry load/store; recover from opcode |
-| `kMisalignedAccess` (store) | 6 (store/AMO addr misaligned) | " |
 | `kBadMemory` (load) | 5 (load access fault) | no MMU; access-fault, not page-fault |
 | `kBadMemory` (store) | 7 (store/AMO access fault) | " |
 | `kOutOfGas` | **none** | hogd-only; exclude, oracle keeps running |

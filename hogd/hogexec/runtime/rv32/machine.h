@@ -81,8 +81,7 @@ private:
   void set_host_trap(HostTrapPayload payload);
   void write_reg(uint8_t index, uint32_t value);
   bool validate_control_target(uint32_t target);
-  bool check_load(uint32_t address, uint32_t width);
-  bool check_store(uint32_t address, uint32_t width);
+  bool check_memory_access(uint32_t address, uint32_t width);
   uint32_t load(uint32_t address, uint32_t width) const;
   void store(uint32_t address, uint32_t width, uint32_t value);
   StepResult execute(const DecodedInstruction &instruction);

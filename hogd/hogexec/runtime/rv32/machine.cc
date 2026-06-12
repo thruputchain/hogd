@@ -130,30 +130,11 @@ Machine::validate_control_target(uint32_t target)
 }
 
 bool
-Machine::check_load(uint32_t address, uint32_t width)
+Machine::check_memory_access(uint32_t address, uint32_t width)
 {
-  // Trap class is observable. Alignment wins over bounds, and both checks run
-  // after gas debit but before register or memory mutation.
-  if ((address % width) != 0) {
-    set_trap(Trap::kMisalignedAccess);
-    return false;
-  }
-  if (!memory_range_in_bounds(memory_.size(), address, width)) {
-    set_trap(Trap::kBadMemory);
-    return false;
-  }
-  return true;
-}
-
-bool
-Machine::check_store(uint32_t address, uint32_t width)
-{
-  // Stores share the load ordering: debit first in step(), then validate all
-  // store preconditions, then mutate memory only on success.
-  if ((address % width) != 0) {
-    set_trap(Trap::kMisalignedAccess);
-    return false;
-  }
+  // Trap class is observable. Bounds is the only data-access check (unaligned
+  // access is legal, as in WASM and RISC-V Zicclsm); it runs after gas debit
+  // but before register or memory mutation.
   if (!memory_range_in_bounds(memory_.size(), address, width)) {
     set_trap(Trap::kBadMemory);
     return false;
@@ -364,7 +345,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kLb:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_load(address, 1)) {
+    if (!check_memory_access(address, 1)) {
       return StepResult::kTrap;
     }
     write_reg(instruction.rd, sign_extend(load(address, 1), 8));
@@ -374,7 +355,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kLh:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_load(address, 2)) {
+    if (!check_memory_access(address, 2)) {
       return StepResult::kTrap;
     }
     write_reg(instruction.rd, sign_extend(load(address, 2), 16));
@@ -384,7 +365,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kLw:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_load(address, 4)) {
+    if (!check_memory_access(address, 4)) {
       return StepResult::kTrap;
     }
     write_reg(instruction.rd, load(address, 4));
@@ -394,7 +375,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kLbu:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_load(address, 1)) {
+    if (!check_memory_access(address, 1)) {
       return StepResult::kTrap;
     }
     write_reg(instruction.rd, load(address, 1));
@@ -404,7 +385,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kLhu:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_load(address, 2)) {
+    if (!check_memory_access(address, 2)) {
       return StepResult::kTrap;
     }
     write_reg(instruction.rd, load(address, 2));
@@ -414,7 +395,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kSb:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_store(address, 1)) {
+    if (!check_memory_access(address, 1)) {
       return StepResult::kTrap;
     }
     store(address, 1, registers_[instruction.rs2]);
@@ -424,7 +405,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kSh:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_store(address, 2)) {
+    if (!check_memory_access(address, 2)) {
       return StepResult::kTrap;
     }
     store(address, 2, registers_[instruction.rs2]);
@@ -434,7 +415,7 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kSw:
   {
     const uint32_t address = registers_[instruction.rs1] + imm;
-    if (!check_store(address, 4)) {
+    if (!check_memory_access(address, 4)) {
       return StepResult::kTrap;
     }
     store(address, 4, registers_[instruction.rs2]);

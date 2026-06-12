@@ -42,7 +42,8 @@ Important files:
 - Bad fetch traps before gas.
 - Valid fetched instructions charge gas before semantic checks or mutation.
 - Insufficient gas wins and leaves architectural state unchanged.
-- Loads/stores require natural alignment and full bounds.
+- Loads/stores require full bounds; any alignment is legal (byte-wise
+  little-endian, as in WASM and RISC-V Zicclsm).
 - Bad jump targets trap before writing link registers or changing PC.
 - Division by zero and signed overflow follow RV32M rules, not C++ UB.
 - Running off the code image is `Trap::kBadPc`, not success.

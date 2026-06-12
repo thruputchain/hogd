@@ -698,7 +698,7 @@ op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 // interpreter self-contained and width-generic.
 // Single fixed-width access via memcpy, which clang lowers to one ldr/str for a
 // constant Width (the byte-shift loop, even unrolled, was left as N byte
-// loads). The caller has already alignment- and bounds-checked addr; the host
+// loads). The caller has already bounds-checked addr; the host
 // is little-endian like RV32, so the bytes map directly.
 static_assert(std::endian::native == std::endian::little,
               "le_load/le_store assume a little-endian host");
@@ -721,16 +721,12 @@ le_store(uint8_t *mem, uint32_t addr, uint32_t v)
 
 // Loads/stores are non-barriers: no self-charge (their gas is in the run total
 // pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
-// still fault (misaligned/oob), which is terminal.
+// still fault (oob), which is terminal.
 template<bool Trace, uint32_t Width, bool SignExtend>
 StepResult
 op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -748,10 +744,6 @@ StepResult
 op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -787,10 +779,6 @@ StepResult
 op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -829,10 +817,6 @@ StepResult
 op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -963,10 +947,6 @@ op_alu_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   }
   const Slot *st = ip + 1;
   const uint32_t addr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, st, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
                                                           gas);
@@ -989,10 +969,6 @@ op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   }
   const Slot *ld = ip + 1;
   const uint32_t addr = c.m->regs_[ld->rs1] + bits_from_i32(ld->imm);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ld, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ld, mem, memsize,
                                                           gas);
@@ -1014,10 +990,6 @@ op_store_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
              uint64_t gas)
 {
   const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
-  if ((addr % Width) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<Width>(memsize, addr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -1041,10 +1013,6 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
               uint64_t gas)
 {
   const uint32_t laddr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if ((laddr % LWidth) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, ip, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<LWidth>(memsize, laddr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
@@ -1059,10 +1027,6 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   }
   const Slot *st = ip + 1;
   const uint32_t saddr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
-  if ((saddr % SWidth) != 0) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kMisalignedAccess>(c, st, mem,
-                                                                 memsize, gas);
-  }
   if (!memory_range_in_bounds<SWidth>(memsize, saddr)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
                                                           gas);

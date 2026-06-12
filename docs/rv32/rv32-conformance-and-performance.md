@@ -17,7 +17,8 @@ Coverage includes:
 - Little-endian loads/stores, sign extension, and memory writeback.
 - RV32M multiply/divide/remainder edge cases, including divide-by-zero and
   signed overflow.
-- Trap ordering for bad PCs, misaligned memory, and out-of-gas before mutation.
+- Trap ordering for bad PCs, out-of-bounds memory, and out-of-gas before
+  mutation; unaligned data access succeeds.
 - ECALL halt behavior through the narrow `Host` interface.
 
 Add new cases when a bug fix depends on instruction semantics, trap class,

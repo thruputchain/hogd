@@ -238,10 +238,12 @@ random_i_imm(std::mt19937_64 &rng)
 }
 
 uint32_t
-aligned_offset(std::mt19937_64 &rng, uint32_t width)
+random_offset(std::mt19937_64 &rng, uint32_t width)
 {
-  const uint32_t slots = (256 - width) / width;
-  return 128 + (width * random_u32_inclusive(rng, slots));
+  // Any byte offset in [128, 384 - width]: the range the aligned-only version
+  // spanned, without rounding to the access width -- unaligned data access is
+  // legal and must agree between Machine and the spec model.
+  return 128 + random_u32_inclusive(rng, 256 - width);
 }
 
 spec::SpecInstruction
@@ -284,7 +286,7 @@ random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
     const auto [op_value, funct3] =
         kLoadOps[static_cast<size_t>(rng() % kLoadOps.size())];
     const uint32_t width = spec::load_width(op_value);
-    const auto imm = static_cast<int32_t>(aligned_offset(rng, width) - 128);
+    const auto imm = static_cast<int32_t>(random_offset(rng, width) - 128);
     const uint8_t rd = random_reg(rng);
     return spec(load(rd, funct3, 29, imm), op_value, rd, 29, 0, imm);
   }
@@ -297,7 +299,7 @@ random_instruction(std::mt19937_64 &rng, size_t index, size_t count)
     const auto [op_value, funct3] =
         kStoreOps[static_cast<size_t>(rng() % kStoreOps.size())];
     const uint32_t width = spec::store_width(op_value);
-    const auto imm = static_cast<int32_t>(aligned_offset(rng, width) - 128);
+    const auto imm = static_cast<int32_t>(random_offset(rng, width) - 128);
     const uint8_t rs2 = random_reg(rng);
     return spec(store(29, rs2, imm, funct3), op_value, 0, 29, rs2, imm);
   }
@@ -479,7 +481,7 @@ TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpec)
 
   regs[1] = 3;
   compare_to_machine(CrosscheckCase{
-      .name = "misaligned_load",
+      .name = "unaligned_load",
       .instructions = {spec(load(2, 2, 1, 0), Op::kLw, 2, 1, 0, 0),
                        spec(0x00000073U, Op::kEcall)},
       .initial_regs = regs,

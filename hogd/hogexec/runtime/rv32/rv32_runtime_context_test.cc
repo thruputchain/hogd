@@ -662,9 +662,12 @@ make_bad_pc_image()
 rv32::RuntimeContractImage
 make_bad_memory_image()
 {
+  // lw at 256: 4-byte aligned but entirely outside [0,256) -- aligned fully-OOB
+  // variant; sibling make_unaligned_oob_access_image covers unaligned
+  // end-overlap.
   return rv32::RuntimeContractImage{
       .program = make_program({
-          i_type(0x03, 1, 2, 0, 254),
+          i_type(0x03, 1, 2, 0, 256),
       }),
       .initial_memory = std::vector<uint8_t>(256),
       .memory_bytes = 256,
@@ -672,11 +675,13 @@ make_bad_memory_image()
 }
 
 rv32::RuntimeContractImage
-make_misaligned_access_image()
+make_unaligned_oob_access_image()
 {
+  // lw at 253: in [0,256) but 253+4 > 256 -- unaligned AND out of bounds,
+  // which traps kBadMemory now that unaligned in-bounds access is legal.
   return rv32::RuntimeContractImage{
       .program = make_program({
-          addi(1, 0, 1),
+          addi(1, 0, 253),
           i_type(0x03, 2, 2, 1, 0),
       }),
       .initial_memory = std::vector<uint8_t>(256),
@@ -1815,7 +1820,7 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
 
   expect_deterministic(make_bad_pc_image());
   expect_deterministic(make_bad_memory_image());
-  expect_deterministic(make_misaligned_access_image());
+  expect_deterministic(make_unaligned_oob_access_image());
   expect_deterministic(make_breakpoint_image());
 }
 

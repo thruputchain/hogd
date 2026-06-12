@@ -39,7 +39,6 @@ enum class Trap {
   kInvalidInstruction,
   kBadPc,
   kBadMemory,
-  kMisalignedAccess,
   kBreakpoint,
   kOutOfGas,
   kHostTrap,
