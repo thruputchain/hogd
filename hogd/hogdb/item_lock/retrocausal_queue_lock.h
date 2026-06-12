@@ -17,14 +17,13 @@
 
 namespace hogd {
 
-// Uses SipHash24 with a random key (generated at construction) to defend
-// against adversarial hash collision attacks on entry_tracking_.
+// Uses the process-wide random-keyed SipHash24 to defend against adversarial
+// hash collision attacks on entry_tracking_.
 struct QueueEntryHasher {
-  mutable SipHash24 hasher;
-
   size_t operator()(const QueueEntry &entry) const
   {
-    return hasher(std::as_bytes(std::span(entry.data(), entry.size())));
+    return SipHash24::get_default()(
+        std::as_bytes(std::span(entry.data(), entry.size())));
   }
 };
 
