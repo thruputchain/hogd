@@ -85,8 +85,6 @@ build_and_hash_trie(TrieType &trie, size_t num_threads)
   return trie.get_root_hash();
 }
 
-} // namespace
-
 // Tests that [size()] and [empty()] return expected values.
 TEST(MerkleTrie, SizeAndEmpty)
 {
@@ -834,8 +832,6 @@ TEST(MerkleTrie, InsertOrUpdate)
   hogd::MerkleTrie::find_end(cookie);
 }
 
-namespace {
-
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
 template<typename T>
@@ -1118,8 +1114,6 @@ prove(T &trie)
   }
 }
 
-} // namespace
-
 TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
@@ -1132,8 +1126,6 @@ TEST(MerkleTriePrefix, Prove)
   prove(trie);
 }
 
-namespace {
-
 // Test that we cannot prove a KV pair with an empty key and value is in an
 // empty trie.
 template<typename T>
@@ -1145,8 +1137,6 @@ prove_empty_trie(T &trie)
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key,
                                  std::span<std::byte>()));
 }
-
-} // namespace
 
 TEST(MerkleTrie, ProveEmptyTrie)
 {
@@ -1184,8 +1174,6 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   }
 }
 
-namespace {
-
 // Test that we can no longer prove a KV pair is in the trie after removing it.
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
@@ -1213,8 +1201,6 @@ prove_after_removing_key(T &trie)
                                    std::span<std::byte>()));
   }
 }
-
-} // namespace
 
 TEST(MerkleTrie, ProveAfterRemovingKey)
 {
@@ -1365,8 +1351,6 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-namespace {
-
 // This test stresses the Merkle trie. It randomly generates 100 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [for_each()], [get_proof()], [prove()],
@@ -1472,8 +1456,6 @@ stress(T &trie, bool allow_empty)
   }
 }
 
-} // namespace
-
 TEST(MerkleTrie, Stress)
 {
   MerkleTrie trie;
@@ -1485,8 +1467,6 @@ TEST(MerkleTriePrefix, Stress)
   MerkleTriePrefix trie;
   stress(trie, /*allow_empty=*/false);
 }
-
-namespace {
 
 // This test first adds 5,000 KV pairs to the trie, then proves each KV pair in
 // the trie, then removes all KV pairs.
@@ -1564,8 +1544,6 @@ stress_two(T &trie, bool allow_empty)
   EXPECT_EQ(seen.size(), total.size());
 }
 
-} // namespace
-
 TEST(MerkleTrie, StressTwo)
 {
   MerkleTrie trie;
@@ -1577,8 +1555,6 @@ TEST(MerkleTriePrefix, StressTwo)
   MerkleTriePrefix trie;
   stress_two(trie, /*allow_empty=*/false);
 }
-
-namespace {
 
 // Inserts and removes ~200,000 KV pairs with [num_threads] threads.
 void
@@ -1668,8 +1644,6 @@ run_multithread(size_t num_threads)
   EXPECT_EQ(trie.size(), kInitialSize);
   EXPECT_TRUE(trie.check());
 }
-
-} // namespace
 
 TEST(MerkleTriePrefix, Multithread128)
 {
@@ -1863,7 +1837,55 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   allocator.free(leaf);
 }
 
+TEST(MerkleTrie, ProveAcceptsSameLengthWrongKey)
+{
+  MerkleTrie trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_key("9999");
+  ASSERT_EQ(real_key.size(), forged_key.size());
+  ASSERT_FALSE(real_key == forged_key);
+
+  std::string value = "value bound to the original key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(
+      MerkleTrie::prove(root_hash, node_encodings, forged_key, value_span));
+}
+
+TEST(MerkleTriePrefix, ProveAcceptsSameLengthWrongKey)
+{
+  MerkleTriePrefix trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_key("9999");
+  ASSERT_EQ(real_key.size(), forged_key.size());
+  ASSERT_FALSE(real_key == forged_key);
+
+  std::string value = "value bound to the original prefixed key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings, forged_key,
+                                       value_span));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+} // namespace
 
 } // namespace hogd
 
