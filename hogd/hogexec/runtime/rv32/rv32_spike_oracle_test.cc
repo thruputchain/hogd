@@ -139,7 +139,7 @@ TEST(Rv32SpikeOracle, randomCorpusMatchesSpike)
 
   // Same generator as the fast non-gated Machine-vs-spec pass in the oracle
   // test, here checked against the independent Spike reference. Fewer seeds
-  // because each Spike run costs the subprocess timeout.
+  // because each Spike run pays the ~130ms instruction-cap spin.
   for (uint64_t seed = 0; seed < 24; ++seed) {
     SCOPED_TRACE(seed);
     DifferentialProgram program;

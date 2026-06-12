@@ -48,11 +48,12 @@ inline constexpr uint32_t kSpikeTextBase = 0x80000000U;
 inline constexpr uint32_t kSpikeDataBase = 0x1000U;
 
 // The terminal ecall traps in M-mode and Spike then spins in its default trap
-// handler (below kSpikeTextBase, so it emits no in-range commits — faulting
-// instructions never retire). An --instructions cap makes Spike exit on its
-// own instead of needing an external `timeout` kill (a GNU-ism absent on stock
-// macOS). 100M is ~6 orders of magnitude above any corpus program's dynamic
-// length and the capped spin returns in ~130ms.
+// handler (below kSpikeTextBase, so it emits no in-range commits -- faulting
+// instructions never retire, but Spike's --instructions cap counts executed
+// steps, not retirements, so the spin still consumes it and Spike exits on
+// its own). This replaces an external `timeout` kill (a GNU-ism absent on
+// stock macOS). 100M is ~6 orders of magnitude above any corpus program's
+// dynamic length and the capped spin returns in ~130ms.
 inline constexpr const char *kSpikeInstructionCap = "100000000";
 
 inline std::string
