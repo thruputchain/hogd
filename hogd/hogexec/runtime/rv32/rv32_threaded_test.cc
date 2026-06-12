@@ -493,15 +493,15 @@ TEST(Rv32Threaded, unalignedStoreWritesExactBytes)
   // store wrote exactly bytes 1..4 (byte 4's 0x00 came from the store, not
   // from untouched memory).
   const std::vector<uint32_t> words = {
-      addi(6, 0, 0x111),  // x6 = 0x111
+      addi(6, 0, 0x111),             // x6 = 0x111
       u_type(0x37U, 7, 0x11111000U), // lui x7, 0x11111
-      op(6, 7, 6, 0, 0),  // add x6, x7, x6 -> x6 = 0x11111111
-      store(0, 6, 0, 2),  // sw x6, 0(x0)
-      store(0, 6, 4, 2),  // sw x6, 4(x0)
-      addi(3, 0, 0x1ff),  // x3 = 0x1ff
-      store(0, 3, 1, 2),  // sw x3, 1(x0) -> unaligned address 1
-      load(4, 2, 0, 0),   // lw x4, 0(x0) -> bytes 0..3 = 11 ff 01 00
-      load(5, 2, 0, 4),   // lw x5, 4(x0) -> bytes 4..7 = 00 11 11 11
+      op(6, 7, 6, 0, 0),             // add x6, x7, x6 -> x6 = 0x11111111
+      store(0, 6, 0, 2),             // sw x6, 0(x0)
+      store(0, 6, 4, 2),             // sw x6, 4(x0)
+      addi(3, 0, 0x1ff),             // x3 = 0x1ff
+      store(0, 3, 1, 2),             // sw x3, 1(x0) -> unaligned address 1
+      load(4, 2, 0, 0),              // lw x4, 0(x0) -> bytes 0..3 = 11 ff 01 00
+      load(5, 2, 0, 4),              // lw x5, 4(x0) -> bytes 4..7 = 00 11 11 11
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);

@@ -1138,8 +1138,8 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
       {"lh_bad_memory", 1, 16, Trap::kBadMemory},
       {"lw_bad_memory", 2, 16, Trap::kBadMemory},
       // End-overlap: address in bounds but address+width exceeds memory size.
-      {"lh_end_overlap", 1, 15, Trap::kBadMemory},  // 15+2=17 > 16
-      {"lw_end_overlap", 2, 13, Trap::kBadMemory},  // 13+4=17 > 16
+      {"lh_end_overlap", 1, 15, Trap::kBadMemory}, // 15+2=17 > 16
+      {"lw_end_overlap", 2, 13, Trap::kBadMemory}, // 13+4=17 > 16
   }};
 
   for (const auto &test_case : load_cases) {
@@ -1167,8 +1167,8 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
       {"sh_bad_memory", 1, 16, Trap::kBadMemory},
       {"sw_bad_memory", 2, 16, Trap::kBadMemory},
       // End-overlap: address in bounds but address+width exceeds memory size.
-      {"sh_end_overlap", 1, 15, Trap::kBadMemory},  // 15+2=17 > 16
-      {"sw_end_overlap", 2, 13, Trap::kBadMemory},  // 13+4=17 > 16
+      {"sh_end_overlap", 1, 15, Trap::kBadMemory}, // 15+2=17 > 16
+      {"sw_end_overlap", 2, 13, Trap::kBadMemory}, // 13+4=17 > 16
   }};
 
   for (const auto &test_case : store_cases) {

@@ -663,7 +663,8 @@ rv32::RuntimeContractImage
 make_bad_memory_image()
 {
   // lw at 256: 4-byte aligned but entirely outside [0,256) -- aligned fully-OOB
-  // variant; sibling make_unaligned_oob_access_image covers unaligned end-overlap.
+  // variant; sibling make_unaligned_oob_access_image covers unaligned
+  // end-overlap.
   return rv32::RuntimeContractImage{
       .program = make_program({
           i_type(0x03, 1, 2, 0, 256),
