@@ -479,7 +479,7 @@ TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpec)
 
   regs[1] = 3;
   compare_to_machine(CrosscheckCase{
-      .name = "misaligned_load",
+      .name = "unaligned_load",
       .instructions = {spec(load(2, 2, 1, 0), Op::kLw, 2, 1, 0, 0),
                        spec(0x00000073U, Op::kEcall)},
       .initial_regs = regs,

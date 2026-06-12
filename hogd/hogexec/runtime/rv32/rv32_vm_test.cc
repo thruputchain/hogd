@@ -1087,13 +1087,14 @@ TEST(Rv32ExecutionTest, traps_on_bad_fetch_memory_and_alignment)
     EXPECT_EQ(machine.trap(), Trap::kBadPc);
   }
   {
+    // Unaligned but in-bounds lw: succeeds (no alignment trap).
     const auto program = make_program({load(1, 2, 2, 0)});
     Machine machine(program, 16, 10);
     MachineTestPeer::set_reg(machine, 2, 1);
-    EXPECT_EQ(machine.step(), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+    EXPECT_EQ(machine.step(), StepResult::kContinue);
   }
   {
+    // Out-of-bounds lw: traps kBadMemory.
     const auto program = make_program({load(1, 2, 2, 0)});
     Machine machine(program, 16, 10);
     MachineTestPeer::set_reg(machine, 2, 16);
@@ -1101,13 +1102,14 @@ TEST(Rv32ExecutionTest, traps_on_bad_fetch_memory_and_alignment)
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
   }
   {
+    // Unaligned but in-bounds sw: succeeds (no alignment trap).
     const auto program = make_program({s_type(2, 1, 2, 0)});
     Machine machine(program, 16, 10);
     MachineTestPeer::set_reg(machine, 1, 2);
-    EXPECT_EQ(machine.step(), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+    EXPECT_EQ(machine.step(), StepResult::kContinue);
   }
   {
+    // Out-of-bounds sw: traps kBadMemory.
     const auto program = make_program({s_type(2, 1, 2, 0)});
     Machine machine(program, 16, 10);
     MachineTestPeer::set_reg(machine, 1, 16);
@@ -1131,11 +1133,9 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     Trap trap;
   };
 
-  const std::array<LoadTrapCase, 5> load_cases = {{
+  const std::array<LoadTrapCase, 3> load_cases = {{
       {"lb_bad_memory", 0, 16, Trap::kBadMemory},
-      {"lh_misaligned", 1, 1, Trap::kMisalignedAccess},
       {"lh_bad_memory", 1, 16, Trap::kBadMemory},
-      {"lw_misaligned", 2, 1, Trap::kMisalignedAccess},
       {"lw_bad_memory", 2, 16, Trap::kBadMemory},
   }};
 
@@ -1159,11 +1159,9 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     Trap trap;
   };
 
-  const std::array<StoreTrapCase, 5> store_cases = {{
+  const std::array<StoreTrapCase, 3> store_cases = {{
       {"sb_bad_memory", 0, 16, Trap::kBadMemory},
-      {"sh_misaligned", 1, 1, Trap::kMisalignedAccess},
       {"sh_bad_memory", 1, 16, Trap::kBadMemory},
-      {"sw_misaligned", 2, 2, Trap::kMisalignedAccess},
       {"sw_bad_memory", 2, 16, Trap::kBadMemory},
   }};
 
@@ -1252,11 +1250,12 @@ TEST(Rv32ExecutionTest, debits_gas_before_later_traps_and_mutation)
     EXPECT_EQ(machine.reg(1), 0U);
   }
   {
+    // Unaligned OOB lw: gas debited before trap (kBadMemory, no writeback).
     const auto program = make_program({load(1, 2, 2, 0)});
     Machine machine(program, 16, kBaseInstructionGas);
-    MachineTestPeer::set_reg(machine, 2, 1);
+    MachineTestPeer::set_reg(machine, 2, 13);
     EXPECT_EQ(machine.step(), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
+    EXPECT_EQ(machine.trap(), Trap::kBadMemory);
     EXPECT_EQ(machine.gas_remaining(), 0U);
     EXPECT_EQ(machine.pc(), 0U);
     EXPECT_EQ(machine.reg(1), 0U);
@@ -1465,11 +1464,7 @@ TEST(Rv32ConformanceTest, randomized_store_bounds_are_deterministic)
     MachineTestPeer::set_reg(machine, 1, address);
     MachineTestPeer::set_reg(machine, 2, 0xaabbccddU);
     const StepResult result = machine.step();
-    if ((address % 4) != 0) {
-      EXPECT_EQ(result, StepResult::kTrap);
-      EXPECT_EQ(machine.trap(), Trap::kMisalignedAccess);
-    }
-    else if (!memory_range_in_bounds(machine.memory().size(), address, 4)) {
+    if (!memory_range_in_bounds(machine.memory().size(), address, 4)) {
       EXPECT_EQ(result, StepResult::kTrap);
       EXPECT_EQ(machine.trap(), Trap::kBadMemory);
     }

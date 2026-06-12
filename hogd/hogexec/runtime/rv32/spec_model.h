@@ -178,9 +178,6 @@ validate_control_target(SpecState &state, uint32_t code_bytes, uint32_t target)
 inline bool
 check_memory(SpecState &state, uint32_t address, uint32_t width)
 {
-  if ((address % width) != 0) {
-    return set_trap(state, Trap::kMisalignedAccess);
-  }
   if (!memory_range_in_bounds(state.memory.size(), address, width)) {
     return set_trap(state, Trap::kBadMemory);
   }
