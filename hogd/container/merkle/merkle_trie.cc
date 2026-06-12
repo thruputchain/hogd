@@ -49,15 +49,11 @@ get_longest_common_range_length(const HexArray &a, size_t a_start,
 }
 
 bool
-branch_has_child_hash(const Node::Raw &node, const SHA256Hash &child_hash)
+branch_has_child_hash(const Node::Raw &node, size_t idx,
+                      const SHA256Hash &child_hash)
 {
-  size_t num_matches = 0;
-  for (SHA256Hash h : node.child_hashes) {
-    if (h == child_hash) {
-      num_matches++;
-    }
-  }
-  return num_matches == 1;
+  CHECK_LT(idx, node.child_hashes.size());
+  return node.child_hashes[idx] == child_hash;
 }
 
 bool
@@ -357,34 +353,47 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
   // are already included in the hashes. If the root hash we generate from the
   // [encodings] matches the [root_hash] passed in **and** we examined a path
   // equal in length to [k], then we verified that the KV pair is in the trie.
-  size_t verified_key_size = 0;
+  size_t remaining_key_size = k.size();
   while (idx < encodings.size()) {
     SHA256Hash prev_hash = node.hash;
     if (!Node::get_node_from_encoding(encodings, idx, node)) {
       return false;
     }
-
     bool ok;
     switch (node.type) {
     case Node::Type::kBranch:
       if (num_nodes) {
-        verified_key_size++;
-        ok = branch_has_child_hash(node, prev_hash);
+        ok = remaining_key_size &&
+             branch_has_child_hash(
+                 node,
+                 /*idx=*/static_cast<size_t>(k.get(remaining_key_size - 1)),
+                 prev_hash);
+        remaining_key_size--;
       }
       else {
         // We could start on a branch if the value is directly inside the
         // branch.
         ok = node.value_hash && (*node.value_hash == sha256(value));
+        // Nothing to check/do for the key or [remaining_key_size]. The value is
+        // directly in the branch, so this branch itself does not contribute to
+        // the key. Only the nodes above this branch in the trie contribute to
+        // the key.
       }
       break;
     case Node::Type::kExtension:
       ok = (num_nodes != 0U);
-      verified_key_size += node.path.size();
+      ok = ok && (remaining_key_size >= node.path.size()) &&
+           (k.get_subarray(remaining_key_size - node.path.size(),
+                           remaining_key_size) == node.path);
+      remaining_key_size -= node.path.size();
       ok = ok && (node.child_hashes[0] == prev_hash);
       break;
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
-      verified_key_size += node.path.size();
+      ok = ok && (remaining_key_size >= node.path.size()) &&
+           (k.get_subarray(remaining_key_size - node.path.size(),
+                           remaining_key_size) == node.path);
+      remaining_key_size -= node.path.size();
       ok = ok && node.value_hash && (*node.value_hash == sha256(value));
       break;
 
@@ -406,7 +415,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
   }
 
   // Check that we verified the entire key and that the root hash matches up.
-  return verified_key_size == k.size() && node.hash == root_hash;
+  return !remaining_key_size && node.hash == root_hash;
 }
 
 bool
