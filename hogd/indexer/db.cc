@@ -1182,6 +1182,16 @@ IndexDB::get_events(EventQuery const &query) const
       break;
     case BlockAnchorKind::AnchorAtHeight:
       anchor_block = query.anchor.height();
+      if (anchor_block < oldest_block()) {
+        if (order == IterationOrder::IterationOrderDescending) {
+          // Everything at or below the anchor is outside the
+          // retained range — empty page, per protocol/indexer.x's
+          // oldest_block contract.  Validating here also keeps the
+          // signed height from wrapping to all-0xFF in the seek key.
+          return page;
+        }
+        anchor_block = oldest_block();
+      }
       break;
     }
   }

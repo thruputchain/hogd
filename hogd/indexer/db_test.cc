@@ -932,6 +932,45 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   }
 }
 
+TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  ASSERT_TRUE(db->consume_events(5, std::vector{log_with_tx(addr, 0x01)}));
+
+  // Descending from below the retained range: empty page — the
+  // anchor must NOT wrap to the top of the key range and return the
+  // newest event.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters),
+                   IterationOrder::IterationOrderDescending,
+                   anchor_at_height(-1)));
+    ASSERT_TRUE(page.has_value());
+    EXPECT_TRUE(page->events.empty());
+    EXPECT_TRUE(page->cursor.empty());
+  }
+
+  // Ascending from below the retained range clamps up to
+  // oldest_block() and serves normally.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters),
+                   IterationOrder::IterationOrderAscending,
+                   anchor_at_height(-1)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 5);
+  }
+}
+
 // NOLINTEND(misc-include-cleaner)
 
 } // namespace hogd
