@@ -147,10 +147,9 @@ inline constexpr uint32_t kCorpusMemoryBytes = 0x2000;
 
 // Generate a straight-line program (no branches/jal, so pc advances
 // monotonically to the terminal ecall) that mixes register ops with
-// width-aligned loads/stores to the data region. Accesses are aligned because
-// our Machine traps on misalignment while Spike silently handles it -- a
-// misaligned access would diverge. Each memory op re-establishes its base via
-// lui, so register writes never strand the base.
+// loads/stores of any alignment into the data region (unaligned access is
+// legal; Spike matches when run with Zicclsm). Each memory op re-establishes
+// its base via lui, so register writes never strand the base.
 inline std::vector<uint32_t>
 generate_memory_program(uint64_t seed, size_t body_len)
 {
@@ -174,13 +173,13 @@ generate_memory_program(uint64_t seed, size_t body_len)
       }
     }
     else {
-      // Memory op: establish the base, then an aligned load or store.
+      // Memory op: establish the base, then a load or store at any alignment.
       const auto base = static_cast<uint8_t>(1 + (rng() % 31)); // x1..x31
       code.push_back(test_program::u_type(0x37U, base, kCorpusDataBase));
       const uint32_t wsel = rng() % 3; // 0=byte, 1=half, 2=word
       const uint32_t width = 1U << wsel;
       const auto offset =
-          static_cast<int32_t>((rng() % (kCorpusDataSpan / width)) * width);
+          static_cast<int32_t>(rng() % (kCorpusDataSpan - width + 1));
       if (rng() % 2 == 0) {
         // test_program::store is store(rs1, rs2, imm, funct3).
         code.push_back(test_program::store(base, random_reg(rng), offset,

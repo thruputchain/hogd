@@ -273,7 +273,7 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
   const uint32_t code_region = (code_bytes + 0xFFFU) & ~0xFFFU;
   std::ostringstream cmd;
   cmd << "'" << binary << "' --instructions=" << kSpikeInstructionCap
-      << " --isa=rv32im --log-commits --disable-dtb -m0x" << std::hex
+      << " --isa=rv32im_zicclsm --log-commits --disable-dtb -m0x" << std::hex
       << text_base << ":0x" << code_region;
   if (memory_bytes > kSpikeDataBase) {
     cmd << ",0x" << kSpikeDataBase << ":0x" << (memory_bytes - kSpikeDataBase);
