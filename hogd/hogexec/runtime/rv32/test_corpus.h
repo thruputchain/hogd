@@ -14,7 +14,7 @@
 // offset). There is no production code here; it is harness infrastructure.
 //
 // generate_register_only_program: register/control-flow ops, forward-only.
-// generate_memory_program: register ops plus width-aligned loads/stores.
+// generate_memory_program: register ops plus loads/stores at any alignment.
 //
 // Both deliberately exclude the ops the constant-offset pc mapping cannot
 // model:
@@ -24,7 +24,7 @@
 //     a register, which differs by the oracle's base offset (Spike cannot put
 //     code at 0; [0, 0x1000) is reserved for devices).
 // Together they exercise the full arithmetic/logical/shift/mul/div data path,
-// forward branches, and aligned memory access -- the bulk of the ISA and where
+// forward branches, and memory access -- the bulk of the ISA and where
 // most interpreter optimizations and subtle bugs live.
 
 namespace hogd::rv32::test_corpus {
