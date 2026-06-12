@@ -363,7 +363,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     switch (node.type) {
     case Node::Type::kBranch:
       if (num_nodes) {
-        ok = remaining_key_size &&
+        ok = (remaining_key_size != 0U) &&
              branch_has_child_hash(
                  node,
                  /*idx=*/static_cast<size_t>(k.get(remaining_key_size - 1)),
@@ -415,7 +415,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
   }
 
   // Check that we verified the entire key and that the root hash matches up.
-  return !remaining_key_size && node.hash == root_hash;
+  return (remaining_key_size == 0U) && node.hash == root_hash;
 }
 
 bool
