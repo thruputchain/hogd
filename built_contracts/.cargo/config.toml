@@ -17,6 +17,9 @@ rustflags = [
 
 [target.riscv32im-unknown-none-elf]
 rustflags = [
+    # The hogd rv32 VM permits unaligned data loads/stores, so let LLVM emit
+    # them directly instead of byte-wise expansions.
+    "-C", "target-feature=+unaligned-scalar-mem",
     "-C", "link-arg=-Tgroundhog-rv32.ld",
     "-C", "link-arg=-static",
     "-C", "link-arg=--no-dynamic-linker",
