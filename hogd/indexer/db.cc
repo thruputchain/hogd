@@ -743,8 +743,7 @@ IndexDB::consume_events(BlockHeight block_height,
 bool
 IndexDB::height_seen_locked(int64_t h) const
 {
-  const int64_t latest =
-      highest_indexed_block_.load(std::memory_order_relaxed);
+  const int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
   return (latest != kNoBlocksIndexed && h <= latest) ||
          pending_heights_.contains(h);
 }

@@ -891,9 +891,9 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   {
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));
-    auto page = db->get_events(make_query(
-        std::move(filters), IterationOrder::IterationOrderAscending,
-        BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 1);
     EXPECT_EQ(page->events[0].block_height, 10);
@@ -907,8 +907,7 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));
     auto page = db->get_events(
-        make_query(std::move(filters),
-                   IterationOrder::IterationOrderDescending,
+        make_query(std::move(filters), IterationOrder::IterationOrderDescending,
                    anchor_at_height(12)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 1);
@@ -921,9 +920,9 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   {
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));
-    auto page = db->get_events(make_query(
-        std::move(filters), IterationOrder::IterationOrderAscending,
-        BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 3);
     EXPECT_EQ(page->events[0].block_height, 10);
@@ -948,8 +947,7 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));
     auto page = db->get_events(
-        make_query(std::move(filters),
-                   IterationOrder::IterationOrderDescending,
+        make_query(std::move(filters), IterationOrder::IterationOrderDescending,
                    anchor_at_height(-1)));
     ASSERT_TRUE(page.has_value());
     EXPECT_TRUE(page->events.empty());
@@ -962,8 +960,7 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));
     auto page = db->get_events(
-        make_query(std::move(filters),
-                   IterationOrder::IterationOrderAscending,
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
                    anchor_at_height(-1)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 1);
