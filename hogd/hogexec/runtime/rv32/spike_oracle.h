@@ -48,11 +48,12 @@ inline constexpr uint32_t kSpikeTextBase = 0x80000000U;
 inline constexpr uint32_t kSpikeDataBase = 0x1000U;
 
 // The terminal ecall traps in M-mode and Spike then spins in its default trap
-// handler (below kSpikeTextBase, so it emits no in-range commits). We wait that
-// spin out with a short `timeout`; the program itself retires in microseconds,
-// so every in-range commit is emitted well before the kill. A future
-// optimization could stream and kill on the first ecall-exception marker.
-inline constexpr const char *kSpikeTimeoutSeconds = "0.5";
+// handler (below kSpikeTextBase, so it emits no in-range commits — faulting
+// instructions never retire). An --instructions cap makes Spike exit on its
+// own instead of needing an external `timeout` kill (a GNU-ism absent on stock
+// macOS). 100M is ~6 orders of magnitude above any corpus program's dynamic
+// length and the capped spin returns in ~130ms.
+inline constexpr const char *kSpikeInstructionCap = "100000000";
 
 inline std::string
 spike_oracle_binary()
@@ -270,8 +271,8 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
   // --disable-dtb stops Spike writing a device tree into that data region.
   const uint32_t code_region = (code_bytes + 0xFFFU) & ~0xFFFU;
   std::ostringstream cmd;
-  cmd << "timeout " << kSpikeTimeoutSeconds << " '" << binary
-      << "' --isa=rv32im --log-commits --disable-dtb -m0x" << std::hex
+  cmd << "'" << binary << "' --instructions=" << kSpikeInstructionCap
+      << " --isa=rv32im --log-commits --disable-dtb -m0x" << std::hex
       << text_base << ":0x" << code_region;
   if (memory_bytes > kSpikeDataBase) {
     cmd << ",0x" << kSpikeDataBase << ":0x" << (memory_bytes - kSpikeDataBase);
