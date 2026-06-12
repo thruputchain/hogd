@@ -1,5 +1,6 @@
 #include "hogd/hogdb/hogdb_dao.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -244,7 +245,54 @@ HogDBStatus<OwningSpan<const std::byte>>
 HogDBDAO::read_wasm_code(const SHA256Hash &hash)
 {
   auto key = make_wasm_code_key(hash);
-  return db_.get_if_type(std::as_bytes(std::span(key)), 0);
+
+  // One lookup covers both layouts: get() returns the type byte and the
+  // value together, so the inline path (every pre-chunking row, and the
+  // common case) costs a single read.
+  auto item = db_.get(std::as_bytes(std::span(key)));
+  if (!item)
+    return item.error(); // kNotFound passes through unchanged
+  if (item->type == kWasmCodeInline)
+    return std::move(item->value);
+  if (item->type != kWasmCodeChunkedHead)
+    return HogDBError(HogDBCode::kCorruption);
+
+  // The chunked head's value is the XDR uint32 total serialized length.
+  if (item->value.size() != sizeof(uint32_t))
+    return HogDBError(HogDBCode::kCorruption);
+  uint32_t total = 0;
+  try {
+    x23::deserialize(&total, x23::BufViewEnd(std::span(item->value)));
+  } catch (x23::XdrException &) {
+    return HogDBError(HogDBCode::kCorruption);
+  }
+
+  // A chunked head describing a row that would fit inline, or one needing
+  // more chunks than a one-byte index addresses, is malformed. Checked
+  // before allocating `total` bytes.
+  if (Database::item_fits(key.size(), total))
+    return HogDBError(HogDBCode::kCorruption);
+  const size_t chunk_count =
+      (static_cast<size_t>(total) + kWasmCodeChunkPayloadSize - 1) /
+      kWasmCodeChunkPayloadSize;
+  if (chunk_count > 255)
+    return HogDBError(HogDBCode::kCorruption);
+
+  auto *data = new std::byte[total];
+  OwningSpan<const std::byte> out(std::span<const std::byte>(data, total),
+                                  [data] { delete[] data; });
+  for (size_t i = 0; i < chunk_count; ++i) {
+    auto chunk_key = make_wasm_code_chunk_key(hash, static_cast<uint8_t>(i));
+    const size_t off = i * kWasmCodeChunkPayloadSize;
+    const size_t len = std::min(kWasmCodeChunkPayloadSize, total - off);
+    // The exact-size get_if_type overload also rejects a wrong-sized chunk.
+    if (auto chunk =
+            db_.get_if_type(std::as_bytes(std::span(chunk_key)), kWasmCodeChunk,
+                            std::span<std::byte>(data + off, len));
+        !chunk)
+      return HogDBError(HogDBCode::kCorruption);
+  }
+  return out;
 }
 
 HogDBStatus<int128_t>
@@ -461,8 +509,15 @@ HogDBStatus<void>
 HogDBDAO::write_wasm_code(const SHA256Hash &hash,
                           std::span<const std::byte> buf)
 {
-  auto key = make_wasm_code_key(hash);
-  return db_.put(std::as_bytes(std::span(key)), 0, buf);
+  HogDBStatus<void> ret;
+  for_each_wasm_code_item(hash, buf,
+                          [this, &ret](std::span<const std::byte> key,
+                                       uint8_t type,
+                                       std::span<const std::byte> value) {
+                            if (ret)
+                              ret = db_.put(key, type, value);
+                          });
+  return ret;
 }
 
 HogDBStatus<void>

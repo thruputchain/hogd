@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "address_auth.hh"
@@ -50,6 +51,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
@@ -218,7 +220,156 @@ make_hog_age(const Address &addr, uint128_t to_schedule,
   };
 }
 
+// Deterministic non-trivial payload so chunk reassembly errors are visible.
+x23::Vec<uint8_t>
+make_code_bytes(size_t size)
+{
+  x23::Vec<uint8_t> buf;
+  buf.resize_uninitialized(size);
+  for (size_t i = 0; i < size; ++i) {
+    buf[i] = static_cast<uint8_t>((i * 31) + 7);
+  }
+  return buf;
+}
+
+// Largest value length that stores inline under the 33-byte wasm-code key.
+size_t
+max_inline_wasm_code_size()
+{
+  size_t size = kBigItemThreshold;
+  while (!Database::item_fits(make_wasm_code_key(SHA256Hash{}).size(), size)) {
+    --size;
+  }
+  return size;
+}
+
 } // namespace
+
+TEST_F(HogDBTest, WasmCodeChunkedRoundtrip)
+{
+  const size_t max_inline = max_inline_wasm_code_size();
+  const std::array<size_t, 5> sizes = {
+      max_inline,                          // largest inline row
+      max_inline + 1,                      // smallest chunked row
+      (2 * kWasmCodeChunkPayloadSize),     // exact multiple of chunk payload
+      (2 * kWasmCodeChunkPayloadSize) + 1, // one byte into a final chunk
+      kMaxSerializedContractBytes,         // largest row hogdb accepts
+  };
+  uint8_t which = 0;
+  for (size_t size : sizes) {
+    SHA256Hash hash{};
+    hash[0] = 0xC0;
+    hash[1] = which++;
+    auto buf = make_code_bytes(size);
+    auto buf_span = std::as_bytes(std::span(buf));
+    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
+    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_TRUE(rcode) << size;
+    EXPECT_TRUE(std::ranges::equal(buf_span, *rcode)) << size;
+    // Re-writing the same row is idempotent (content-addressed rows can be
+    // staged again by a later transaction deploying the same contract).
+    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
+    auto rcode2 = db_.read_wasm_code(hash);
+    ASSERT_TRUE(rcode2) << size;
+    EXPECT_TRUE(std::ranges::equal(buf_span, *rcode2)) << size;
+  }
+}
+
+// Guards db_hash compatibility: a row that fits one item must keep the exact
+// pre-chunking layout (type 0 at the 33-byte key, no chunk items), so
+// chunking changes nothing for existing state.
+TEST_F(HogDBTest, WasmCodeSmallRowKeepsLegacyInlineLayout)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC1;
+  auto buf = make_code_bytes(100);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto key = make_wasm_code_key(hash);
+  auto type = db_.get_ramdb().get_type(std::as_bytes(std::span(key)));
+  ASSERT_TRUE(type);
+  EXPECT_EQ(*type, kWasmCodeInline);
+
+  auto chunk_key = make_wasm_code_chunk_key(hash, 0);
+  EXPECT_FALSE(db_.get_ramdb().get_type(std::as_bytes(std::span(chunk_key))));
+}
+
+TEST_F(HogDBTest, WasmCodeMissingChunkIsCorruption)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC2;
+  auto buf = make_code_bytes(kMaxSerializedContractBytes);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto chunk_key = make_wasm_code_chunk_key(hash, 1);
+  ASSERT_TRUE(db_.get_ramdb().remove(std::as_bytes(std::span(chunk_key))));
+
+  auto rcode = db_.read_wasm_code(hash);
+  ASSERT_FALSE(rcode);
+  EXPECT_EQ(rcode.error().code(), HogDBCode::kCorruption);
+}
+
+// The chunked-head sanity checks (unknown type byte, fits-inline total,
+// out-of-range chunk count) all reject with kCorruption -- and they run
+// before read_wasm_code allocates `total` bytes, so a hostile head cannot
+// drive a huge allocation (the 0xFFFFFFFF case would be a 4 GiB buffer).
+TEST_F(HogDBTest, WasmCodeTamperedHeadIsCorruption)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC3;
+  auto buf = make_code_bytes(kMaxSerializedContractBytes);
+  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+
+  auto key = make_wasm_code_key(hash);
+  auto key_span = std::as_bytes(std::span(key));
+
+  auto expect_corrupt_after = [&](uint8_t type,
+                                  std::span<const std::byte> value) {
+    ASSERT_TRUE(db_.get_ramdb().put(key_span, type, value));
+    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_FALSE(rcode);
+    EXPECT_EQ(rcode.error().code(), HogDBCode::kCorruption);
+  };
+
+  // Unknown head type byte.
+  auto valid_len = x23::serialize(static_cast<uint32_t>(buf.size()));
+  expect_corrupt_after(7, std::as_bytes(std::span(valid_len)));
+
+  // Chunked head describing a row small enough to be stored inline.
+  auto small_len = x23::serialize(static_cast<uint32_t>(100));
+  expect_corrupt_after(kWasmCodeChunkedHead,
+                       std::as_bytes(std::span(small_len)));
+
+  // Chunked head describing more chunks than a one-byte index addresses.
+  auto huge_len = x23::serialize(static_cast<uint32_t>(0xFFFFFFFF));
+  expect_corrupt_after(kWasmCodeChunkedHead,
+                       std::as_bytes(std::span(huge_len)));
+}
+
+// for_each_wasm_code_item emits payload chunks before the chunked head, so a
+// reader that observes a head always finds complete chunks. Pin that
+// ordering: it is documented behavior the read path relies on.
+TEST_F(HogDBTest, WasmCodeChunkedItemsEmitHeadLast)
+{
+  SHA256Hash hash{};
+  hash[0] = 0xC4;
+  auto buf = make_code_bytes((2 * kWasmCodeChunkPayloadSize) + 1);
+
+  std::vector<std::pair<size_t, uint8_t>> emitted; // (key length, type)
+  for_each_wasm_code_item(hash, std::as_bytes(std::span(buf)),
+                          [&](std::span<const std::byte> key, uint8_t type,
+                              std::span<const std::byte> /*value*/) {
+                            emitted.emplace_back(key.size(), type);
+                          });
+
+  ASSERT_EQ(emitted.size(), 4U); // 3 chunks + head
+  for (size_t i = 0; i + 1 < emitted.size(); ++i) {
+    EXPECT_EQ(emitted[i].first, sizeof(SHA256Hash) + 2) << i;
+    EXPECT_EQ(emitted[i].second, kWasmCodeChunk) << i;
+  }
+  EXPECT_EQ(emitted.back().first, sizeof(SHA256Hash) + 1);
+  EXPECT_EQ(emitted.back().second, kWasmCodeChunkedHead);
+}
 
 TEST_F(HogDBTest, DataAccessObject)
 {
@@ -1124,14 +1275,46 @@ TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
   });
 }
 
-// Regression for #1775: a contract whose serialized code row exceeds RAMDB's
-// item-size limit must be rejected when its transaction stages it (kTooBig),
-// not at block write-back, where apply() would leave earlier writes visible and
-// the commit error would abort the node.
-TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
+// A contract row bigger than one RAMDB item commits chunked: the staged
+// chunk items' incremental db_hash delta matches a full state-hash
+// recompute, and the DAO reassembles the row byte-identically.
+TEST_F(HogDBTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 {
   Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(kBigItemThreshold);
+  contract.wasmi_contract().data.resize_uninitialized(2 * kBigItemThreshold);
+  for (size_t i = 0; i < contract.wasmi_contract().data.size(); ++i) {
+    contract.wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  }
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_new_contract(contract));
+  });
+
+  auto rcode = db_.read_wasm_code(sha256(contract));
+  ASSERT_TRUE(rcode);
+  auto expected = x23::serialize(contract);
+  EXPECT_TRUE(std::ranges::equal(std::as_bytes(std::span(expected)), *rcode));
+}
+
+// Regression for #1775/#2569: a serialized contract row larger than
+// kMaxSerializedContractBytes is executor misbehavior -- hogexec enforces
+// kMaxContractSizeBytes on attached blobs before execution, and hogdb stores
+// any legal row (chunked if necessary). Reject at staging with
+// kInvalidExecutorBehavior, not at block write-back, where apply() would
+// leave earlier writes visible and the commit error would abort the node.
+TEST_F(HogDBTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract().data.resize_uninitialized(
+      kMaxSerializedContractBytes + 1);
+
+  // A row at exactly the bound is accepted (the preflight is >, not >=).
+  // Blob of (bound - 8) serializes to exactly kMaxSerializedContractBytes:
+  // 4-byte union tag + 4-byte opaque length + data (multiple of 4, no pad).
+  Contract at_bound_contract(ContractType::kWasmi);
+  at_bound_contract.wasmi_contract().data.resize_uninitialized(
+      kMaxSerializedContractBytes - 8);
+  ASSERT_EQ(x23::xdr_size(at_bound_contract), kMaxSerializedContractBytes);
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
@@ -1139,9 +1322,11 @@ TEST_F(HogDBTest, NewContractExceedingItemSizeLimitFailsTransaction)
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
+  ASSERT_TRUE(invoke_tx.request_new_contract(at_bound_contract));
+
   auto ret = invoke_tx.request_new_contract(contract);
   ASSERT_FALSE(ret);
-  EXPECT_EQ(HogDBCode::kTooBig, ret.error().code());
+  EXPECT_EQ(HogDBCode::kInvalidExecutorBehavior, ret.error().code());
 
   invoke_tx.abort();
   invoke_tx.release_blocktx_reference();

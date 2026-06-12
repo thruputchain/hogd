@@ -3190,12 +3190,16 @@ append_name_custom_section(auto &wasm, uint32_t custom_bytes)
 
 } // namespace
 
-// Regression test for #2462: an honest caller can pass a well-formed,
-// verifier-accepted Wasm contract whose serialized bytes exceed RAMDB's
-// single-item limit. The deterministic write rejection must surface as a
-// structured TestFFIErrorCode rather than throwing std::runtime_error through
-// the noexcept setup helper and terminating the process.
-TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasm)
+// Since #2569 hogdb chunks large code rows across multiple RAMDB items, so an
+// honest verifier-accepted contract whose serialized bytes exceed RAMDB's
+// single-item limit now stores successfully through the setup path.  This
+// supersedes the #2462 regression concern (the write no longer fails; the
+// structured-error-or-crash question is moot at this size).  We also deploy
+// the stored contract and invoke it end-to-end to confirm the full path works;
+// the padded test_param_entrypoint module has a wrong-ABI export so the frame
+// returns a deterministic Fault, but the FFI layer still returns
+// kTestFFIErrorCodeNone.
+TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
 {
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
@@ -3220,9 +3224,45 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasm)
   ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_EQ(verify_result.success, 1);
 
-  // The oversized write must be reported as an unrecoverable error, not crash.
+  // Since #2569 the oversized row is stored chunked: the setup write succeeds.
   auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
-  EXPECT_EQ(result, kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(result, kTestFFIErrorCodeNone);
+
+  // Deploy and invoke end-to-end to confirm the chunked contract is readable
+  // and executable.
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  // A committed transaction consumes a replay nonce charged to the invoked
+  // address; grant enough storage tokens to cover that cost.
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto invoke_result = root_invoke(syscall_handler, 0);
+  x23::Defer d4([&] { free_ffi_data_buffer(invoke_result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(invoke_result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(invoke_result.serialized_events); });
+  // The FFI wrapper must not surface an unrecoverable error: the param-ABI
+  // mismatch is a deterministic fault, not a system error.
+  EXPECT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
 // Test that do_verify_contract returns failure for wasm with large memory.

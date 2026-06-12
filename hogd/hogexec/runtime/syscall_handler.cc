@@ -29,6 +29,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
+#include "hogd/hogexec/common/limits.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -60,6 +61,25 @@
 #include "x23/x23.h"
 
 namespace hogd {
+
+namespace {
+
+size_t
+contract_blob_size(Contract const &contract)
+{
+  switch (contract.contract_type()) {
+  case ContractType::kNative:
+  case ContractType::kMockTest:
+    return 0;
+  case ContractType::kWasmi:
+    return contract.wasmi_contract().data.size();
+  case ContractType::kRv32:
+    return contract.rv32_contract().data.size();
+  }
+  panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
+}
+
+} // namespace
 
 ExecResult
 SystemCallHandler::to_exec_result(InvokeErrorCode error_code)
@@ -260,6 +280,17 @@ SystemCallHandler::perform_initial_validation()
   // to the executor, this check could be removed.
 
   for (auto const &[_, contract] : newly_created_contracts_) {
+    // Enforce the contract size limit before verification: the limit is
+    // runtime-agnostic, and rejecting here -- before any body execution --
+    // guarantees commit_transaction never stages an oversized code row
+    // (#2569). Same deterministic classification as a failed
+    // verify_contract.
+    if (contract_blob_size(*contract) > kMaxContractSizeBytes) {
+      error("Attached contract blob exceeds kMaxContractSizeBytes");
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::Deterministic};
+      return {};
+    }
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
     if (res != InvokeErrorCode::None) {
@@ -1286,18 +1317,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
-  auto contract_size = [&] -> uint32_t {
-    switch (contract.contract_type()) {
-    case ContractType::kNative:
-    case ContractType::kMockTest:
-      return 0LU;
-    case ContractType::kWasmi:
-      return contract.wasmi_contract().data.size();
-    case ContractType::kRv32:
-      return contract.rv32_contract().data.size();
-    }
-    panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
-  }();
+  auto contract_size = static_cast<uint32_t>(contract_blob_size(contract));
 
   // deploy new contract
   invocation_frame_stack_.deploy_contract(
