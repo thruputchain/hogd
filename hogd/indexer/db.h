@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <rocksdb/compression_type.h>
+#include <set>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -98,9 +100,13 @@ public:
   // up to `limit` events plus a continuation cursor.
   IndexerStatus<EventPage> get_events(EventQuery const &query) const;
 
-  // Highest block height the indexer has processed, or BlockHeight(0)
-  // if nothing has been indexed yet.  Updated on every consume_events
-  // call; lock-free atomic, safe to read concurrently with indexing.
+  // Highest block height through which the index is CONTIGUOUS:
+  // every block from the first-ever ingested height up to this value
+  // is fully ingested.  Out-of-order blocks above a gap are ingested
+  // but not served until the gap fills, so everything a query or
+  // cursor can observe is immutable.  BlockHeight(0) if nothing has
+  // been indexed yet.  Lock-free read, safe concurrently with
+  // ingestion.
   BlockHeight latest_block() const;
 
   // Oldest block height still retained by the indexer.  Today always
@@ -152,17 +158,42 @@ private:
   // highest_indexed_block_ on open.  Runs once at construction.
   void initialize_highest_block_from_db();
 
+  // True iff `h` is at or below the contiguous watermark or buffered
+  // in pending_heights_.  Caller holds ingest_mutex_.
+  bool height_seen_locked(int64_t h) const;
+
+  // Record an ingested height: advance the contiguous watermark
+  // (draining newly-contiguous pending heights, persisting the meta
+  // key) or buffer an out-of-order height.  Caller holds
+  // ingest_mutex_.
+  void record_height_locked(int64_t h);
+
   std::unique_ptr<rocksdb::DB, RocksDBDeleter> db_;
   rocksdb::ColumnFamilyHandle *tx_cf_handle_;
   rocksdb::ColumnFamilyHandle *contract_cf_handle_;
   std::jthread stats_worker_thread_;
 
-  // Highest block height seen by consume_events() since the DB was
-  // opened, capped below by whatever was present on disk at open
-  // time.  Atomic so get_events can read it without synchronizing
-  // with the ingestion path.  Stored as int64 (the underlying
-  // representation of BlockHeight) for atomic access.
-  std::atomic<int64_t> highest_indexed_block_{0};
+  // Sentinel for highest_indexed_block_: nothing indexed yet.
+  static constexpr int64_t kNoBlocksIndexed = -1;
+
+  // Serializes ingest tracking (pending_heights_ + watermark
+  // advance/persist).  get_events never takes it — queries read only
+  // the atomic below.  Default-constructed fresh on move (moves only
+  // happen in the factory functions, before concurrent use).
+  std::mutex ingest_mutex_;
+
+  // Heights ingested out of order, strictly above the watermark + 1.
+  // Almost always empty (commit-time fanout delivers heights in
+  // order); intentionally NOT persisted — a gap spanning a restart
+  // stalls serving until upstream resends.  Guarded by ingest_mutex_.
+  std::set<int64_t> pending_heights_;
+
+  // Highest CONTIGUOUSLY ingested block height (see latest_block()),
+  // kNoBlocksIndexed until the first ingest, seeded from the on-disk
+  // meta key on open.  Atomic so get_events can read it without
+  // synchronizing with the ingestion path.  Stored as int64 (the
+  // underlying representation of BlockHeight) for atomic access.
+  std::atomic<int64_t> highest_indexed_block_{kNoBlocksIndexed};
 };
 
 } // namespace hogd
