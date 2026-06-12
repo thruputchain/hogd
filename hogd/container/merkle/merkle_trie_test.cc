@@ -1972,6 +1972,11 @@ TEST(MerkleTriePrefix, ProveRejectsWrongBranchSlot)
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(real_key);
   ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kBranch));
+  // Check that the proof still has a branch node even after we remove the root
+  // branch node in [MerkleTriePrefix].
+  ASSERT_TRUE(proof_has_node_type(std::vector(node_encodings_by_node.begin(),
+                                              node_encodings_by_node.end() - 1),
+                                  Node::Type::kBranch));
   const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
   EXPECT_EQ(root_hash, root_hash_by_node);
   ASSERT_FALSE(node_encodings.empty());
