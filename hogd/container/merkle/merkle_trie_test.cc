@@ -85,8 +85,6 @@ build_and_hash_trie(TrieType &trie, size_t num_threads)
   return trie.get_root_hash();
 }
 
-} // namespace
-
 // Tests that [size()] and [empty()] return expected values.
 TEST(MerkleTrie, SizeAndEmpty)
 {
@@ -834,8 +832,6 @@ TEST(MerkleTrie, InsertOrUpdate)
   hogd::MerkleTrie::find_end(cookie);
 }
 
-namespace {
-
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
 template<typename T>
@@ -1118,8 +1114,6 @@ prove(T &trie)
   }
 }
 
-} // namespace
-
 TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
@@ -1132,8 +1126,6 @@ TEST(MerkleTriePrefix, Prove)
   prove(trie);
 }
 
-namespace {
-
 // Test that we cannot prove a KV pair with an empty key and value is in an
 // empty trie.
 template<typename T>
@@ -1145,8 +1137,6 @@ prove_empty_trie(T &trie)
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key,
                                  std::span<std::byte>()));
 }
-
-} // namespace
 
 TEST(MerkleTrie, ProveEmptyTrie)
 {
@@ -1184,8 +1174,6 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   }
 }
 
-namespace {
-
 // Test that we can no longer prove a KV pair is in the trie after removing it.
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
@@ -1213,8 +1201,6 @@ prove_after_removing_key(T &trie)
                                    std::span<std::byte>()));
   }
 }
-
-} // namespace
 
 TEST(MerkleTrie, ProveAfterRemovingKey)
 {
@@ -1365,8 +1351,6 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-namespace {
-
 // This test stresses the Merkle trie. It randomly generates 100 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [for_each()], [get_proof()], [prove()],
@@ -1472,8 +1456,6 @@ stress(T &trie, bool allow_empty)
   }
 }
 
-} // namespace
-
 TEST(MerkleTrie, Stress)
 {
   MerkleTrie trie;
@@ -1485,8 +1467,6 @@ TEST(MerkleTriePrefix, Stress)
   MerkleTriePrefix trie;
   stress(trie, /*allow_empty=*/false);
 }
-
-namespace {
 
 // This test first adds 5,000 KV pairs to the trie, then proves each KV pair in
 // the trie, then removes all KV pairs.
@@ -1564,8 +1544,6 @@ stress_two(T &trie, bool allow_empty)
   EXPECT_EQ(seen.size(), total.size());
 }
 
-} // namespace
-
 TEST(MerkleTrie, StressTwo)
 {
   MerkleTrie trie;
@@ -1577,8 +1555,6 @@ TEST(MerkleTriePrefix, StressTwo)
   MerkleTriePrefix trie;
   stress_two(trie, /*allow_empty=*/false);
 }
-
-namespace {
 
 // Inserts and removes ~200,000 KV pairs with [num_threads] threads.
 void
@@ -1668,8 +1644,6 @@ run_multithread(size_t num_threads)
   EXPECT_EQ(trie.size(), kInitialSize);
   EXPECT_TRUE(trie.check());
 }
-
-} // namespace
 
 TEST(MerkleTriePrefix, Multithread128)
 {
@@ -1863,7 +1837,237 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   allocator.free(leaf);
 }
 
+bool
+proof_has_node_type(const std::vector<std::vector<std::byte>> &node_encodings,
+                    Node::Type node_type)
+{
+  for (const std::vector<std::byte> &node_encoding : node_encodings) {
+    size_t idx = 0;
+    Node::Raw node;
+    if (!Node::get_node_from_encoding(node_encoding, idx, node)) {
+      return false;
+    }
+    if (idx != node_encoding.size()) {
+      return false;
+    }
+    if (node.type == node_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+TEST(MerkleTrie, ProveRejectsWrongLeafPath)
+{
+  MerkleTrie trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_key("9999");
+  ASSERT_EQ(real_key.size(), forged_key.size());
+  ASSERT_FALSE(real_key == forged_key);
+
+  std::string value = "value bound to the original key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kLeaf));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(
+      MerkleTrie::prove(root_hash, node_encodings, forged_key, value_span));
+}
+
+TEST(MerkleTriePrefix, ProveRejectsWrongLeafPath)
+{
+  MerkleTriePrefix trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_key("9999");
+  ASSERT_EQ(real_key.size(), forged_key.size());
+  ASSERT_FALSE(real_key == forged_key);
+
+  std::string value = "value bound to the original prefixed key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kLeaf));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings, forged_key,
+                                       value_span));
+}
+
+TEST(MerkleTrie, ProveRejectsWrongBranchSlot)
+{
+  MerkleTrie trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_branch_key("9234");
+  ASSERT_EQ(real_key.size(), forged_branch_key.size());
+  ASSERT_FALSE(real_key == forged_branch_key);
+  ASSERT_FALSE(real_key.get(0) == forged_branch_key.get(0));
+  ASSERT_TRUE(real_key.get_subarray(1, real_key.size()) ==
+              forged_branch_key.get_subarray(1, forged_branch_key.size()));
+
+  std::string value = "value bound to the original key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kBranch));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, forged_branch_key,
+                                 value_span));
+}
+
+TEST(MerkleTriePrefix, ProveRejectsWrongBranchSlot)
+{
+  MerkleTriePrefix trie;
+
+  const HexArray real_key("1234");
+  const HexArray forged_prefix_branch_key("9234");
+  const HexArray forged_child_branch_key("1934");
+  ASSERT_EQ(real_key.size(), forged_prefix_branch_key.size());
+  ASSERT_EQ(real_key.size(), forged_child_branch_key.size());
+  ASSERT_FALSE(real_key == forged_prefix_branch_key);
+  ASSERT_FALSE(real_key == forged_child_branch_key);
+  ASSERT_FALSE(real_key.get(0) == forged_prefix_branch_key.get(0));
+  ASSERT_TRUE(
+      real_key.get_subarray(1, real_key.size()) ==
+      forged_prefix_branch_key.get_subarray(1,
+                                            forged_prefix_branch_key.size()));
+  ASSERT_EQ(real_key.get(0), forged_child_branch_key.get(0));
+  ASSERT_FALSE(real_key.get(1) == forged_child_branch_key.get(1));
+  ASSERT_TRUE(
+      real_key.get_subarray(2, real_key.size()) ==
+      forged_child_branch_key.get_subarray(2, forged_child_branch_key.size()));
+
+  std::string value = "value bound to the original prefixed key";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(proof_has_node_type(node_encodings_by_node, Node::Type::kBranch));
+  // Check that the proof still has a branch node even after we remove the root
+  // branch node in [MerkleTriePrefix].
+  ASSERT_TRUE(proof_has_node_type(std::vector(node_encodings_by_node.begin(),
+                                              node_encodings_by_node.end() - 1),
+                                  Node::Type::kBranch));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings,
+                                       forged_prefix_branch_key, value_span));
+  EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings,
+                                       forged_child_branch_key, value_span));
+}
+
+TEST(MerkleTrie, ProveRejectsWrongExtensionPath)
+{
+  MerkleTrie trie;
+
+  const HexArray real_key("123456");
+  const HexArray sibling_key("123499");
+  const HexArray forged_extension_key("1abc56");
+  ASSERT_EQ(real_key.size(), forged_extension_key.size());
+  ASSERT_EQ(real_key.get(0), forged_extension_key.get(0));
+  ASSERT_EQ(real_key.get(4), forged_extension_key.get(4));
+  ASSERT_EQ(real_key.get(5), forged_extension_key.get(5));
+  ASSERT_FALSE(real_key.get_subarray(1, 4) ==
+               forged_extension_key.get_subarray(1, 4));
+
+  std::string value = "value below extension";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  std::string sibling_value = "sibling value";
+  std::span<std::byte> sibling_value_span{reinterpret_cast<std::byte *>(
+                                              sibling_value.data()),
+                                          sibling_value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  EXPECT_TRUE(trie.insert(sibling_key, sibling_value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(
+      proof_has_node_type(node_encodings_by_node, Node::Type::kExtension));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings,
+                                 forged_extension_key, value_span));
+}
+
+TEST(MerkleTriePrefix, ProveRejectsWrongExtensionPath)
+{
+  MerkleTriePrefix trie;
+
+  const HexArray real_key("123456");
+  const HexArray sibling_key("123499");
+  const HexArray forged_extension_key("12ab56");
+  ASSERT_EQ(real_key.size(), forged_extension_key.size());
+  ASSERT_EQ(real_key.get(0), forged_extension_key.get(0));
+  ASSERT_EQ(real_key.get(1), forged_extension_key.get(1));
+  ASSERT_EQ(real_key.get(4), forged_extension_key.get(4));
+  ASSERT_EQ(real_key.get(5), forged_extension_key.get(5));
+  ASSERT_FALSE(real_key.get_subarray(2, 4) ==
+               forged_extension_key.get_subarray(2, 4));
+
+  std::string value = "prefixed value below extension";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  std::string sibling_value = "prefixed sibling value";
+  std::span<std::byte> sibling_value_span{reinterpret_cast<std::byte *>(
+                                              sibling_value.data()),
+                                          sibling_value.size()};
+  EXPECT_TRUE(trie.insert(real_key, value_span));
+  EXPECT_TRUE(trie.insert(sibling_key, sibling_value_span));
+  trie.generate_all_hashes();
+
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.get_proof_by_node(real_key);
+  ASSERT_TRUE(
+      proof_has_node_type(node_encodings_by_node, Node::Type::kExtension));
+  const auto &[root_hash, node_encodings] = trie.get_proof(real_key);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  ASSERT_FALSE(node_encodings.empty());
+  EXPECT_TRUE(
+      MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
+  EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings,
+                                       forged_extension_key, value_span));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+} // namespace
 
 } // namespace hogd
 
