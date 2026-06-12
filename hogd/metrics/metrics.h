@@ -133,6 +133,15 @@ public:
 
   std::string dump_to_prometheus_string();
 
+  bool done_with_init(ComponentName component_name)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+
+    std::atomic<bool> &component =
+        done_with_init_[static_cast<size_t>(component_name)];
+    return component.load(std::memory_order_acquire);
+  }
+
   void clear()
   {
     for (size_t i = 0; i < components_.size(); i++) {
@@ -189,15 +198,6 @@ private:
 
   static std::string fully_qualified_name(ComponentName component_name,
                                           const std::string &metric_name);
-
-  bool done_with_init(ComponentName component_name)
-  {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-
-    std::atomic<bool> &component =
-        done_with_init_[static_cast<size_t>(component_name)];
-    return component.load(std::memory_order_acquire);
-  }
 
   std::array<std::atomic<bool>, kNumComponents> done_with_init_{};
   std::array<Component, kNumComponents> components_;
