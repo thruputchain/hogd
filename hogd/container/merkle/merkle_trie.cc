@@ -348,11 +348,6 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
 
   size_t num_nodes = 0;
   size_t idx = 0;
-  // We just need to verify that we saw a path equal in length to [key]. We do
-  // not need to check the path contents themselves because the path contents
-  // are already included in the hashes. If the root hash we generate from the
-  // [encodings] matches the [root_hash] passed in **and** we examined a path
-  // equal in length to [k], then we verified that the KV pair is in the trie.
   size_t remaining_key_size = k.size();
   while (idx < encodings.size()) {
     SHA256Hash prev_hash = node.hash;
