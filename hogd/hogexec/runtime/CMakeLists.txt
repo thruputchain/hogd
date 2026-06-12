@@ -186,6 +186,20 @@ target_link_libraries(
 )
 gtest_discover_tests(runtime_test)
 
+# Standalone binary (no run_hogexec_tests / init_hogexec_metrics in main) so the
+# uninitialized-metrics guard in launch_log_worker can be tested.
+add_executable(
+  hogexec_metrics_test
+  hogexec_metrics_test.cc
+)
+
+target_link_libraries(
+  hogexec_metrics_test
+  runtime
+  GTest::gtest
+)
+gtest_discover_tests(hogexec_metrics_test)
+
 add_executable(
   rv32_syscall_entry_bridge_test
   rv32/rv32_syscall_entry_bridge_test.cc

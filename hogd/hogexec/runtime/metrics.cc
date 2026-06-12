@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <mutex>
+#include <stdexcept>
 #include <stop_token>
 #include <thread>
 
@@ -14,6 +15,14 @@ namespace hogd {
 void
 HogexecMetrics::launch_log_worker()
 {
+  // The worker reports through Metrics::record, whose init CHECK is
+  // unreachable-UB in release builds; fail loudly here instead.
+  if (!Metrics::instance().done_with_init(Metrics::ComponentName::kExecutor)) {
+    throw std::runtime_error(
+        "HogexecMetrics::launch_log_worker: executor metrics not initialized; "
+        "call init_hogexec_metrics() (hogd/hogexec/shared.h) first");
+  }
+
   HogexecMetrics &instance = get_instance();
   std::scoped_lock g(instance.background_worker_mutex_);
   if (!instance.background_worker_.joinable()) {

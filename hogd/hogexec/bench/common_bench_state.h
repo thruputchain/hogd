@@ -30,6 +30,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -65,6 +66,10 @@ public:
       coord_port_(coord_port)
   {
     CHECK_EQ(server_addrs_.size(), 2U);
+
+    // The benches launch HogexecMetrics' log worker, which reports through
+    // the Metrics singleton and requires the executor metrics to exist.
+    init_hogexec_metrics();
 
     hogdb_handle_ = std::make_unique<ControlServerHandle>(hogdb_addr());
     event_server_handle_ =
