@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
@@ -14,6 +15,8 @@
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/rv32/rv32_contract.h"
+#include "hogd/hogexec/runtime/rv32/test_artifact_builder.h"
+#include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -248,6 +251,26 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
+}
+
+TEST(Rv32ContractTest, VerifyRejectsRunGasOverflow)
+{
+  constexpr size_t kOverflowingDivCount =
+      (0xFFFFU / rv32::kDivInstructionGas) + 1;
+  const std::vector<uint32_t> words(
+      kOverflowingDivCount,
+      rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact(words, std::span<const uint8_t>{});
+
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract() = std::move(blob);
+  Rv32Context context;
+  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

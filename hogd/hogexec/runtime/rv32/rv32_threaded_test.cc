@@ -122,6 +122,23 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
             ProgramError::kUnsupportedSystemInstruction);
 }
 
+TEST(Rv32Threaded, createRejectsRunGasOverflow)
+{
+  using test_program::op;
+  constexpr size_t kOverflowingDivCount = (0xFFFFU / kDivInstructionGas) + 1;
+  const std::vector<uint32_t> words(kOverflowingDivCount,
+                                    op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
+  const std::vector<uint8_t> bytes = words_to_bytes(words);
+
+  ASSERT_TRUE(Program::create(bytes).has_value());
+  auto threaded =
+      ThreadedMachinePreInstantiation::create(bytes, /*memory=*/{},
+                                              /*total_memory_size=*/256,
+                                              /*trace=*/false);
+  ASSERT_FALSE(threaded.has_value());
+  EXPECT_EQ(threaded.error(), ProgramError::kRunGasTooLarge);
+}
+
 TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
 {
   // Regression: code_ holds a byte span, so contains_pc must bound pc by the
