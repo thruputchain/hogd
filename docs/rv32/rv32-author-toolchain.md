@@ -115,7 +115,7 @@ visible while the implementation remains duplicated across languages.
 
 Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
-gas table version 2 + gas-schedule digest `0xEBE53DCEEA581D0C`, VM-profile digest
+gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory / dispatch
 sections.
 
