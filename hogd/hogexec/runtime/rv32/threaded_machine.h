@@ -27,14 +27,14 @@
 // materializing observable state.
 //
 // Gas is metered at *start of run* (block granularity, like the wasm engines):
-// a "run" is a maximal sequence of non-barrier instructions (ALU/lui/auipc/
-// fence -- none of which trap or branch). enter_run() charges the whole run's
-// gas in one check; the non-barrier handlers inside do no gas work. Barriers
-// (loads/stores/branches/jal/jalr/ecall/ebreak) end a run and self-charge their
-// own gas. On out-of-gas, the run is aborted at its head -- so the exact
-// instruction and intermediate gas_remaining differ from a per-instruction
-// machine, but total gas to any barrier (and thus to any ecall and to halt) is
-// identical, which is all that persists.
+// a "run" is a maximal straight-line sequence whose continuation is known at
+// lowering time. enter_run() charges the whole run's gas in one check; the
+// handlers inside do no gas work. Control-flow instructions and host-boundary
+// instructions (branches/jal/jalr/ecall/ebreak) are barriers and self-charge.
+// Loads/stores stay in straight-line runs for performance; if they trap, the
+// run has already been charged. On out-of-gas, the run is aborted at its head.
+// The exact instruction and intermediate gas_remaining can therefore differ
+// from the per-instruction Machine at trap boundaries.
 //
 // Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
 // the executable Slot array is built (once, cached across reset()) with either
