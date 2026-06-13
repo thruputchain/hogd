@@ -48,8 +48,13 @@ public:
   x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
                                                   BlockHeight block_height);
 
-  // Abandons a block.
-  // Returns an error if the block is not open.
+  // Commits a closed block.
+  // Sends events to indexers and GCs the block context.
+  // Returns the block height on success.
+  x23::Async<EventStatus<BlockHeight>> commit_block(BlockID block_id);
+
+  // Abandons a block (active or already closed but not yet committed).
+  // Returns an error if the block_id is not found.
   x23::Async<EventStatus<void>> abandon_block(BlockID block_id);
 
   // This is normally called by commit_block() or abandon_block().

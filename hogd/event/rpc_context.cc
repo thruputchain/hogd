@@ -114,6 +114,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   }
   auto &context = it->second;
 
+  context.get().set_block_height(block_height);
+
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
     auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
@@ -146,7 +148,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   [](EventRPCContext &event, std::unique_ptr<x23::CoroGuard> g,
-     BlockID block_id, BlockHeight block_height, SHA256Hash out_hash,
+     BlockID block_id, SHA256Hash out_hash,
      x23::Async<void> file_wait) -> x23::Detached {
     auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
@@ -163,12 +165,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
     co_await file_wait;
     co_await context->get().finish_file(out_hash);
-    {
-      x23::CoroGuard cg;
-      co_await cg(event.indexers_lock_);
-      co_await context->get().send_events_to_indexers(block_height,
-                                                      event.indexers_);
-    }
 
     // Scope cg so it unlocks event.lock_ before we decrement the
     // pending-detached counter. ~EventRPCContext spins on that counter
@@ -183,14 +179,13 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
       it = event.event_block_contexts_.find(block_id);
       CHECK(it != event.event_block_contexts_.end());
       bool released = it->second.release_reference();
-      if (released || it->second.initiate_shutdown()) {
+      if (released) {
         event.gc_context_internal(it);
       }
     }
     event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
     co_return;
-  }(*this, std::move(g), block_id, block_height, out_hash,
-                                 std::move(file_wait));
+  }(*this, std::move(g), block_id, out_hash, std::move(file_wait));
 
   // We moved [g] into the detached coroutine above, so be sure not to do any
   // work beyond this point which touches a context or [indexers_]!
@@ -203,29 +198,97 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   co_return out_hash;
 }
 
+x23::Async<EventStatus<BlockHeight>>
+EventRPCContext::commit_block(BlockID block_id)
+{
+  info("EventRPCContext::commit_block: block_id={} acquiring lock", block_id);
+  PerThreadARC<EventBlockContext> *context_ptr = nullptr;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    info("EventRPCContext::commit_block: block_id={} lock acquired", block_id);
+    auto it = event_block_contexts_.find(block_id);
+    if (it == event_block_contexts_.end()) {
+      co_return EventError{EventErrorCode::kBadBlockID};
+    }
+    context_ptr = &it->second;
+    if (!context_ptr->get().closing()) {
+      co_return EventError{EventErrorCode::kBadBlockID};
+    }
+    CHECK(context_ptr->try_acquire_reference());
+  }
+
+  co_await context_ptr->get().wait_file_done();
+
+  BlockHeight block_height = context_ptr->get().block_height();
+  {
+    x23::CoroGuard cg;
+    co_await cg(indexers_lock_);
+    co_await context_ptr->get().send_events_to_indexers(block_height,
+                                                        indexers_);
+  }
+
+  info("EventRPCContext::commit_block: block_id={} done, gc", block_id);
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    auto it = event_block_contexts_.find(block_id);
+    CHECK(it != event_block_contexts_.end());
+    bool released = it->second.release_reference();
+    if (released || it->second.initiate_shutdown()) {
+      gc_context_internal(it);
+    }
+  }
+  co_return block_height;
+}
+
 x23::Async<EventStatus<void>>
 EventRPCContext::abandon_block(BlockID block_id)
 {
   info("EventRPCContext::abandon_block: block_id={} acquiring lock", block_id);
-  x23::CoroGuard g;
-  co_await g(lock_);
-  info("EventRPCContext::abandon_block: block_id={} lock acquired", block_id);
 
-  auto it = event_block_contexts_.find(block_id);
-  if (it == event_block_contexts_.end()) {
-    co_return EventError{EventErrorCode::kBadBlockID};
+  PerThreadARC<EventBlockContext> *context_ptr = nullptr;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    info("EventRPCContext::abandon_block: block_id={} lock acquired", block_id);
+
+    auto it = event_block_contexts_.find(block_id);
+    if (it == event_block_contexts_.end()) {
+      co_return EventError{EventErrorCode::kBadBlockID};
+    }
+    auto &context = it->second;
+
+    if (!context.get().closing()) {
+      info("EventRPCContext::abandon_block: block_id={} awaiting abandon",
+           block_id);
+      co_await context.get().await_abandon();
+      context.get().delete_events_file();
+      info("EventRPCContext::abandon_block: block_id={} done", block_id);
+      if (context.initiate_shutdown()) {
+        gc_context_internal(it);
+      }
+      co_return EventStatus<void>();
+    }
+
+    context_ptr = &context;
+    CHECK(context_ptr->try_acquire_reference());
   }
-  auto &context = it->second;
-  if (context.get().closing()) {
-    co_return EventError{EventErrorCode::kBadBlockID};
-  }
-  info("EventRPCContext::abandon_block: block_id={} awaiting abandon",
+
+  co_await context_ptr->get().wait_file_done();
+  context_ptr->get().delete_events_file();
+
+  info("EventRPCContext::abandon_block: block_id={} done (post-close), gc",
        block_id);
-  co_await context.get().await_abandon();
-  info("EventRPCContext::abandon_block: block_id={} done", block_id);
-
-  if (context.initiate_shutdown()) {
-    gc_context_internal(it);
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    auto it = event_block_contexts_.find(block_id);
+    CHECK(it != event_block_contexts_.end());
+    bool released = it->second.release_reference();
+    if (released || it->second.initiate_shutdown()) {
+      gc_context_internal(it);
+    }
   }
   co_return EventStatus<void>();
 }

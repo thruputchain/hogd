@@ -31,6 +31,7 @@ public:
   x23::Async<RPCError> open_block(BlockID block_id);
   x23::Async<EventBlockResult> close_block(BlockID block_id,
                                            BlockHeight block_height);
+  x23::Async<RPCError> abandon_block(BlockID block_id);
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
                                   TxEventLog event_log);
 
@@ -58,10 +59,21 @@ public:
   }
 
 private:
+  // Per-block lifecycle state (from sched side), mirroring EventBlockContext's
+  // active/closed distinction:
+  //   kActive -> kClosed   (close_block)
+  // open_block (re)inserts the block as kActive; abandon_block erases the entry
+  // entirely (from either state). A block with no entry is unknown/abandoned,
+  // so concurrent emit_event calls short-circuit (is_block_open is false).
+  enum class BlockState : int32_t {
+    kActive,
+    kClosed,
+  };
+
   x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
-  // Track opened/closed blocks (from sched side)
-  std::map<BlockID, int32_t> block_refcounts_;
+  // Track block lifecycle state (from sched side)
+  std::map<BlockID, BlockState> block_states_;
   // Track executor handles per block (from exec side)
   std::map<BlockID, int32_t> executor_handle_refcounts_;
 
@@ -70,8 +82,8 @@ private:
 
   bool is_block_open(BlockID block_id) const
   {
-    return block_refcounts_.contains(block_id) &&
-           block_refcounts_.at(block_id) > 0;
+    auto it = block_states_.find(block_id);
+    return it != block_states_.end() && it->second == BlockState::kActive;
   }
 
   // Store events: block_id -> tx_id -> vector of events
@@ -140,16 +152,14 @@ struct TestEventAggregatorSchedRpc {
   }
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  x23::Async<RPCError> eventsched_commit_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_commit_block(BlockID /*block_id*/)
   {
-    co_return RPCError::kRPCUnimplemented;
+    co_return RPCError::kRPCNone;
   }
 
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)
   {
-    co_return (
-        co_await event_aggregator_.close_block(block_id, /*block_height=*/0))
-        .error();
+    return event_aggregator_.abandon_block(block_id);
   }
 
 private:

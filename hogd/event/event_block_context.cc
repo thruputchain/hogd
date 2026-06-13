@@ -313,10 +313,46 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
 {
   x23::CoroGuard g;
   co_await g(lock_);
+  root_hash_ = hash;
+  has_root_hash_ = true;
   auto ts4 = x23::fastclock::now();
   rename_file(g, hash);
   auto ts5 = x23::fastclock::now();
   info("time to rename file: {} ns", ts5 - ts4);
+  file_done_.store(true);
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (!pool) {
+    pool = &default_threadpool();
+  }
+  file_done_.broadcast(pool);
+}
+
+x23::Async<void>
+EventBlockContext::wait_file_done()
+{
+  while (!file_done_.load()) {
+    co_await file_done_.wait(false);
+  }
+}
+
+void
+EventBlockContext::delete_events_file()
+{
+  events_file_.reset();
+  if (has_root_hash_) {
+    auto name = final_events_filename(work_directory_, root_hash_);
+    if (std::remove(name.c_str()) != 0) {
+      warn("delete_events_file: failed to remove final file '{}': {}", name,
+           strerror(errno));
+    }
+  }
+  else {
+    auto name = temp_events_filename(work_directory_, block_id_);
+    if (std::remove(name.c_str()) != 0) {
+      warn("delete_events_file: failed to remove temp file '{}': {}", name,
+           strerror(errno));
+    }
+  }
 }
 
 x23::Async<void>

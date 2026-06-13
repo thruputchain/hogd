@@ -57,6 +57,21 @@ EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
   co_return RPCError::kRPCNone;
 }
 
+x23::Async<RPCError>
+EventMempoolRpc::eventsched_commit_block(BlockID block_id)
+{
+  info("eventsched_commit_block: block_id={}", block_id);
+  auto r = co_await ctx_.commit_block(block_id);
+  if (!r) {
+    info("eventsched_commit_block: block_id={} error={}", block_id,
+         static_cast<int>(r.error().code()));
+    co_return to_rpc_error(r.error().code());
+  }
+  info("eventsched_commit_block: block_id={} done", block_id);
+  co_await Health::instance().set_current_block_height(r.value());
+  co_return RPCError::kRPCNone;
+}
+
 x23::Async<EventBlockResult>
 EventMempoolRpc::eventsched_close_block(BlockID block_id,
                                         BlockHeight block_height)
@@ -70,7 +85,6 @@ EventMempoolRpc::eventsched_close_block(BlockID block_id,
     co_return EventBlockResult{to_rpc_error(r.error().code())};
   }
   info("eventsched_close_block: block_id={} done", block_id);
-  co_await Health::instance().set_current_block_height(block_height);
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = r.value();
   co_return result;

@@ -395,6 +395,7 @@ IndexDB::IndexDB(IndexDB &&other) noexcept
   : db_(std::move(other.db_)), tx_cf_handle_(other.tx_cf_handle_),
     contract_cf_handle_(other.contract_cf_handle_),
     stats_worker_thread_(std::move(other.stats_worker_thread_)),
+    pending_heights_(std::move(other.pending_heights_)),
     highest_indexed_block_(
         other.highest_indexed_block_.load(std::memory_order_acquire))
 {
@@ -426,6 +427,7 @@ IndexDB::operator=(IndexDB &&other) noexcept
     tx_cf_handle_ = other.tx_cf_handle_;
     contract_cf_handle_ = other.contract_cf_handle_;
     stats_worker_thread_ = std::move(other.stats_worker_thread_);
+    pending_heights_ = std::move(other.pending_heights_);
     highest_indexed_block_.store(other.highest_indexed_block_.load(
                                      std::memory_order_acquire),
                                  std::memory_order_release);
@@ -479,6 +481,18 @@ IndexDB::consume_events(BlockHeight block_height,
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+
+  {
+    // Re-ingesting an already-seen height would overwrite served,
+    // immutable history; skip it entirely.  Benign for byte-identical
+    // retries; anything else is an upstream bug.
+    std::lock_guard g(ingest_mutex_);
+    if (height_seen(static_cast<int64_t>(block_height), g)) {
+      warn("consume_events: ignoring duplicate ingest for block {}",
+           static_cast<int64_t>(block_height));
+      return {};
+    }
   }
 
   auto start_ts = x23::fastclock::get_ns();
@@ -709,43 +723,14 @@ IndexDB::consume_events(BlockHeight block_height,
     }
   }
 
-  // Bump the latest-block high-water mark.  Monotonic — ingestion is
-  // sequential at block boundaries, but a compare-exchange guards
-  // against any future concurrency and keeps the invariant obvious.
-  // When we win the CAS, persist the new value via the meta key so
-  // [latest_block] survives restart accurately.  We sequence the Put
-  // strictly AFTER the SST ingest above: the meta key may lag the data
-  // (one-block window if we crash here) but can never lead it.
+  // Record the ingested height and advance the contiguous watermark.
+  // Sequenced strictly AFTER the SST ingest above so the watermark
+  // never claims a block whose rows aren't yet visible; the meta key
+  // may lag the data (one-block window if we crash here) but can
+  // never lead it.
   {
-    const auto new_h = static_cast<int64_t>(block_height);
-    int64_t cur = highest_indexed_block_.load(std::memory_order_acquire);
-    bool advanced = false;
-    while (new_h > cur) {
-      if (highest_indexed_block_.compare_exchange_weak(
-              cur, new_h, std::memory_order_acq_rel,
-              std::memory_order_acquire)) {
-        advanced = true;
-        break;
-      }
-    }
-    if (advanced) {
-      static_assert(std::endian::native == std::endian::little);
-      uint64_t encoded = std::byteswap(static_cast<uint64_t>(new_h));
-      rocksdb::Status s =
-          db_->Put(rocksdb::WriteOptions(), db_->DefaultColumnFamily(),
-                   rocksdb::Slice(
-                       IndexerKeyFormat::kHighestIndexedBlockMetaKey),
-                   rocksdb::Slice(reinterpret_cast<const char *>(&encoded),
-                                  sizeof(encoded)));
-      if (!s.ok()) {
-        // Non-fatal: in-memory atomic still serves [latest_block]
-        // correctly for the lifetime of this process.  Next successful
-        // consume_events will re-attempt the Put.
-        error("consume_events: failed to persist highest_indexed_block "
-              "meta key: {}",
-              s.ToString());
-      }
-    }
+    std::lock_guard g(ingest_mutex_);
+    record_height(static_cast<int64_t>(block_height), g);
   }
 
   auto end_ts = x23::fastclock::get_ns();
@@ -753,6 +738,67 @@ IndexDB::consume_events(BlockHeight block_height,
        (end_ts - start_ts) / 1'000'000'000.0);
 
   return {};
+}
+
+bool
+IndexDB::height_seen(int64_t h, std::lock_guard<std::mutex> const & /*g*/) const
+{
+  const int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
+  return (latest != kNoBlocksIndexed && h <= latest) ||
+         pending_heights_.contains(h);
+}
+
+void
+IndexDB::record_height(int64_t h, std::lock_guard<std::mutex> const &g)
+{
+  // Re-check under the same lock: the pre-ingest seen() check and
+  // this record are separate critical sections, so a concurrent
+  // ingest of the same height can have recorded it in between.
+  // Without this guard the duplicate would land in pending_heights_
+  // below the watermark and permanently block the drain loop.
+  if (height_seen(h, g)) {
+    warn("consume_events: block {} was recorded concurrently; skipping", h);
+    return;
+  }
+  int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
+  if (latest != kNoBlocksIndexed && h != latest + 1) {
+    // Out-of-order arrival above a gap: ingested, but not servable
+    // until the gap fills.  Expected to be rare — commit-time fanout
+    // delivers heights in order.  No size cap: dropping entries
+    // would silently lose blocks; the logged set size is the
+    // operator's signal that a gap is stuck.
+    warn("consume_events: out-of-order block {} buffered (watermark {}, "
+         "{} pending)",
+         h, latest, pending_heights_.size() + 1);
+    pending_heights_.insert(h);
+    return;
+  }
+  // The first-ever ingested height becomes the base of the
+  // contiguous range; afterwards drain any heights made contiguous
+  // by this arrival.
+  latest = h;
+  auto it = pending_heights_.begin();
+  while (it != pending_heights_.end() && *it == latest + 1) {
+    latest = *it;
+    it = pending_heights_.erase(it);
+  }
+  highest_indexed_block_.store(latest, std::memory_order_release);
+
+  static_assert(std::endian::native == std::endian::little);
+  const uint64_t encoded = std::byteswap(static_cast<uint64_t>(latest));
+  const rocksdb::Status s =
+      db_->Put(rocksdb::WriteOptions(), db_->DefaultColumnFamily(),
+               rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
+               rocksdb::Slice(reinterpret_cast<const char *>(&encoded),
+                              sizeof(encoded)));
+  if (!s.ok()) {
+    // Non-fatal: in-memory atomic still serves [latest_block]
+    // correctly for the lifetime of this process.  Next successful
+    // consume_events will re-attempt the Put.
+    error("consume_events: failed to persist highest_indexed_block "
+          "meta key: {}",
+          s.ToString());
+  }
 }
 
 void
@@ -905,8 +951,8 @@ IndexDB::initialize_highest_block_from_db()
 BlockHeight
 IndexDB::latest_block() const
 {
-  return static_cast<BlockHeight>(
-      highest_indexed_block_.load(std::memory_order_acquire));
+  const int64_t w = highest_indexed_block_.load(std::memory_order_acquire);
+  return static_cast<BlockHeight>(w == kNoBlocksIndexed ? 0 : w);
 }
 
 namespace {
@@ -928,8 +974,10 @@ struct Position {
 class ContractIter {
 public:
   ContractIter(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *cf,
-               ContractAddress addr)
-    : contract_(addr), iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
+               ContractAddress addr, IterationOrder order,
+               BlockHeight max_block)
+    : contract_(addr), order_(order), max_block_(max_block),
+      iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
   {}
 
   ContractAddress const &contract() const { return contract_; }
@@ -1038,10 +1086,23 @@ private:
       has_current_ = false;
       return;
     }
+    if (order_ == IterationOrder::IterationOrderAscending &&
+        current_.block > max_block_) {
+      // Rows above the contiguous watermark are not servable: they
+      // (or a block below them) may still be ingesting, so they are
+      // not yet immutable.  Ascending keys only grow, so this
+      // iterator is exhausted for the current query.  Descending
+      // never gets here — its seek anchor is clamped to the
+      // watermark before iteration starts.
+      has_current_ = false;
+      return;
+    }
     has_current_ = true;
   }
 
   ContractAddress contract_;
+  IterationOrder order_;
+  BlockHeight max_block_;
   std::unique_ptr<rocksdb::Iterator> iter_;
   std::vector<std::size_t> filter_indices_;
   Position current_{};
@@ -1058,7 +1119,11 @@ IndexDB::get_events(EventQuery const &query) const
   }
 
   EventPage page;
-  page.latest_block = latest_block();
+  // The serving bound for this entire query: rows above this height
+  // are ingested-but-mutable (a lower gap may still be filling) and
+  // must not be observed by the page or its continuation cursor.
+  const BlockHeight max_serve_block = latest_block();
+  page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
   // Validate: filters non-empty, each filter's contract_addresses
@@ -1124,12 +1189,30 @@ IndexDB::get_events(EventQuery const &query) const
         // the highest indexed block.
         return page;
       }
-      anchor_block = latest_block();
+      anchor_block = max_serve_block;
       break;
     case BlockAnchorKind::AnchorAtHeight:
       anchor_block = query.anchor.height();
+      if (anchor_block < oldest_block()) {
+        if (order == IterationOrder::IterationOrderDescending) {
+          // Everything at or below the anchor is outside the
+          // retained range — empty page, per protocol/indexer.x's
+          // oldest_block contract.  Validating here also keeps the
+          // signed height from wrapping to all-0xFF in the seek key.
+          return page;
+        }
+        anchor_block = oldest_block();
+      }
       break;
     }
+  }
+
+  // Descending scans seek from the anchor downward; clamp the start
+  // to the watermark so pending rows are never visited.  Ascending
+  // scans are bounded inside ContractIter instead.
+  if (order == IterationOrder::IterationOrderDescending &&
+      anchor_block > max_serve_block) {
+    anchor_block = max_serve_block;
   }
 
   // Dedupe contracts across all filters.  For each unique contract,
@@ -1143,7 +1226,8 @@ IndexDB::get_events(EventQuery const &query) const
         it->add_filter(fidx);
       }
       else {
-        iters.emplace_back(db_.get(), contract_cf_handle_, addr);
+        iters.emplace_back(db_.get(), contract_cf_handle_, addr, order,
+                           max_serve_block);
         iters.back().add_filter(fidx);
       }
     }
