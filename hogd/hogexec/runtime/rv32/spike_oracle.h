@@ -303,11 +303,11 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
 // The static subset this adapter supports: non-empty code terminated by ecall;
 // an aligned, in-range initial pc; zero initial registers and memory (Spike
 // runs from reset and zero-fills data RAM); register and memory ops, but no
-// jalr, auipc, linking jal, or ebreak -- those write/consume absolute pc or
-// require trap reconstruction this harness does not model. Load/store target
-// addresses must land in the mapped data region; the corpus guarantees that.
-// Out-of-subset programs are rejected up front rather than silently
-// mis-reconstructed from zero state.
+// jalr, auipc, linking jal, ebreak, or unimp -- those write/consume absolute
+// pc, require trap reconstruction, or are illegal instructions this harness
+// does not model. Load/store target addresses must land in the mapped data
+// region; the corpus guarantees that. Out-of-subset programs are rejected up
+// front rather than silently mis-reconstructed from zero state.
 inline bool
 spike_supported(const DifferentialProgram &program)
 {

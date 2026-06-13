@@ -940,7 +940,22 @@ TEST(Rv32ExecutionTest, ebreak_is_deterministic_runtime_trap)
   EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
 }
 
-TEST(Rv32ExecutionTest, unimp_is_deterministic_invalid_instruction_trap)
+TEST(Rv32ExecutionTest, canonical_unimp_decodes_to_kUnimp)
+{
+  // 0xc0001073 = csrrw x0, cycle, x0: the canonical RISC-V `unimp` trap
+  // encoding. Only this exact word is admitted; all other SYSTEM/CSR forms
+  // remain kUnsupportedSystemInstruction.
+  const auto result = decode_instruction(0xc0001073U);
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.instruction.op, Op::kUnimp);
+  EXPECT_EQ(result.instruction.kind, InstructionKind::kUnimp);
+
+  const auto program = make_program({0xc0001073U});
+  EXPECT_NE(program, nullptr);
+}
+
+TEST(Rv32ExecutionTest,
+     canonical_unimp_is_deterministic_invalid_instruction_trap)
 {
   const auto program = make_program({0xc0001073U});
   ASSERT_NE(program, nullptr);
