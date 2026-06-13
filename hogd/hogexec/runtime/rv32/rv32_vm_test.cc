@@ -952,7 +952,8 @@ TEST(Rv32ExecutionTest, canonical_unimp_decodes_to_kUnimp)
   EXPECT_NE(program, nullptr);
 }
 
-TEST(Rv32ExecutionTest, canonical_unimp_is_deterministic_invalid_instruction_trap)
+TEST(Rv32ExecutionTest,
+     canonical_unimp_is_deterministic_invalid_instruction_trap)
 {
   const auto program = make_program({0xc0001073U});
   ASSERT_NE(program, nullptr);

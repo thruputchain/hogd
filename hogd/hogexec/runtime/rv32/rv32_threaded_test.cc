@@ -687,7 +687,8 @@ TEST(Rv32Threaded, ebreakTraps)
   // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
   // If ebreak were not a barrier, gas_to_run would be 2 (ebreak+addi) and
   // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kEbreak).
-  const std::vector<uint32_t> words = {0x00100073U, addi(1, 0, 1)}; // ebreak, addi x1,x0,1
+  const std::vector<uint32_t> words = {0x00100073U,
+                                       addi(1, 0, 1)}; // ebreak, addi x1,x0,1
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
@@ -703,7 +704,8 @@ TEST(Rv32Threaded, unimpTraps)
   // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
   // If unimp were not a barrier, gas_to_run would be 2 (unimp+addi) and
   // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kUnimp).
-  const std::vector<uint32_t> words = {0xc0001073U, addi(1, 0, 1)}; // unimp, addi x1,x0,1
+  const std::vector<uint32_t> words = {0xc0001073U,
+                                       addi(1, 0, 1)}; // unimp, addi x1,x0,1
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
