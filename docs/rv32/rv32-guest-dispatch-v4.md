@@ -383,8 +383,8 @@ matching versions.
 4. **Real-calldata smoke (hogd, closes author-toolchain Phase 0/4):** build with
    `groundhog build --target rv32`, generate the trait header from `.spec.json`,
    and from a native driver call `increment(7)` then assert `get() == 7`. Add:
-   - an **unknown method-id** call asserting the decided outcome (Option A: metered
-     deterministic error; Option B: zero-gas `Deterministic` miss matching WASM),
+    - an **unknown method-id** call asserting the decided outcome: metered
+      deterministic error from the guest dispatcher's default arm,
    - a **stripped release build** that still emits valid `.spec.json`/`.spec.xdr`,
    - a method-with-args vs no-arg pair, so calldata read is shown independent of
      dispatch,
