@@ -1852,8 +1852,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.
     remove_from_scheduler = &nominated_block_cache_.result_tx_hashes;
-    // TODO(jhumphri): Add the failed txs back as well.
-    // remove_from_scheduler += nominated_block_cache_.failed_txs;
+    // We do *not* add the failed txs back (in
+    // [nominated_block_cache_.failed_txs]).
   }
   else {
     // The committed block is a block we validated.
@@ -1863,7 +1863,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       // scheduled again.
       return_to_runqueue.insert(nominated_block_cache_.result_tx_hashes.begin(),
                                 nominated_block_cache_.result_tx_hashes.end());
-      // TODO(jhumphri): Add the failed txs back as well.
+      // We also return the failed txs. A future block may want to use these
+      // txs. e.g., maybe a validation block uses them.
+      return_to_runqueue.insert(nominated_block_cache_.failed_txs.begin(),
+                                nominated_block_cache_.failed_txs.end());
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id == block_id) {
