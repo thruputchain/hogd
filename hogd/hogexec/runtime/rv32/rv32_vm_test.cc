@@ -752,6 +752,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kDivu, "DIVU", 8},   {Op::kRem, "REM", 8},
       {Op::kRemu, "REMU", 8},   {Op::kFence, "FENCE", 1},
       {Op::kEcall, "ECALL", 1}, {Op::kEbreak, "EBREAK", 1},
+      {Op::kUnimp, "UNIMP", 1},
   }};
   const std::array<ExpectedSyscallGasEntry, 4> expected_syscalls = {{
       {"SHA256HashBase", hogd::kSHA256HashBaseCost},
@@ -760,9 +761,9 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {"GenericBadSyscall", hogd::kGenericBadSyscallCost},
   }};
 
-  EXPECT_EQ(kOpCount, 48U);
-  EXPECT_EQ(kGasTableVersion, 2U);
-  EXPECT_EQ(kGasScheduleDigest, 0xebe53dceea581d0cULL);
+  EXPECT_EQ(kOpCount, 49U);
+  EXPECT_EQ(kGasTableVersion, 3U);
+  EXPECT_EQ(kGasScheduleDigest, 0x918317c21c46bb60ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
@@ -935,6 +936,20 @@ TEST(Rv32ExecutionTest, ebreak_is_deterministic_runtime_trap)
   EXPECT_EQ(out_of_gas.trap(), Trap::kOutOfGas);
   EXPECT_EQ(out_of_gas.pc(), 0U);
   EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
+}
+
+TEST(Rv32ExecutionTest, canonical_unimp_decodes_to_kUnimp)
+{
+  // 0xc0001073 = csrrw x0, cycle, x0: the canonical RISC-V `unimp` trap
+  // encoding. Only this exact word is admitted; all other SYSTEM/CSR forms
+  // remain kUnsupportedSystemInstruction.
+  const auto result = decode_instruction(0xc0001073U);
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.instruction.op, Op::kUnimp);
+  EXPECT_EQ(result.instruction.kind, InstructionKind::kUnimp);
+
+  const auto program = make_program({0xc0001073U});
+  EXPECT_NE(program, nullptr);
 }
 
 TEST(Rv32ExecutionTest, sign_and_zero_extends_loads)

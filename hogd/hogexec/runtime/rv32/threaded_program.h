@@ -202,6 +202,9 @@ private:
       if (word == 0x00100073U) {
         return ok(Op::kEbreak, 0);
       }
+      if (word == 0xc0001073U) {
+        return ok(Op::kUnimp, 0);
+      }
       return bad(ProgramError::kUnsupportedSystemInstruction);
     default:
       return bad(ProgramError::kUnsupportedInstruction);
