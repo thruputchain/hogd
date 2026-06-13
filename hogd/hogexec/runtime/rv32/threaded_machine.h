@@ -103,16 +103,14 @@ public:
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,
-                                  bool trace, bool gas_overflow)
+                                  bool trace)
     : exec_(std::move(exec)),
-      initial_memory_image_(std::move(initial_memory_image)), trace_(trace),
-      gas_overflow_(gas_overflow)
+      initial_memory_image_(std::move(initial_memory_image)), trace_(trace)
   {}
 
   std::vector<Slot> exec_;
   std::vector<uint8_t> initial_memory_image_;
   bool trace_ = false;
-  bool gas_overflow_ = false;
 
   friend class ThreadedMachine;
 };
@@ -176,7 +174,6 @@ public:
   ThreadedMachine(ThreadedMachinePreInstantiation const &pre_instantiation,
                   uint64_t gas)
     : pre_instantiation_(&pre_instantiation),
-      gas_overflow_(pre_instantiation.gas_overflow_),
       exec_traced_(pre_instantiation.trace_)
   {
     const auto &image = pre_instantiation.initial_memory_image_;
@@ -331,8 +328,6 @@ public:
   Trap trap_ = Trap::kNone;
   std::optional<EcallArgs> pending_ecall_ =
       std::nullopt; // set while suspended at an ecall; cold
-  const bool
-      gas_overflow_; //  a run's gas exceeded uint16 -> reject (drive traps)
   bool halted_ = false;
   const bool exec_traced_;
   uint32_t halt_code_ = 0;
@@ -1755,7 +1750,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     //
     // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only
     // reachable by a pathologically long straight-line run -- up to 16384
-    // instrs * 8 gas for div) is rejected: gas_overflow_ makes drive() trap.
+    // instrs * 8 gas for div) is rejected below.
     // TODO(geoff): instead split the run, charging 65535 at a synthetic mid-run
     // recharge handler.
     const auto self_gas = static_cast<uint32_t>(d.gas);
@@ -1791,9 +1786,13 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     next_fused = fused_here;
   }
 
+  if (gas_overflow) {
+    return std::unexpected(ProgramError::kRunGasTooLarge);
+  }
+
   return ThreadedMachinePreInstantiation(std::move(exec),
-                                         std::move(initial_memory_image), trace,
-                                         gas_overflow);
+                                         std::move(initial_memory_image),
+                                         trace);
 }
 
 inline MachineView
@@ -1810,17 +1809,6 @@ template<bool Trace>
 StepResult
 ThreadedMachine::drive()
 {
-  // Reject a program whose run gas overflowed uint16 (set in
-  // PreInstantiation::create). This is an interpreter-side encoding limit
-  // (gas_to_run is uint16), not a bad opcode; kInvalidInstruction is a stand-in
-  // for "this interpreter can't run this program" until runs are split.
-  // TODO(gramseyer): split overflowing runs instead of rejecting (then this
-  // whole branch goes away).
-  if (gas_overflow_) {
-    trap_ = Trap::kInvalidInstruction;
-    halted_ = true;
-    return StepResult::kTrap;
-  }
   Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   uint8_t *mem = memory_.data();
