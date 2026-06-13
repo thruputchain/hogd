@@ -346,7 +346,7 @@ private:
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
         transaction_nomination_chunks;
-    x23::XdrVec<SignedTransaction> failed_txs;
+    x23::XdrVec<SignedTransactionHash> failed_tx_hashes;
   };
 
   struct NominationTelemetry {
