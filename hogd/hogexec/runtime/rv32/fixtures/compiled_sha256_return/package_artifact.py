@@ -10,7 +10,9 @@ ARTIFACT_MAGIC = b"GHRV32A1"
 ARTIFACT_FORMAT_VERSION = 4
 ARTIFACT_HEADER_BYTES = 132
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
+ARTIFACT_FLAGS_REQUIRED_VALUE = 0
 ARTIFACT_ENTRY_ABI_VERSION = 2
+ARTIFACT_SYSCALL_ABI_VERSION = 1
 GAS_TABLE_VERSION = 3
 GAS_SCHEDULE_DIGEST = 0x918317C21C46BB60
 SHT_SYMTAB = 2
@@ -173,7 +175,9 @@ def parse_artifact(path):
     format_version = header[1]
     header_bytes = header[2]
     vm_profile_digest = header[3]
+    flags = header[4]
     entry_abi_version = header[5]
+    syscall_abi_version = header[6]
     gas_table_version = header[7]
     gas_schedule_digest = header[8]
     memory_bytes = header[9]
@@ -191,8 +195,12 @@ def parse_artifact(path):
         raise FixtureError(
             f"unexpected VM profile digest 0x{vm_profile_digest:016x}"
         )
+    if flags != ARTIFACT_FLAGS_REQUIRED_VALUE:
+        raise FixtureError(f"unexpected artifact flags {flags}")
     if entry_abi_version != ARTIFACT_ENTRY_ABI_VERSION:
         raise FixtureError(f"unexpected entry ABI version {entry_abi_version}")
+    if syscall_abi_version != ARTIFACT_SYSCALL_ABI_VERSION:
+        raise FixtureError(f"unexpected syscall ABI version {syscall_abi_version}")
     if gas_table_version != GAS_TABLE_VERSION:
         raise FixtureError(f"unexpected gas table version {gas_table_version}")
     if gas_schedule_digest != GAS_SCHEDULE_DIGEST:
