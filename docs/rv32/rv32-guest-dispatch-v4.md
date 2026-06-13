@@ -263,11 +263,11 @@ though most of it is zero (bss/heap/stack). That is pure bloat.
 
 The data image is **address-indexed**, per the modified-Harvard model
 (`rv32-vm-experimental-design.md:158`): `.text` lives in separate code memory and
-its data-memory shadow is inert. The lowerer already follows this shape for the
-fixture (`fixtures/compiled_sha256_return/lower_elf.py:267,278`): start a
-zero-filled image of size `memory_bytes`, validate the ALLOC section policy, and
-copy only **VM-memory PROGBITS sections from the lowerer allowlist** at their
-guest virtual addresses (for example `.rodata`/`.srodata`/`.data`/`.sdata`).
+its data-memory shadow is inert. The official `rv32-lower` follows this shape for
+the fixture: start a zero-filled image of size `memory_bytes`, validate the ALLOC
+section policy, and copy only **VM-memory PROGBITS sections from the lowerer
+allowlist** at their guest virtual addresses (for example
+`.rodata`/`.srodata`/`.data`/`.sdata`).
 Skip NOBITS sections for contents (`.bss`/`.sbss` are provided by the zero-fill),
 and explicitly exclude both `.text` and metadata/spec sidecars
 (`groundhogspecv0`/`groundhogspecrawv0`) from the VM-memory image. **Do not**
