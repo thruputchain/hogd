@@ -113,11 +113,10 @@ metadata check verifies the stamped lowerer fingerprint against `artifact.h`.
 That gives the format extraction a regression guard and keeps cross-repo drift
 visible while the implementation remains duplicated across languages.
 
-Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
-magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
-gas table version 2 + gas-schedule digest `0xEBE53DCEEA581D0C`, VM-profile digest
-`0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory / dispatch
-sections.
+Current v4 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
+magic `GHRV32A1`, 132-byte header, format version 4, entry ABI 2, syscall ABI 1,
+gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
+`0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory sections.
 
 If guest-side dispatch lands, the dispatch section + its commitment become
 vestigial; either keep a trivial single-entry table under v3 for now or have hogd

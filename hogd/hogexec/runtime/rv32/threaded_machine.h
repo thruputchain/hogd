@@ -30,7 +30,8 @@
 // a "run" is a maximal straight-line sequence whose continuation is known at
 // lowering time. enter_run() charges the whole run's gas in one check; the
 // handlers inside do no gas work. Control-flow instructions and host-boundary
-// instructions (branches/jal/jalr/ecall/ebreak) are barriers and self-charge.
+// instructions (branches/jal/jalr/ecall/ebreak/unimp) are barriers and
+// self-charge.
 // Loads/stores stay in straight-line runs for performance; if they trap, the
 // run has already been charged. On out-of-gas, the run is aborted at its head.
 // The exact instruction and intermediate gas_remaining can therefore differ
