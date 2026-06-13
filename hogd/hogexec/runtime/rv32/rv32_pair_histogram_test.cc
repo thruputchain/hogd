@@ -75,6 +75,7 @@ is_fusable_first(InstructionKind kind)
   case InstructionKind::kFence:
   case InstructionKind::kEcall:
   case InstructionKind::kEbreak:
+  case InstructionKind::kUnimp:
     return false;
   case InstructionKind::kLui:
   case InstructionKind::kAuipc:

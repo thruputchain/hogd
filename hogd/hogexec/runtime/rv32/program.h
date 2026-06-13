@@ -41,6 +41,7 @@ enum class InstructionKind {
   kFence,
   kEcall,
   kEbreak,
+  kUnimp,
 };
 
 enum class Op : uint8_t {

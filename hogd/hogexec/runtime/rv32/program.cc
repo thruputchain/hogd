@@ -233,7 +233,7 @@ decode_instruction(uint32_t word)
       return decoded(instruction);
     }
     if (word == 0xc0001073U) {
-      instruction.kind = InstructionKind::kEbreak;
+      instruction.kind = InstructionKind::kUnimp;
       instruction.op = Op::kUnimp;
       return decoded(instruction);
     }

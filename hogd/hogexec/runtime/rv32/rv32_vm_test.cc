@@ -694,7 +694,7 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
        kBaseInstructionGas},
       {0x00100073U, InstructionKind::kEbreak, Op::kEbreak, 0, 0, -1, 0,
        kBaseInstructionGas},
-      {0xc0001073U, InstructionKind::kEbreak, Op::kUnimp, 0, 0, -1, 0,
+      {0xc0001073U, InstructionKind::kUnimp, Op::kUnimp, 0, 0, -1, 0,
        kBaseInstructionGas},
   }};
 
