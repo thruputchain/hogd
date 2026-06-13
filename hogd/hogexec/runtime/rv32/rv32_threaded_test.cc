@@ -690,6 +690,19 @@ TEST(Rv32Threaded, ebreakTraps)
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
 }
 
+TEST(Rv32Threaded, unimpDecodesToKUnimp)
+{
+  // 0xc0001073 is the canonical RISC-V `unimp` word (csrrw x0, cycle, x0).
+  // Pin that ThreadedProgram accepts it and decodes it to Op::kUnimp.
+  const std::vector<uint32_t> words = {0xc0001073U};
+  const std::vector<uint8_t> bytes = words_to_bytes(words);
+  const auto prog = ThreadedProgram::create(bytes);
+  ASSERT_TRUE(prog.has_value());
+  const auto decoded = prog->instruction_at(0);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->op, Op::kUnimp);
+}
+
 TEST(Rv32Threaded, ecallHaltsWithA0)
 {
   // x10(a0)=7, then ecall. RecordingHost default halts with a0.
