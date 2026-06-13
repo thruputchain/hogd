@@ -751,13 +751,25 @@ IndexDB::height_seen_locked(int64_t h) const
 void
 IndexDB::record_height_locked(int64_t h)
 {
+  // Re-check under the same lock: the pre-ingest seen() check and
+  // this record are separate critical sections, so a concurrent
+  // ingest of the same height can have recorded it in between.
+  // Without this guard the duplicate would land in pending_heights_
+  // below the watermark and permanently block the drain loop.
+  if (height_seen_locked(h)) {
+    warn("consume_events: block {} was recorded concurrently; skipping", h);
+    return;
+  }
   int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
   if (latest != kNoBlocksIndexed && h != latest + 1) {
     // Out-of-order arrival above a gap: ingested, but not servable
     // until the gap fills.  Expected to be rare — commit-time fanout
-    // delivers heights in order.
-    warn("consume_events: out-of-order block {} buffered (watermark {})", h,
-         latest);
+    // delivers heights in order.  No size cap: dropping entries
+    // would silently lose blocks; the logged set size is the
+    // operator's signal that a gap is stuck.
+    warn("consume_events: out-of-order block {} buffered (watermark {}, "
+         "{} pending)",
+         h, latest, pending_heights_.size() + 1);
     pending_heights_.insert(h);
     return;
   }
