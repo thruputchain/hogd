@@ -18,12 +18,9 @@
 // and CI are unaffected (opt-in / out-of-default-CI posture). Linked against
 // rv32_isa_core ONLY.
 //
-// Supported subset: ecall-terminated, zero-initial-register/memory programs
-// with register AND memory ops (loads/stores), but no jalr, auipc, or linking
-// jal -- those write/consume the absolute pc, which Spike cannot place at 0
-// ([0, 0x1000) is reserved for devices), so they stay on the in-tree
-// crosscheck. Code maps to Spike at a constant pc offset; data lives at its
-// true address in a region above the device window.
+// The accepted subset is defined by spike_supported() in spike_oracle.h, which
+// is the single source of truth. Code maps to Spike at a constant pc offset;
+// data lives at its true address in a region above the device window.
 
 namespace hogd::rv32 {
 namespace {
@@ -175,8 +172,9 @@ TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
   // terminal-ecall reconstruction.
   EXPECT_TRUE(spike.run(reg_program({0x00100073U, kEcall})).steps.empty());
 
-  // Canonical unimp (csrrw x0, cycle, x0) likewise: spike raises
-  // illegal-instruction at the same retired-instruction point.
+  // Canonical unimp (csrrw x0, cycle, x0) likewise: deterministic
+  // illegal-instruction trap, outside this adapter's synthetic stream
+  // contract -- rejected statically, never shipped to spike.
   EXPECT_TRUE(spike.run(reg_program({0xc0001073U, kEcall})).steps.empty());
 
   // No terminal ecall.
