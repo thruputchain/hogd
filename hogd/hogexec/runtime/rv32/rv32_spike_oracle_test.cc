@@ -175,6 +175,10 @@ TEST(Rv32SpikeOracle, rejectsUnsupportedPrograms)
   // terminal-ecall reconstruction.
   EXPECT_TRUE(spike.run(reg_program({0x00100073U, kEcall})).steps.empty());
 
+  // Canonical unimp (csrrw x0, cycle, x0) likewise: spike raises
+  // illegal-instruction at the same retired-instruction point.
+  EXPECT_TRUE(spike.run(reg_program({0xc0001073U, kEcall})).steps.empty());
+
   // No terminal ecall.
   EXPECT_TRUE(spike.run(reg_program({addi(1, 0, 5)})).steps.empty());
 
