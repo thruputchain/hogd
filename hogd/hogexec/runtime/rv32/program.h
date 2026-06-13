@@ -92,6 +92,7 @@ enum class Op : uint8_t {
   kFence,
   kEcall,
   kEbreak,
+  kUnimp,
   kCount,
 };
 
@@ -152,6 +153,7 @@ constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kFence, .name = "FENCE", .cost = kBaseInstructionGas},
     {.op = Op::kEcall, .name = "ECALL", .cost = kBaseInstructionGas},
     {.op = Op::kEbreak, .name = "EBREAK", .cost = kBaseInstructionGas},
+    {.op = Op::kUnimp, .name = "UNIMP", .cost = kBaseInstructionGas},
 }};
 
 constexpr bool

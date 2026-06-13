@@ -341,6 +341,7 @@ spike_supported(const DifferentialProgram &program)
     case Op::kJalr:
     case Op::kAuipc:
     case Op::kEbreak:
+    case Op::kUnimp:
       return false;
     case Op::kJal:
       if (decoded.instruction.rd != 0) {

@@ -403,6 +403,7 @@ is_barrier(Op op)
   case Op::kJalr:
   case Op::kEcall:
   case Op::kEbreak:
+  case Op::kUnimp:
     return true;
   default:
     return false;
@@ -1180,6 +1181,8 @@ handler_for(Op op)
     // ebreak's gas is charged at the run head; the handler is a pure trap, so
     // dispatch straight to trap_at (it has the handler signature).
     return &trap_at<Trace, Trap::kBreakpoint>;
+  case Op::kUnimp:
+    return &trap_at<Trace, Trap::kInvalidInstruction>;
   case Op::kEcall:
     return &op_ecall<Trace>;
   default:

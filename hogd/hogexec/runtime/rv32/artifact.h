@@ -25,7 +25,9 @@ inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
 // into the header at kArtifactGasVersionOffset and validated at load.
-inline constexpr uint32_t kGasTableVersion = 2;
+// v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
+// trap.
+inline constexpr uint32_t kGasTableVersion = 3;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -86,7 +88,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0xebe53dceea581d0cULL);
+static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
 
 constexpr uint64_t
 format_fingerprint_u64(uint64_t digest, const char *name, uint64_t value)
@@ -239,7 +241,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x373c4a7cf1a42ef8ULL);
+static_assert(kArtifactFormatFingerprint == 0x3aed01915d1a5e1dULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 

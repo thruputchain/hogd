@@ -667,7 +667,7 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
     uint64_t gas_cost;
   };
 
-  const std::array<Case, 13> cases = {{
+  const std::array<Case, 14> cases = {{
       {u_type(0x37, 5, 0x12345000U), InstructionKind::kLui, Op::kLui, 5, -1, -1,
        0x12345000, kBaseInstructionGas},
       {u_type(0x17, 6, 0xfffff000U), InstructionKind::kAuipc, Op::kAuipc, 6, -1,
@@ -693,6 +693,8 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {0x00000073U, InstructionKind::kEcall, Op::kEcall, 0, 0, 0, 0,
        kBaseInstructionGas},
       {0x00100073U, InstructionKind::kEbreak, Op::kEbreak, 0, 0, -1, 0,
+       kBaseInstructionGas},
+      {0xc0001073U, InstructionKind::kEbreak, Op::kUnimp, 0, 0, -1, 0,
        kBaseInstructionGas},
   }};
 
@@ -752,6 +754,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kDivu, "DIVU", 8},   {Op::kRem, "REM", 8},
       {Op::kRemu, "REMU", 8},   {Op::kFence, "FENCE", 1},
       {Op::kEcall, "ECALL", 1}, {Op::kEbreak, "EBREAK", 1},
+      {Op::kUnimp, "UNIMP", 1},
   }};
   const std::array<ExpectedSyscallGasEntry, 4> expected_syscalls = {{
       {"SHA256HashBase", hogd::kSHA256HashBaseCost},
@@ -760,9 +763,9 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {"GenericBadSyscall", hogd::kGenericBadSyscallCost},
   }};
 
-  EXPECT_EQ(kOpCount, 48U);
-  EXPECT_EQ(kGasTableVersion, 2U);
-  EXPECT_EQ(kGasScheduleDigest, 0xebe53dceea581d0cULL);
+  EXPECT_EQ(kOpCount, 49U);
+  EXPECT_EQ(kGasTableVersion, 3U);
+  EXPECT_EQ(kGasScheduleDigest, 0x918317c21c46bb60ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
@@ -927,6 +930,24 @@ TEST(Rv32ExecutionTest, ebreak_is_deterministic_runtime_trap)
 
   EXPECT_EQ(machine.step(), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 9U);
+
+  Machine out_of_gas(program, 16, 0);
+  EXPECT_EQ(out_of_gas.step(), StepResult::kTrap);
+  EXPECT_EQ(out_of_gas.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(out_of_gas.pc(), 0U);
+  EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
+}
+
+TEST(Rv32ExecutionTest, unimp_is_deterministic_invalid_instruction_trap)
+{
+  const auto program = make_program({0xc0001073U});
+  ASSERT_NE(program, nullptr);
+  Machine machine(program, 16, 10);
+
+  EXPECT_EQ(machine.step(), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
   EXPECT_EQ(machine.pc(), 0U);
   EXPECT_EQ(machine.gas_remaining(), 9U);
 

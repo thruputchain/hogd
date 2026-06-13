@@ -707,6 +707,16 @@ TEST(Rv32Threaded, ebreakTraps)
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
 }
 
+TEST(Rv32Threaded, unimpTrapsInvalidInstruction)
+{
+  const std::vector<uint32_t> words = {0xc0001073U}; // unimp
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+}
+
 TEST(Rv32Threaded, ecallHaltsWithA0)
 {
   // x10(a0)=7, then ecall. RecordingHost default halts with a0.

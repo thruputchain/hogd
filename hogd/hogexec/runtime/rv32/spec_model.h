@@ -487,6 +487,9 @@ step_spec(SpecState &state, std::span<const SpecInstruction> instructions)
   case Op::kEbreak:
     set_trap(state, Trap::kBreakpoint);
     return StepResult::kTrap;
+  case Op::kUnimp:
+    set_trap(state, Trap::kInvalidInstruction);
+    return StepResult::kTrap;
   default:
     set_trap(state, Trap::kInvalidInstruction);
     return StepResult::kTrap;

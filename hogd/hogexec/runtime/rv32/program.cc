@@ -232,6 +232,11 @@ decode_instruction(uint32_t word)
       instruction.op = Op::kEbreak;
       return decoded(instruction);
     }
+    if (word == 0xc0001073U) {
+      instruction.kind = InstructionKind::kEbreak;
+      instruction.op = Op::kUnimp;
+      return decoded(instruction);
+    }
     // ECALL and EBREAK are the only accepted SYSTEM instructions. CSR,
     // privileged, and environment-return forms are rejected before a Program
     // can be created.

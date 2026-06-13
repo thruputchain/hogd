@@ -16,4 +16,4 @@ CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crat
 
 echo "Installing groundhog-rv32-lower..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo install --registry groundhog groundhog-rv32-lower@0.5.5
+  cargo install --registry groundhog groundhog-rv32-lower@0.5.7
