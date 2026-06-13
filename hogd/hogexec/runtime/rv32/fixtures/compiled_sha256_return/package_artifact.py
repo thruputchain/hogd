@@ -34,7 +34,9 @@ class FixtureError(RuntimeError):
 
 
 class Section:
-    def __init__(self, index, name, sh_type, flags, addr, offset, size, link, entsize):
+    def __init__(
+        self, index, name, sh_type, flags, addr, offset, size, link, entsize
+    ):
         self.index = index
         self.name = name
         self.sh_type = sh_type
@@ -140,16 +142,22 @@ def parse_symbols(data, sections):
             raise FixtureError("symbol table has invalid string table link")
         strings = sections[section.link]
         if strings.sh_type != SHT_STRTAB:
-            raise FixtureError("symbol table link must point to a string table")
+            raise FixtureError(
+                "symbol table link must point to a string table"
+            )
         string_blob = data[strings.offset:strings.offset + strings.size]
         if section.entsize != 16:
             raise FixtureError("unexpected ELF32 symbol size")
-        for off in range(section.offset, section.offset + section.size, section.entsize):
-            st_name, st_value, st_size, st_info, _st_other, st_shndx = struct.unpack_from(
-                "<IIIBBH", data, off
-            )
+        for off in range(
+            section.offset, section.offset + section.size, section.entsize
+        ):
+            raw_symbol = struct.unpack_from("<IIIBBH", data, off)
+            st_name, st_value, st_size, st_info = raw_symbol[:4]
+            st_shndx = raw_symbol[5]
             name = read_c_string(string_blob, st_name) if st_name != 0 else ""
-            symbols.append(Symbol(name, st_value, st_size, st_info & 0x0F, st_shndx))
+            symbols.append(
+                Symbol(name, st_value, st_size, st_info & 0x0F, st_shndx)
+            )
     return symbols
 
 
@@ -190,7 +198,9 @@ def parse_artifact(path):
     if magic != ARTIFACT_MAGIC:
         raise FixtureError("artifact has wrong magic")
     if format_version != ARTIFACT_FORMAT_VERSION:
-        raise FixtureError(f"unexpected artifact format version {format_version}")
+        raise FixtureError(
+            f"unexpected artifact format version {format_version}"
+        )
     if header_bytes != ARTIFACT_HEADER_BYTES:
         raise FixtureError(f"unexpected artifact header size {header_bytes}")
     if vm_profile_digest != ARTIFACT_VM_PROFILE_DIGEST:
@@ -202,7 +212,9 @@ def parse_artifact(path):
     if entry_abi_version != ARTIFACT_ENTRY_ABI_VERSION:
         raise FixtureError(f"unexpected entry ABI version {entry_abi_version}")
     if syscall_abi_version != ARTIFACT_SYSCALL_ABI_VERSION:
-        raise FixtureError(f"unexpected syscall ABI version {syscall_abi_version}")
+        raise FixtureError(
+            f"unexpected syscall ABI version {syscall_abi_version}"
+        )
     if gas_table_version != GAS_TABLE_VERSION:
         raise FixtureError(f"unexpected gas table version {gas_table_version}")
     if gas_schedule_digest != GAS_SCHEDULE_DIGEST:
@@ -220,7 +232,9 @@ def parse_artifact(path):
     if initial_memory_offset + initial_memory_bytes != len(artifact):
         raise FixtureError("artifact has trailing bytes")
     code = artifact[code_offset:code_offset + code_bytes]
-    memory = artifact[initial_memory_offset:initial_memory_offset + initial_memory_bytes]
+    memory = artifact[
+        initial_memory_offset:initial_memory_offset + initial_memory_bytes
+    ]
     if code_digest != hashlib.sha256(code).digest():
         raise FixtureError("code section digest mismatch")
     if initial_memory_digest != hashlib.sha256(memory).digest():
@@ -236,16 +250,22 @@ def extract_fixture_input(memory, sections, symbols):
         raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} must be an object symbol")
     section = section_for_symbol(symbol, sections)
     if section is None or not section.alloc or section.nobits or section.exec:
-        raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} must resolve to data memory")
+        raise FixtureError(
+            f"{FIXTURE_INPUT_SYMBOL} must resolve to data memory"
+        )
     if symbol.size == 0:
         raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} must have nonzero size")
     if symbol.value + symbol.size > len(memory):
-        raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} exceeds initialized memory")
+        raise FixtureError(
+            f"{FIXTURE_INPUT_SYMBOL} exceeds initialized memory"
+        )
     return symbol.value, memory[symbol.value:symbol.value + symbol.size]
 
 
 def format_array(name, blob):
-    out = [f"inline constexpr std::array<uint8_t, {len(blob)}> {name} = {{"]
+    out = [
+        f"inline constexpr std::array<uint8_t, {len(blob)}> {name} = {{"
+    ]
     for i in range(0, len(blob), 12):
         chunk = ", ".join(f"0x{byte:02x}" for byte in blob[i:i + 12])
         out.append(f"    {chunk},")
@@ -254,6 +274,9 @@ def format_array(name, blob):
 
 
 def write_header(path, artifact, metadata):
+    initial_memory_bytes = metadata["initial_memory_bytes"]
+    sha256_repeated_id = f"0x{SHA256_REPEATED_METHOD_ID:016x}ULL"
+    fixture_input_offset = metadata["fixture_input_offset"]
     body = f"""#pragma once
 
 #include <array>
@@ -262,12 +285,12 @@ def write_header(path, artifact, metadata):
 namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {metadata['memory_bytes']};
-inline constexpr uint32_t kInitialMemoryBytes = {metadata['initial_memory_bytes']};
+inline constexpr uint32_t kInitialMemoryBytes = {initial_memory_bytes};
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
-inline constexpr uint64_t kSha256RepeatedMethodId = 0x{SHA256_REPEATED_METHOD_ID:016x}ULL;
-inline constexpr uint32_t kFixtureInputOffset = {metadata['fixture_input_offset']};
+inline constexpr uint64_t kSha256RepeatedMethodId = {sha256_repeated_id};
+inline constexpr uint32_t kFixtureInputOffset = {fixture_input_offset};
 inline constexpr char kFixtureSha256[] =
     "{metadata['fixture_sha256']}";
 inline constexpr char kElfSha256[] =
@@ -303,7 +326,9 @@ def main():
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
     artifact, code, memory, memory_bytes = parse_artifact(args.artifact)
-    fixture_input_offset, fixture_input = extract_fixture_input(memory, sections, symbols)
+    fixture_input_offset, fixture_input = extract_fixture_input(
+        memory, sections, symbols
+    )
     lowerer_metadata = json.loads(Path(args.lowerer_metadata).read_text())
     fixture_blob = code + memory
     metadata = {
