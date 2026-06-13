@@ -54,7 +54,7 @@ It also surfaced two staleness/ergonomics problems that motivate this design:
 |---|---|---|
 | `groundhog-rv32-artifact` (lib) | groundhog-rpc (`crates/rv32/artifact`) | **Single Rust source of truth** for the artifact format: header constants, writer, validator. |
 | `groundhog-rv32-lower` (lib + bin `rv32-lower`) | groundhog-rpc (alongside CLI build tooling) | The `wasm-opt` analog: `rv32-lower --elf in --out x.rv32a`. Validate ELF layout → package code+memory → hash → write artifact. Depends on `groundhog-rv32-artifact`. (Crate keeps the `groundhog-` prefix; the binary is the short `rv32-lower`, as `groundhog-cli` → `groundhog`.) |
-| `#[contract]` macro + `rv32-runtime` | sdk_rs | Entry symbols, the guest-side dispatcher (see below), and typed syscall wrappers. `_start` routes to the selected method once the method-id-passing mechanism is chosen (open question below) — the `_start` ABI is not yet settled. |
+| `#[contract]` macro + `rv32-runtime` | sdk_rs | Entry symbols, the guest-side dispatcher (see below), and typed syscall wrappers. `_start` routes to the selected method using the v4 ABI: the runtime seeds the invoked method id in `a0`/`a1`. |
 | `groundhog build` (rv32 path) | groundhog-rpc | Convenience orchestration: cargo-build the rv32 bin → call the lowerer library → emit `.rv32a` + the contract spec/metadata it already produces. |
 | VM / artifact loader / dispatch | hogd | Consume side. `artifact.h` pins the format constants in C++ and exposes the matching format fingerprint; hogd's smoke metadata check proves the consumed lowerer/runtime pair agree. |
 
@@ -82,7 +82,7 @@ PC and tells the guest which method was invoked.
 | Symbols | Must retain `.symtab` (the strip issue) | Not needed — strip is fine |
 | Fragility | method→PC depends on linker/codegen layout | None — one fixed entry |
 | Method set visibility | In the artifact | In the contract spec (already emitted by `groundhog build`) |
-| Unknown method | Runtime zero-gas deterministic miss | Must be deterministic; whether it stays a zero-gas host miss or becomes a metered guest outcome is the open production decision — see [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) Decision 2 |
+| Unknown method | Runtime zero-gas deterministic miss | v4 Option A: the guest dispatcher handles the default arm, producing a metered deterministic trap — see [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) Decision 2 |
 | Cross-repo coupling | Dispatch-table format shared 3 ways | Gone |
 
 **Recommendation: adopt guest-side dispatch.** It deletes the single biggest
@@ -145,10 +145,10 @@ RV32_SMOKE_METHOD_ID=0x143934D51BD51575 \
   --gtest_filter='*LoweredSdkArtifactSmoke'
 ```
 
-`CARGO_PROFILE_RELEASE_STRIP=false` is required while v3 lowering discovers
-`_start` and dispatch PCs from the ELF symbol table. The method id above is the
-smoke counter's no-arg `get` entrypoint; calldata-taking methods are still useful
-failure-path smoke checks, but they abort on empty calldata.
+v4 lowering no longer discovers dispatch PCs from `.symtab`, so stripped release
+ELFs are valid lowerer inputs. The method id above is the smoke counter's no-arg
+`get` entrypoint; calldata-taking methods are still useful failure-path smoke
+checks, but they abort on empty calldata.
 
 Convenience:
 
@@ -172,20 +172,19 @@ hogd's RV32 CI/integration smoke to call `groundhog build --target rv32 --json`
 too. At that point the WASM and RV32 contract fixtures share one clean build
 entrypoint, and `rv32-lower` remains the lower-level scriptable escape hatch.
 
-## Open questions (Geoff-owned, runtime side)
+## Settled Runtime Decisions
 
-Questions 1 and 2 below have a proposed resolution in
+Questions 1 and 2 below are resolved by
 [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) (the Phase 3 execution
-contract): method_id passed in `a0`/`a1`, shipped together with a v4 cut that
+contract): method_id is passed in `a0`/`a1`, shipped together with the v4 cut that
 drops the dispatch section. That note also settles the `_start` ABI left
-unsettled in the components table above.
+unsettled in the original components table above.
 
-1. **How does the guest learn the invoked method id?** Cleanest: the runtime
-   drops `method_id` into a register at the entry PC and the SDK-generated
-   `_start` reads it. Alternative: a `get_invoked_method` syscall (more moving
-   parts). Needed before guest-side dispatch can land.
-2. **Artifact v4?** Whether method_id-passing ships together with dropping the
-   dispatch section, or v3 keeps a trivial table in the interim.
+1. **How does the guest learn the invoked method id?** The runtime seeds
+   `method_id` into `a0`/`a1` before entering PC 0, and SDK-generated `_start`
+   reads it.
+2. **Artifact v4?** Method-id passing shipped together with dropping the dispatch
+   section.
 3. **Typed syscall wrappers.** The register-native ABI cannot express a full
    64-bit scalar by value (`MintAuthToken`'s `BlockHeight`, for example), so
    wrappers should pass such values by pointer. The SDK's typed syscall wrappers
