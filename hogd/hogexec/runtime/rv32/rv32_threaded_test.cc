@@ -690,6 +690,16 @@ TEST(Rv32Threaded, ebreakTraps)
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
 }
 
+TEST(Rv32Threaded, unimpTraps)
+{
+  const std::vector<uint32_t> words = {0xc0001073U}; // canonical unimp
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+}
+
 TEST(Rv32Threaded, unimpDecodesToKUnimp)
 {
   // 0xc0001073 is the canonical RISC-V `unimp` word (csrrw x0, cycle, x0).
