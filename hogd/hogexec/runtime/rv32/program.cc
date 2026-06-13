@@ -237,9 +237,9 @@ decode_instruction(uint32_t word)
       instruction.op = Op::kUnimp;
       return decoded(instruction);
     }
-    // ECALL and EBREAK are the only accepted SYSTEM instructions. CSR,
-    // privileged, and environment-return forms are rejected before a Program
-    // can be created.
+    // ECALL, EBREAK, and canonical UNIMP are the accepted SYSTEM instructions.
+    // CSR, privileged, and environment-return forms are rejected before a
+    // Program can be created.
     return unsupported(ProgramError::kUnsupportedSystemInstruction);
   default:
     return unsupported(ProgramError::kUnsupportedInstruction);
