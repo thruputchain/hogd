@@ -185,6 +185,8 @@ def parse_artifact(path):
     initial_memory_bytes = header[11]
     code_offset = header[12]
     initial_memory_offset = header[13]
+    code_digest = header[14]
+    initial_memory_digest = header[15]
     if magic != ARTIFACT_MAGIC:
         raise FixtureError("artifact has wrong magic")
     if format_version != ARTIFACT_FORMAT_VERSION:
@@ -219,6 +221,10 @@ def parse_artifact(path):
         raise FixtureError("artifact has trailing bytes")
     code = artifact[code_offset:code_offset + code_bytes]
     memory = artifact[initial_memory_offset:initial_memory_offset + initial_memory_bytes]
+    if code_digest != hashlib.sha256(code).digest():
+        raise FixtureError("code section digest mismatch")
+    if initial_memory_digest != hashlib.sha256(memory).digest():
+        raise FixtureError("initial memory section digest mismatch")
     return artifact, code, memory, memory_bytes
 
 

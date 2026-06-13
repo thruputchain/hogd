@@ -1,9 +1,9 @@
 # RV32 Author Toolchain: Lowerer, Build, and Dispatch
 
-Status: proposal / decision record. Drafted 2026-05-29 off the `counter-rv32`
-spike and the landing of the register-native syscall ABI (groundhog-xdr 0.14.x,
-hogd PRs #2411 / #2417 and the `rv32: switch syscall bridge to register-native`
-work).
+Status: landed decision record. Drafted 2026-05-29 off the `counter-rv32` spike
+and the landing of the register-native syscall ABI (groundhog-xdr 0.14.x, hogd
+PRs #2411 / #2417 and the `rv32: switch syscall bridge to register-native`
+work); updated after v4 guest-side dispatch landed.
 
 This note answers the **"Production SDK lowerer design"** gate that
 [rv32-cpp-ownership-review.md](rv32-cpp-ownership-review.md) lists as still open,
@@ -18,8 +18,9 @@ The spike proved minimal viability end to end:
   builds for `riscv32im-unknown-none-elf`.
 - The `#[contract]` macro emits each entrypoint as `#[export_name = "<16-HEX>"]`
   + `#[link_section = ".text.gh_<16-HEX>"]` on rv32.
-- The original `scripts/rv32_lower.py` lowered that ELF to a valid v3 artifact
-  with all four dispatch entries resolved to PCs.
+- The original `scripts/rv32_lower.py` lowered that ELF to a legacy v3-format artifact
+  with all four dispatch entries resolved to PCs. Current artifacts are v4 and
+  use guest-side dispatch instead of a dispatch section.
 - hogd's `LoweredSdkArtifactSmoke` test
   (`rv32_runtime_context_test.cc`) parses such a lowered artifact and invokes its
   lowest-ID dispatch entry through `root_invoke()` — so the VM-side path exists.
@@ -66,37 +67,37 @@ format/lowering implementation is focused and reusable: a library for
 `groundhog build`, plus a standalone `rv32-lower` binary for scripts and direct
 interop checks.
 
-## Dispatch: adopt guest-side dispatch (Geoff)
+## Dispatch: guest-side dispatch (landed)
 
-The current mechanism (M4) is **runtime-side artifact dispatch**: the lowerer
-scans `.symtab` for the `16-HEX` entrypoint symbols, builds a method-id → PC
-table into the artifact, and the runtime validates it and selects the entry PC.
+The old M4 mechanism used a **runtime-side table**: the lowerer scanned
+`.symtab` for the `16-HEX` entrypoint symbols, built a method-id → PC table into
+the artifact, and the runtime validated it and selected the entry PC.
 
-The proposal is **guest-side dispatch**: the contract carries its own
-`match method_id { … }` switch behind a single entry; the runtime enters at one
-PC and tells the guest which method was invoked.
+The landed v4 mechanism is **guest-side dispatch**: the contract carries its own
+`match method_id { … }` switch behind a single entry; the runtime enters at PC 0
+and tells the guest which method was invoked through `a0`/`a1`.
 
-| | Runtime-side table (today) | Guest-side switch (proposed) |
+| | Runtime-side table (old v3) | Guest-side switch (current v4) |
 |---|---|---|
 | Lowerer | Scans symbols, builds + commits a dispatch table | Validate + package + hash only |
 | Symbols | Must retain `.symtab` (the strip issue) | Not needed — strip is fine |
 | Fragility | method→PC depends on linker/codegen layout | None — one fixed entry |
 | Method set visibility | In the artifact | In the contract spec (already emitted by `groundhog build`) |
-| Unknown method | Runtime zero-gas deterministic miss | v4 Option A: the guest dispatcher handles the default arm, producing a metered deterministic trap — see [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) Decision 2 |
+| Unknown method | Runtime host-side miss before guest execution | The guest dispatcher handles the default arm, producing a metered deterministic trap — see [rv32-guest-dispatch-v4.md](rv32-guest-dispatch-v4.md) Decision 2 |
 | Cross-repo coupling | Dispatch-table format shared 3 ways | Gone |
 
-**Recommendation: adopt guest-side dispatch.** It deletes the single biggest
-source of lowerer complexity, makes the standalone tool `wasm-opt`-sized, and
-removes the dispatch-table cross-repo contract. The "method set must be readable
-from the artifact" argument for the table evaporates because `groundhog build`
-already emits the spec/manifest; indexers read the spec, not the artifact.
+Guest-side dispatch deleted the single biggest source of lowerer complexity,
+makes the standalone tool `wasm-opt`-sized, and removes the dispatch-table
+cross-repo contract. The "method set must be readable from the artifact"
+argument for the table evaporates because `groundhog build` already emits the
+spec/manifest; indexers read the spec, not the artifact.
 
 Divergence from WASM (named-export dispatch) is acceptable: parity tests compare
 host-visible *outcomes*, not the dispatch mechanism.
 
 The one non-negotiable: the macro-generated dispatcher must be provably
-deterministic on unknown ids (abort or return an error code, never panic/trap),
-since it now owns the unknown-method path the runtime used to guarantee.
+deterministic on unknown ids, producing the agreed metered deterministic trap
+instead of a runtime-side zero-gas miss.
 
 ## Artifact format: the load-bearing contract
 
@@ -192,7 +193,7 @@ unsettled in the original components table above.
 ## Sequencing
 
 - **Phase 0 — done in spike:** rv32 build, entry symbols, python lowering to a
-  valid v3 artifact (header now correct after the local `syscall_abi 0→1` fix),
+  valid legacy v3-format artifact (since replaced by v4 guest-dispatch artifacts),
   and execution through the `LoweredSdkArtifactSmoke` harness (parse + invoke
   first dispatch entry). Still open: running it with real calldata and plumbing a
   CI-built artifact instead of the `RV32_SMOKE_ARTIFACT` env var.
@@ -209,7 +210,7 @@ unsettled in the original components table above.
   `artifact.h` remains the cross-repo guard.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `built_contracts/build_risc.sh`, which wraps
-  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.6`;
+  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.5.7`;
   `scripts/rv32_lower.py` was deleted. One supported implementation from here
   on. The runtime smoke now builds its generated SDK artifact from the
   `rv32_smoke_counter` fixture in the `built_contracts/integration_test_contracts`

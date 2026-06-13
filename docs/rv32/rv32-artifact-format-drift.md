@@ -7,7 +7,7 @@ cross-check that keeps hogd's `artifact.h` and the Rust artifact crate's
 
 ## Problem
 
-The RV32 **v3 artifact format** is defined twice:
+The RV32 **v4 artifact format** is defined twice:
 
 - **C++** — `hogd/hogexec/runtime/rv32/artifact.h`: the constants, field
   offsets, and validation the runtime applies when it parses an artifact.
@@ -17,12 +17,12 @@ The RV32 **v3 artifact format** is defined twice:
 The two are kept in sync **by hand**. Nothing stops them drifting: bump an
 offset, an ABI version, or a max size on one side and the mismatch only surfaces
 later as an artifact that mysteriously fails to load (or, worse, loads when it
-should not). We want any v3 drift to be **intentional and visible** — caught at
+should not). We want any v4 drift to be **intentional and visible** — caught at
 build time, on the machine of whoever changed it.
 
-This is not about freezing v3. When v4 lands (method_id-passing, dropping the
-dispatch section), re-pinning the fingerprint simply *becomes part of the format
-bump* — which is exactly the friction we want.
+This is not about freezing v4. When a future format lands, re-pinning the
+fingerprint simply *becomes part of the format bump* — which is exactly the
+friction we want.
 
 ## Goal / non-goals
 
@@ -31,7 +31,7 @@ that fails the build when they disagree, plus a cross-repo proof that the two
 fingerprints actually match — not just that two hand-copied literals are equal.
 
 **Non-goals.**
-- Not freezing or versioning-up the format (no v4 work here).
+- Not freezing or versioning-up the format.
 - Not the crate extraction itself — that is the follow-up slice, de-risked by
   this one (see Sequencing).
 - Not generating one definition from the other (codegen was considered and
@@ -63,9 +63,9 @@ Hash **named fields in a fixed order with explicit little-endian encoding** —
 never C++ struct bytes (padding/layout would never match Rust). Fold via FNV-1a,
 identical algorithm both sides, mirroring `gas_schedule_digest()`.
 
-Prefix the fold with a **domain string**: `groundhog.rv32.artifact.format.v3`.
+Prefix the fold with a **domain string**: `groundhog.rv32.artifact.format.v4`.
 This namespaces the digest (no semantic collision with other FNV digests) and
-makes the version explicit — when v4 arrives the prefix bumps to `.v4` *and* the
+makes the version explicit — when the next format arrives the prefix bumps *and* the
 constants change, so the version shift double-signals.
 
 ### 2. What gets folded — an objective rule
@@ -73,23 +73,19 @@ constants change, so the version shift double-signals.
 Fold **exactly what `artifact.cc` validates at load**, in a fixed field order:
 
 - magic (`GHRV32A1`)
-- format version (3)
-- header size (172)
+- format version (4)
+- header size (132)
 - vm-profile digest
 - flags policy (currently: flags must be 0)
-- entry ABI version (1)
+- entry ABI version (2)
 - syscall ABI version (1)
-- gas-table version (2) and gas-schedule digest
+- gas-table version (3) and gas-schedule digest
 - every header field offset and size (the `kArtifact*Offset` set)
 - section digest algorithm (SHA-256) and digest size (32)
-- dispatch-entry size/layout (16)
-- max code / memory / dispatch sizes
+- max code / memory sizes
 - policy invariants the loader enforces: flags required value = 0, canonical
-  section order (`header | code | dispatch | initial_memory`), no gaps/trailing
-  bytes, full-memory image (`initial_memory_size == memory_bytes`), non-empty
-  dispatch table, dispatch size multiple of entry size, reserved dispatch field
-  = 0, strictly increasing method ids, valid/aligned dispatch PCs, and
-  `instruction_bytes = 4`
+  section order (`header | code | initial_memory`), no gaps/trailing bytes,
+  `initial_memory_size <= memory_bytes`, and `instruction_bytes = 4`
 
 **Explicitly excluded:** metadata-only provenance fields that the runtime never
 inspects — `rustc_version`, `build_flags`, `target_triple`. Folding those would
@@ -99,7 +95,7 @@ The "what `artifact.cc` validates" rule is the source of truth for the set, so
 the field list is auditable rather than hand-curated by taste.
 
 *Implementation note:* the Rust writer currently derives offsets implicitly
-(`code_offset = HEADER_BYTES`, `dispatch_offset = code_offset + code.len()`,
+(`code_offset = HEADER_BYTES`, `initial_memory_offset = code_offset + code.len()`,
 …) and has no named offset constants. Folding the layout forces writing the
 field table down explicitly in Rust, in the same order as the C++ side. Small
 work, net-positive legibility.

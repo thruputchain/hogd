@@ -367,8 +367,9 @@ capture(const Ctx c)
   return s;
 }
 
-// A barrier ends a gas run: it transfers control (branches/jumps/ecall/ebreak),
-// so the run can't be pre-charged past it (the continuation isn't known). Its
+// A barrier ends a gas run: it transfers control
+// (branches/jumps/ecall/ebreak/unimp), so the run can't be pre-charged past it
+// (the continuation isn't known). Its
 // gas is charged individually. Loads/stores are NOT barriers: they're
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
 // already paid the run's gas (block-granular metering, like the wasm engines).

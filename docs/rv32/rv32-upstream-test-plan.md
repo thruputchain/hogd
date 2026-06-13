@@ -58,7 +58,8 @@ Acceptance criteria:
       mapping are exercised for successful pass paths.
 - [x] Synthetic pass/fail behavior maps to deterministic runtime
       success/failure.
-- [x] No production `ContractType::kRv32` selector is introduced.
+- [x] Phase 1 originally avoided a production `ContractType::kRv32` selector;
+      later deployment work superseded this with the kRv32 runtime path.
 - [ ] Compiled/lowered upstream pass/fail behavior maps to deterministic
       runtime success/failure.
 
