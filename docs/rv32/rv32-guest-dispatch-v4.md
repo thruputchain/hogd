@@ -378,8 +378,8 @@ matching versions.
    - *groundhog-rpc:* artifact crate v4 (chosen variant, re-pin fingerprint,
      update static asserts/tests); thin the lowerer to validate-via-`e_entry` +
      package + hash; accept stripped builds.
-    - *hogd:* continue drift cleanup around strip/build comments and expand SDK
-      fixture coverage as new contract shapes land.
+   - *hogd:* continue drift cleanup around strip/build comments and expand SDK
+     fixture coverage as new contract shapes land.
 4. **Real-calldata smoke (hogd, closes author-toolchain Phase 0/4):** build with
    `groundhog build --target rv32`, generate the trait header from `.spec.json`,
    and from a native driver call `increment(7)` then assert `get() == 7`. Add:
