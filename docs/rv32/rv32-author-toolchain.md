@@ -118,10 +118,9 @@ magic `GHRV32A1`, 132-byte header, format version 4, entry ABI 2, syscall ABI 1,
 gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory sections.
 
-If guest-side dispatch lands, the dispatch section + its commitment become
-vestigial; either keep a trivial single-entry table under v3 for now or have hogd
-cut a **v4** that drops the section. Keep the gas/profile digest discipline intact
-through any bump.
+Guest-side dispatch has landed in the v4 format surface: the runtime seeds the
+method id in `a0`/`a1`, and the dispatch section + commitment were removed. Keep
+the gas/profile digest discipline intact through future bumps.
 
 ## Build flow (the two paths)
 

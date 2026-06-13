@@ -48,9 +48,12 @@ static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
 ```
 
 and `format.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0x9183_17c2_1c46_bb60`).
-`gas_schedule_digest()` folds **named values** (versions, op costs, name
-strings) via FNV-1a with explicit encoding — it never hashes raw struct bytes.
-We generalize that idiom from "the gas schedule" to "the whole format."
+For the gas-table v3 bump, the Rust side is the `groundhog-rv32-lower` 0.5.7 /
+`groundhog-rv32-artifact` crate release, which also pins
+`FORMAT_FINGERPRINT = 0x3aed_0191_5d1a_5e1d`. `gas_schedule_digest()` folds
+**named values** (versions, op costs, name strings) via FNV-1a with explicit
+encoding — it never hashes raw struct bytes. We generalize that idiom from "the
+gas schedule" to "the whole format."
 
 ## Design
 

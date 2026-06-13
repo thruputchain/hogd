@@ -1183,6 +1183,8 @@ handler_for(Op op)
     // dispatch straight to trap_at (it has the handler signature).
     return &trap_at<Trace, Trap::kBreakpoint>;
   case Op::kUnimp:
+    // unimp's gas is charged at the run head; the handler is a pure trap, so
+    // dispatch straight to trap_at (it has the handler signature).
     return &trap_at<Trace, Trap::kInvalidInstruction>;
   case Op::kEcall:
     return &op_ecall<Trace>;
