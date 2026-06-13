@@ -733,7 +733,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   info("schedule(), total schedule time is {}", total_schedule_time);
   record_stage(stage_schedule_loop);
 
-  cache.failed_txs.clear();
+  cache.failed_tx_hashes.clear();
   size_t num_tx_outcomes_processed = 0;
   // We need to remove failed txs from [cache.txs], so we use [tx_write_idx] to
   // track where to overwrite successful txs to in [cache.txs]. We do a single
@@ -756,7 +756,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
         tx_write_idx++;
       }
       else {
-        cache.failed_txs.push_back(std::move(cache.txs[tx_idx]));
+        cache.failed_tx_hashes.push_back((cache.tx_hashes[tx_idx]));
       }
     }
     num_tx_outcomes_processed = handle_end_indices[handle_idx];
@@ -1082,7 +1082,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   nomination_telemetry.nominated_tx_count =
       nominated_block_cache_.result_tx_hashes.size();
   nomination_telemetry.failed_tx_count =
-      nominated_block_cache_.failed_txs.size();
+      nominated_block_cache_.failed_tx_hashes.size();
   nominated_block_cache_.db_tip = DbTip{
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
@@ -1843,7 +1843,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // Importantly, this logic must only look at txs that actually made it into
   // the nominated block. [nominated_block_cache_.tx_hashes] includes every tx
   // we attempted during scheduling, including txs that later failed proposal
-  // and were re-added to the scheduler via [failed_txs].
+  // and were re-added to the scheduler via [failed_tx_hashes].
   static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
       return_to_runqueue;
   return_to_runqueue.clear();
@@ -1853,7 +1853,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // The committed block is the block we nominated.
     remove_from_scheduler = &nominated_block_cache_.result_tx_hashes;
     // We do *not* add the failed txs back (in
-    // [nominated_block_cache_.failed_txs]).
+    // [nominated_block_cache_.failed_tx_hashes]).
   }
   else {
     // The committed block is a block we validated.
@@ -1865,8 +1865,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                 nominated_block_cache_.result_tx_hashes.end());
       // We also return the failed txs. A future block may want to use these
       // txs. e.g., maybe a validation block uses them.
-      return_to_runqueue.insert(nominated_block_cache_.failed_txs.begin(),
-                                nominated_block_cache_.failed_txs.end());
+      return_to_runqueue.insert(nominated_block_cache_.failed_tx_hashes.begin(),
+                                nominated_block_cache_.failed_tx_hashes.end());
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id == block_id) {
