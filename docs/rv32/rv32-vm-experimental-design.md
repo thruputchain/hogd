@@ -58,9 +58,12 @@ Instruction gas is a fixed constexpr table in `program.h`:
 - divide/remainder ops: `8`
 
 `kGasScheduleDigest` now covers both RV32 instruction costs and the live host
-syscall costs from `gas_cost_table.h`. `kGasTableVersion` is `2` after admitting
-`EBREAK` as a deterministic breakpoint trap; protocol activation must treat
-digest-affecting changes as version bumps.
+syscall costs from `gas_cost_table.h`. `kGasTableVersion` is `3` after admitting
+the canonical `unimp` word (`0xc0001073`) as a deterministic invalid-instruction
+trap (version `2` admitted `EBREAK` as a deterministic breakpoint trap); the
+accepted SYSTEM instructions are exactly `ECALL`, `EBREAK`, and canonical
+`UNIMP`. Protocol activation must treat digest-affecting changes as version
+bumps.
 
 `ecall` charges instruction gas first. Reported host gas is debited in
 `Machine::complete_ecall` before committing `a0`, halt state, trap state, or

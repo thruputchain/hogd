@@ -1,6 +1,6 @@
 {
   "artifact_bytes": 555,
-  "artifact_sha256": "d80a07dc68d258601408a363d42e366a98c7cbcfbe0ef7e94b0944dc74d77723",
+  "artifact_sha256": "de9b8a61a7c1fed50872b75ee7e6b91926c23918fba347dc63dd4d8163075bc3",
   "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
   "code_bytes": 208,
   "code_sha256": "4a83cf81f494f32d4374e8dbb24e62585f899f30804c66188e6b141a903949c0",
@@ -12,7 +12,7 @@
   "initial_memory_bytes": 215,
   "initial_memory_sha256": "45ef90c4d9f1c122e900b4b122467002c01f42769b140e5e01a234f4c6c5cd36",
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
-  "lowering_tool_sha256": "18b370c44396c1c3c1a3119f7367bb85dab9a2802a5ce2e51c67e26ccd095ecd",
+  "lowering_tool_sha256": "357197fa55f10299b9887c512750bf97422544ea31ce27ddea14aa8bd514c19c",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
