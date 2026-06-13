@@ -76,11 +76,12 @@ struct alignas(16) Slot {
     } rb;
   };
 };
+static_assert(sizeof(Slot) == 16);
+static_assert(alignof(Slot) == 16);
 // Immutable, decode-once form of a contract: the baked Slot handler array plus
 // the initial memory image (the contract's seeded bytes zero-padded out to
 // total_memory_size). Shared across ThreadedMachine instantiations -- each
-// machine copies the image into its own memory_ at construction/reset, so the
-// decode and the zero-fill happen once here rather than per invocation.
+// machine copies the full image into its own memory_ at construction/reset.
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
@@ -413,22 +414,26 @@ is_barrier(Op op)
 // the retired step first. `Trace` is the enclosing handler's template
 // parameter.
 #define HOGD_THREAD_NEXT(c, next)                                              \
-  if constexpr (Trace) {                                                       \
-    (c).m->gas_remaining_ = gas;                                               \
-    (c).m->pc_ = pc_of((c), (next));                                           \
-    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
-  }                                                                            \
-  HOGD_MUSTTAIL return (next)->handler((c), (next), mem, memsize, gas)
+  do {                                                                         \
+    if constexpr (Trace) {                                                     \
+      (c).m->gas_remaining_ = gas;                                             \
+      (c).m->pc_ = pc_of((c), (next));                                         \
+      (c).m->obs_->on_retire(capture(c), StepResult::kContinue);               \
+    }                                                                          \
+    HOGD_MUSTTAIL return (next)->handler((c), (next), mem, memsize, gas);      \
+  } while (false)
 
 // Tail-dispatch that *starts a new run* at `next` (after a barrier): record the
 // retired step (traced), then enter_run charges the new run's gas.
 #define HOGD_ENTER_RUN(c, next)                                                \
-  if constexpr (Trace) {                                                       \
-    (c).m->gas_remaining_ = gas;                                               \
-    (c).m->pc_ = pc_of((c), (next));                                           \
-    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
-  }                                                                            \
-  HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize, gas)
+  do {                                                                         \
+    if constexpr (Trace) {                                                     \
+      (c).m->gas_remaining_ = gas;                                             \
+      (c).m->pc_ = pc_of((c), (next));                                         \
+      (c).m->obs_->on_retire(capture(c), StepResult::kContinue);               \
+    }                                                                          \
+    HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize, gas);     \
+  } while (false)
 
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
 // a template parameter (compile-time literal at every call site). Its signature
@@ -522,22 +527,6 @@ sltu_op(uint32_t a, uint32_t b)
 {
   return a < b ? 1U : 0U;
 }
-inline uint32_t
-mul_op(uint32_t a, uint32_t b)
-{
-  return static_cast<uint32_t>(uint64_t{a} * uint64_t{b});
-}
-inline uint32_t
-divu_op(uint32_t a, uint32_t b)
-{
-  return b == 0 ? std::numeric_limits<uint32_t>::max() : a / b;
-}
-inline uint32_t
-remu_op(uint32_t a, uint32_t b)
-{
-  return b == 0 ? a : a % b;
-}
-
 // --- Non-barrier handlers: no gas work (the run was pre-charged) ------------
 
 template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
@@ -1154,7 +1143,7 @@ handler_for(Op op)
   case Op::kAnd:
     return &op_rr<Trace, and_op>;
   case Op::kMul:
-    return &op_rr<Trace, mul_op>;
+    return &op_rr<Trace, mul_low>;
   case Op::kMulh:
     return &op_rr<Trace, mulh>;
   case Op::kMulhsu:
@@ -1164,11 +1153,11 @@ handler_for(Op op)
   case Op::kDiv:
     return &op_rr<Trace, div_signed>;
   case Op::kDivu:
-    return &op_rr<Trace, divu_op>;
+    return &op_rr<Trace, div_unsigned>;
   case Op::kRem:
     return &op_rr<Trace, rem_signed>;
   case Op::kRemu:
-    return &op_rr<Trace, remu_op>;
+    return &op_rr<Trace, rem_unsigned>;
   case Op::kLb:
     return &op_load<Trace, 1, true>;
   case Op::kLh:

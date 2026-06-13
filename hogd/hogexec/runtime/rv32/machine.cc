@@ -4,7 +4,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
-#include <limits>
 #include <memory>
 #include <span>
 #include <utility>
@@ -518,9 +517,8 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kMul:
-    write_reg(instruction.rd,
-              static_cast<uint32_t>(uint64_t{registers_[instruction.rs1]} *
-                                    uint64_t{registers_[instruction.rs2]}));
+    write_reg(instruction.rd, mul_low(registers_[instruction.rs1],
+                                      registers_[instruction.rs2]));
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kMulh:
@@ -544,10 +542,8 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kDivu:
-    write_reg(instruction.rd,
-              registers_[instruction.rs2] == 0
-                  ? std::numeric_limits<uint32_t>::max()
-                  : registers_[instruction.rs1] / registers_[instruction.rs2]);
+    write_reg(instruction.rd, div_unsigned(registers_[instruction.rs1],
+                                           registers_[instruction.rs2]));
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kRem:
@@ -556,10 +552,8 @@ Machine::execute(const DecodedInstruction &instruction)
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kRemu:
-    write_reg(instruction.rd,
-              registers_[instruction.rs2] == 0
-                  ? registers_[instruction.rs1]
-                  : registers_[instruction.rs1] % registers_[instruction.rs2]);
+    write_reg(instruction.rd, rem_unsigned(registers_[instruction.rs1],
+                                           registers_[instruction.rs2]));
     pc_ = pc_next;
     return StepResult::kContinue;
   case Op::kFence:
