@@ -488,7 +488,7 @@ IndexDB::consume_events(BlockHeight block_height,
     // immutable history; skip it entirely.  Benign for byte-identical
     // retries; anything else is an upstream bug.
     std::lock_guard g(ingest_mutex_);
-    if (height_seen_locked(static_cast<int64_t>(block_height))) {
+    if (height_seen(static_cast<int64_t>(block_height), g)) {
       warn("consume_events: ignoring duplicate ingest for block {}",
            static_cast<int64_t>(block_height));
       return {};
@@ -730,7 +730,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // never lead it.
   {
     std::lock_guard g(ingest_mutex_);
-    record_height_locked(static_cast<int64_t>(block_height));
+    record_height(static_cast<int64_t>(block_height), g);
   }
 
   auto end_ts = x23::fastclock::get_ns();
@@ -741,7 +741,7 @@ IndexDB::consume_events(BlockHeight block_height,
 }
 
 bool
-IndexDB::height_seen_locked(int64_t h) const
+IndexDB::height_seen(int64_t h, std::lock_guard<std::mutex> const & /*g*/) const
 {
   const int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
   return (latest != kNoBlocksIndexed && h <= latest) ||
@@ -749,14 +749,14 @@ IndexDB::height_seen_locked(int64_t h) const
 }
 
 void
-IndexDB::record_height_locked(int64_t h)
+IndexDB::record_height(int64_t h, std::lock_guard<std::mutex> const &g)
 {
   // Re-check under the same lock: the pre-ingest seen() check and
   // this record are separate critical sections, so a concurrent
   // ingest of the same height can have recorded it in between.
   // Without this guard the duplicate would land in pending_heights_
   // below the watermark and permanently block the drain loop.
-  if (height_seen_locked(h)) {
+  if (height_seen(h, g)) {
     warn("consume_events: block {} was recorded concurrently; skipping", h);
     return;
   }

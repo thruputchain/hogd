@@ -159,14 +159,14 @@ private:
   void initialize_highest_block_from_db();
 
   // True iff `h` is at or below the contiguous watermark or buffered
-  // in pending_heights_.  Caller holds ingest_mutex_.
-  bool height_seen_locked(int64_t h) const;
+  // in pending_heights_.  The guard evidences ingest_mutex_ is held.
+  bool height_seen(int64_t h, std::lock_guard<std::mutex> const &g) const;
 
   // Record an ingested height: advance the contiguous watermark
   // (draining newly-contiguous pending heights, persisting the meta
-  // key) or buffer an out-of-order height.  Caller holds
-  // ingest_mutex_.
-  void record_height_locked(int64_t h);
+  // key) or buffer an out-of-order height.  The guard evidences
+  // ingest_mutex_ is held.
+  void record_height(int64_t h, std::lock_guard<std::mutex> const &g);
 
   std::unique_ptr<rocksdb::DB, RocksDBDeleter> db_;
   rocksdb::ColumnFamilyHandle *tx_cf_handle_;
