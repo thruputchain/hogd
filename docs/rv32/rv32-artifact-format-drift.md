@@ -44,10 +44,10 @@ fingerprints actually match — not just that two hand-copied literals are equal
 
 ```cpp
 inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest(); // FNV-1a fold
-static_assert(kGasScheduleDigest == 0xebe53dceea581d0cULL);
+static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
 ```
 
-and `format.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0xebe5_3dce_ea58_1d0c`).
+and `format.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0x9183_17c2_1c46_bb60`).
 `gas_schedule_digest()` folds **named values** (versions, op costs, name
 strings) via FNV-1a with explicit encoding — it never hashes raw struct bytes.
 We generalize that idiom from "the gas schedule" to "the whole format."

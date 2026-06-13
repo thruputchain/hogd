@@ -115,7 +115,7 @@ visible while the implementation remains duplicated across languages.
 
 Current v3 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 172-byte header, format version 3, entry ABI 1, syscall ABI 1,
-gas table version 2 + gas-schedule digest `0xEBE53DCEEA581D0C`, VM-profile digest
+gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory / dispatch
 sections.
 
@@ -213,7 +213,7 @@ unsettled in the components table above.
   `artifact.h` remains the cross-repo guard.
 - **Phase 2 — hogd producer switched (2026-05-30):** hogd's manual smoke-test
   producer now uses `built_contracts/build_risc.sh`, which wraps
-  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.4.6`;
+  `scripts/rv32_make_smoke_artifact.sh` and requires exactly `rv32-lower 0.5.7`;
   `scripts/rv32_lower.py` was deleted. One supported implementation from here
   on. The runtime smoke now builds its generated SDK artifact from the
   `rv32_smoke_counter` fixture in the `built_contracts/integration_test_contracts`

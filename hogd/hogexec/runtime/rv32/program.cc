@@ -232,9 +232,18 @@ decode_instruction(uint32_t word)
       instruction.op = Op::kEbreak;
       return decoded(instruction);
     }
-    // ECALL and EBREAK are the only accepted SYSTEM instructions. CSR,
-    // privileged, and environment-return forms are rejected before a Program
-    // can be created.
+    if (word == 0xc0001073U) {
+      // Canonical `unimp` (csrrw x0, cycle, x0): the toolchain-standard trap
+      // encoding (rustc -Cpanic=immediate-abort, clang __builtin_trap). It
+      // decodes to a deterministic illegal-instruction trap. Only this exact
+      // word is admitted.
+      instruction.kind = InstructionKind::kUnimp;
+      instruction.op = Op::kUnimp;
+      return decoded(instruction);
+    }
+    // ECALL, EBREAK, and canonical UNIMP are the only accepted SYSTEM
+    // instructions. All other CSR, privileged, and environment-return forms
+    // are rejected before a Program can be created.
     return unsupported(ProgramError::kUnsupportedSystemInstruction);
   default:
     return unsupported(ProgramError::kUnsupportedInstruction);
