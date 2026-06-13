@@ -263,8 +263,9 @@ TEST(Rv32ContractTest, VerifyRejectsRunGasOverflow)
   const std::vector<uint32_t> words(
       kOverflowingDivCount,
       rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
+  const std::vector<uint8_t> initial_memory{0};
   const std::vector<uint8_t> artifact =
-      rv32::test_artifact::build_artifact(words, std::span<const uint8_t>{});
+      rv32::test_artifact::build_artifact(words, initial_memory);
 
   ContractBlob blob;
   blob.data.append_range(artifact);
