@@ -682,22 +682,34 @@ TEST(Rv32Threaded, fusedLoadFeedsImmArith)
 
 TEST(Rv32Threaded, ebreakTraps)
 {
-  const std::vector<uint32_t> words = {0x00100073U}; // ebreak
+  // ebreak followed by an addi. ebreak is a barrier, so its run's gas_to_run
+  // is only its own gas (kBaseInstructionGas=1); the addi's gas must NOT be
+  // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
+  // If ebreak were not a barrier, gas_to_run would be 2 (ebreak+addi) and
+  // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kEbreak).
+  const std::vector<uint32_t> words = {0x00100073U, addi(1, 0, 1)}; // ebreak, addi x1,x0,1
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+  EXPECT_EQ(machine.gas_remaining(), 99U); // only ebreak's own gas charged
 }
 
 TEST(Rv32Threaded, unimpTraps)
 {
-  const std::vector<uint32_t> words = {0xc0001073U}; // canonical unimp
+  // unimp followed by an addi. unimp is a barrier, so its run's gas_to_run
+  // is only its own gas (kBaseInstructionGas=1); the addi's gas must NOT be
+  // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
+  // If unimp were not a barrier, gas_to_run would be 2 (unimp+addi) and
+  // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kUnimp).
+  const std::vector<uint32_t> words = {0xc0001073U, addi(1, 0, 1)}; // unimp, addi x1,x0,1
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(machine.gas_remaining(), 99U); // only unimp's own gas charged
 }
 
 TEST(Rv32Threaded, unimpDecodesToKUnimp)
