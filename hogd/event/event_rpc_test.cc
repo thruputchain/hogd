@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -11,6 +12,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
@@ -57,7 +59,7 @@ TEST_F(EventRpcTest, BasicUsage)
 
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
             RPCError::kRPCNone);
-  EXPECT_NE(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestAbandonBlock)
@@ -81,6 +83,7 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(mempool_rpc.eventsched_close_block(1, 1)().error(),
             RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(1)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestFromRPC)
@@ -112,6 +115,7 @@ TEST_F(EventRpcTest, TestFromRPC)
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_commit_block(0), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv4Bind)
@@ -136,6 +140,7 @@ TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv4Bind)
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_commit_block(0), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv6Bind)
@@ -164,6 +169,7 @@ TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv6Bind)
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_commit_block(0), RPCError::kRPCNone);
 }
 
 // Test multiple executors with proper reference counting
@@ -323,7 +329,70 @@ TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
 
     auto result = mempool_rpc.eventsched_close_block(block_id, block_id)();
     EXPECT_EQ(result.error(), RPCError::kRPCNone);
+    EXPECT_EQ(mempool_rpc.eventsched_commit_block(block_id)(),
+              RPCError::kRPCNone);
   }
+}
+
+TEST_F(EventRpcTest, AbandonActiveBlockDeletesTempFile)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+
+  auto temp_file = EventBlockContext::temp_events_filename(temp_dir(), 1);
+  EXPECT_TRUE(std::filesystem::exists(temp_file));
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+}
+
+TEST_F(EventRpcTest, AbandonClosedBlockDeletesFinalFile)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  auto result = mempool_rpc.eventsched_close_block(1, 1)();
+  EXPECT_EQ(result.error(), RPCError::kRPCNone);
+
+  auto final_file =
+      EventBlockContext::final_events_filename(temp_dir(), result.root_hash());
+  auto temp_file = EventBlockContext::temp_events_filename(temp_dir(), 1);
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_FALSE(std::filesystem::exists(final_file));
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+}
+
+TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  auto result = mempool_rpc.eventsched_close_block(1, 1)();
+  EXPECT_EQ(result.error(), RPCError::kRPCNone);
+
+  auto final_file =
+      EventBlockContext::final_events_filename(temp_dir(), result.root_hash());
+
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(1)(), RPCError::kRPCNone);
+  EXPECT_TRUE(std::filesystem::exists(final_file));
 }
 
 } // namespace hogd

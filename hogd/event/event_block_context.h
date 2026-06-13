@@ -103,6 +103,20 @@ public:
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
+  x23::Async<void> wait_file_done();
+  void delete_events_file();
+
+  void set_block_height(BlockHeight h)
+  {
+    CHECK_EQ(block_height_, -1);
+    block_height_ = h;
+  }
+  BlockHeight block_height() const
+  {
+    CHECK_NE(block_height_, -1);
+    return block_height_;
+  }
+
   x23::Async<void> await_abandon();
   x23::Async<bool> is_abandoned()
   {
@@ -191,6 +205,10 @@ private:
   x23::CoroFutex<bool> all_executors_closed_ = false;
 
   x23::UniqueFd events_file_;
+  BlockHeight block_height_ = -1;
+  SHA256Hash root_hash_{};
+  bool has_root_hash_ = false;
+  x23::CoroFutex<bool> file_done_ = false;
 };
 
 } // namespace hogd

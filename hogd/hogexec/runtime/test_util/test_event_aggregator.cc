@@ -21,7 +21,7 @@ TestEventAggregator::open_block(BlockID block_id)
   info("Opening block {}", block_id);
   x23::CoroGuard guard;
   co_await guard(lock_);
-  block_refcounts_[block_id]++;
+  block_states_[block_id] = BlockState::kActive;
   co_return RPCError::kRPCNone;
 }
 
@@ -45,22 +45,37 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 
   x23::CoroGuard guard;
   co_await guard(lock_);
-  if (!block_refcounts_.contains(block_id)) {
+  auto it = block_states_.find(block_id);
+  if (it == block_states_.end() || it->second != BlockState::kActive) {
     error("Block {} is not open", block_id);
     co_return EventBlockResult(RPCError::kRPCBadBlockID);
   }
 
-  if (block_refcounts_.at(block_id) == 0) {
-    error("Block {} is not open", block_id);
-    co_return EventBlockResult(RPCError::kRPCBadBlockID);
-  }
-
-  block_refcounts_[block_id]--;
+  it->second = BlockState::kClosed;
   SHA256Hash root_hash{}; // TODO(geoff): Implement
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = root_hash;
   info("Closed block {}, height = {}", block_id, block_height);
   co_return result;
+}
+
+x23::Async<RPCError>
+TestEventAggregator::abandon_block(BlockID block_id)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  auto it = block_states_.find(block_id);
+  if (it == block_states_.end()) {
+    error("Block {} is not open", block_id);
+    co_return RPCError::kRPCBadBlockID;
+  }
+  // Abandon accepts both active and already-closed blocks. Erasing the entry
+  // (like the real event server tearing down the block context) immediately
+  // causes concurrent emit_event calls to short-circuit, since is_block_open
+  // becomes false under lock_.
+  block_states_.erase(it);
+  info("Abandoned block {}", block_id);
+  co_return RPCError::kRPCNone;
 }
 
 x23::Async<void>
