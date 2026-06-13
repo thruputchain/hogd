@@ -952,6 +952,24 @@ TEST(Rv32ExecutionTest, canonical_unimp_decodes_to_kUnimp)
   EXPECT_NE(program, nullptr);
 }
 
+TEST(Rv32ExecutionTest, canonical_unimp_is_deterministic_invalid_instruction_trap)
+{
+  const auto program = make_program({0xc0001073U});
+  ASSERT_NE(program, nullptr);
+  Machine machine(program, 16, 10);
+
+  EXPECT_EQ(machine.step(), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 9U);
+
+  Machine out_of_gas(program, 16, 0);
+  EXPECT_EQ(out_of_gas.step(), StepResult::kTrap);
+  EXPECT_EQ(out_of_gas.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(out_of_gas.pc(), 0U);
+  EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
+}
+
 TEST(Rv32ExecutionTest, sign_and_zero_extends_loads)
 {
   const auto program = make_program({
