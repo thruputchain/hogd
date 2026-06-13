@@ -127,8 +127,7 @@ the gas/profile digest discipline intact through future bumps.
 Standalone (scriptable, no CLI config required):
 
 ```
-CARGO_PROFILE_RELEASE_STRIP=false \
-  cargo build --release --target riscv32im-unknown-none-elf -p <contract>-rv32
+cargo build --release --target riscv32im-unknown-none-elf -p <contract>-rv32
 rv32-lower --elf target/.../release/<contract>-rv32 --out <contract>.rv32a
 ```
 
