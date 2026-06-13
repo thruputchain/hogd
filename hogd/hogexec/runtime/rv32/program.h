@@ -22,6 +22,7 @@ enum class ProgramError {
   kCodeSizeNotAligned,
   kCodeTooLarge,
   kMemoryTooLarge,
+  kRunGasTooLarge,
   kUnsupportedCompressedInstruction,
   kUnsupportedSystemInstruction,
   kUnsupportedInstruction,

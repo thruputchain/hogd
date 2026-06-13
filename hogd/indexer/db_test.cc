@@ -244,7 +244,7 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   std::ranges::fill(tx1, 0x01);
   std::ranges::fill(tx2, 0x02);
 
-  // Block 10: one event; block 20: two events.
+  // Block 10: one event; block 11: two events.
   TxEventLog event_log1;
   event_log1.proposed_tx_hash = tx1;
   event_log1.events.push_back(make_event(addr, 0, 0));
@@ -255,7 +255,7 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   event_log2.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
-  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -266,11 +266,11 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   ASSERT_TRUE(page.has_value());
   ASSERT_EQ(page->events.size(), 3);
   EXPECT_EQ(page->events[0].block_height, 10);
-  EXPECT_EQ(page->events[1].block_height, 20);
+  EXPECT_EQ(page->events[1].block_height, 11);
   EXPECT_EQ(page->events[1].sequence_number, 0);
-  EXPECT_EQ(page->events[2].block_height, 20);
+  EXPECT_EQ(page->events[2].block_height, 11);
   EXPECT_EQ(page->events[2].sequence_number, 1);
-  EXPECT_EQ(page->latest_block, 20);
+  EXPECT_EQ(page->latest_block, 11);
   // Full exhaustion: cursor is empty.
   EXPECT_TRUE(page->cursor.empty());
 }
@@ -295,7 +295,7 @@ TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
   event_log2.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
-  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -305,7 +305,7 @@ TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
                  BlockAnchor(BlockAnchorKind::AnchorAtEnd)));
   ASSERT_TRUE(page.has_value());
   ASSERT_EQ(page->events.size(), 2);
-  EXPECT_EQ(page->events[0].block_height, 20);
+  EXPECT_EQ(page->events[0].block_height, 11);
   EXPECT_EQ(page->events[1].block_height, 10);
 }
 
@@ -548,7 +548,7 @@ TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
 
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
-  for (int h : {5, 10, 15}) {
+  for (int h : {5, 6, 7}) {
     SHA256Hash tx;
     std::ranges::fill(tx, static_cast<uint8_t>(h));
     TxEventLog log;
@@ -561,12 +561,12 @@ TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
   filters.push_back(filter_with_contracts_no_topics({addr}));
   auto page = db->get_events(make_query(std::move(filters),
                                         IterationOrder::IterationOrderAscending,
-                                        anchor_at_height(10)));
+                                        anchor_at_height(6)));
   ASSERT_TRUE(page.has_value());
-  // Anchor=10 inclusive, ascending -> blocks 10 and 15.
+  // Anchor=6 inclusive, ascending -> blocks 6 and 7.
   ASSERT_EQ(page->events.size(), 2);
-  EXPECT_EQ(page->events[0].block_height, 10);
-  EXPECT_EQ(page->events[1].block_height, 15);
+  EXPECT_EQ(page->events[0].block_height, 6);
+  EXPECT_EQ(page->events[1].block_height, 7);
 }
 
 // Parity port of the legacy ConsumeAndLookupContractEvents test.
@@ -673,8 +673,8 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   ASSERT_TRUE(db->consume_events(42, std::vector{log}));
   EXPECT_EQ(db->latest_block(), 42);
 
-  // Non-regressing on a smaller block height (shouldn't happen in
-  // practice but the invariant should hold).
+  // A height at or below the watermark is treated as already seen
+  // and skipped; the watermark holds.
   SHA256Hash tx2;
   std::ranges::fill(tx2, 0x02);
   TxEventLog event_log2;
@@ -711,16 +711,16 @@ TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
   {
     auto db = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(db.has_value());
-    ASSERT_TRUE(db->consume_events(500, std::vector{log_low}));
     ASSERT_TRUE(db->consume_events(100, std::vector{log_high}));
-    EXPECT_EQ(db->latest_block(), 500);
+    ASSERT_TRUE(db->consume_events(101, std::vector{log_low}));
+    EXPECT_EQ(db->latest_block(), 101);
   }
 
   // Reopen.  SeekToLast on contract_index would land on addr_high
-  // (block 100); the meta key keeps us at 500.
+  // (block 100); the meta key keeps us at 101.
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
-  EXPECT_EQ(db->latest_block(), 500);
+  EXPECT_EQ(db->latest_block(), 101);
 }
 
 // Databases that predate the meta key open cleanly: the missing key
@@ -806,6 +806,166 @@ TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
   ASSERT_TRUE(page.has_value());
   EXPECT_TRUE(page->events.empty());
   EXPECT_TRUE(page->cursor.empty());
+}
+
+namespace {
+
+// One-event TxEventLog for `addr` whose tx hash is uniformly `fill`.
+TxEventLog
+log_with_tx(ContractAddress const &addr, uint8_t fill)
+{
+  SHA256Hash tx;
+  std::ranges::fill(tx, fill);
+  TxEventLog log;
+  log.proposed_tx_hash = tx;
+  log.events.push_back(make_event(addr, 0, 0));
+  return log;
+}
+
+} // namespace
+
+TEST_F(IndexDBTest, OutOfOrderIngestHoldsWatermarkUntilGapFills)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  // First block defines the base — no need to start at 0.
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}));
+  EXPECT_EQ(db->latest_block(), 7);
+
+  // Block 9 arrives before block 8: ingested but the watermark holds.
+  ASSERT_TRUE(db->consume_events(9, std::vector{log_with_tx(addr, 0x03)}));
+  EXPECT_EQ(db->latest_block(), 7);
+
+  // The gap fills; the watermark drains through the buffered height.
+  ASSERT_TRUE(db->consume_events(8, std::vector{log_with_tx(addr, 0x02)}));
+  EXPECT_EQ(db->latest_block(), 9);
+}
+
+TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}));
+
+  // Same height again with different content: ignored, success
+  // returned, and the conflicting rows are NOT ingested (served
+  // history is immutable).
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x02)}));
+  EXPECT_EQ(db->latest_block(), 7);
+  SHA256Hash tx2;
+  std::ranges::fill(tx2, 0x02);
+  EXPECT_FALSE(db->get_tx_events(tx2).has_value());
+
+  // Below the base: also treated as already-seen.
+  ASSERT_TRUE(db->consume_events(3, std::vector{log_with_tx(addr, 0x04)}));
+  EXPECT_EQ(db->latest_block(), 7);
+  SHA256Hash tx4;
+  std::ranges::fill(tx4, 0x04);
+  EXPECT_FALSE(db->get_tx_events(tx4).has_value());
+}
+
+TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{log_with_tx(addr, 0x01)}));
+  // Out-of-order: block 12 lands before block 11.
+  ASSERT_TRUE(db->consume_events(12, std::vector{log_with_tx(addr, 0x03)}));
+  ASSERT_EQ(db->latest_block(), 10);
+
+  // Ascending full scan stops at the watermark: block 12's rows are
+  // ingested but not servable, and the page reports exhaustion
+  // (empty cursor) at a consistent cut.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 10);
+    EXPECT_TRUE(page->cursor.empty());
+    EXPECT_EQ(page->latest_block, 10);
+  }
+
+  // Descending from an explicit anchor above the watermark clamps
+  // down to it instead of exposing the pending block.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderDescending,
+                   anchor_at_height(12)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 10);
+  }
+
+  // Once the gap fills, everything becomes servable.
+  ASSERT_TRUE(db->consume_events(11, std::vector{log_with_tx(addr, 0x02)}));
+  ASSERT_EQ(db->latest_block(), 12);
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 3);
+    EXPECT_EQ(page->events[0].block_height, 10);
+    EXPECT_EQ(page->events[1].block_height, 11);
+    EXPECT_EQ(page->events[2].block_height, 12);
+  }
+}
+
+TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  ASSERT_TRUE(db->consume_events(5, std::vector{log_with_tx(addr, 0x01)}));
+
+  // Descending from below the retained range: empty page — the
+  // anchor must NOT wrap to the top of the key range and return the
+  // newest event.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderDescending,
+                   anchor_at_height(-1)));
+    ASSERT_TRUE(page.has_value());
+    EXPECT_TRUE(page->events.empty());
+    EXPECT_TRUE(page->cursor.empty());
+  }
+
+  // Ascending from below the retained range clamps up to
+  // oldest_block() and serves normally.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   anchor_at_height(-1)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 5);
+  }
 }
 
 // NOLINTEND(misc-include-cleaner)

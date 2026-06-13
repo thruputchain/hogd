@@ -133,6 +133,12 @@ arithmetic_shift_right(uint32_t value, uint32_t amount)
 }
 
 constexpr uint32_t
+mul_low(uint32_t lhs, uint32_t rhs)
+{
+  return static_cast<uint32_t>(uint64_t{lhs} * uint64_t{rhs});
+}
+
+constexpr uint32_t
 mulh(uint32_t lhs, uint32_t rhs)
 {
   // MULH variants differ only in signedness of the high half. Keep the casts
@@ -157,6 +163,15 @@ mulhu(uint32_t lhs, uint32_t rhs)
 }
 
 constexpr uint32_t
+div_unsigned(uint32_t lhs, uint32_t rhs)
+{
+  if (rhs == 0) {
+    return std::numeric_limits<uint32_t>::max();
+  }
+  return lhs / rhs;
+}
+
+constexpr uint32_t
 div_signed(uint32_t lhs, uint32_t rhs)
 {
   const int32_t divisor = i32_from_bits(rhs);
@@ -169,6 +184,15 @@ div_signed(uint32_t lhs, uint32_t rhs)
     return lhs;
   }
   return bits_from_i32(static_cast<int32_t>(dividend / divisor));
+}
+
+constexpr uint32_t
+rem_unsigned(uint32_t lhs, uint32_t rhs)
+{
+  if (rhs == 0) {
+    return lhs;
+  }
+  return lhs % rhs;
 }
 
 constexpr uint32_t
