@@ -103,6 +103,16 @@ private:
                   !std::is_const_v<std::remove_reference_t<ArgParam>>) {
       // Output ref: T&
       using T = std::remove_reference_t<ArgParam>;
+      // The arity static_assert in syscall() only checks the *number* of
+      // arguments, not their types.  WritableOutput<T> writes sizeof(T) bytes
+      // back into &arg, so if the caller passes storage of a different type
+      // the static_cast<void *> below would silently reinterpret it -- an
+      // out-of-bounds / type-confusing write with no compile or runtime check.
+      // Require the caller's argument type to exactly match the declared
+      // output type, so any mismatch fails to compile instead.
+      static_assert(std::is_same_v<std::remove_cvref_t<Arg>, T>,
+                    "native syscall output argument type must exactly match "
+                    "the syscall's declared output parameter type");
       return WritableOutput<T>(static_cast<void *>(&arg));
     }
     else if constexpr (std::is_pointer_v<ArgParam> &&
