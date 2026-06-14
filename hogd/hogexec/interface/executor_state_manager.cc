@@ -213,8 +213,13 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
   // Abandon here is working-as-intended: this drain runs after close_block()
   // has been sent, so a straggler emit rejected with BadBlockID is expected.
   // Any other late error is a genuine failure the caller must surface.
-  if (!event_error.has_value() ||
-      event_error.value() == SystemErrorCode::Abandon) {
+  if (!event_error.has_value()) {
+    co_return SystemStatus<void>{};
+  }
+  if (event_error.value() == SystemErrorCode::Abandon) {
+    warn("Dropped events for block {}: a straggler emit was rejected with "
+         "Abandon after close_block (working-as-intended)",
+         block_id);
     co_return SystemStatus<void>{};
   }
   co_return SystemStatus<void>{SystemError{event_error.value()}};
