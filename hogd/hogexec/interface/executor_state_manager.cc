@@ -9,6 +9,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -169,12 +170,21 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
   }
   if (do_gc) {
-    co_await gc_executor_context(block_id);
+    // We hold the last reference, so gc runs here before we return: a late
+    // event error from a straggler callback can still be folded into the
+    // finish_block result. (gc_executor_context filters Abandon as WAI; the
+    // only remaining code an emit can produce is Unrecoverable.)
+    if (auto gc_status = co_await gc_executor_context(block_id);
+        !gc_status.has_value()) [[unlikely]] {
+      error("Unrecoverable: late event-server error {} during gc of block {}",
+            std::to_underlying(gc_status.error().code()), block_id);
+      result = ExecResult::ExecResultUnrecoverable;
+    }
   }
   co_return result;
 }
 
-x23::Async<void>
+x23::Async<SystemStatus<void>>
 ExecutorStateManager::gc_executor_context(BlockID block_id)
 {
   trace("Garbage collecting state for block {}", block_id);
@@ -189,7 +199,7 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
   // in-flight propose/validate RPCs can still spawn detached event callbacks
   // before the final release_reference() hands off cleanup. Drain again here
   // before recycling the ExecutorContext.
-  co_await it->second.context.get().await_event_return();
+  auto event_error = co_await it->second.context.get().await_event_return();
 
   auto ul = context_cache_.lock_threads();
   context_cache_.for_each(ul, [block_id](ContextCache &cache) {
@@ -199,6 +209,15 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
 
   stash_snapshot_cache(it->second.context.get().extract_snapshot_cache(), g);
   active_blocks_.erase(it);
+
+  // Abandon here is working-as-intended: this drain runs after close_block()
+  // has been sent, so a straggler emit rejected with BadBlockID is expected.
+  // Any other late error is a genuine failure the caller must surface.
+  if (!event_error.has_value() ||
+      event_error.value() == SystemErrorCode::Abandon) {
+    co_return SystemStatus<void>{};
+  }
+  co_return SystemStatus<void>{SystemError{event_error.value()}};
 }
 
 void

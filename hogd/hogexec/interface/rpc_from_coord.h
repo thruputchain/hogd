@@ -14,6 +14,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
@@ -111,10 +112,17 @@ private:
     return executor_states_ != nullptr;
   }
 
-  x23::Async<PerThreadARC<ExecutorContext> *>
+  // Acquires a reference to the context for block_id in the given mode. A null
+  // value means there is no usable context (not initialized, not found, or a
+  // mode mismatch); an error means a late event-server error surfaced while
+  // releasing during a mode-mismatch cleanup and must be propagated.
+  x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
   try_get_context(BlockID block_id, ExecutionMode mode);
-  x23::MaybeAsync<void> release_context(BlockID block_id,
-                                        PerThreadARC<ExecutorContext> *ctx);
+  // Releases the caller's reference. If this was the last reference, runs the
+  // deferred gc and returns its result so a late event-server error can be
+  // folded into the in-flight transaction's result.
+  x23::MaybeAsync<SystemStatus<void>>
+  release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
   struct TxIDAllocator {
     uint64_t value_ = 0;
