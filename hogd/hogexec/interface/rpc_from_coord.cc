@@ -9,6 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "rpc_types.hh"
@@ -17,7 +18,7 @@
 
 namespace hogd {
 
-x23::Async<PerThreadARC<ExecutorContext> *>
+x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
 ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 {
   if (!initialize_check()) [[unlikely]] {
@@ -33,7 +34,10 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
     warn("Expected executor context for block {} to be in {} mode, but found "
          "in {} mode",
          block_id, mode, ctx->get().mode());
-    co_await release_context(block_id, ctx);
+    if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
+        [[unlikely]] {
+      co_return rel.error();
+    }
     co_return nullptr;
   }
 
@@ -44,13 +48,21 @@ x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(BlockID block_id,
                                                       Transaction tx)
 {
-  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kProposing);
+  if (!ctx_status.has_value()) [[unlikely]] {
+    co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+  }
+  auto *ctx = *ctx_status;
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
   auto r = co_await ctx->get().propose_transaction(tx, allocate_tx_ids(1));
-  co_await release_context(block_id, ctx);
+  if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
+      [[unlikely]] {
+    co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+  }
   co_return r;
 }
 
@@ -58,14 +70,22 @@ x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
-  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kValidating);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kValidating);
+  if (!ctx_status.has_value()) [[unlikely]] {
+    co_return ExecResult::ExecResultUnrecoverable;
+  }
+  auto *ctx = *ctx_status;
   if (!ctx) {
     co_return ExecResult::ExecResultSystemError;
   }
 
   auto r =
       co_await ctx->get().validate_transaction(proposed_tx, allocate_tx_ids(1));
-  co_await release_context(block_id, ctx);
+  if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
+      [[unlikely]] {
+    co_return ExecResult::ExecResultUnrecoverable;
+  }
   co_return r;
 }
 
@@ -73,7 +93,14 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
                                                 TransactionBatch txs)
 {
-  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kProposing);
+  if (!ctx_status.has_value()) [[unlikely]] {
+    co_return ExecProposeBatchResult(txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultUnrecoverable));
+  }
+  auto *ctx = *ctx_status;
   if (!ctx) {
     co_return ExecProposeBatchResult(txs.size(),
                                      ExecProposeResult(
@@ -83,7 +110,12 @@ ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
   CHECK(txs.size() <= std::numeric_limits<uint32_t>::max());
   auto first_tx_id = allocate_tx_ids(txs.size());
   auto r = co_await ctx->get().propose_transaction_batch(txs, first_tx_id);
-  co_await release_context(block_id, ctx);
+  if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
+      [[unlikely]] {
+    co_return ExecProposeBatchResult(txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultUnrecoverable));
+  }
   co_return r;
 }
 
@@ -91,7 +123,13 @@ x23::Async<ExecValidateBatchResult>
 ExecutorMempoolRpc::executorsched_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
-  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kValidating);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kValidating);
+  if (!ctx_status.has_value()) [[unlikely]] {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultUnrecoverable);
+  }
+  auto *ctx = *ctx_status;
   if (!ctx) {
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
@@ -100,7 +138,11 @@ ExecutorMempoolRpc::executorsched_validate_batch(
   CHECK(proposed_txs.size() <= std::numeric_limits<uint32_t>::max());
   auto r = co_await ctx->get().validate_transaction_batch(
       proposed_txs, allocate_tx_ids(proposed_txs.size()));
-  co_await release_context(block_id, ctx);
+  if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
+      [[unlikely]] {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultUnrecoverable);
+  }
   co_return r;
 }
 
@@ -150,14 +192,17 @@ ExecutorMempoolRpc::executorsched_shutdown()
   co_return;
 }
 
-x23::MaybeAsync<void>
+x23::MaybeAsync<SystemStatus<void>>
 ExecutorMempoolRpc::release_context(BlockID block_id,
                                     PerThreadARC<ExecutorContext> *ctx)
 {
   if (ctx->release_reference()) {
+    // We dropped the last reference, so the deferred gc runs here. Its drain
+    // can surface a late event-server error from a straggler callback; return
+    // it so the caller can fold it into the in-flight transaction's result.
     return executor_states_->gc_executor_context(block_id);
   }
-  return {};
+  return SystemStatus<void>{};
 }
 
 } // namespace hogd

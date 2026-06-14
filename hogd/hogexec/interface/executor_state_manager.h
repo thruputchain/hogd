@@ -12,6 +12,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -51,8 +52,11 @@ public:
   x23::Async<ExecResult> remove_block(BlockID block_id);
 
   // All references to the executor context must be released before calling
-  // this.
-  x23::Async<void> gc_executor_context(BlockID block_id);
+  // this. Returns failure if a late event-server error is observed while
+  // draining straggler event callbacks (Abandon is treated as
+  // working-as-intended and reported as success), or success if the final
+  // drain was clean.
+  x23::Async<SystemStatus<void>> gc_executor_context(BlockID block_id);
 
 private:
   x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode);
