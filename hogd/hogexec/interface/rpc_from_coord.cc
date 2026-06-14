@@ -6,10 +6,10 @@
 
 #include "exec_result.hh"
 #include "exec_sched.hh"
-#include "hogd/hogexec/common/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "rpc_types.hh"
@@ -48,7 +48,8 @@ x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(BlockID block_id,
                                                       Transaction tx)
 {
-  auto ctx_status = co_await try_get_context(block_id, ExecutionMode::kProposing);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx_status.has_value()) [[unlikely]] {
     co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
   }
@@ -92,10 +93,12 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
                                                 TransactionBatch txs)
 {
-  auto ctx_status = co_await try_get_context(block_id, ExecutionMode::kProposing);
+  auto ctx_status =
+      co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx_status.has_value()) [[unlikely]] {
-    co_return ExecProposeBatchResult(
-        txs.size(), ExecProposeResult(ExecResult::ExecResultUnrecoverable));
+    co_return ExecProposeBatchResult(txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultUnrecoverable));
   }
   auto *ctx = *ctx_status;
   if (!ctx) {
@@ -109,8 +112,9 @@ ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
   auto r = co_await ctx->get().propose_transaction_batch(txs, first_tx_id);
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecProposeBatchResult(
-        txs.size(), ExecProposeResult(ExecResult::ExecResultUnrecoverable));
+    co_return ExecProposeBatchResult(txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultUnrecoverable));
   }
   co_return r;
 }
