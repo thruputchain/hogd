@@ -1847,13 +1847,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
       return_to_runqueue;
   return_to_runqueue.clear();
-  const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler = nullptr;
+  x23::XdrVec<const x23::XdrVec<SignedTransactionHash> *> remove_from_scheduler;
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.
-    remove_from_scheduler = &nominated_block_cache_.result_tx_hashes;
-    // We do *not* add the failed txs back (in
-    // [nominated_block_cache_.failed_tx_hashes]).
+    remove_from_scheduler.push_back(&nominated_block_cache_.result_tx_hashes);
+    // We also need to remove the failed txs (in
+    // [nominated_block_cache_.failed_tx_hashes]) from [scheduler_->txs_].
+    remove_from_scheduler.push_back(&nominated_block_cache_.failed_tx_hashes);
   }
   else {
     // The committed block is a block we validated.
@@ -1870,27 +1871,35 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id == block_id) {
-        remove_from_scheduler = &cache.tx_hashes;
+        CHECK(remove_from_scheduler.empty());
+        remove_from_scheduler.push_back(&cache.tx_hashes);
       }
     }
-    CHECK_CONST_PTR(remove_from_scheduler);
+    CHECK(!remove_from_scheduler.empty());
     // Any of the txs in the committed (validated) block that were also in the
     // nominated block should not be returned to the runqueue.
-    for (const SignedTransactionHash &hash : *remove_from_scheduler) {
-      if (return_to_runqueue.empty()) {
-        break;
+    for (const x23::XdrVec<SignedTransactionHash> *remove :
+         remove_from_scheduler) {
+      for (const SignedTransactionHash &hash : *remove) {
+        if (return_to_runqueue.empty()) {
+          break;
+        }
+        return_to_runqueue.erase(hash);
       }
-      return_to_runqueue.erase(hash);
     }
   }
   record_stage(stage_compute_reenqueue_set);
 
-  CHECK_CONST_PTR(remove_from_scheduler);
   scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                             return_to_runqueue.cend());
-  const size_t remove_from_scheduler_size = remove_from_scheduler->size();
-  co_await scheduler_->remove_from_scheduler(
-      x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+  CHECK(!remove_from_scheduler.empty());
+  size_t remove_from_scheduler_size = 0;
+  for (const x23::XdrVec<SignedTransactionHash> *remove :
+       remove_from_scheduler) {
+    remove_from_scheduler_size += remove->size();
+    co_await scheduler_->remove_from_scheduler(
+        x23::span<const SignedTransactionHash>(*remove));
+  }
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     x23::CoroGuard cg;
