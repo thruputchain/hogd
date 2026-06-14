@@ -147,8 +147,14 @@ RetrocausalQueueItem
 RetrocausalQueueItem::make_fully_consumed_item(
     const SnapshotStorageItem &base_item, x23::Vec<QueueEntry> consumed_entries)
 {
+  // locally_consumed_index_ is a uint16; the per-block consumed count is
+  // bounded by kRetrocausalQueueBlockEntriesMaxLen (see the static_assert in
+  // the header). Narrow explicitly so the conversion is intentional, not an
+  // implicit uint32 -> uint16 truncation.
+  assert(consumed_entries.size() <=
+         static_cast<size_t>(kRetrocausalQueueBlockEntriesMaxLen));
   auto retrocausally_consumed_count =
-      static_cast<uint32_t>(consumed_entries.size());
+      static_cast<uint16_t>(consumed_entries.size());
 
   RetrocausalQueueItem item(base_item);
   item.locally_consumed_index_ = retrocausally_consumed_count;
