@@ -1,6 +1,7 @@
 #!/bin/bash
+set -euo pipefail
 
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POST_CHECKOUT=${SCRIPT_DIR}/../.git/hooks/post-checkout
 POST_MERGE=${SCRIPT_DIR}/../.git/hooks/post-merge
 

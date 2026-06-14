@@ -1,14 +1,36 @@
 #!/bin/bash
+set -euo pipefail
 
-SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
-ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
-cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target wasm32-unknown-unknown
-cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target riscv32im-unknown-none-elf
-cd "${ROOT_DIR}/hogd/rust" && cargo fetch
+cargo_in() {
+  local dir="$1"
+  shift
 
-set -ex
+  if command -v rustup >/dev/null 2>&1 && [ -f "${dir}/rust-toolchain.toml" ]; then
+    local toolchain
+    toolchain="$(
+      sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "${dir}/rust-toolchain.toml" | head -n 1
+    )"
+    if [ -n "${toolchain}" ]; then
+      local rustc
+      rustc="$(rustup which --toolchain "${toolchain}" rustc)"
+      (cd "${dir}" && RUSTC="${rustc}" rustup run "${toolchain}" cargo "$@")
+      return
+    fi
+  fi
+
+  (cd "${dir}" && cargo "$@")
+}
+
+cargo_in "${ROOT_DIR}/built_contracts" fetch -Zbuild-std
+cargo_in "${ROOT_DIR}/built_contracts" fetch -Zbuild-std --target wasm32-unknown-unknown
+cargo_in "${ROOT_DIR}/built_contracts" fetch -Zbuild-std --target riscv32im-unknown-none-elf
+cargo_in "${ROOT_DIR}/hogd/rust" fetch
+
+set -x
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
