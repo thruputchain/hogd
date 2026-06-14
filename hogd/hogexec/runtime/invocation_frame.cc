@@ -496,7 +496,7 @@ InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
   assert(!frame_stack_.empty());
   if (frame_stack_.back().check_owns_auth_token(token_id)) {
     auto const *out = auth_token_registry_.lookup_auth_token(token_id);
-    CHECK_CONST_PTR(out);
+    CHECK_PTR(out);
     return out;
   }
   return nullptr;
@@ -524,7 +524,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   auto const *token = auth_token_registry_.lookup_auth_token(token_id);
-  CHECK_CONST_PTR(token);
+  CHECK_PTR(token);
 
   if (token->root_node.consumer_address != frame_stack_.back().address()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};

@@ -1905,7 +1905,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     auto it = validated_block_cache_.find(block_id);
     CHECK(it != validated_block_cache_.end());
     committed_cache = &it->second;
-    CHECK_CONST_PTR(committed_cache);
+    CHECK_PTR(committed_cache);
     // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
     // us, so we do not need to do it here.
     co_await scheduler_->apply_committed_block_hog_ages(

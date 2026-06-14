@@ -106,7 +106,7 @@ read_process_name()
   return *name;
 #elifdef __APPLE__
   const char *name = getprogname();
-  CHECK_CONST_PTR(name);
+  CHECK_PTR(name);
   return std::string(name);
 #else  // defined(__linux__)
   CHECK(false);

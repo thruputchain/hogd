@@ -77,7 +77,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
 
   if (before == nullptr) {
-    CHECK_CONST_PTR(after);
+    CHECK_PTR(after);
 
     if constexpr (is_debug_build()) {
       if (ctx.key.is_address_balance()) {
@@ -88,15 +88,15 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
 
   if (after == nullptr) {
-    CHECK_CONST_PTR(before);
+    CHECK_PTR(before);
     handle_release_uncommitted_lock(before, ctx_with_snapshot, lock);
     // this value should be ignored, so returning a value that is obviously
     // invalid
     return std::numeric_limits<int128_t>::max();
   }
 
-  CHECK_CONST_PTR(before);
-  CHECK_CONST_PTR(after);
+  CHECK_PTR(before);
+  CHECK_PTR(after);
   CHECK_GT(pending_refcount_, 0U);
   // No need to modify pending_refcount_ here -- we already have a reference and
   // don't need to release it, as both before and after are non-null.
@@ -124,7 +124,7 @@ try {
           else {
             using change_type = typename lock_t::change_type;
             auto const *inner = change.get_inner<change_type>();
-            CHECK_CONST_PTR(inner);
+            CHECK_PTR(inner);
             return lock.try_atomic_change_lock(nullptr, inner, ctx);
           }
         },
@@ -159,7 +159,7 @@ try {
         }
         else {
           auto *inner = change.get_inner<typename lock_t::change_type>();
-          CHECK_CONST_PTR(inner);
+          CHECK_PTR(inner);
           return lock.commit_change(did_finalize, snapshot_cost_, *inner, ctx);
         }
       },
@@ -228,7 +228,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           change_type const *before_inner = nullptr;
           if (before != nullptr) {
             before_inner = before->get_inner<change_type>();
-            CHECK_CONST_PTR(before_inner);
+            CHECK_PTR(before_inner);
           }
 
           change_type const *after_inner = nullptr;
@@ -270,7 +270,7 @@ ItemLock::handle_try_atomic_from_pending(
     CHECK(std::holds_alternative<ExclusiveLock>(lock_contents_));
     // If after is nullptr, this case is handled elsewhere
     // (handle_release_uncommitted_lock)
-    CHECK_CONST_PTR(after);
+    CHECK_PTR(after);
 
     if (after->is_exclusive()) {
       auto res = std::get<ExclusiveLock>(lock_contents_)
@@ -299,7 +299,7 @@ ItemLock::handle_try_atomic_from_pending(
           else {
             using change_type = typename lock_t::change_type;
             auto const *after_inner = after->get_inner<change_type>();
-            CHECK_CONST_PTR(after_inner);
+            CHECK_PTR(after_inner);
             return lock.try_atomic_change_lock(nullptr, after_inner, ctx);
           }
         },
@@ -358,7 +358,7 @@ ItemLock::handle_try_atomic_from_pending(
           change_type const *before_inner = nullptr;
           if (before != nullptr) {
             before_inner = before->get_inner<change_type>();
-            CHECK_CONST_PTR(before_inner);
+            CHECK_PTR(before_inner);
           }
 
           change_type const *after_inner = nullptr;
@@ -391,7 +391,7 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
 {
   if (pending_refcount_ == 0) {
     CHECK(std::holds_alternative<std::monostate>(lock_contents_));
-    CHECK_CONST_PTR(after);
+    CHECK_PTR(after);
     prepare_lock_contents(after, ctx, ul);
   }
 
@@ -416,7 +416,7 @@ ItemLock::handle_release_uncommitted_lock(
 {
   CHECK(ul.owns_lock());
   CHECK_GT(pending_refcount_, 0U);
-  CHECK_CONST_PTR(before);
+  CHECK_PTR(before);
   pending_refcount_--;
   if (pending_refcount_ == 0) {
     reset_lock_contents(ul);
@@ -447,7 +447,7 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
         (pending_refcount_ == 1 &&
          std::holds_alternative<ExclusiveLock>(lock_contents_)));
 
-  CHECK_CONST_PTR(after);
+  CHECK_PTR(after);
   CHECK(ul.owns_lock());
 
   if (after->is_bytes()) {

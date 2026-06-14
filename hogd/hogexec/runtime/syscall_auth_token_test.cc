@@ -1287,7 +1287,7 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
 }
 
 // Regression test for #1702 comment 1: forwarding a completely fabricated
-// token ID (never minted) must be rejected, not crash via CHECK_CONST_PTR.
+// token ID (never minted) must be rejected, not crash via CHECK_PTR.
 TEST_F(SyscallAuthTokenTest, ForwardFabricatedAuthTokenIdIsRejected)
 {
   constexpr ContractAddress kCallerAddress = make_contract_address(0);
