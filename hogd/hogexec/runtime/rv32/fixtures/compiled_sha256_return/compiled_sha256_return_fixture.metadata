@@ -1,18 +1,33 @@
 {
   "artifact_bytes": 555,
-  "artifact_sha256": "de9b8a61a7c1fed50872b75ee7e6b91926c23918fba347dc63dd4d8163075bc3",
+  "artifact_sha256": "ceec83010f8c7080f14eb6fa7b168df72445c16c7c33f959ec9cc620e226db41",
   "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
   "code_bytes": 208,
-  "code_sha256": "4a83cf81f494f32d4374e8dbb24e62585f899f30804c66188e6b141a903949c0",
-  "elf_sha256": "f8baadcb17f3781e009f1827090d12ba89cd7bdbfe3b7e2f1a858a5dea34039d",
+  "code_sha256": "eab17a6fc64b0ab42418c9a0e7b889d59987e2a7904f15b7416caa3298bf985c",
+  "elf_sha256": "e76792d673dd06d880771ee300de7fb097ab84cd0d3905ea84ad9ecec320e517",
   "fixture_input": "0102030405080d",
   "fixture_input_offset": 208,
   "fixture_input_sha256": "976ad63be07aa8f9f1d50ec110693c0edcf5172b6245de4aa0e6482b875a9740",
-  "fixture_sha256": "c351870106c3b94a3b4f509ab20f5eec16048bbe2b1d11497158f482623501ae",
+  "fixture_sha256": "a0ed146828bb5cff0abc3e59bf9d6e238faae8e40070839db08bfc0a89c5032b",
   "initial_memory_bytes": 215,
   "initial_memory_sha256": "45ef90c4d9f1c122e900b4b122467002c01f42769b140e5e01a234f4c6c5cd36",
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
-  "lowering_tool_sha256": "357197fa55f10299b9887c512750bf97422544ea31ce27ddea14aa8bd514c19c",
+  "lowerer_metadata": {
+    "artifact_bytes": 555,
+    "artifact_format_fingerprint": "0x3aed01915d1a5e1d",
+    "artifact_sha256": "ceec83010f8c7080f14eb6fa7b168df72445c16c7c33f959ec9cc620e226db41",
+    "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
+    "code_bytes": 208,
+    "code_sha256": "eab17a6fc64b0ab42418c9a0e7b889d59987e2a7904f15b7416caa3298bf985c",
+    "elf_sha256": "e76792d673dd06d880771ee300de7fb097ab84cd0d3905ea84ad9ecec320e517",
+    "initial_memory_bytes": 215,
+    "initial_memory_sha256": "45ef90c4d9f1c122e900b4b122467002c01f42769b140e5e01a234f4c6c5cd36",
+    "memory_bytes": 65536,
+    "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
+    "target_triple": "riscv32im-unknown-none-elf"
+  },
+  "lowering_tool": "rv32-lower",
+  "lowering_tool_version": "rv32-lower 0.5.7",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
@@ -24,7 +39,8 @@
     "0xca571c66a719dd56",
     "0x5749e8fa5d1f3cfe"
   ],
+  "packaging_tool_sha256": "3cf6f30872ab4644eb328551ddebe71c6495a4a39379a928e5cfd6a02b166244",
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
-  "source_sha256": "be248aa376b3772695638bfbb59188f565ad07afed174cd420c7e4d9b65d33f3",
+  "source_sha256": "e03410aa01a8bcc3909ca5fc050ee7d4343244b6b2c0a8172da1f4efc7ef47cb",
   "target_triple": "riscv32im-unknown-none-elf"
 }

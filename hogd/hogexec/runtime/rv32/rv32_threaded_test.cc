@@ -744,6 +744,24 @@ TEST(Rv32Threaded, unimpDecodesToKUnimp)
   EXPECT_EQ(decoded->op, Op::kUnimp);
 }
 
+TEST(Rv32Threaded, unimpTrapsInvalidInstruction)
+{
+  const std::vector<uint32_t> words = {0xc0001073U}; // unimp
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 99U);
+
+  ThreadedMachine out_of_gas(*program, 0);
+  EXPECT_EQ(out_of_gas.run(host), StepResult::kTrap);
+  EXPECT_EQ(out_of_gas.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(out_of_gas.pc(), 0U);
+  EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
+}
+
 TEST(Rv32Threaded, ecallHaltsWithA0)
 {
   // x10(a0)=7, then ecall. RecordingHost default halts with a0.

@@ -6,7 +6,8 @@ Groundhog currently executes deployed user contracts through WASM. The RV32 work
 is an in-tree C++ interpreter experiment: can we own a small deterministic VM
 instead of inheriting all execution behavior from a vendored engine?
 
-WASM remains production. RV32 is isolated behind `ContractType::kMockTest`.
+WASM remains production. RV32 now has a `ContractType::kRv32` deployed-contract
+path, but remains experimental pending activation hardening.
 
 A separate product note on optional ZK implications lives outside this repo at
 `~/docs/groundhog-product/wip/rv32-zk-optionality.md`.
@@ -31,8 +32,9 @@ Important files:
 - `host.h` defines `Host`, `MachineView`, `HostResult`, traps, and step results.
 - `syscall_bridge.{h,cc}` adapts RV32 `ecall` frames to `syscall_entry`.
 - `artifact.{h,cc}` parses the strict artifact format.
-- `dispatch.{h,cc}` validates artifact method dispatch tables.
-- `runtime_context.{h,cc}` is the test-only parity runtime.
+- Guest-side dispatch starts from the fixed entry point with method id seeded in
+  `a0`/`a1`.
+- `runtime_context.{h,cc}` is the deployed-contract runtime used by kRv32.
 
 ## Execution Rules
 
@@ -117,41 +119,40 @@ Host traps carry typed payloads:
 
 ## Artifact Format
 
-The current artifact format is v3:
+The current artifact format is v4:
 
 - magic: `GHRV32A1`
-- header bytes: `172`
+- header bytes: `132`
 - VM profile digest
-- entry ABI version: `1`
+- entry ABI version: `2` (runtime enters at PC 0 and seeds method id in `a0`/`a1`)
 - syscall ABI version: `1` (register-native: args in `a0`–`a7`, no frame/footer)
 - gas schedule version and digest
 - memory size, code size, initial memory size
-- offsets for code, dispatch table, and initial memory
-- SHA256 commitments for code, initial memory, and dispatch table
+- offsets for code and initial memory
+- SHA256 commitments for code and initial memory
 
 Parser rules:
 
 - little-endian explicit reads only;
 - no host struct overlays;
-- exact canonical layout: header, code, dispatch, memory, no gaps/trailing bytes;
-- full initial memory image required;
-- dispatch table required, sorted by method ID, reserved bytes zero;
-- dispatch PCs must be valid `Program` PCs.
+- exact canonical layout: header, code, initial memory, no gaps/trailing bytes;
+- `initial_memory_size <= memory_bytes`; the runtime zero-extends the remaining
+  memory.
 
 The artifact parser does not parse ELF. ELF is fixture/lowerer input only.
 
 ## Dispatch
 
-M4 chose runtime-side artifact dispatch:
+v4 uses guest-side dispatch:
 
-- the artifact contains method ID to PC entries;
-- runtime validates the table before VM construction;
-- known methods run at the selected validated PC;
-- unknown methods fail as deterministic misses with zero gas.
+- the runtime always enters at PC 0 (`_start`);
+- the runtime seeds the invoked method id into `a0`/`a1`;
+- `_start` dispatches to the selected method in guest code;
+- unknown methods run the guest default arm and produce a metered deterministic
+  trap.
 
-This intentionally replaced the earlier guest-side fixed-entry stub idea. The
-guest-side shape may still be useful for a future SDK, but it is not the current
-dispatch mechanism.
+This removed the dispatch table from the artifact and made stripped release ELFs
+valid lowerer inputs.
 
 ## Rust Fixture And Lowering
 
@@ -171,7 +172,8 @@ The fixture layout makes link-time virtual addresses match PC-space:
 - `.rodata`, `.data`, `.bss`, buffers, and stack live above `.text`
   inside the 64 KiB memory limit.
 - Low guest-memory bytes corresponding to `.text` are dead space.
-- Initial memory is a full 64 KiB image, not sparse sections.
+- Initial memory is the initialized prefix of the 64 KiB memory image; the
+  runtime zero-extends the rest.
 
 The fixture lowerer must fail loudly on unsupported compiler output:
 
@@ -181,7 +183,6 @@ The fixture lowerer must fail loudly on unsupported compiler output:
 - no executable section other than `.text`;
 - no overlapping data sections;
 - no data/object symbols in `.text`;
-- dispatch entry symbols resolve to valid `.text` PCs;
 - build metadata records relevant source/config hashes.
 
 The Rust fixture uses the register-native RV32 bridge ABI: the guest loads the
@@ -199,7 +200,7 @@ it passed). Normal completion is the Return syscall; `_start` must not return.
   - Test-only `RuntimeContext`, WASM/RV32 parity for traces, return buffers,
     storage writes, events, stats, and outcome mapping.
 - M4 compiled Rust/artifact/dispatch: complete.
-  - Committed Rust fixture, strict artifact parser, runtime dispatch table,
+  - Committed Rust fixture, strict artifact parser, guest-side dispatch, and
     multi-method compiled fixture with WASM parity.
 - Early M5 hardening: partly complete.
   - Typed host payloads, deterministic bridge-fault classification, SHA256

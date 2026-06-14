@@ -667,7 +667,7 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
     uint64_t gas_cost;
   };
 
-  const std::array<Case, 13> cases = {{
+  const std::array<Case, 14> cases = {{
       {u_type(0x37, 5, 0x12345000U), InstructionKind::kLui, Op::kLui, 5, -1, -1,
        0x12345000, kBaseInstructionGas},
       {u_type(0x17, 6, 0xfffff000U), InstructionKind::kAuipc, Op::kAuipc, 6, -1,
@@ -693,6 +693,8 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {0x00000073U, InstructionKind::kEcall, Op::kEcall, 0, 0, 0, 0,
        kBaseInstructionGas},
       {0x00100073U, InstructionKind::kEbreak, Op::kEbreak, 0, 0, -1, 0,
+       kBaseInstructionGas},
+      {0xc0001073U, InstructionKind::kUnimp, Op::kUnimp, 0, 0, -1, 0,
        kBaseInstructionGas},
   }};
 

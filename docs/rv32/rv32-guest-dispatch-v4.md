@@ -1,22 +1,16 @@
 # RV32 Guest-Side Dispatch and the v4 Artifact Cut
 
-Status: proposal (2026-06-01; revised after code-grounded review). This is the
-execution contract for **Phase 3** of
-[rv32-author-toolchain.md](rv32-author-toolchain.md): it proposes closure of that
-note's open questions #1 ("how does the guest learn the invoked method id?") and
-#2 ("artifact v4?") — final once Decision 2 is signed off — and settles the
-`_start` ABI it left unsettled. The *decision*
+Status: decision record (2026-06-01; revised after code-grounded review and the
+v4 cut). This is the execution contract for **Phase 3** of
+[rv32-author-toolchain.md](rv32-author-toolchain.md): it closes that note's
+questions #1 ("how does the guest learn the invoked method id?") and #2
+("artifact v4?") and settles the `_start` ABI it left unsettled. The *decision*
 to adopt guest-side dispatch is already recorded there; this note pins the
 concrete entry ABI, the v4 layout, the version bumps, and the cross-repo
 sequencing the three teams build against.
 
 It does not re-argue the strategy. Read the author-toolchain "Dispatch: adopt
 guest-side dispatch" section first for the why; this is the how.
-
-**One decision gates everything below and is not yet made: Decision 2
-(unknown-method semantics).** It determines whether v4 is protocol-visible and
-even changes the exact v4 header layout. It needs Geoff/runtime-side sign-off
-before this note becomes a decision record.
 
 ## What changes, in one paragraph
 
@@ -28,8 +22,8 @@ constructs `Machine(program, memory, gas, entry_pc)`. v4 moves the
 (PC 0, already enforced), seeds the invoked `method_id` into registers, and the
 SDK-generated `_start` runs its own `match method_id { … }`. The dispatch PC
 table disappears from the artifact, the lowerer stops needing symbols (stripped
-release builds work). What stays open is whether the runtime keeps a host-side
-*existence* check (Decision 2).
+release builds work). Unknown methods follow Decision 2 Option A: they enter the
+guest dispatcher and become metered deterministic traps.
 
 The address model needs no change: the lowerer already requires `e_entry == 0`
 (`crates/rv32/lower/src/elf.rs`) and `_start` at vaddr 0
@@ -67,11 +61,12 @@ author-toolchain OQ#1's "cleanest" option: no extra syscall, no host round-trip.
 
 The syscall ABI (`syscall_abi_version`) is unchanged.
 
-## Decision 2 — unknown-method semantics (the production decision; UNRESOLVED)
+## Decision 2 — unknown-method semantics (Option A)
 
-This is the real fork, and my first draft got it wrong by calling for the "same
-host-visible outcome via a return/revert path" — those are contradictory, because
-the current outcome is *pre-execution*.
+This was the production fork: either preserve the old pre-execution miss or let
+guest-side dispatch handle unknown ids. v4 chose **Option A**: an unknown method
+id enters `_start`, runs the guest dispatcher's default arm, and becomes a metered
+deterministic trap.
 
 **Current behavior (RV32 and WASM, identical):** an unknown method is a
 deterministic miss *before any guest code runs* — `InvokeErrorCode::Deterministic`
@@ -88,10 +83,10 @@ with **0 gas**, no guest function run, no syscalls, no trace (RV32 builds no
   function runs, zero gas, no syscalls** — not "no instance," which the runtime
   has already built.
 
-If v4 dispatches unknown methods *in the guest*, the observable contract changes:
+Because v4 dispatches unknown methods *in the guest*, the observable contract changes:
 a `Machine` is constructed, the dispatcher's compare chain retires instructions
 (metered gas, nonzero), and the trace is non-empty. That is a **protocol-visible
-divergence from WASM**. So this must be a deliberate choice, not a side effect.
+divergence from WASM**. This is now a deliberate v4 behavior, not a side effect.
 
 **Option A — metered guest miss.** The guest dispatcher's default arm produces a
 deterministic error/abort. Simplest artifact and runtime; no host existence
@@ -263,11 +258,11 @@ though most of it is zero (bss/heap/stack). That is pure bloat.
 
 The data image is **address-indexed**, per the modified-Harvard model
 (`rv32-vm-experimental-design.md:158`): `.text` lives in separate code memory and
-its data-memory shadow is inert. The lowerer already follows this shape for the
-fixture (`fixtures/compiled_sha256_return/lower_elf.py:267,278`): start a
-zero-filled image of size `memory_bytes`, validate the ALLOC section policy, and
-copy only **VM-memory PROGBITS sections from the lowerer allowlist** at their
-guest virtual addresses (for example `.rodata`/`.srodata`/`.data`/`.sdata`).
+its data-memory shadow is inert. The official `rv32-lower` follows this shape for
+the fixture: start a zero-filled image of size `memory_bytes`, validate the ALLOC
+section policy, and copy only **VM-memory PROGBITS sections from the lowerer
+allowlist** at their guest virtual addresses (for example
+`.rodata`/`.srodata`/`.data`/`.sdata`).
 Skip NOBITS sections for contents (`.bss`/`.sbss` are provided by the zero-fill),
 and explicitly exclude both `.text` and metadata/spec sidecars
 (`groundhogspecv0`/`groundhogspecrawv0`) from the VM-memory image. **Do not**
@@ -347,17 +342,16 @@ today, so the feasibility spike needs no production API to run.
   shape (linear vs sorted/jump-table) affects per-method gas fairness as the
   method count grows.
 
-## Open question / feasibility spike (gates the ABI)
+## Feasibility Spike Result
 
-The seam *shape* is decided (`seed_method_id`, both interpreters). The remaining
-spike: **do the seeded `a0`/`a1` arrive intact and survive `_start`'s prologue?**
-Prototype with `MachineTestPeer`: reset, seed `a0`/`a1`, `run()` a tiny hand-built
-program that reads them and `ecall`s a return; assert the values arrive. Repeat
-for `ThreadedMachine`.
+The seam *shape* is decided (`seed_method_id`, both interpreters). Tests now
+cover seeded `a0`/`a1` delivery for the interpreter and threaded engine, including
+real lowered SDK artifacts that read the method id from `_start`.
 
-## Drift to clean up while cutting v4
+## Follow-Up Drift Cleanup
 
-These are stale because of the strip/dispatch change and should land with the cut:
+These are stale because of the strip/dispatch change and should be cleaned up
+after the cut:
 
 - `built_contracts/build_risc.sh:42` forces `CARGO_PROFILE_RELEASE_STRIP=false` —
   no longer needed (v4 accepts stripped builds).
@@ -371,27 +365,26 @@ support in hogd (no users to protect). Land hogd-v4, lowerer-v4, and the SDK
 dispatcher together, regen all fixtures in one set, and run the smoke against
 matching versions.
 
-0. **Decide Decision 2.** It gates the v4 header and whether v4 is
-   protocol-visible. Everything downstream depends on it.
-1. **Spike (hogd):** register-seed + run-from-0 via `MachineTestPeer`, on both
-   interpreters. → confirms the ABI is implementable.
-2. **Lock the ABI + format:** this doc to `Status: decision record`; pin the
-   chosen v4 header table and re-pin the fingerprint across both sides.
-3. **Parallel (independent once ABI + format are agreed):**
+0. **Done: decide Decision 2.** Option A shipped: unknown methods run the guest
+   dispatcher and are metered deterministic traps.
+1. **Done: spike/register seed (hogd):** register-seed + run-from-0 is covered on
+   both interpreters and with real lowered artifacts.
+2. **Done: lock the ABI + format:** this doc is a decision record; the v4 header
+   table and fingerprint are pinned across both sides.
+3. **Parallel follow-up:**
    - *sdk_rs:* naked `_start` dispatcher + unknown-method arm; drop the
      `.text.gh_*` dispatch dependence; unit-test the generated `match` and the
      `a0`/`a1` capture in isolation.
    - *groundhog-rpc:* artifact crate v4 (chosen variant, re-pin fingerprint,
      update static asserts/tests); thin the lowerer to validate-via-`e_entry` +
      package + hash; accept stripped builds.
-   - *hogd:* `runtime_context.{h,cc}` + `artifact.{h,cc}` (remove dispatch state /
-     add method-set check); `seed_method_id` on both interpreters; re-pinned
-     `kArtifactFormatFingerprint`; update tests; drift cleanup.
+   - *hogd:* continue drift cleanup around strip/build comments and expand SDK
+     fixture coverage as new contract shapes land.
 4. **Real-calldata smoke (hogd, closes author-toolchain Phase 0/4):** build with
    `groundhog build --target rv32`, generate the trait header from `.spec.json`,
    and from a native driver call `increment(7)` then assert `get() == 7`. Add:
-   - an **unknown method-id** call asserting the decided outcome (Option A: metered
-     deterministic error; Option B: zero-gas `Deterministic` miss matching WASM),
+    - an **unknown method-id** call asserting the decided outcome: metered
+      deterministic error from the guest dispatcher's default arm,
    - a **stripped release build** that still emits valid `.spec.json`/`.spec.xdr`,
    - a method-with-args vs no-arg pair, so calldata read is shown independent of
      dispatch,
@@ -403,9 +396,8 @@ matching versions.
 ## Cross-references
 
 - [rv32-author-toolchain.md](rv32-author-toolchain.md) — the dispatch decision and
-  3-repo ownership split. This note executes its Phase 3 and proposes closure of
-  open questions #1 and #2. When Decision 2 is signed off and v4 lands, mark
-  those as closed-by-this.
+  3-repo ownership split. This note executes its Phase 3 and closes questions #1
+  and #2.
 - [rv32-artifact-format-drift.md](rv32-artifact-format-drift.md) — the fingerprint
   cross-check that enforces the v3 → v4 cut on both sides.
 - [rv32-vm-experimental-design.md](rv32-vm-experimental-design.md) — VM/runtime

@@ -25,7 +25,8 @@ inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
 // into the header at kArtifactGasVersionOffset and validated at load.
-// v3: admitted canonical UNIMP as a deterministic invalid-instruction trap.
+// v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
+// trap.
 inline constexpr uint32_t kGasTableVersion = 3;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;

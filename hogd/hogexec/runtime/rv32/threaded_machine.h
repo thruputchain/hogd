@@ -30,7 +30,8 @@
 // a "run" is a maximal straight-line sequence whose continuation is known at
 // lowering time. enter_run() charges the whole run's gas in one check; the
 // handlers inside do no gas work. Control-flow instructions and host-boundary
-// instructions (branches/jal/jalr/ecall/ebreak) are barriers and self-charge.
+// instructions (branches/jal/jalr/ecall/ebreak/unimp) are barriers and
+// self-charge.
 // Loads/stores stay in straight-line runs for performance; if they trap, the
 // run has already been charged. On out-of-gas, the run is aborted at its head.
 // The exact instruction and intermediate gas_remaining can therefore differ
@@ -366,8 +367,9 @@ capture(const Ctx c)
   return s;
 }
 
-// A barrier ends a gas run: it transfers control (branches/jumps/ecall/ebreak),
-// so the run can't be pre-charged past it (the continuation isn't known). Its
+// A barrier ends a gas run: it transfers control
+// (branches/jumps/ecall/ebreak/unimp), so the run can't be pre-charged past it
+// (the continuation isn't known). Its
 // gas is charged individually. Loads/stores are NOT barriers: they're
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
 // already paid the run's gas (block-granular metering, like the wasm engines).
@@ -1182,7 +1184,8 @@ handler_for(Op op)
     // dispatch straight to trap_at (it has the handler signature).
     return &trap_at<Trace, Trap::kBreakpoint>;
   case Op::kUnimp:
-    // Same shape as ebreak: gas charged at the run head, pure trap.
+    // unimp's gas is charged at the run head; the handler is a pure trap, so
+    // dispatch straight to trap_at (it has the handler signature).
     return &trap_at<Trace, Trap::kInvalidInstruction>;
   case Op::kEcall:
     return &op_ecall<Trace>;
