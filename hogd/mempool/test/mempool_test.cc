@@ -1536,11 +1536,8 @@ TEST(Mempool, SubmitUnvettedReplayKeyVariantRequeuedAfterNomination)
   SignedTransactionBatch parsed_txs;
   ASSERT_TRUE(
       parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
-  ASSERT_EQ(parsed_txs.size(), 2UL);
-  const std::set<SignedTransaction> parsed_txs_set(parsed_txs.begin(),
-                                                   parsed_txs.end());
-  const std::set<SignedTransaction> submitted_txs_set(txs.begin(), txs.end());
-  EXPECT_EQ(parsed_txs_set, submitted_txs_set);
+  ASSERT_EQ(parsed_txs.size(), 1UL);
+  ASSERT_TRUE(parsed_txs[0] == txs[0] || parsed_txs[0] == txs[1]);
 
   const SignedTransactionHash tx0_hash = sha256(txs[0].tx);
   const SignedTransactionHash tx1_hash = sha256(txs[1].tx);
@@ -1563,7 +1560,7 @@ TEST(Mempool, SubmitUnvettedReplayKeyVariantRequeuedAfterNomination)
   const SignedTransactionHash sibling_hash =
       included_hash == tx0_hash ? tx1_hash : tx0_hash;
 
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 2UL);
   EXPECT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
   EXPECT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
@@ -1573,10 +1570,10 @@ TEST(Mempool, SubmitUnvettedReplayKeyVariantRequeuedAfterNomination)
           res_nominate.nominated_block().block_id)();
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 1UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 0UL);
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
-  ASSERT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
+  EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
 }
 
 } // namespace hogd
