@@ -1487,7 +1487,7 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   EXPECT_EQ(final_tip.db_tip().height, 0);
 }
 
-TEST(Mempool, SubmitUnvettedReplayKeyVariantRequeuedAfterNomination)
+TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
