@@ -57,7 +57,7 @@ public:
   SystemStatus<std::optional<WireStorageItem>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
 
-  SystemStatus<std::optional<const Contract>>
+  SystemStatus<std::optional<Contract>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
   SystemStatus<std::optional<DeployedContractHash>>
