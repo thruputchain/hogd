@@ -1847,7 +1847,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
       return_to_runqueue;
   return_to_runqueue.clear();
-  const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler;
+  const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler = nullptr;
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.
