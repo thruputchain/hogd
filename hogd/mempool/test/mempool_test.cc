@@ -1487,6 +1487,95 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   EXPECT_EQ(final_tip.db_tip().height, 0);
 }
 
+TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  txs[1].tx.invocation = fib_client.make_invocation<"slow_fibonacci">(
+      /*gas_amount=*/5'000'000'000, uint32_t{11});
+  txs[1].tx.uniquifier = txs[0].tx.uniquifier;
+
+  ASSERT_EQ(txs[0].tx.invocation.invoked_address,
+            txs[1].tx.invocation.invoked_address);
+  ASSERT_EQ(txs[0].tx.uniquifier.block_expiry_height,
+            txs[1].tx.uniquifier.block_expiry_height);
+  ASSERT_EQ(txs[0].tx.uniquifier.nonce, txs[1].tx.uniquifier.nonce);
+  ASSERT_NE(sha256(txs[0].tx), sha256(txs[1].tx));
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  for (SignedTransaction &tx : txs) {
+    tx.tx.auth_claim = make_sign_claim(0);
+    tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
+  }
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(txs)())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 2UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  SchedulerNominationResult res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  SignedTransactionBatch parsed_txs;
+  ASSERT_TRUE(
+      parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+  ASSERT_EQ(parsed_txs.size(), 1UL);
+  ASSERT_TRUE(parsed_txs[0] == txs[0] || parsed_txs[0] == txs[1]);
+
+  const SignedTransactionHash tx0_hash = sha256(txs[0].tx);
+  const SignedTransactionHash tx1_hash = sha256(txs[1].tx);
+
+  SignedTransactionHashBatch tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(
+      res_nominate.nominated_block().nomination.transactions_hash,
+      tx_hashes)());
+  ASSERT_EQ(tx_hashes.size(), 1UL);
+  ASSERT_TRUE(tx_hashes[0] == tx0_hash || tx_hashes[0] == tx1_hash);
+
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
+  ASSERT_TRUE(
+      parallel_batch_to_t(res_nominate.nominated_block()
+                              .nomination.transactions_nondeterministic_data,
+                          tx_nondeterministic_data)());
+  EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
+
+  const SignedTransactionHash included_hash = tx_hashes[0];
+  const SignedTransactionHash sibling_hash =
+      included_hash == tx0_hash ? tx1_hash : tx0_hash;
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 2UL);
+  EXPECT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
+  EXPECT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
+
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(
+          res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 0UL);
+  EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
+  EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
+}
+
 } // namespace hogd
 
 int

@@ -733,7 +733,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   info("schedule(), total schedule time is {}", total_schedule_time);
   record_stage(stage_schedule_loop);
 
-  cache.failed_txs.clear();
+  cache.failed_tx_hashes.clear();
   size_t num_tx_outcomes_processed = 0;
   // We need to remove failed txs from [cache.txs], so we use [tx_write_idx] to
   // track where to overwrite successful txs to in [cache.txs]. We do a single
@@ -756,7 +756,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
         tx_write_idx++;
       }
       else {
-        cache.failed_txs.push_back(std::move(cache.txs[tx_idx]));
+        cache.failed_tx_hashes.push_back((cache.tx_hashes[tx_idx]));
       }
     }
     num_tx_outcomes_processed = handle_end_indices[handle_idx];
@@ -927,7 +927,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   double stage_clear = 0.0;
   double stage_initialize_overlap = 0.0;
   double stage_schedule_remaining = 0.0;
-  double stage_add_failed_txs = 0.0;
   double stage_finish_nominating = 0.0;
   double stage_finalize_result = 0.0;
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -1065,12 +1064,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   info("schedule() gave us {} txs, scheduler size is {}",
        nominated_block_cache_.tx_hashes.size(), scheduler_->size());
 
-  // Process the transaction outcomes.
-  if (!nominated_block_cache_.failed_txs.empty()) {
-    co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
-  }
-  record_stage(stage_add_failed_txs);
-
   co_await finish_nominating_block(db_tip, nominated_block_cache_);
   record_stage(stage_finish_nominating);
 
@@ -1089,7 +1082,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   nomination_telemetry.nominated_tx_count =
       nominated_block_cache_.result_tx_hashes.size();
   nomination_telemetry.failed_tx_count =
-      nominated_block_cache_.failed_txs.size();
+      nominated_block_cache_.failed_tx_hashes.size();
   nominated_block_cache_.db_tip = DbTip{
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
@@ -1103,12 +1096,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
        "wait_auth_data={:.6f}, clear_a={:.6f}, clear_b={:.6f}, clear_c={:.6f}, "
        "clear_d={:.6f}, clear={:.6f}, initialize_overlap={:.6f}, "
-       "schedule_remaining={:.6f}, add_failed_txs={:.6f}, "
-       "finish_nominating={:.6f}, finalize_result={:.6f}, total={:.6f}, num tx "
-       "hashes {}, num tx nominations {}",
+       "schedule_remaining={:.6f}, finish_nominating={:.6f}, "
+       "finalize_result={:.6f}, total={:.6f}, num tx hashes {}, num tx "
+       "nominations {}",
        stage_precheck, stage_wait_transfers, stage_wait_auth_data,
        stage_clear_a, stage_clear_b, stage_clear_c, stage_clear_d, stage_clear,
-       stage_initialize_overlap, stage_schedule_remaining, stage_add_failed_txs,
+       stage_initialize_overlap, stage_schedule_remaining,
        stage_finish_nominating, stage_finalize_result, timer.elapsed(),
        nominated_block_cache_.result_tx_hashes.size(),
        nominated_block_cache_.result_tx_nominations.size());
@@ -1850,7 +1843,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // Importantly, this logic must only look at txs that actually made it into
   // the nominated block. [nominated_block_cache_.tx_hashes] includes every tx
   // we attempted during scheduling, including txs that later failed proposal
-  // and were re-added to the scheduler via [failed_txs].
+  // and were added to [failed_tx_hashes].
   static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
       return_to_runqueue;
   return_to_runqueue.clear();
@@ -1858,23 +1851,27 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.
-    remove_from_scheduler = &nominated_block_cache_.result_tx_hashes;
+    // [nominated_block_cache_.tx_hashes] also includes the failed txs (in
+    // [nominated_block_cache_.failed_tx_hashes]).
+    remove_from_scheduler = &nominated_block_cache_.tx_hashes;
   }
   else {
     // The committed block is a block we validated.
     if (nominated_block_cache_.block_id &&
         nominated_block_cache_.block_id != block_id) {
       // Return the nominated block's txs to the runqueue so they can be
-      // scheduled again.
-      return_to_runqueue.insert(nominated_block_cache_.result_tx_hashes.begin(),
-                                nominated_block_cache_.result_tx_hashes.end());
+      // scheduled again. [nominated_block_cache_.tx_hashes] also includes the
+      // failed txs (in [nominated_block_cache_.failed_tx_hashes]).
+      return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
+                                nominated_block_cache_.tx_hashes.end());
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id == block_id) {
+        CHECK_NULL(remove_from_scheduler);
         remove_from_scheduler = &cache.tx_hashes;
       }
     }
-    CHECK_CONST_PTR(remove_from_scheduler);
+    CHECK_PTR(remove_from_scheduler);
     // Any of the txs in the committed (validated) block that were also in the
     // nominated block should not be returned to the runqueue.
     for (const SignedTransactionHash &hash : *remove_from_scheduler) {
@@ -1886,9 +1883,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_compute_reenqueue_set);
 
-  CHECK_CONST_PTR(remove_from_scheduler);
   scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                             return_to_runqueue.cend());
+  CHECK_PTR(remove_from_scheduler);
   const size_t remove_from_scheduler_size = remove_from_scheduler->size();
   co_await scheduler_->remove_from_scheduler(
       x23::span<const SignedTransactionHash>(*remove_from_scheduler));
@@ -1908,7 +1905,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     auto it = validated_block_cache_.find(block_id);
     CHECK(it != validated_block_cache_.end());
     committed_cache = &it->second;
-    CHECK_CONST_PTR(committed_cache);
+    CHECK_PTR(committed_cache);
     // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
     // us, so we do not need to do it here.
     co_await scheduler_->apply_committed_block_hog_ages(
