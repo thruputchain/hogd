@@ -12,7 +12,7 @@ cargo_in() {
     local toolchain
     toolchain="$(
       sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-        "${dir}/rust-toolchain.toml" | head -n 1
+        "${dir}/rust-toolchain.toml" | { head -n 1; cat > /dev/null; }
     )"
     if [ -n "${toolchain}" ]; then
       local rustc
