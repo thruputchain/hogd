@@ -16,10 +16,10 @@ The edge code is improving but still experimental:
 
 - `syscall_bridge.{h,cc}` reuses `syscall_entry` correctly, but still uses a
   scratch-copy memory model per ECALL.
-- `artifact.{h,cc}` and `dispatch.{h,cc}` are strict and well-tested, but their
-  broad error classes should be split before heavy fuzzing.
-- `runtime_context.{h,cc}` is useful test scaffolding, not final production
-  contract selection.
+- `artifact.{h,cc}` is strict and well-tested, but broad error classes should be
+  split before heavy fuzzing.
+- `runtime_context.{h,cc}` now backs `ContractType::kRv32`; activation hardening
+  still needs to decide final rollout policy.
 - `fixtures/compiled_sha256_return/` is a regression fixture, not the SDK.
 
 Recommendation: keep the in-tree VM path alive. Do not replace the core unless a
@@ -72,10 +72,11 @@ Remaining concern:
 Closed issues:
 
 - Runtime does not parse ELF.
-- Artifact v3 has SHA256 commitments for code, memory, and dispatch sections.
+- Artifact v4 has SHA256 commitments for code and initial memory sections.
 - Header offsets and little-endian helpers are named.
-- Dispatch validation is shared by parser and runtime.
-- Unknown method dispatch is a zero-gas deterministic miss.
+- Guest-side dispatch starts from the fixed entry point with method id in
+  `a0`/`a1`.
+- Unknown method dispatch is a metered deterministic guest trap.
 - Gas digest includes RV32 instruction costs and live syscall costs.
 
 Remaining concerns:
@@ -91,13 +92,13 @@ Remaining concerns:
 
 Current role:
 
-- Test-only `ContractType::kMockTest` runtime.
+- `ContractType::kRv32` runtime for deployed-contract execution.
 - Proves RV32/WASM parity through the shared `SystemCallHandler`.
-- Compares return buffers, traces, storage writes, events, stats, dispatch, and
-  error outcomes.
+- Compares return buffers, traces, storage writes, events, stats, method
+  dispatch, and error outcomes.
 
-Do not treat it as final production shape. M5/protocol integration should decide
-how deployed artifacts are stored, verified, and selected.
+Do not treat it as final production shape. Activation work should decide the
+remaining rollout and hardening requirements.
 
 ## Fixture And Lowerer
 

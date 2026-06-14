@@ -29,7 +29,12 @@ rustflags = [
     # and the stored image carries no code-sized zero shadow. Tell lld the
     # overlap is intentional.
     "-C", "link-arg=--no-check-sections",
-    "-C", "panic=abort",
+    # The hogd rv32 VM admits the canonical `unimp` trap (0xc0001073), so use
+    # immediate-abort: panic sites compile straight to the trap instruction
+    # instead of routing through the SDK ebreak panic handler, stripping the
+    # panic-formatting machinery by construction. Requires unstable-options.
+    "-Z", "unstable-options",
+    "-C", "panic=immediate-abort",
     "-C", "relocation-model=static",
     "-Z", "trap-unreachable=false",
     "--deny", "warnings",

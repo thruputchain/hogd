@@ -699,12 +699,67 @@ TEST(Rv32Threaded, fusedLoadFeedsImmArith)
 
 TEST(Rv32Threaded, ebreakTraps)
 {
-  const std::vector<uint32_t> words = {0x00100073U}; // ebreak
+  // ebreak followed by an addi. ebreak is a barrier, so its run's gas_to_run
+  // is only its own gas (kBaseInstructionGas=1); the addi's gas must NOT be
+  // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
+  // If ebreak were not a barrier, gas_to_run would be 2 (ebreak+addi) and
+  // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kEbreak).
+  const std::vector<uint32_t> words = {0x00100073U,
+                                       addi(1, 0, 1)}; // ebreak, addi x1,x0,1
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+  EXPECT_EQ(machine.gas_remaining(), 99U); // only ebreak's own gas charged
+}
+
+TEST(Rv32Threaded, unimpTraps)
+{
+  // unimp followed by an addi. unimp is a barrier, so its run's gas_to_run
+  // is only its own gas (kBaseInstructionGas=1); the addi's gas must NOT be
+  // pre-charged. Starting gas=100 -> gas_remaining=99 after the run fires.
+  // If unimp were not a barrier, gas_to_run would be 2 (unimp+addi) and
+  // gas_remaining would be 98 -- detecting removal of is_barrier(Op::kUnimp).
+  const std::vector<uint32_t> words = {0xc0001073U,
+                                       addi(1, 0, 1)}; // unimp, addi x1,x0,1
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(machine.gas_remaining(), 99U); // only unimp's own gas charged
+}
+
+TEST(Rv32Threaded, unimpDecodesToKUnimp)
+{
+  // 0xc0001073 is the canonical RISC-V `unimp` word (csrrw x0, cycle, x0).
+  // Pin that ThreadedProgram accepts it and decodes it to Op::kUnimp.
+  const std::vector<uint32_t> words = {0xc0001073U};
+  const std::vector<uint8_t> bytes = words_to_bytes(words);
+  const auto prog = ThreadedProgram::create(bytes);
+  ASSERT_TRUE(prog.has_value());
+  const auto decoded = prog->instruction_at(0);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->op, Op::kUnimp);
+}
+
+TEST(Rv32Threaded, unimpTrapsInvalidInstruction)
+{
+  const std::vector<uint32_t> words = {0xc0001073U}; // unimp
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kInvalidInstruction);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 99U);
+
+  ThreadedMachine out_of_gas(*program, 0);
+  EXPECT_EQ(out_of_gas.run(host), StepResult::kTrap);
+  EXPECT_EQ(out_of_gas.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(out_of_gas.pc(), 0U);
+  EXPECT_EQ(out_of_gas.gas_remaining(), 0U);
 }
 
 TEST(Rv32Threaded, ecallHaltsWithA0)

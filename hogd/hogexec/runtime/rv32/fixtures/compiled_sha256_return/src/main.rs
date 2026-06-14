@@ -26,10 +26,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 // v4 guest-side dispatch. The runtime enters at _start (PC 0) with the invoked
 // method id seeded into a0 (low 32 bits) / a1 (high 32 bits). _start reads them
 // before any prologue runs, compares against the two method selectors, and tail
-// -calls the matching body; an unknown id falls through to `ebreak`, a
-// deterministic trap (the dispatcher's default arm). The selector low/high
+// -calls the matching body; an unknown id falls through to canonical UNIMP, a
+// deterministic invalid-instruction trap. The selector low/high
 // halves below must match SHA256_METHOD_ID / SHA256_REPEATED_METHOD_ID in
-// lower_elf.py and the Sha256Wrapper entrypoint hashes the C++ parity test
+// package_artifact.py and the Sha256Wrapper entrypoint hashes the C++ parity test
 // pins.
 const SHA256_LO: i32 = 0xA719_DD56_u32 as i32; // SHA256_METHOD_ID & 0xFFFF_FFFF
 const SHA256_HI: i32 = 0xCA57_1C66_u32 as i32; // SHA256_METHOD_ID >> 32
@@ -53,7 +53,7 @@ global_asm!(
     "  bne  a1, t0, 2f",
     "  tail {rep}",
     "2:",
-    "  ebreak",
+    "  .word 0xc0001073",
     ".popsection",
     sha = sym sha256_return_hash,
     rep = sym sha256_return_empty,

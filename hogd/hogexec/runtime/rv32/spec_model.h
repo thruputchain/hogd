@@ -487,7 +487,10 @@ step_spec(SpecState &state, std::span<const SpecInstruction> instructions)
   case Op::kEbreak:
     set_trap(state, Trap::kBreakpoint);
     return StepResult::kTrap;
+  case Op::kUnimp:
   default:
+    // kUnimp is enumerated so the spec model names every validated op;
+    // it deliberately shares the invalid-instruction trap with undecodable ops.
     set_trap(state, Trap::kInvalidInstruction);
     return StepResult::kTrap;
   }

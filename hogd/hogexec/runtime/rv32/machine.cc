@@ -580,6 +580,9 @@ Machine::execute(const DecodedInstruction &instruction)
   case Op::kEbreak:
     set_trap(Trap::kBreakpoint);
     return StepResult::kTrap;
+  case Op::kUnimp:
+    set_trap(Trap::kInvalidInstruction);
+    return StepResult::kTrap;
   default:
     assert(false && "invalid decoded op");
     set_trap(Trap::kInvalidInstruction);

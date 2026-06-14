@@ -16,8 +16,8 @@
   - Execution contract for the guest-side dispatch cut (author-toolchain
     Phase 3): the `_start` entry ABI, unknown-method semantics, the v4 artifact
     layout, and cross-repo sequencing.
-  - Proposes closure of author-toolchain open questions #1 (method-id passing)
-    and #2 (v4); becomes final once Decision 2 is signed off.
+  - Records closure of author-toolchain open questions #1 (method-id passing)
+    and #2 (v4).
 - [rv32-rust-vm-lessons.md](rv32-rust-vm-lessons.md)
   - Prior-art notes from CKB-VM and PolkaVM.
   - Explains why the artifact/runtime boundary looks the way it does.
@@ -32,8 +32,8 @@
   - License notice for adapted `riscv-tests` conformance vectors.
 
 This directory is the working record for the experimental in-tree RV32IM VM.
-RV32 is still test-only: no `ContractType::kRv32`, no deployed-contract path,
-and no protocol-visible behavior.
+RV32 now has a `ContractType::kRv32` deployed-contract path, but remains behind
+explicit artifact/profile validation and activation hardening.
 
 ## Implementation Layers
 
@@ -43,11 +43,12 @@ and no protocol-visible behavior.
 - Host bridge: `syscall_bridge.{h,cc}`.
   - Converts RV32 register-native `ecall`s (syscall number in `a0`, args in
     `a1`-`a7`) into the shared `syscall_entry` path.
-- Artifact and dispatch: `artifact.{h,cc}`, `dispatch.{h,cc}`.
-  - Parses the strict v3 artifact format, validates SHA256 section commitments,
-    and maps method IDs to validated PCs.
-- Experimental runtime: `runtime_context.{h,cc}`.
-  - Test-only `ContractType::kMockTest` runtime used for RV32/WASM parity.
+- Artifact loading: `artifact.{h,cc}`.
+  - Parses the strict v4 artifact format and validates SHA256 section
+    commitments. Guest code owns method dispatch from the fixed entry point.
+- Runtime: `runtime_context.{h,cc}`.
+  - `ContractType::kRv32` runtime used for RV32 deploy/call/view execution and
+    RV32/WASM parity tests.
 - Fixture/lowerer: `fixtures/compiled_sha256_return/`.
   - Disposable Rust/lowerer spike used as a regression fixture, not the final SDK.
 - Tests and benchmark:

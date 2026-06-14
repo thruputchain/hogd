@@ -6,10 +6,10 @@ differential harness against the C++ RV32 VM. It is a named gate in three
 places — the Runtime Boundary Gate
 (`rv32-conformance-and-performance.md`), the open gates in
 `rv32-upstream-test-plan.md`, and the activation-hardening list in
-`README.md` — and must be green before any protocol-visible RV32 work.
+`README.md` — and must be green before broad protocol activation.
 
-RV32 is still test-only (`ContractType::kMockTest`, no `kRv32` selector). This
-gate is part of activation hardening, not a production dependency.
+RV32 has a `ContractType::kRv32` deployed-contract path. This gate is part of
+activation hardening, not a dependency of the local runtime plumbing.
 
 ## What this adds over the existing five layers
 
@@ -199,7 +199,7 @@ Three sources, in priority order:
    This is where coverage actually comes from and is the main net-new build.
    (The spec-model crosscheck already has a fixed-seed generator we can learn
    from / extend.)
-2. **Real ELF via the lowerer.** Our `ELF → v3 artifact` lowerer and Spike both
+2. **Real ELF via the lowerer.** Our `ELF → v4 artifact` lowerer and Spike both
    consume ELF, so **ELF is a shared input format** — a clean equivalence point
    *iff* the lowerer's memory map (code/data placement, rodata relocation) is
    mirrored in the oracle config. This is the path to differential-testing real
