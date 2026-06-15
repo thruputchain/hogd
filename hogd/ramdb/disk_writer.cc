@@ -10,6 +10,7 @@
 #include <cstring>
 #include <format>
 #include <mutex>
+#include <new>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -186,6 +187,16 @@ DBStatus<uint64_t>
 DiskWriter::sync()
 {
   std::unique_lock ul(to_disk_lock_);
+
+  // Reserve the queue slots (one per dirty head plus the commit marker) before
+  // draining any head, so an allocation failure here leaves the heads and
+  // to_disk_ untouched: the sync fails atomically and is retryable instead of
+  // stranding drained loglets with no following commit marker (#2657).
+  try {
+    to_disk_.reserve(to_disk_.size() + heads_.size() + 1);
+  } catch (const std::bad_alloc &) {
+    return DBError(DBCode::kNoMemory);
+  }
 
   // Ask write_worker() to write the partial loglets in all heads and then the
   // commit record. write_worker() may also still be writing full loglets
