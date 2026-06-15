@@ -1495,10 +1495,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
 
   info("schedulercoord_validate here");
-  // [nomination] includes the the tx hashes and the nondeterministic proposal
+  // [nomination] includes the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
-  // the nondeterminstic proposal data to form a [ProposedTransaction], which
+  // the nondeterministic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   bool validated = true;

@@ -101,7 +101,7 @@ public:
       // mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
-      // We need to call [executor_.shut_down()] so that the [Exector]
+      // We need to call [executor_.shut_down()] so that the [Executor]
       // destructor does not block.
       executor_.shut_down();
 
