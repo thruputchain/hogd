@@ -93,7 +93,7 @@ public:
     : t_(std::forward<Args>(args)...)
   {}
 
-  // take() acquries the lock and returns a smart pointer Ptr to the
+  // take() acquires the lock and returns a smart pointer Ptr to the
   // object that will release the lock when the pointer is destroyed
   // or when you call reset() on it.  The Ptr returned by take() will
   // always be non-null, so you can hold the lock for a block with:

@@ -313,7 +313,7 @@ public:
     ::close(fd.get());
   }
 
-  // Make any pending and future callbacks return with EBADF untill
+  // Make any pending and future callbacks return with EBADF until
   // reset() is called.  Pending callbacks are made asynchronously, so
   // may still be running after poison() returns.
   void poison(BorrowedFd fd);

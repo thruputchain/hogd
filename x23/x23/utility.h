@@ -44,7 +44,7 @@ using std::declval;
 // arg should always be an unparenthesized id-expression--usually a
 // function parameter declared as a forwarding reference (auto &&arg).
 //
-// We play some games to force a compliation error in the event that
+// We play some games to force a compilation error in the event that
 // arg is parenthesized, as this would cause us to get the wrong
 // decltype--i.e., the type of an expression, not the type with which
 // a variable was declared.  (An expression is already its own type,

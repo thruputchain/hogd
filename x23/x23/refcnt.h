@@ -32,7 +32,7 @@ template<typename Ptr> struct RefOps {
 
 // In the event that we bucket reference counts by CPU, we want to be
 // able to include a tag in a RefPtr recording the CPU or bucket in
-// which the reference count was incremeneted.
+// which the reference count was incremented.
 template<typename Ptr, typename Ops> class RefTag {
 public:
   using ops = Ops;

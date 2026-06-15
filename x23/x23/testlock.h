@@ -25,7 +25,7 @@ namespace x23 {
 // * You can unlock the TestLock in a different thread from the one
 //   in which you acquired it, which is important for coroutines that
 //   may migrate across threads.  Note you still can't lock a
-//   TestLock in a coroutine exexuting in ThreadPool, as coroutines
+//   TestLock in a coroutine executing in ThreadPool, as coroutines
 //   should never block, but it is safe to use try_lock().
 //
 // * There's a block_while_inhibited() hook for derived types

@@ -69,7 +69,7 @@
 //   to co_await, and save the CoroCB to be invoked when the event
 //   fires.
 //
-// * Any funtion returning the vacuous type Detached can be a
+// * Any function returning the vacuous type Detached can be a
 //   coroutine that uses co_await and co_return (co_returing void),
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
