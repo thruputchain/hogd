@@ -9,7 +9,7 @@
 // Therefore, only a single pointer can be maintained to each item and these
 // pointers must be updated during compaction. Compaction is done in
 // coordination with a ScalableMap, a type of hash table that the log compactor
-// uses to maintain these single pointers and sychronize updates to item
+// uses to maintain these single pointers and synchronize updates to item
 // locations.
 //
 // The log is divided into several fixed-sized segments called loglets. Each

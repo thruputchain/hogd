@@ -210,11 +210,11 @@ public:
   std::span<const std::byte> get_bytes() const { return {start_, pos_}; }
 
   // is_attached returns true if the loglet is ready for use. It is undefined
-  // behavor to use the loglet (e.g., allocate, reallocate, or deallocate)
+  // behavior to use the loglet (e.g., allocate, reallocate, or deallocate)
   // before it has been attached.
   bool is_attached() const { return start_ != nullptr; }
 
-  // attach sets the loget's segment location. It must be called before using
+  // attach sets the loglet's segment location. It must be called before using
   // the loglet. start must point into a region whose std::byte[] lifetime has
   // already been started (see LogletAllocator::create).
   void attach(std::byte *start, size_t len)

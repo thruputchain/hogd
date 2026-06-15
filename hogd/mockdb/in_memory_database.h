@@ -25,7 +25,7 @@ class InMemoryDatabase {
 public:
   // Should be called from within a StorageView.
   // This should return the storage item at the end of block immediately
-  // preceeding a storage view that is a direct descendant of this.
+  // preceding a storage view that is a direct descendant of this.
   // (i.e. the most recently committed block)
   // However, this object does not manage view changes internally.
   //

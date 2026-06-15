@@ -89,7 +89,7 @@ TEST(CRC32C, BasicUsage)
   std::vector<uint8_t> a_same = {0, 1, 2, 3};
   std::vector<uint8_t> b = {3, 2, 1, 0};
 
-  // direct calcuation
+  // direct calculation
   EXPECT_EQ(crc32c(a), crc32c(a_same));
   EXPECT_NE(crc32c(a), crc32c(b));
 

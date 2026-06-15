@@ -374,7 +374,7 @@ public:
   get_or_create_local_rv32_translation(SHA256Hash const &hash,
                                        Contract const &contract);
 
-  // == Error converstion methods ==
+  // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
 

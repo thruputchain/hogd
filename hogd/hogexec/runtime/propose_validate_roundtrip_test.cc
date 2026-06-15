@@ -263,7 +263,7 @@ protected:
   }
 
   // Proposal helper for adversarial tests: insert {10} + commit,
-  // consume 1 + abort.  Returns both proposal datas.
+  // consume 1 + abort.  Returns both proposal data.
   std::pair<NondeterministicProposalData, NondeterministicProposalData>
   propose_rcq_insert_and_consume(RuntimeContext &ctx)
   {

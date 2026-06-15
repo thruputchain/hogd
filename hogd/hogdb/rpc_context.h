@@ -216,7 +216,7 @@ private:
   // closed snapshot hashes waiting for commit.
   std::map<BlockTXID, DbHash> db_hashes_;
 
-  // External serivces that may subscribe to changes in the database.
+  // External services that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   AuthChangeSubscriptionManager auth_change_subscription_manager_;
   BackgroundCommitWorker background_commit_worker_ =
