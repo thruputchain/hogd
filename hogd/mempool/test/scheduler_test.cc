@@ -232,23 +232,34 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   after_lock.unlock();
 }
 
-TEST(Scheduler, PendingNominationExcludesAccountAcrossSchedules)
+TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 3;
+  txs[2].tx.uniquifier.block_expiry_height = 12;
 
   MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit * 2);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
-  EXPECT_EQ(scheduler->size(), 2UL);
+  scheduler->add_txs({txs[0], txs[1], txs[2]})();
+  EXPECT_EQ(scheduler->size(), 3UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
   EXPECT_EQ(scheduler->size(), 1UL);
@@ -273,24 +284,35 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 3;
+  txs[2].tx.uniquifier.block_expiry_height = 12;
 
   MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit * 2);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(scheduler->size(), 1UL);
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
   EXPECT_EQ(scheduler->size(), 0UL);
 
-  scheduler->add_txs({txs[1]})();
+  scheduler->add_txs({txs[2]})();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   scheduled_hashes.clear();
