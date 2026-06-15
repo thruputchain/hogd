@@ -18,6 +18,8 @@
 #include <sys/param.h>
 #include <unistd.h> // for gethostname
 #define HOST_NAME_MAX MAXHOSTNAMELEN
+#else
+#include <climits> // for HOST_NAME_MAX
 #endif
 
 namespace hogd {

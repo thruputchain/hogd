@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <climits> // for IOV_MAX
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
