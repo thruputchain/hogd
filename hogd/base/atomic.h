@@ -63,7 +63,7 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
 
 } // namespace detail
 
-// Clang's stdlib provices integral specializations for std::atomic<int128_t>.
+// Clang's stdlib provides integral specializations for std::atomic<int128_t>.
 // Clang also sets is_always_lock_free to true for int128_t.
 template<typename T>
 using Atomic16B = std::conditional_t<std::atomic<T>::is_always_lock_free,

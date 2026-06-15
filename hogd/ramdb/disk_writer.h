@@ -3,7 +3,7 @@
 // Ramdb uses a multi-headed buffer design for writing to disk in order to
 // improve multicore scalability. Each head is responsible for a shard of the
 // key space and uses a loglet as its write buffer. When the loglet becomes
-// full, it is enqueued to be written to the on-disk log. A seperate thread
+// full, it is enqueued to be written to the on-disk log. A separate thread
 // then concurrently performs the writes in the background.
 //
 // LSN = log sequence number
@@ -69,7 +69,7 @@ public:
   // the appropriate log head.
   //
   // Other writes to the same head will be locked, which allows the caller to
-  // update the in-memory item before droping the scope so it can keep that
+  // update the in-memory item before dropping the scope so it can keep that
   // state consistent.
   ScopedDiskWrite write_record(size_t hash);
 

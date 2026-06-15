@@ -3077,7 +3077,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         [](model::RunnableActionSet &set, auto self) -> model::Async {
           co_await set.bg();
 
-          // If this one preceeds the set_add_nnint in the orchestrator, then
+          // If this one precedes the set_add_nnint in the orchestrator, then
           // that will succeed.
           auto calldata =
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::

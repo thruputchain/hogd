@@ -2151,7 +2151,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnFreshKey)
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_excl_past_fresh");
   auto tx = make_new_per_tx_db_proxy();
-  // This consitutes invalid input from the executor
+  // This constitutes invalid input from the executor
   tx.add_delta(key,
                make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
@@ -2174,7 +2174,7 @@ TEST_F(DirectRCQTests,
   advance_block();
 
   auto tx = make_new_per_tx_db_proxy();
-  // This consitutes invalid input from the executor
+  // This constitutes invalid input from the executor
   tx.add_delta(key,
                make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));

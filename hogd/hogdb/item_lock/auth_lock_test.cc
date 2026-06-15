@@ -565,7 +565,7 @@ TEST(AuthLockTest, DISABLED_AcquireCosts2)
   AuthLock lock(base);
 
   // We can't refund deleting keys in auth data because we don't pass the
-  // permament exclusive lock flag into the auth data item. These two changes
+  // permanent exclusive lock flag into the auth data item. These two changes
   // are both valid, but if committed together with a tx-local refund would have
   // the possibility of double-refunding the deleted key.
 

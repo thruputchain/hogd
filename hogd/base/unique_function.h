@@ -51,7 +51,7 @@ private:
 } // namespace detail
 
 // invocable_r is the concept for a callable type F that can be called with
-// arguments Arg... and returns a type convertable to Ret.
+// arguments Arg... and returns a type convertible to Ret.
 template<typename Ret, typename F, typename... Args>
 concept invocable_r = std::is_invocable_r_v<Ret, F, Args...>;
 

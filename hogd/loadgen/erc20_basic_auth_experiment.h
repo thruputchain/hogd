@@ -35,7 +35,7 @@ private:
 
   ContractAddress get_owner_address() const
   {
-    // must be intialized by initialize_wallet_addresses
+    // must be initialized by initialize_wallet_addresses
     assert(!wallets_.empty());
     return wallets_[0].address;
   }

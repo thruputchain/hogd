@@ -96,7 +96,7 @@ pub struct WasmtimeGlobalContext {
     // and I am more concerned with how performance will degrade as the number of cache entries increases
     // (and memory usage increases).
     //
-    // But this change can be revisted if necessary.
+    // But this change can be revisited if necessary.
     instance_pre_cache: InstancePreCache,
     engine_count: usize,
     linkers: Vec<Linker<*mut c_void>>,

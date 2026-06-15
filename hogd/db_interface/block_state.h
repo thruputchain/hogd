@@ -22,7 +22,7 @@ namespace hogd {
 // the parent can be unlinked, at which point the reference is released.
 //
 // Note: the base database does not maintain versioning for blocks that do not
-// commit and have no possibility of committing (i.e., some directly preceeding
+// commit and have no possibility of committing (i.e., some directly preceding
 // block had its sibling commit instead of it).
 // Any pending modifications on a block whose sibling commits (from, e.g.,
 // delayed RPCs or slow executors) may read invalid state (and give invalid

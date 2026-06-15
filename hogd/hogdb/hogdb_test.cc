@@ -706,7 +706,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   {
     LockContext ctx(&db_, height, rckey, &cost_model_);
 
-    // height is now 10, 101 expired, and it shouldn't be possible to readd it
+    // height is now 10, 101 expired, and it shouldn't be possible to re-add it
     ItemChange c2(ReplayCacheIt(Uniquifier(height, 101)));
     auto r = lock2.try_atomic_change_lock(nullptr, &c2, ctx);
     ASSERT_FALSE(r);

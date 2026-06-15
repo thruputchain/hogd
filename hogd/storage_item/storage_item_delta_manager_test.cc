@@ -503,7 +503,7 @@ TEST_P(DeltaManagerTest, PermanentExclusiveLockMultiAcquire)
       StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
       StorageLock(StorageLockType::kNone)));
 
-  // cannot reacquire lock after permament lock commits
+  // cannot reacquire lock after permanent lock commits
   ASSERT_FALSE(
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
                        StorageLock(StorageLockType::kNone)));
@@ -811,7 +811,7 @@ TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
   ASSERT_TRUE(lk2);
   // Consume cost must be 0: the snapshot contains nothing to pop. Even if
   // this consume has managed to pair with a concurrent consume that would
-  // leave the cost unchanged so 0 is conservative and a determinstic function
+  // leave the cost unchanged so 0 is conservative and a deterministic function
   // of the delta and the snapshot.
   EXPECT_EQ(lk2->locked_tokens_, 0);
   item.commit(consume_delta, *lk2);

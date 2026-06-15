@@ -37,7 +37,7 @@ enum class TestSignedEnum : int32_t {
 TEST(SyscallParseTests, ParsePrimitiveTypes)
 {
   AliasGuard guard;
-  // some arbitrary iniital data
+  // some arbitrary initial data
   std::vector<uint8_t> memory = {0, 1, 2, 3, 4, 5, 6, 7};
   int128_t big_num = (int128_t{1} << 75) + 12;
   auto *addr = reinterpret_cast<uint8_t *>(&big_num);

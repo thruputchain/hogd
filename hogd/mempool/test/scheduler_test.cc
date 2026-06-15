@@ -657,8 +657,9 @@ TEST(Scheduler, Fairness)
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestInfra::kAccountAddresses[i];
     // The number of txs scheduled should be the proportion of total hogs that
-    // this account has multipled by [kBlockSize]. For example, account 1 has 10
-    // billion hogs, so its proportion of total hogs is 10 billion / (5 billion
+    // this account has multiplied by [kBlockSize]. For example, account 1 has
+    // 10 billion hogs, so its proportion of total hogs is 10 billion / (5
+    // billion
     // + 10 billion + 15 billion + 20 billion) = 10 billion / 50 billion = 0.2.
     // Thus, the number of txs scheduled for account 1 should be 0.2 *
     // [kBlockSize] * [kNumRounds].
