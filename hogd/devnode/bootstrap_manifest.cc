@@ -20,7 +20,6 @@
 #include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
-#include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
@@ -192,10 +191,10 @@ require_string_value(std::string_view actual, std::string_view expected,
   }
 }
 
-// hog-devnode only: this asserts that the manifest matches the dev-wallet WASM
-// blob the binary already has. In a non-dev backend the relationship
-// reverses — the manifest names the artifact bytes to deploy and the
-// backend verifies its deployed sha256 against the manifest's contentHash.
+// hog-devnode only: this asserts that the manifest matches the dev-wallet
+// artifact the binary already has. In a non-dev backend the relationship
+// reverses: the manifest names the artifact bytes to deploy and the backend
+// verifies its deployed sha256 against the manifest's contentHash.
 DevWalletProfile
 validate_dev_wallet_assertions(const json::Value &dev_wallet)
 {
@@ -210,7 +209,6 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
   if (std::optional<std::string_view> content_hash =
           optional_string_field(dev_wallet, "contentHash", "devWallet")) {
     auto wallet_contract = load_dev_wallet_contract(profile);
-    CHECK(wallet_contract != nullptr);
     const std::string wallet_hash = hex_string(sha256(*wallet_contract));
     require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
   }

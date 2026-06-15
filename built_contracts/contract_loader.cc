@@ -27,7 +27,8 @@ std::vector<std::filesystem::path> contract_artifact_directories;
 } // namespace
 
 void
-set_contract_artifact_directories(std::vector<std::filesystem::path> directories)
+set_contract_artifact_directories(
+    std::vector<std::filesystem::path> directories)
 {
   std::lock_guard guard(contract_artifact_directories_mutex);
   contract_artifact_directories = std::move(directories);
@@ -37,12 +38,12 @@ std::vector<std::filesystem::path>
 contract_search_directories()
 {
   std::lock_guard guard(contract_artifact_directories_mutex);
-  std::vector<std::filesystem::path> directories = contract_artifact_directories;
+  std::vector<std::filesystem::path> directories =
+      contract_artifact_directories;
   directories.push_back(std::filesystem::path(CMAKE_ROOT_BINARY_DIR) /
                         "built_contracts");
-  directories.push_back(std::filesystem::path(x23::getprogpath())
-                            .parent_path() /
-                        "contracts");
+  directories.push_back(
+      std::filesystem::path(x23::getprogpath()).parent_path() / "contracts");
   directories.emplace_back(kSystemContractsDir);
   return directories;
 }
@@ -63,7 +64,7 @@ load_raw_file(std::string_view filename)
     }
   }
   if (!f) {
-    throw std::runtime_error("failed to load wasm file: " +
+    throw std::runtime_error("failed to load contract artifact: " +
                              std::string(filename));
   }
 
@@ -81,11 +82,12 @@ load_raw_file(std::string_view filename)
   const bool read_error = std::ferror(f) != 0;
   std::fclose(f);
   if (read_error) {
-    throw std::runtime_error("failed to read wasm file: " +
+    throw std::runtime_error("failed to read contract artifact: " +
                              std::string(filename));
   }
 
-  // groundhog build produces already-instrumented wasm; no need to re-instrument.
+  // groundhog build produces already-instrumented wasm; no need to
+  // re-instrument.
   return contents;
 }
 

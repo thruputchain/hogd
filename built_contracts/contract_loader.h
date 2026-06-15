@@ -16,8 +16,7 @@ void set_contract_artifact_directories(
 // Directories searched for contract artifacts, in priority order.
 std::vector<std::filesystem::path> contract_search_directories();
 
-// Loads a contract from the contract artifact search path. Takes a filename for
-// the WASM file and returns a shared pointer to the loaded Contract. Throws
+// Loads a WASM contract from the contract artifact search path. Throws
 // std::runtime_error if the file cannot be loaded.
 std::shared_ptr<Contract> load_contract(std::string_view filename);
 

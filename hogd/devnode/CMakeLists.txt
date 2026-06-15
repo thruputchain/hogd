@@ -28,6 +28,7 @@ target_link_libraries(
 )
 add_dependencies(
   hog_devnode
+  all_riscv_contracts
   all_wasm_contracts
   all_wasm_headers
 )
@@ -74,6 +75,7 @@ target_link_libraries(
 )
 add_dependencies(
   hog_devnode_test
+  all_riscv_contracts
   all_wasm_contracts
   hog_devnode_exec
 )
@@ -101,6 +103,7 @@ target_link_libraries(
 )
 add_dependencies(
   bootstrap_manifest_test
+  all_riscv_contracts
   all_wasm_contracts
   all_wasm_headers
 )

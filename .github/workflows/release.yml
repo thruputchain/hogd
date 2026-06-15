@@ -239,7 +239,7 @@ jobs:
           cp build/release/hogd/devnode/hog-devnode package/hog-devnode-macos-arm64/hog-devnode
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
-          cp build/release/built_contracts/dev_wallet.wasm package/hog-devnode-macos-arm64/contracts/dev_wallet.wasm
+          cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
           mkdir -p lib
@@ -317,7 +317,7 @@ jobs:
           fi
           popd >/dev/null
 
-          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.wasm lib
+          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.rv32a lib
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
