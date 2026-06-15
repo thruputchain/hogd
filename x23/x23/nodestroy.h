@@ -95,7 +95,7 @@ private:
 
 // NoDestroy<T> embeds an element of class T, a bit like optional<T>,
 // except that the object is never destroyed.  Hence, it's useful for
-// globals and static objects that might be accessed during global
+// globals and statics that might be accessed during global
 // destruction.
 template<typename T> class NoDestroy : public Unconstructed<T> {
 public:
