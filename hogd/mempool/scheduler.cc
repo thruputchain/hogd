@@ -148,6 +148,7 @@ void
 Scheduler::start_pending_nomination(BlockID block_id)
 {
   CHECK_EQ(pending_nomination_.block_id, 0UL);
+  CHECK(pending_nomination_.accounts_excluded_from_block.empty());
   pending_nomination_.block_id = block_id;
 }
 
@@ -161,6 +162,7 @@ Scheduler::commit_pending_nomination(BlockID block_id)
     account_state->hog_age = hog_age;
   }
   refresh_ready_accounts(pending_nomination_.touched_accounts);
+  refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
@@ -177,12 +179,14 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
   //
   // The reason why we do not call [pending_nomination_.clear()] instead is
   // because we pass [pending_nomination_.touched_accounts] to
-  // [refresh_ready_accounts()]. We could copy it into a temporary variable
-  // instead and call [pending_nomination_.clear()], but it would be best to
-  // avoid this copy overhead.
+  // [refresh_ready_accounts()] and [refresh_accounts_excluded_from_block()]. We
+  // could copy them into temporary variables instead and call
+  // [pending_nomination_.clear()], but it would be best to avoid this copy
+  // overhead.
   pending_nomination_.block_id = 0;
   pending_nomination_.hog_ages.clear();
   refresh_ready_accounts(pending_nomination_.touched_accounts);
+  refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
@@ -501,6 +505,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   for (const ContractAddress &account : found) {
+    if (account_excluded_from_block(account)) {
+      continue;
+    }
     ready_accounts_.insert(get_account_key(account));
   }
 }
@@ -811,6 +818,24 @@ Scheduler::erase_ready_account(const ContractAddress &account)
   }
 }
 
+bool
+Scheduler::account_excluded_from_block(const ContractAddress &account) const
+{
+  return pending_nomination_.accounts_excluded_from_block.contains(account);
+}
+
+void
+Scheduler::refresh_accounts_excluded_from_block()
+{
+  for (const ContractAddress &account :
+       pending_nomination_.accounts_excluded_from_block) {
+    erase_ready_account(account);
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      ready_accounts_.insert(get_account_key(account));
+    }
+  }
+}
+
 void
 Scheduler::refresh_ready_accounts(
     const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts)
@@ -821,6 +846,9 @@ Scheduler::refresh_ready_accounts(
     // [AccountKey] may be updated with a new age, so the updated age is used on
     // the [insert()].
     erase_ready_account(account);
+    if (account_excluded_from_block(account)) {
+      continue;
+    }
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
@@ -857,6 +885,9 @@ Scheduler::cycle_accounts_during_schedule_helper(
     const TxKey &lower_bound)
 {
   for (const ContractAddress &account : accounts) {
+    if (account_excluded_from_block(account)) {
+      continue;
+    }
     // TODO(jhumphri): This is the same code as in [account_is_ready], but
     // we have it here because we need the iterator. Clean this up.
     GasAmount gas_limit;
@@ -885,9 +916,14 @@ Scheduler::schedule(size_t num_txs,
   size_t num_scheduled = 0;
   static std::unordered_set<ContractAddress, ByteArrayHasher> removed_accounts;
   static std::unordered_set<ContractAddress, ByteArrayHasher>
-      accounts_excluded_from_block;
+      local_accounts_excluded_from_block;
   removed_accounts.clear();
-  accounts_excluded_from_block.clear();
+  local_accounts_excluded_from_block.clear();
+  std::unordered_set<ContractAddress, ByteArrayHasher>
+      &accounts_excluded_from_block =
+          pending_nomination_.block_id
+              ? pending_nomination_.accounts_excluded_from_block
+              : local_accounts_excluded_from_block;
 
   const TxKey lower_bound = {.expiry_block_height = current_block(),
                              .tx_hash = {}};
@@ -973,9 +1009,9 @@ Scheduler::schedule(size_t num_txs,
           // The account may have been added to [removed_accounts] for a
           // different tx, so we need to remove it if so. Otherwise,
           // [cycle_accounts_during_schedule_helper()] could add the account to
-          // the runqueue, and then later on when we add all accounts in
-          // [accounts_excluded_from_block] back to the runqueue, we will crash
-          // because the account will already be in the runqueue.
+          // the runqueue, and then later when the excluded accounts are added
+          // back to the runqueue, we will crash because the account will
+          // already be in the runqueue.
           auto removed_it = removed_accounts.find(account);
           if (removed_it != removed_accounts.end()) {
             removed_accounts.erase(removed_it);
@@ -1006,9 +1042,11 @@ Scheduler::schedule(size_t num_txs,
   ready_accounts_.erase(ready_accounts_.begin(), account_it);
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
-  for (const ContractAddress &account : accounts_excluded_from_block) {
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+  if (!pending_nomination_.block_id) {
+    for (const ContractAddress &account : accounts_excluded_from_block) {
+      if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+        CHECK(ready_accounts_.insert(get_account_key(account)).second);
+      }
     }
   }
 }
