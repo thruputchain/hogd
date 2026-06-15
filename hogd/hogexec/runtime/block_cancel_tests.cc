@@ -26,6 +26,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -98,6 +99,71 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
 
   // Try to commit the transaction - this should fail because the block
   // the transaction was created for is no longer current
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultSystemError);
+}
+
+// Companion to CancelBlockBeforeCommit, but the root frame faults
+// (Deterministic) so the transaction takes the body-discarded commit path
+// (commit_body_discarded) instead of the success commit. Advancing the block
+// here surfaces the staleness at the subtransaction *push* step
+// (try_push_current_subtransaction), which already aborts the open HogDB
+// InvokeTX. The force_commit_or_abort guard escalates the destructor's
+// committed-or-aborted invariant to a hard panic, so any InvokeTX leak on this
+// path fails the test loudly.
+//
+// Note: this does NOT cover the commit_transaction() failure branch in
+// commit_body_discarded -- that branch only fires when the block is cancelled
+// in the narrow window *between* a successful push and the commit (a concurrent
+// consensus race), which is not reproducible in this single-threaded harness.
+// That branch's fix mirrors the verified push-failure and success-commit paths.
+TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
+{
+  x23::Defer<> force_commit_guard = SystemCallHandler::force_commit_or_abort();
+
+  // A native contract whose root entrypoint faults deterministically.
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0,
+                [](NativeSyscallContext & /*unused*/) noexcept
+                    -> InvokeStatus<void> {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                });
+    auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(kContractAddress, contract);
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kContractAddress,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  // Root frame faults: the body is discarded, but the transaction must still
+  // commit its side-records (replay nonce) via commit_body_discarded.
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+
+  // Advance the block so the discarded-body commit hits a stale block.
+  advance_block();
+
+  // The stale-block commit failure must surface as a system error and leave
+  // the handler cleanly aborted (enforced by the destructor invariant under
+  // the force_commit_or_abort guard).
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultSystemError);
 }
