@@ -55,7 +55,7 @@ generate_random_path(bool allow_empty)
     i = static_cast<std::byte>(path_dist(gen));
   }
   HexArray ret(path);
-  // If [path_size] is odd, remove a hex digit from the from path.
+  // If [path_size] is odd, remove a hex digit from the path.
   if (path_size % 2) {
     ret.remove_from_back(1);
   }

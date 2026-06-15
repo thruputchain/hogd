@@ -232,6 +232,105 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   after_lock.unlock();
 }
 
+TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 2;
+  txs[2].tx.uniquifier.block_expiry_height = 12;
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1], txs[2]})();
+  EXPECT_EQ(scheduler->size(), 3UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduled_hashes.clear();
+  scheduled.clear();
+  // Check that no tx is scheduled.
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->commit_pending_nomination(/*block_id=*/1);
+
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
+TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 2;
+  txs[2].tx.uniquifier.block_expiry_height = 12;
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+
+  scheduler->add_txs({txs[2]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduled_hashes.clear();
+  scheduled.clear();
+  // Check that no tx is scheduled.
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
   constexpr BlockHeight kBlock = 5;

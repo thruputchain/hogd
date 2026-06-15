@@ -206,6 +206,8 @@ private:
     BlockID block_id = 0;
     std::unordered_map<ContractAddress, HogAge, ByteArrayHasher> hog_ages;
     std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
+    std::unordered_set<ContractAddress, ByteArrayHasher>
+        accounts_excluded_from_block;
 
     PendingNominationState() { clear(); }
 
@@ -214,6 +216,7 @@ private:
       block_id = 0;
       hog_ages.clear();
       touched_accounts.clear();
+      accounts_excluded_from_block.clear();
     }
   };
 
@@ -284,6 +287,8 @@ private:
       const AccountState &account_state, const ContractAddress &account) const;
   void refresh_ready_accounts(
       const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts);
+  void refresh_accounts_excluded_from_block();
+  bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
 
   std::set<AccountKey> ready_accounts_;

@@ -32,7 +32,7 @@ hash_from_string(const std::string &str)
   for (size_t i = 0; i < str.size(); i += 2) {
     std::byte first_hex_digit = h.get(i);
     std::byte second_hex_digit = h.get(i + 1);
-    // [HexArray::Get] always return an [std::byte] with the most significant
+    // [HexArray::get] always returns an [std::byte] with the most significant
     // four bits zeroed out. Thus, for [second_hex_digit] below, we do not need
     // to zero out these bits again.
     std::byte b = (first_hex_digit << 4) | second_hex_digit;
