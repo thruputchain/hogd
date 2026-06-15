@@ -105,8 +105,12 @@ if ! command -v rustup &>/dev/null; then
   exit 1
 fi
 
-# Install required Rust toolchains
-RUST_TOOLCHAINS=("1.90.0" "stable" "nightly-2025-09-24")
+# Install required Rust toolchains. Keep in sync with the in-repo
+# rust-toolchain.toml files and .devcontainer/Dockerfile:
+#   - 1.93.0             hogd/rust + CMakeLists Rust_TOOLCHAIN
+#   - 1.96.0             pre-staged for the planned stable-Rust unification
+#   - nightly-2026-02-12 built_contracts (wasm32 + build-std)
+RUST_TOOLCHAINS=("1.93.0" "1.96.0" "nightly-2026-02-12")
 for tc in "${RUST_TOOLCHAINS[@]}"; do
   if ! rustup toolchain list | grep -q "^$tc"; then
     echo "Installing Rust toolchain: $tc"
@@ -115,16 +119,24 @@ for tc in "${RUST_TOOLCHAINS[@]}"; do
 done
 
 # Install wasm32 target for nightly
-if ! rustup target list --installed --toolchain nightly-2025-09-24 | grep -q wasm32-unknown-unknown; then
+if ! rustup target list --installed --toolchain nightly-2026-02-12 | grep -q wasm32-unknown-unknown; then
   echo "Installing wasm32-unknown-unknown target for nightly..."
-  rustup target add wasm32-unknown-unknown --toolchain nightly-2025-09-24
+  rustup target add wasm32-unknown-unknown --toolchain nightly-2026-02-12
 fi
 
 # Install rust-src for build-std
-if ! rustup component list --installed --toolchain nightly-2025-09-24 | grep -q rust-src; then
+if ! rustup component list --installed --toolchain nightly-2026-02-12 | grep -q rust-src; then
   echo "Installing rust-src component for nightly..."
-  rustup component add rust-src --toolchain nightly-2025-09-24
+  rustup component add rust-src --toolchain nightly-2026-02-12
 fi
+
+# Install the wasm + rv32 contract backends for 1.96 (the planned stable unification)
+for target in wasm32-unknown-unknown riscv32im-unknown-none-elf; do
+  if ! rustup target list --installed --toolchain 1.96.0 | grep -q "$target"; then
+    echo "Installing $target target for 1.96.0..."
+    rustup target add "$target" --toolchain 1.96.0
+  fi
+done
 
 # Install cbindgen
 CBINDGEN_VERSION=0.29.2
@@ -142,7 +154,7 @@ if ! command -v bindgen &>/dev/null; then
 fi
 
 # Install clippy for required toolchains
-for tc in "1.90.0" "stable"; do
+for tc in "1.93.0" "1.96.0"; do
   if ! rustup component list --installed --toolchain "$tc" | grep -q clippy; then
     echo "Installing clippy for $tc..."
     rustup component add clippy --toolchain "$tc"
