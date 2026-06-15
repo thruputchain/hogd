@@ -968,23 +968,28 @@ Scheduler::schedule(size_t num_txs,
           // TODO(jhumphri): Do we want to penalize the account more severely?
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
-          // It is possible that the account is already in
-          // [accounts_excluded_from_block], so we do not CHECK that the
-          // insert was successful. This happens when [add_txs()] above is
-          // called in parallel with [schedule()]. [add_txs()] can enqueue
-          // another tx for [account], and then if [schedule()] cycles the
-          // accounts above via [cycle_accounts_during_schedule_helper()], we
-          // end up adding [account] back into [ready_accounts_].
-          accounts_excluded_from_block.insert(account);
+
+          CHECK(accounts_excluded_from_block.insert(account).second);
+          // The account may have been added to [removed_accounts] for a
+          // different tx, so we need to remove it if so. Otherwise,
+          // [cycle_accounts_during_schedule_helper()] could add the account to
+          // the runqueue, and then later on when we add all accounts in
+          // [accounts_excluded_from_block] back to the runqueue, we will crash
+          // because the account will already been in the runqueue.
+          auto removed_it = removed_accounts.find(account);
+          if (removed_it != removed_accounts.end()) {
+            removed_accounts.erase(removed_it);
+          }
         }
         else {
           // The account has enough hogs in total to run this tx, but the
           // account is going to have to be cycled once or twice. For now, we
           // just skip over this account and revisit it once it has been
           // cycled.
+          CHECK(!accounts_excluded_from_block.contains(account));
+          CHECK(removed_accounts.insert(account).second);
         }
         account_it++;
-        CHECK(removed_accounts.insert(account).second);
         break;
       }
     }

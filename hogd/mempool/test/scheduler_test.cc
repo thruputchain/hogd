@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -787,13 +788,13 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
 
   scheduler->add_txs({tx1, tx2, tx_b})();
 
-  EXPECT_DEATH(
-      {
-        x23::XdrVec<SignedTransactionHash> scheduled_hashes;
-        x23::XdrVec<SignedTransaction> scheduled;
-        scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
-      },
-      "CHECK FAILED");
+  {
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    // Ensure that this does not trigger a CHECK in the scheduler (see issue
+    // #1474).
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  }
 }
 
 } // namespace hogd
