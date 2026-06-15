@@ -975,7 +975,7 @@ Scheduler::schedule(size_t num_txs,
           // [cycle_accounts_during_schedule_helper()] could add the account to
           // the runqueue, and then later on when we add all accounts in
           // [accounts_excluded_from_block] back to the runqueue, we will crash
-          // because the account will already been in the runqueue.
+          // because the account will already be in the runqueue.
           auto removed_it = removed_accounts.find(account);
           if (removed_it != removed_accounts.end()) {
             removed_accounts.erase(removed_it);
