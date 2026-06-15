@@ -37,6 +37,7 @@
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
 #include "exec_result.hh"
