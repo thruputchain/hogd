@@ -218,7 +218,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
     return *this->get();
   }
 
-  // Make it look a litle Vec-like to simplify marshaling code
+  // Make it look a little Vec-like to simplify marshaling code
   static constexpr size_t max_size() { return 1; }
   size_t size() const noexcept { return bool(*this); }
   void resize(size_t n)

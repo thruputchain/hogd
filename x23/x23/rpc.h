@@ -447,7 +447,7 @@ struct RpcStream : public detail::RpcStreamImpl {
                         ProcMeta::proc_name, record.size() - 4,
                         max_message_size);
 
-    // Note we geneate the xid after calling make_record just in case
+    // Note we generate the xid after calling make_record just in case
     // make_record throws because of illegal XDR values (such as an
     // invalid union discriminant).
     Awaitable<Buf> a;

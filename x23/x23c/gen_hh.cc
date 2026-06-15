@@ -563,7 +563,7 @@ struct x23::xdr_meta<struct {0}> {{
   for (const auto &info : aiv)
     bottom_ += std::format("    \"{}\",\n", info.arm->decl.id);
   bottom_ += "  };\n";
-  // Record the cases, as they coud be useful for fuzzing tools
+  // Record the cases, as they could be useful for fuzzing tools
   size_t ncases = 0;
   for (const auto &a : b.arms)
     ncases += a.cases.size();

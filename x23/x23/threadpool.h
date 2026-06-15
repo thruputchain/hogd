@@ -275,11 +275,11 @@ public:
   }
 
   // Return once every thread in the threadpool has been suspended at
-  // least once.  It is an error to call this funciton from within the
+  // least once.  It is an error to call this function from within the
   // ThreadPool, as that would cause deadlock.
   void quiesce() noexcept;
 
-  // Drain pauses the current thread and doesn't return untill all
+  // Drain pauses the current thread and doesn't return until all
   // coroutine handles that were either in the queue or executing at
   // the time drain was invoked have completed.  Do not call this from
   // within the ThreadPool (which could lead to deadlock if two

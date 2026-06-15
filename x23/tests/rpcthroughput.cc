@@ -193,7 +193,7 @@ do_client(int port, const char *server)
             ++count;
           }
         } catch (const XdrException &e) {
-          // std::println("Excpetion: {}", e.what());
+          // std::println("Exception: {}", e.what());
         }
         co_return;
       }(dir, c, count);
