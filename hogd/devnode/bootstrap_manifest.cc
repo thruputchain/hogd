@@ -192,10 +192,10 @@ require_string_value(std::string_view actual, std::string_view expected,
   }
 }
 
-// hog-devnode only: this asserts that the manifest matches the dev-wallet WASM
-// blob the binary already has. In a non-dev backend the relationship
-// reverses — the manifest names the artifact bytes to deploy and the
-// backend verifies its deployed sha256 against the manifest's contentHash.
+// hog-devnode only: this asserts that the manifest matches the dev-wallet
+// artifact the binary already has. In a non-dev backend the relationship
+// reverses: the manifest names the artifact bytes to deploy and the backend
+// verifies its deployed sha256 against the manifest's contentHash.
 DevWalletProfile
 validate_dev_wallet_assertions(const json::Value &dev_wallet)
 {

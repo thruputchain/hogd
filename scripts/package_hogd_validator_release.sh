@@ -50,13 +50,13 @@ copy_exec "$build_dir/hogd/event/event_exec" "$validator_dir/hog-event"
 copy_exec "$build_dir/hogd/indexer/indexer_exec" "$validator_dir/hog-indexer"
 copy_exec "$build_dir/hogd/devnode/hog-devnode" "$validator_dir/hog-devnode"
 copy_exec "$build_dir/hogd/devnode/hog-devnode" "$hog_devnode_dir/hog-devnode"
-copy_file "$build_dir/built_contracts/dev_wallet.wasm" \
-  "$validator_dir/contracts/dev_wallet.wasm"
-copy_file "$build_dir/built_contracts/dev_wallet.wasm" \
-  "$hog_devnode_dir/contracts/dev_wallet.wasm"
+copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
+  "$validator_dir/contracts/dev_wallet.rv32a"
+copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
+  "$hog_devnode_dir/contracts/dev_wallet.rv32a"
 
 tar -C "$validator_dir" -czf "$output_dir/hogd-validator-linux-x86_64.tar.gz" \
-  contracts/dev_wallet.wasm \
+  contracts/dev_wallet.rv32a \
   hog-auth \
   hog-db \
   hog-devnode \
@@ -66,5 +66,5 @@ tar -C "$validator_dir" -czf "$output_dir/hogd-validator-linux-x86_64.tar.gz" \
   hog-mempool
 
 tar -C "$hog_devnode_dir" -czf "$output_dir/hog-devnode-linux-x86_64.tar.gz" \
-  contracts/dev_wallet.wasm \
+  contracts/dev_wallet.rv32a \
   hog-devnode

@@ -11,10 +11,7 @@ namespace hogd {
 namespace {
 
 struct ContractArtifactDirectoryGuard {
-  ~ContractArtifactDirectoryGuard()
-  {
-    set_contract_artifact_directories({});
-  }
+  ~ContractArtifactDirectoryGuard() { set_contract_artifact_directories({}); }
 };
 
 TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
@@ -41,6 +38,9 @@ TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
   ContractArtifactDirectoryGuard guard;
   auto blob = load_contract_blob("dev_wallet.wasm");
   EXPECT_FALSE(blob.data.empty());
+
+  auto rv32_blob = load_contract_blob("dev_wallet.rv32a");
+  EXPECT_FALSE(rv32_blob.data.empty());
 }
 
 } // namespace

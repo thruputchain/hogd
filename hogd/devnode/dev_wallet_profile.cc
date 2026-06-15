@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/dev_wallet.h"
 #include "contract.hh"
 
 namespace hogd {
@@ -15,8 +14,8 @@ namespace {
 
 constexpr DevWalletProfile kDefaultDevWallet{
     .name = kDefaultDevWalletProfile,
-    .artifact_filename = dev_wallet::DevWallet::kWasmFile,
-    .artifact_hint = "contracts/dev_wallet.wasm",
+    .artifact_filename = "dev_wallet.rv32a",
+    .artifact_hint = "contracts/dev_wallet.rv32a",
 };
 
 } // namespace
@@ -35,7 +34,9 @@ resolve_dev_wallet_profile(std::string_view name)
 std::shared_ptr<Contract>
 load_dev_wallet_contract(DevWalletProfile const &profile)
 {
-  return load_contract(profile.artifact_filename);
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract() = load_contract_blob(profile.artifact_filename);
+  return contract;
 }
 
 } // namespace hogd

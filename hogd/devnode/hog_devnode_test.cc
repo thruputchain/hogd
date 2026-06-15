@@ -23,6 +23,7 @@
 #include <ios>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -47,6 +48,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -78,6 +80,13 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
+
+std::shared_ptr<Contract>
+load_default_dev_wallet_contract()
+{
+  return load_dev_wallet_contract(
+      resolve_dev_wallet_profile(kDefaultDevWalletProfile));
+}
 
 std::chrono::seconds
 startup_timeout()
@@ -762,7 +771,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
     }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hog-devnode-default");
-      w.field("artifactHint", "./dev-wallet.wasm");
+      w.field("artifactHint", "./dev-wallet.rv32a");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
               entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
@@ -856,14 +865,14 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   const json::Value *dev_wallet = bootstrap->find("devWallet");
   ASSERT_NE(dev_wallet, nullptr);
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_default_dev_wallet_contract();
   ASSERT_TRUE(wallet_contract);
   std::string wallet_hash = hex_string(sha256(*wallet_contract));
   EXPECT_EQ(require_string_field(*dev_wallet, "contentHash", ""), wallet_hash);
   EXPECT_EQ(require_string_field(*dev_wallet, "deployedCodeHash", ""),
             wallet_hash);
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
-            "contracts/dev_wallet.wasm");
+            "contracts/dev_wallet.rv32a");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
             entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
@@ -997,7 +1006,7 @@ TEST(HogDevnode, ContractArtifactDirectoryPrependsAndFallsBackToDefaults)
   const json::Value *dev_wallet = bootstrap->find("devWallet");
   ASSERT_NE(dev_wallet, nullptr);
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
-            "contracts/dev_wallet.wasm");
+            "contracts/dev_wallet.rv32a");
 
   expect_clean_exit(process);
 }
@@ -1145,7 +1154,7 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       R"("bootstrapAccounts":[],"bootstrap":{"devWallet":{)"
       R"("contentHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("deployedCodeHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
-      R"("artifactHint":"contracts/dev_wallet.wasm",)"
+      R"("artifactHint":"contracts/dev_wallet.rv32a",)"
       R"("deployEntrypoint":"0x0000000000000000","doActionEntrypoint":"0x0000000000000000"},)"
       R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"
@@ -1251,8 +1260,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 
 TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_default_dev_wallet_contract();
   ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(2, "manifest-seed", "1000000000",
@@ -1286,8 +1294,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 
 TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_default_dev_wallet_contract();
   ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "manifest-seed", "42",
@@ -1401,8 +1408,7 @@ TEST(HogDevnode, BootstrapManifestRejectsMismatchedDevWalletHash)
 
 TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_default_dev_wallet_contract();
   ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "", "42",
@@ -1428,8 +1434,7 @@ TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
 
 TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto wallet_contract = load_default_dev_wallet_contract();
   ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "manifest-seed", " 1000",
