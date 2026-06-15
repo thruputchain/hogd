@@ -1175,7 +1175,7 @@ TEST(MerkleTrie, ProveEmptyKVPair)
 }
 
 // Test that we can no longer prove a KV pair is in the trie after removing it.
-// Also check that after removign it, we cannot prove a KV pair with an empty
+// Also check that after removing it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
 template<typename T>
 void

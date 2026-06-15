@@ -24,7 +24,7 @@ namespace hogd {
 // lock.unlock();
 //
 // lock.lock_writer();
-// --The thead now holds the lock in writer mode.--
+// --The thread now holds the lock in writer mode.--
 // lock.unlock();
 class RwLock {
 public:
