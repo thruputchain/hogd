@@ -150,7 +150,7 @@ Two Namespace.so-optimized workflows are available:
 1. Go to your runner profile settings in Namespace.so
 2. Enable "Custom Container Image"
 3. Paste the Dockerfile contents
-4. Replace `ARG BASE_IMAGE=ubuntu:24.04` with:
+4. Replace `ARG BASE_IMAGE=ubuntu:26.04` with:
    ```dockerfile
    ARG BASE_IMAGE=${NAMESPACE_BASE_IMAGE_REF}
    ```
@@ -186,8 +186,8 @@ Only these remain:
 ## Toolchain Versions
 
 - **Clang/LLVM**: 21 (from apt.llvm.org) - includes clang-format-21, clang-tidy-21, lld-21
-- **GCC**: 15
-- **Rust**: 1.90.0 (default, required by CMakeLists.txt), stable, nightly-2025-09-24 (for wasm32 builds)
-- **cbindgen**: latest
+- **GCC**: 15 (default in 26.04's archive)
+- **Rust**: 1.93.0 (default, required by CMakeLists.txt + hogd/rust), 1.96.0 (pre-staged for the stable unification, with wasm32 + riscv32im targets), nightly-2026-02-12 (for wasm32 + build-std contracts)
+- **cbindgen**: 0.29.2
 - **Additional tools**: shfmt, wabt, binaryen
-- **Ubuntu**: 24.04 (noble)
+- **Ubuntu**: 26.04 (resolute)

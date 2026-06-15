@@ -10,7 +10,7 @@
 # Note: Uses conditional sudo - skipped when running as root (local Docker),
 # used when running as non-root (Namespace.so base image)
 
-ARG BASE_IMAGE=ubuntu:24.04
+ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
 
 # Avoid prompts during package installation
@@ -29,13 +29,10 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
 # Add LLVM repository for clang-21
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | $SUDO tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc \
-    && echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | $SUDO tee /etc/apt/sources.list.d/llvm.list
+    && echo "deb http://apt.llvm.org/resolute/ llvm-toolchain-resolute-21 main" | $SUDO tee /etc/apt/sources.list.d/llvm.list
 
-# Add the toolchain PPA for gcc-15 (noble's default archive only ships gcc-14;
-# gcc-15 is needed for __attribute__((musttail)) used by the rv32 threaded
-# interpreter).
-RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
-    $SUDO add-apt-repository -y ppa:ubuntu-toolchain-r/test
+# gcc-15 (needed for __attribute__((musttail)) in the rv32 threaded interpreter)
+# is the default toolchain in 26.04's archive, so no extra PPA is required.
 
 # Install all build dependencies
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
@@ -57,8 +54,6 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     libc++abi-21-dev \
     lld-21 \
     llvm-21 \
-    gcc-14 \
-    g++-14 \
     gcc-15 \
     g++-15 \
     python3 \
@@ -98,30 +93,33 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     $SUDO update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-21 100 && \
     $SUDO update-alternatives --install /usr/bin/lld lld /usr/bin/lld-21 100
 
-# Install Rust (stable toolchain)
+# Install Rust
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-# Install Rust toolchains:
-# - 1.90.0 (required by CMakeLists.txt for hogd/rust)
-# - stable (general use)
-# - nightly-2025-09-24 (required by built_contracts for wasm32 + build-std)
+# Pre-install the toolchains pinned by the in-repo rust-toolchain.toml files so
+# CI hits a warm cache instead of re-downloading them on first cargo invocation.
+# Keep these in sync with their source of truth:
+#   - 1.93.0             hogd/rust/rust-toolchain.toml + CMakeLists Rust_TOOLCHAIN
+#   - 1.96.0             pre-staged for the planned stable-Rust unification (no
+#                        rust-toolchain.toml references it yet); having it baked
+#                        in means flipping the pins won't trigger a fresh rustup
+#                        download on the Namespace runners.
+#   - nightly-2026-02-12 built_contracts/rust-toolchain.toml (wasm32 + build-std,
+#                        also used for the riscv32im contracts via -Zbuild-std)
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     $SUDO mkdir -p /usr/local/rustup /usr/local/cargo \
     && $SUDO chmod 777 /usr/local/rustup /usr/local/cargo \
-    && wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0 --profile minimal \
-    && rustup toolchain install stable \
-    && rustup toolchain install nightly-2025-09-24 \
-    && rustup target add wasm32-unknown-unknown --toolchain nightly-2025-09-24 \
-    && rustup component add rust-src --toolchain nightly-2025-09-24 \
-    && rustup component add clippy --toolchain nightly-2025-09-24 \
-    && rustup component add rustfmt --toolchain nightly-2025-09-24 \
-    && rustup component add clippy --toolchain 1.90.0 \
-    && rustup component add rustfmt --toolchain 1.90.0 \
-    && rustup component add clippy --toolchain stable \
-    && rustup component add rustfmt --toolchain stable \
-    && cargo install cbindgen \
+    && wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 --profile minimal \
+    && rustup component add clippy rustfmt --toolchain 1.93.0 \
+    && rustup toolchain install 1.96.0 --profile minimal \
+    && rustup component add clippy rustfmt --toolchain 1.96.0 \
+    && rustup target add wasm32-unknown-unknown riscv32im-unknown-none-elf --toolchain 1.96.0 \
+    && rustup toolchain install nightly-2026-02-12 --profile minimal \
+    && rustup target add wasm32-unknown-unknown --toolchain nightly-2026-02-12 \
+    && rustup component add rust-src clippy rustfmt --toolchain nightly-2026-02-12 \
+    && cargo install --locked --version 0.29.2 cbindgen \
     && $SUDO chmod -R a+rwx /usr/local/rustup /usr/local/cargo
 
 # Create non-root user for local development
