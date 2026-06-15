@@ -127,7 +127,6 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   DevWalletProfile wallet_profile =
       resolve_dev_wallet_profile(node.bootstrap_config().dev_wallet_profile);
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-  CHECK(wallet_contract != nullptr);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
       node.genesis_configuration().storage_cost_model);

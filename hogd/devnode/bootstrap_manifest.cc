@@ -210,7 +210,6 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
   if (std::optional<std::string_view> content_hash =
           optional_string_field(dev_wallet, "contentHash", "devWallet")) {
     auto wallet_contract = load_dev_wallet_contract(profile);
-    CHECK(wallet_contract != nullptr);
     const std::string wallet_hash = hex_string(sha256(*wallet_contract));
     require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
   }

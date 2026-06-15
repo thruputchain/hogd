@@ -867,7 +867,6 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   ASSERT_NE(dev_wallet, nullptr);
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto wallet_contract = load_default_dev_wallet_contract();
-  ASSERT_TRUE(wallet_contract);
   std::string wallet_hash = hex_string(sha256(*wallet_contract));
   EXPECT_EQ(require_string_field(*dev_wallet, "contentHash", ""), wallet_hash);
   EXPECT_EQ(require_string_field(*dev_wallet, "deployedCodeHash", ""),
@@ -1262,7 +1261,6 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 {
   auto wallet_contract = load_default_dev_wallet_contract();
-  ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(2, "manifest-seed", "1000000000",
                               hex_string(sha256(*wallet_contract)));
@@ -1296,7 +1294,6 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
 {
   auto wallet_contract = load_default_dev_wallet_contract();
-  ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "manifest-seed", "42",
                               hex_string(sha256(*wallet_contract)));
@@ -1410,7 +1407,6 @@ TEST(HogDevnode, BootstrapManifestRejectsMismatchedDevWalletHash)
 TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
 {
   auto wallet_contract = load_default_dev_wallet_contract();
-  ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "", "42",
                               hex_string(sha256(*wallet_contract)));
@@ -1436,7 +1432,6 @@ TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
 TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
 {
   auto wallet_contract = load_default_dev_wallet_contract();
-  ASSERT_TRUE(wallet_contract);
   const std::string manifest =
       bootstrap_manifest_json(1, "manifest-seed", " 1000",
                               hex_string(sha256(*wallet_contract)));

@@ -45,9 +45,6 @@ real_dev_wallet_content_hash()
 {
   auto wallet_contract = load_dev_wallet_contract(
       resolve_dev_wallet_profile(kDefaultDevWalletProfile));
-  if (!wallet_contract) {
-    throw std::runtime_error("dev_wallet contract failed to load");
-  }
   return hex_string(sha256(*wallet_contract));
 }
 
