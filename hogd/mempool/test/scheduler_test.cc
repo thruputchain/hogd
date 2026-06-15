@@ -232,6 +232,81 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   after_lock.unlock();
 }
 
+TEST(Scheduler, PendingNominationExcludesAccountAcrossSchedules)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->commit_pending_nomination(/*block_id=*/1);
+
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
+TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+  EXPECT_EQ(scheduler->size(), 0UL);
+
+  scheduler->add_txs({txs[1]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
   constexpr BlockHeight kBlock = 5;
