@@ -255,6 +255,7 @@ TEST(Scheduler, PendingNominationExcludesAccountAcrossSchedules)
 
   scheduled_hashes.clear();
   scheduled.clear();
+  // Check that no tx is scheduled.
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
@@ -294,6 +295,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
 
   scheduled_hashes.clear();
   scheduled.clear();
+  // Check that no tx is scheduled.
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
