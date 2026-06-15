@@ -714,12 +714,22 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   }
 
   auto res = db_proxy_.commit_transaction();
-  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
-                                 get_block_execution_mode());
   if (!res.has_value()) {
+    // A system error (e.g. a stale block) leaves the HogDB InvokeTX open; abort
+    // it before returning, mirroring the push-failure paths above and the
+    // success-path commit failure in try_commit_transaction().
+    // abort_transaction() marks tx_failed and sets
+    // transaction_committed_or_aborted_.
+    two_phase_commit_failed_ = true;
+    auto abort_status = abort_transaction();
+    if (!abort_status.has_value()) {
+      return to_exec_result(abort_status.error().code());
+    }
     return to_exec_result(res.error().code());
   }
 
+  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                 get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   return success_result;
 }

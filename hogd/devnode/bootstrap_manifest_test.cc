@@ -27,6 +27,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -37,15 +38,13 @@ namespace {
 
 using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
-// Returns the SHA-256 hex of the bundled dev-wallet wasm. Used as the
+// Returns the SHA-256 hex of the bundled dev-wallet artifact. Used as the
 // "correct" devWallet.contentHash value in happy-path fixtures.
 std::string
 real_dev_wallet_content_hash()
 {
-  auto wallet_contract = wallet_meta::load_wasm();
-  if (!wallet_contract) {
-    throw std::runtime_error("dev_wallet wasm contract failed to load");
-  }
+  auto wallet_contract = load_dev_wallet_contract(
+      resolve_dev_wallet_profile(kDefaultDevWalletProfile));
   return hex_string(sha256(*wallet_contract));
 }
 
@@ -109,7 +108,7 @@ struct ManifestBuilder {
       if (include_dev_wallet) {
         w.object_field("devWallet", [&](json::Writer &w) {
           w.field("profile", dev_wallet_profile);
-          w.field("artifactHint", "./dev-wallet.wasm");
+          w.field("artifactHint", "./dev-wallet.rv32a");
           if (include_dev_wallet_content_hash) {
             w.field("contentHash", dev_wallet_content_hash);
           }

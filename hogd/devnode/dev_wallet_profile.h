@@ -18,6 +18,8 @@ struct DevWalletProfile {
 
 DevWalletProfile resolve_dev_wallet_profile(std::string_view name);
 
+// Returns a non-null contract for the resolved profile, or throws if the
+// artifact cannot be loaded.
 std::shared_ptr<Contract>
 load_dev_wallet_contract(DevWalletProfile const &profile);
 

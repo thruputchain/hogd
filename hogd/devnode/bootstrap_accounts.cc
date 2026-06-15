@@ -65,7 +65,6 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
       resolve_dev_wallet_profile(config.dev_wallet_profile);
 
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-  CHECK(wallet_contract != nullptr);
   const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
 
   GenesisConfigurationBuilder builder;
