@@ -13,7 +13,7 @@
 
 namespace hogd {
 
-// This should requie std::atomic<T>::is_always_lock_free but g++ gives back
+// This should require std::atomic<T>::is_always_lock_free but g++ gives back
 // false for uint128_t, which is our main use case.
 template<typename T>
 concept concurrent_set_element =

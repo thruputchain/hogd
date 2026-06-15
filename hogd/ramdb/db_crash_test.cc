@@ -301,7 +301,7 @@ do_child(std::string_view path, Shared &shared)
     // bump this to reassure parent we aren't wedged.
     shared.watchdog++;
 
-    // issue the next put accoring to its put sequence number.
+    // issue the next put according to its put sequence number.
     uint64_t key = put & (kKeys - 1);
     std::ranges::copy(byte_view(put), value.begin());
     DBStatus<void> ret = db->put(byte_view(key), 0, std::span(value));
@@ -381,7 +381,7 @@ do_parent(pid_t child_pid, Shared &shared)
 {
   // for large dbs, rechecking that all of the keys have the expected values
   // can take a long time. so don't start the countdown to fault injection
-  // until the start up phase is done to ensure some progres per crash.
+  // until the start up phase is done to ensure some progress per crash.
   while (shared.starting_up)
     // NOLINTNEXTLINE(misc-include-cleaner)
     std::this_thread::sleep_for(1s);

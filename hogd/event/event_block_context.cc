@@ -203,7 +203,7 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
 x23::Async<void>
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
-  // DO NOT SUSPEND while still using the data paramter!  That would hold a
+  // DO NOT SUSPEND while still using the data parameter!  That would hold a
   // reference to PerThread data across a coroutine suspend point!
 #if __cpp_lib_containers_ranges >= 202202L
   buffers_->buf.append_range(data);

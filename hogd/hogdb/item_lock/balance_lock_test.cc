@@ -248,7 +248,7 @@ TEST(BalanceLockTest, NewBalanceStorageCost)
   status = lock.try_atomic_change_lock(nullptr, &larger, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 
-  // transfered kBalanceStorageCost + 10000 to the address, and only pay once
+  // transferred kBalanceStorageCost + 10000 to the address, and only pay once
   EXPECT_EQ(lock.build_result(make_dummy_context()), 10000);
 }
 

@@ -29,7 +29,7 @@ namespace hogd {
 //
 // The tradeoff is that insertions are lockfree, and that writes are only
 // performed if the key is not present. Looking up an entry already in the map
-// only perfoms atomic read operations (i.e. no shared locks).
+// only performs atomic read operations (i.e. no shared locks).
 
 namespace detail {
 

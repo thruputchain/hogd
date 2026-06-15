@@ -12,7 +12,7 @@ pub struct ModuleCacheEntry {
     pub linker: Linker<*mut c_void>,
 }
 
-// Module cache is NOT threadsafe, and shoult NOT be shared across threads.
+// Module cache is NOT threadsafe, and should NOT be shared across threads.
 pub struct ModuleCache {
     cache: LruCache<SHA256Hash, ModuleCacheEntry>,
 }

@@ -50,7 +50,7 @@ public:
   }
 
   // Executors.
-  // Returns the ID of the registered exector.
+  // Returns the ID of the registered executor.
   size_t register_executor(const ExecCard &card)
   {
     std::unique_lock lk(exec_cards_mutex_);
