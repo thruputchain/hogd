@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -733,6 +734,66 @@ TEST(Scheduler, FairnessAcrossBlocks)
               target + MempoolTestInfra::kAccountAddresses.size());
     EXPECT_GE(tx_counts[address],
               target - MempoolTestInfra::kAccountAddresses.size());
+  }
+}
+
+TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
+{
+  const ContractAddress &account_a = MempoolTestInfra::kAccountAddresses[0];
+  const ContractAddress &account_b = MempoolTestInfra::kAccountAddresses[1];
+
+  fib_client_t fib_client_a(account_a);
+  fib_client_t fib_client_b(account_b);
+
+  MempoolTestInfra server;
+  server.set_hogs(account_a, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/100);
+  server.set_hogs(account_a, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account_a, kHogAgeGroupReceived, /*age=*/0,
+                  /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  constexpr char kProgramName[] = "slow_fibonacci";
+  constexpr uint32_t kFibonacciN = 10;
+
+  SignedTransaction tx1{
+      .tx = Transaction{
+          .invocation = fib_client_a.make_invocation<kProgramName>(
+              /*gas_amount=*/200, kFibonacciN),
+          .uniquifier = {.block_expiry_height = 1000, .nonce = 0},
+          .contracts_to_deploy = {},
+      }};
+
+  SignedTransaction tx2{
+      .tx = Transaction{
+          .invocation = fib_client_a.make_invocation<kProgramName>(
+              /*gas_amount=*/50, kFibonacciN),
+          .uniquifier = {.block_expiry_height =
+                             std::numeric_limits<BlockHeight>::max(),
+                         .nonce = 1},
+          .contracts_to_deploy = {},
+      }};
+
+  SignedTransaction tx_b{
+      .tx = Transaction{
+          .invocation = fib_client_b.make_invocation<kProgramName>(
+              /*gas_amount=*/5'000'000'000, kFibonacciN),
+          .uniquifier = {.block_expiry_height =
+                             std::numeric_limits<BlockHeight>::max(),
+                         .nonce = 0},
+          .contracts_to_deploy = {},
+      }};
+
+  scheduler->add_txs({tx1, tx2, tx_b})();
+
+  {
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    // Ensure that this does not trigger a CHECK in the scheduler (see issue
+    // #1474).
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   }
 }
 
