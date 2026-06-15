@@ -885,9 +885,10 @@ Scheduler::cycle_accounts_during_schedule_helper(
     const TxKey &lower_bound)
 {
   for (const ContractAddress &account : accounts) {
-    if (account_excluded_from_block(account)) {
-      continue;
-    }
+    // An account should never be in both [accounts] and
+    // [pending_nomination_.accounts_excluded_from_block] at the same time.
+    CHECK(!account_excluded_from_block(account));
+
     // TODO(jhumphri): This is the same code as in [account_is_ready], but
     // we have it here because we need the iterator. Clean this up.
     GasAmount gas_limit;
