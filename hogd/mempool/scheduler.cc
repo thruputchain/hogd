@@ -827,6 +827,9 @@ Scheduler::account_excluded_from_block(const ContractAddress &account) const
 void
 Scheduler::refresh_accounts_excluded_from_block()
 {
+  // We do not check that [pending_nomination.block_id] is nonzero here because
+  // this method is called by [abandon_pending_nomination()] after
+  // [pending_nomination.block_id] is zeroed out.
   for (const ContractAddress &account :
        pending_nomination_.accounts_excluded_from_block) {
     erase_ready_account(account);
