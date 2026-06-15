@@ -20,7 +20,6 @@
 #include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
-#include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
