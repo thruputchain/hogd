@@ -74,7 +74,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   x23assert(!*oldwi);
 
   setmode(fdp, kActive);
-  // have to re-check in case write edge occured before we published wi
+  // have to re-check in case write edge occurred before we published wi
   docb(fdp, write);
 }
 

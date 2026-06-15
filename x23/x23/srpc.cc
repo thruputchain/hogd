@@ -42,7 +42,7 @@ SRpcFd::~SRpcFd()
   stop();
   if (write_thread_.joinable()) {
     // The only reference keeping server-only SRpcFds alive will be in
-    // write_worker, meaning SRpcFds is destoyed as write_worker
+    // write_worker, meaning SRpcFds is destroyed as write_worker
     // exits.  We can't join ourselves so just detach.
     if (std::this_thread::get_id() == write_thread_.get_id())
       write_thread_.detach();
