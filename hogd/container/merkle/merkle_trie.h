@@ -109,7 +109,7 @@ public:
   // Returns a proof that the KV pair with key [k] is in the trie. The second
   // element in the pair is a vector of encodings for each node. This function
   // separates each node encoding into its own index, whereas the [get_proof()]
-  // function above returns the encodings concatted together.
+  // function above returns the encodings concatenated together.
   std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
   get_proof_by_node(const Key &k);
 
@@ -449,7 +449,7 @@ private:
   // If a node for [path] already exists in the trie, [existing_key] is set to
   // the node. Thus, since a KV pair can only be placed in a branch or a leaf,
   // [existing_key] is only set to nodes of these types. Regardless of whether
-  // this node exist, the function always returns the lowest branch in the trie
+  // this node exists, the function always returns the lowest branch in the trie
   // on [path]. Note that [existing_key] should be a [nullptr] when this
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
