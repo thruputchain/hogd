@@ -245,6 +245,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
+      mark_tx_failed_authentication(sha256((*txs)[i]));
       to_remove_indices.push_back(i);
     }
   }
@@ -338,6 +339,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
+      mark_tx_failed_authentication(sha256(txs[i]));
       to_remove_indices.push_back(i);
     }
   }
@@ -1560,6 +1562,21 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       stage_lookup_txs /= chunk_results.size();
     }
 
+    // TODO(jhumphri): Synchronize this.
+    for (size_t i = 0; i < missing_tx_hashes.size(); i++) {
+      const SignedTransactionHash &tx_hash = missing_tx_hashes[i];
+      if (tx_failed_authentication(tx_hash)) {
+        co_await finish_all_executors(cache.block_id);
+        co_await abandon_block(cache);
+        co_await decrement_num_validations_in_progress();
+        validation_telemetry.outcome = validation_outcome_str(
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+        info("schedulercoord_validate ret");
+        co_return SchedulerValidationResult(
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+      }
+    }
+
     if (!missing_tx_hashes.empty()) {
       co_await finish_all_executors(cache.block_id);
       co_await abandon_block(cache);
@@ -1848,6 +1865,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     }
   }
   record_stage(stage_build_handles);
+
+  // TODO(jhumphri): Synchronize this.
+  clear_expired_failed_authentication_txs();
 
   // We need to do two things:
   // 1. If the nominated block is not the committed block, we need to return
