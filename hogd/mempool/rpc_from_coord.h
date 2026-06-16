@@ -592,6 +592,48 @@ private:
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
+  void clear_expired_failed_authentication_txs()
+  {
+    // Entries are keyed by the last committed block height at which the failed
+    // authentication should still affect validation.
+    const BlockHeight cutoff = last_committed_block_.height;
+    for (BlockHeight height = cutoff;
+         height > cutoff - kFailedAuthenticationTxsBlockExpiryDelta; height--) {
+      failed_authentication_txs_.remove(height);
+    }
+  }
+
+  void mark_tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  {
+    const BlockHeight expiry =
+        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
+    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
+    // We do not check whether the insert succeeds. It is possible for the same
+    // tx to be added multiple times for the same block height (two validators
+    // could each call [schedulercoord_submit_unvetted()] with the same tx).
+    tx_hashes.insert(tx_hash, 0);
+  }
+
+  bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  {
+    const BlockHeight min_unexpired_height = last_committed_block_.height + 1;
+    const BlockHeight max_unexpired_height =
+        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
+    for (BlockHeight height = min_unexpired_height;
+         height <= max_unexpired_height; height++) {
+      auto [tx_hashes, tx_hashes_lock] =
+          failed_authentication_txs_.find(height);
+      if (tx_hashes == nullptr) {
+        continue;
+      }
+      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
+      if (entry != nullptr) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const uint64_t network_id_;
@@ -627,55 +669,6 @@ private:
       SynchronizedMap<SignedTransactionHash, char, ByteArrayHasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
       failed_authentication_txs_;
-
-  void clear_expired_failed_authentication_txs()
-  {
-    // Entries are keyed by the last committed block height at which the failed
-    // authentication should still affect validation.
-    const BlockHeight cutoff = last_committed_block_.height;
-    x23::Vec<BlockHeight> expired_heights;
-    failed_authentication_txs_.for_each(
-        [cutoff, &expired_heights](
-            std::pair<const BlockHeight, FailedAuthenticationTxSet> &entry) {
-          if (entry.first <= cutoff) {
-            expired_heights.push_back(entry.first);
-          }
-        });
-    for (BlockHeight height : expired_heights) {
-      failed_authentication_txs_.remove(height);
-    }
-  }
-
-  void mark_tx_failed_authentication(const SignedTransactionHash &tx_hash)
-  {
-    const BlockHeight expiry =
-        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
-    // We do not check whether the insert succeeds. It is possible for the same
-    // tx to be added multiple times for the same block height (two validators
-    // could each call [schedulercoord_submit_unvetted()] with the same tx).
-    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
-    auto tx_hash_guard = tx_hashes[tx_hash];
-  }
-
-  bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
-  {
-    const BlockHeight min_unexpired_height = last_committed_block_.height + 1;
-    const BlockHeight max_unexpired_height =
-        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
-    for (BlockHeight height = min_unexpired_height;
-         height <= max_unexpired_height; height++) {
-      auto [tx_hashes, tx_hashes_lock] =
-          failed_authentication_txs_.find(height);
-      if (tx_hashes == nullptr) {
-        continue;
-      }
-      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
-      if (entry != nullptr) {
-        return true;
-      }
-    }
-    return false;
-  }
 
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
