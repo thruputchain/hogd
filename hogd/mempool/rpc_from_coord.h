@@ -622,11 +622,11 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+
   using FailedAuthenticationTxSet =
       SynchronizedMap<SignedTransactionHash, char, ByteArrayHasher>;
-  using FailedAuthenticationTxMap =
-      SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>;
-  FailedAuthenticationTxMap failed_authentication_txs_;
+  SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
+      failed_authentication_txs_;
 
   void clear_expired_failed_authentication_txs()
   {
@@ -655,8 +655,6 @@ private:
     // could each call [schedulercoord_submit_unvetted()] with the same tx).
     auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
     auto tx_hash_guard = tx_hashes[tx_hash];
-    (void)tx_hashes_lock;
-    (void)tx_hash_guard;
   }
 
   bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
@@ -674,8 +672,6 @@ private:
         continue;
       }
       auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
-      (void)tx_hashes_lock;
-      (void)tx_hash_lock;
       if (entry != nullptr) {
         return true;
       }
