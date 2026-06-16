@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -10,7 +9,6 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -28,6 +26,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -623,18 +622,28 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  std::map<BlockHeight,
-           std::unordered_set<SignedTransactionHash, ByteArrayHasher>>
-      failed_authentication_txs_;
+  using FailedAuthenticationTxSet =
+      SynchronizedMap<SignedTransactionHash, char, ByteArrayHasher>;
+  using FailedAuthenticationTxMap =
+      SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>;
+  FailedAuthenticationTxMap failed_authentication_txs_;
 
   void clear_expired_failed_authentication_txs()
   {
     const BlockHeight cutoff =
         last_committed_block_.height - kFailedAuthenticationTxsBlockExpiryDelta;
     // Removes all txs that expired strictly before [cutoff].
-    failed_authentication_txs_.erase(failed_authentication_txs_.begin(),
-                                     failed_authentication_txs_.lower_bound(
-                                         cutoff));
+    x23::Vec<BlockHeight> expired_heights;
+    failed_authentication_txs_.for_each(
+        [cutoff, &expired_heights](
+            std::pair<const BlockHeight, FailedAuthenticationTxSet> &entry) {
+          if (entry.first < cutoff) {
+            expired_heights.push_back(entry.first);
+          }
+        });
+    for (BlockHeight height : expired_heights) {
+      failed_authentication_txs_.remove(height);
+    }
   }
 
   void mark_tx_failed_authentication(const SignedTransactionHash &tx_hash)
@@ -644,23 +653,30 @@ private:
     // We do not check whether the insert succeeds. It is possible for the same
     // tx to be added multiple times for the same block height (two validators
     // could each call [schedulercoord_submit_unvetted()] with the same tx).
-    failed_authentication_txs_[expiry].insert(tx_hash);
+    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
+    auto tx_hash_guard = tx_hashes[tx_hash];
+    (void)tx_hashes_lock;
+    (void)tx_hash_guard;
   }
 
   bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
   {
-    const BlockHeight expiry =
+    const BlockHeight min_unexpired_height =
+        last_committed_block_.height - kFailedAuthenticationTxsBlockExpiryDelta;
+    const BlockHeight max_expiry_height =
         last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
 
-    for (BlockHeight height = expiry; height <= last_committed_block_.height;
+    for (BlockHeight height = min_unexpired_height; height <= max_expiry_height;
          height++) {
-      auto it = failed_authentication_txs_.find(height);
-      if (it == failed_authentication_txs_.end()) {
+      auto [tx_hashes, tx_hashes_lock] =
+          failed_authentication_txs_.find(height);
+      if (tx_hashes == nullptr) {
         continue;
       }
-      const std::unordered_set<SignedTransactionHash, ByteArrayHasher>
-          &tx_hashes = it->second;
-      if (tx_hashes.contains(tx_hash)) {
+      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
+      (void)tx_hashes_lock;
+      (void)tx_hash_lock;
+      if (entry != nullptr) {
         return true;
       }
     }
