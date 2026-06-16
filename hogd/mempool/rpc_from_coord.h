@@ -630,14 +630,14 @@ private:
 
   void clear_expired_failed_authentication_txs()
   {
-    const BlockHeight cutoff =
-        last_committed_block_.height - kFailedAuthenticationTxsBlockExpiryDelta;
-    // Removes all txs that expired strictly before [cutoff].
+    // Entries are keyed by the last committed block height at which the failed
+    // authentication should still affect validation.
+    const BlockHeight cutoff = last_committed_block_.height;
     x23::Vec<BlockHeight> expired_heights;
     failed_authentication_txs_.for_each(
         [cutoff, &expired_heights](
             std::pair<const BlockHeight, FailedAuthenticationTxSet> &entry) {
-          if (entry.first < cutoff) {
+          if (entry.first <= cutoff) {
             expired_heights.push_back(entry.first);
           }
         });
@@ -659,13 +659,11 @@ private:
 
   bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
   {
-    const BlockHeight min_unexpired_height =
-        last_committed_block_.height - kFailedAuthenticationTxsBlockExpiryDelta;
-    const BlockHeight max_expiry_height =
+    const BlockHeight min_unexpired_height = last_committed_block_.height;
+    const BlockHeight max_unexpired_height =
         last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
-
-    for (BlockHeight height = min_unexpired_height; height <= max_expiry_height;
-         height++) {
+    for (BlockHeight height = min_unexpired_height;
+         height <= max_unexpired_height; height++) {
       auto [tx_hashes, tx_hashes_lock] =
           failed_authentication_txs_.find(height);
       if (tx_hashes == nullptr) {
