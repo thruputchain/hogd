@@ -1,5 +1,4 @@
 #include <atomic>
-#include <future>
 #include <gtest/gtest.h>
 #include <latch>
 #include <limits>
@@ -8,7 +7,6 @@
 #include <thread>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -19,10 +17,7 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "genesis.hh"
-#include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -75,22 +70,6 @@ TEST(Mempool, SubmitUnvetted)
 
   MempoolTestInfra server;
 
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  Transaction &tx = txs[0].tx;
-  tx.auth_claim = make_sign_claim(0);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
-
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
@@ -105,22 +84,6 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByMempool)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  Transaction &tx = txs[0].tx;
-  tx.auth_claim = make_sign_claim(0);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
@@ -138,22 +101,6 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  Transaction &tx = txs[0].tx;
-  tx.auth_claim = make_sign_claim(0);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
@@ -232,37 +179,6 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
       generate_unsigned_txs(fib_client, mempool_tx_size_limit + 1);
 
   MempoolTestInfra server(/*skip_genesis_block=*/false, mempool_tx_size_limit);
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-
-  WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), available_parallelism());
-  std::vector<std::future<void>> futures;
-  futures.reserve(chunks.size());
-
-  for (const ChunkRange &chunk : chunks) {
-    futures.push_back(worker_pool.submit([chunk, &txs, &sk] {
-      for (size_t i = chunk.start; i < chunk.end; i++) {
-        SignedTransaction &tx = txs[i];
-        tx.tx.auth_claim = make_sign_claim(0);
-        tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
-      }
-    }));
-  }
-  for (std::future<void> &future : futures) {
-    future.get();
-  }
 
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs})();
@@ -388,20 +304,6 @@ TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   MempoolTestInfra server;
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  Transaction &tx = txs[0].tx;
-  tx.auth_claim = make_sign_claim(0);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
@@ -534,22 +436,6 @@ TEST(Mempool, NominateTxWithError)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  Transaction &tx = txs[0].tx;
-  tx.auth_claim = make_sign_claim(0);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   constexpr size_t kNumBlocks = 2;
   for (size_t i = 0; i < kNumBlocks; i++) {
@@ -1429,6 +1315,79 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
+TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  txs[0].tx.auth_claim = make_sign_claim(0);
+  const SignedTransactionHash tx_hash = sha256(txs[0].tx);
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  auto expect_validation_outcome = [&](auto expected_outcome) {
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SignedTransactionHashBatch tx_hashes{tx_hash};
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+        NondeterministicProposalData{}};
+    Nomination nomination{
+        .block_height = get_tip.db_tip().height + 1,
+        .prev_block_hash = get_tip.db_tip().block_hash,
+        .transactions_hash = t_to_parallel_batch(tx_hashes)(),
+        .transactions_nondeterministic_data =
+            t_to_parallel_batch(tx_nondeterministic_data)(),
+    };
+
+    SchedulerValidationResult res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate(get_tip.db_tip(),
+                                                           nomination)();
+    EXPECT_EQ(res_validate.outcome(), expected_outcome);
+    return res_validate;
+  };
+
+  for (size_t blocks_elapsed = 0;
+       blocks_elapsed <
+       MempoolCoordinatorRpc::kFailedAuthenticationTxsBlockExpiryDelta;
+       blocks_elapsed++) {
+    expect_validation_outcome(
+        SchedulerValidationResult::SchedulerValidationInvalid);
+
+    // Now commit an empty block.
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SchedulerNominationResult res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    SchedulerCommitOutcome res_commit =
+        server.mempool_coord_rpc().schedulercoord_commit_block(
+            res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  }
+
+  SchedulerValidationResult res_validate = expect_validation_outcome(
+      SchedulerValidationResult::SchedulerValidationMissingTxs);
+  ASSERT_EQ(res_validate.missing_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_validate.missing_tx_hashes()[0], tx_hash);
+}
+
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
@@ -1503,21 +1462,6 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   ASSERT_NE(sha256(txs[0].tx), sha256(txs[1].tx));
 
   MempoolTestInfra server;
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.required_weight = 1;
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  for (SignedTransaction &tx : txs) {
-    tx.tx.auth_claim = make_sign_claim(0);
-    tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
-  }
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(txs)())();
