@@ -1563,8 +1563,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
 
     // TODO(jhumphri): Synchronize this.
-    for (size_t i = 0; i < missing_tx_hashes.size(); i++) {
-      const SignedTransactionHash &tx_hash = missing_tx_hashes[i];
+    for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
       if (tx_failed_authentication(tx_hash)) {
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);

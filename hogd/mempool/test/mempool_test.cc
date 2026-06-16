@@ -1,5 +1,4 @@
 #include <atomic>
-#include <future>
 #include <gtest/gtest.h>
 #include <latch>
 #include <limits>
@@ -8,7 +7,6 @@
 #include <thread>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -19,10 +17,7 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "genesis.hh"
-#include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
