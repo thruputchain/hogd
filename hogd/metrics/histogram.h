@@ -29,7 +29,12 @@ public:
 
   void add(const T &val)
   {
-    if (!in_range(val)) {
+    if (val < min_) {
+      underflow_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    else if (val > max_) {
+      overflow_.fetch_add(1, std::memory_order_relaxed);
       return;
     }
 
@@ -37,7 +42,6 @@ public:
   }
 
 private:
-  bool in_range(const T &val) { return val >= min_ && val <= max_; }
   size_t bucket_idx(const T &val) { return (val - min_) / bucket_delta_; }
 
   const T min_;
@@ -46,6 +50,8 @@ private:
 
   // Holds the number of elements in each bucket.
   std::vector<std::atomic<size_t>> buckets_;
+  std::atomic<size_t> underflow_ = 0;
+  std::atomic<size_t> overflow_ = 0;
 };
 
 } // namespace hogd
