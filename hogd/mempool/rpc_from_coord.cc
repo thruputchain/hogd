@@ -1562,7 +1562,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       stage_lookup_txs /= chunk_results.size();
     }
 
-    // TODO(jhumphri): Synchronize this.
     for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
       if (tx_failed_authentication(tx_hash)) {
         co_await finish_all_executors(cache.block_id);
@@ -1865,7 +1864,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_build_handles);
 
-  // TODO(jhumphri): Synchronize this.
   clear_expired_failed_authentication_txs();
 
   // We need to do two things:
