@@ -1,6 +1,7 @@
 add_library(
   metrics
   health.cc
+  histogram.cc
   metrics.cc
 )
 target_link_libraries(

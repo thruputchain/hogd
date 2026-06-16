@@ -33,6 +33,7 @@ public:
   enum class SampleType {
     kSsizeT,
     kPerThreadSsizeT,
+    kHistogram,
   };
 
   static constexpr size_t kNumComponents =
