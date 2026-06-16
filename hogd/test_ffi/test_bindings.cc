@@ -27,7 +27,9 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -142,6 +144,16 @@ lazy_init() noexcept
       auto logger = std::make_unique<ThreadsafeLogger>(LogLevel::kCritical);
       global_logger = logger.get();
       hogd::swap_logger(std::move(logger));
+      // The runtime records executor metrics during transaction commit
+      // (HogexecMetrics::mark_tx_*), so a committing entry point trips Metrics'
+      // done_with_init CHECK unless those metrics are registered first. Guarded
+      // because a host that already initialized them (e.g. a test main calling
+      // init_hogexec_metrics()) must not double-initialize: init_metric()
+      // asserts the component is not yet marked done.
+      if (!Metrics::instance().done_with_init(
+              Metrics::ComponentName::kExecutor)) {
+        init_hogexec_metrics();
+      }
       initialized = true;
     }
     return true;
