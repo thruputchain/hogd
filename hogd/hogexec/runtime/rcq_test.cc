@@ -773,9 +773,10 @@ TEST_P(RCQTest, ConcurrentOverflow)
   }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
-  // Both T1 and T2 try to insert 600 items. Limit is 1000.
-  // Run them concurrently.
-  std::vector<uint8_t> values(600, 1);
+  // Both T1 and T2 each insert just over half the per-block cap, so either
+  // commits alone but the two together exceed
+  // kRetrocausalQueueBlockEntriesMaxLen. Run them concurrently.
+  std::vector<uint8_t> values((kRetrocausalQueueBlockEntriesMaxLen / 2) + 1, 1);
 
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
@@ -900,7 +901,7 @@ TEST_P(RCQTest, MaxEntrySizeBoundary)
 
 // ExactBlockEntriesLimit
 //
-// Inserts exactly kRetrocausalQueueBlockEntriesMaxLen entries (1000)
+// Inserts exactly kRetrocausalQueueBlockEntriesMaxLen entries
 // in a single TX.  Should succeed without overflow.
 TEST_P(RCQTest, ExactBlockEntriesLimit)
 {
