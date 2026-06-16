@@ -659,7 +659,7 @@ private:
 
   bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
   {
-    const BlockHeight min_unexpired_height = last_committed_block_.height;
+    const BlockHeight min_unexpired_height = last_committed_block_.height + 1;
     const BlockHeight max_unexpired_height =
         last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
     for (BlockHeight height = min_unexpired_height;
