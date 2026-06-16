@@ -47,41 +47,6 @@ constexpr size_t kNumTxs = 100;
 using deploy_and_transfer_client_t =
     ContractTraitClient<deploy_and_transfer::DeployAndTransfer>;
 
-Nomination
-make_nomination_with_tx_hash(const DbTip &db_tip,
-                             const SignedTransactionHash &tx_hash)
-{
-  SignedTransactionHashBatch tx_hashes{tx_hash};
-  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
-      NondeterministicProposalData{}};
-
-  return Nomination{
-      .block_height = db_tip.height + 1,
-      .prev_block_hash = db_tip.block_hash,
-      .transactions_hash = t_to_parallel_batch(tx_hashes)(),
-      .transactions_nondeterministic_data =
-          t_to_parallel_batch(tx_nondeterministic_data)(),
-  };
-}
-
-void
-commit_empty_block(MempoolTestInfra &server)
-{
-  SchedulerGetTipResult get_tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-
-  SchedulerNominationResult res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
-
-  SchedulerCommitOutcome res_commit =
-      server.mempool_coord_rpc().schedulercoord_commit_block(
-          res_nominate.nominated_block().block_id)();
-  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-}
-
 SHA256Hash
 make_test_nonce(uint64_t value)
 {
@@ -1376,8 +1341,17 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-    Nomination nomination =
-        make_nomination_with_tx_hash(get_tip.db_tip(), tx_hash);
+    SignedTransactionHashBatch tx_hashes{tx_hash};
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+        NondeterministicProposalData{}};
+    Nomination nomination{
+        .block_height = get_tip.db_tip().height + 1,
+        .prev_block_hash = get_tip.db_tip().block_hash,
+        .transactions_hash = t_to_parallel_batch(tx_hashes)(),
+        .transactions_nondeterministic_data =
+            t_to_parallel_batch(tx_nondeterministic_data)(),
+    };
+
     SchedulerValidationResult res_validate =
         server.mempool_coord_rpc().schedulercoord_validate(get_tip.db_tip(),
                                                            nomination)();
@@ -1391,7 +1365,21 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
        blocks_elapsed++) {
     expect_validation_outcome(
         SchedulerValidationResult::SchedulerValidationInvalid);
-    commit_empty_block(server);
+
+    // Now commit an empty block.
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SchedulerNominationResult res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    SchedulerCommitOutcome res_commit =
+        server.mempool_coord_rpc().schedulercoord_commit_block(
+            res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
   SchedulerValidationResult res_validate = expect_validation_outcome(
