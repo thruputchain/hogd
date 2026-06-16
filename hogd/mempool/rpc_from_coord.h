@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -9,6 +10,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -67,6 +69,8 @@ public:
 
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
+
+  static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         uint64_t network_id, size_t mempool_tx_size_limit)
@@ -619,6 +623,49 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  std::map<BlockHeight,
+           std::unordered_set<SignedTransactionHash, ByteArrayHasher>>
+      failed_authentication_txs_;
+
+  void clear_expired_failed_authentication_txs()
+  {
+    const BlockHeight cutoff =
+        last_committed_block_.height - kFailedAuthenticationTxsBlockExpiryDelta;
+    // Removes all txs that expired strictly before [cutoff].
+    failed_authentication_txs_.erase(failed_authentication_txs_.begin(),
+                                     failed_authentication_txs_.lower_bound(
+                                         cutoff));
+  }
+
+  void mark_tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  {
+    const BlockHeight expiry =
+        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
+    // We do not check whether the insert succeeds. It is possible for the same
+    // tx to be added multiple times for the same block height (two validators
+    // could each call [schedulercoord_submit_unvetted()] with the same tx).
+    failed_authentication_txs_[expiry].insert(tx_hash);
+  }
+
+  bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  {
+    const BlockHeight expiry =
+        last_committed_block_.height + kFailedAuthenticationTxsBlockExpiryDelta;
+
+    for (BlockHeight height = expiry; height <= last_committed_block_.height;
+         height++) {
+      auto it = failed_authentication_txs_.find(height);
+      if (it == failed_authentication_txs_.end()) {
+        continue;
+      }
+      const std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+          &tx_hashes = it->second;
+      if (tx_hashes.contains(tx_hash)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
