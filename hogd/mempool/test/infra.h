@@ -185,6 +185,9 @@ public:
                                        .contract_size =
                                            static_cast<uint32_t>(bytes.size())})
               .has_value());
+    CHECK(get_db()
+              .write_address_auth_data(address, make_default_auth_data())
+              .has_value());
     grant_initial_tokens_for_account(address);
   }
 
@@ -225,6 +228,16 @@ private:
   static std::string make_address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
+  }
+
+  static AddressAuthData make_default_auth_data()
+  {
+    std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
+    for (PublicKeyConfigOpt &public_key : public_keys) {
+      public_key = nullptr;
+    }
+
+    return AddressAuthData{.public_keys = public_keys, .required_weight = 0};
   }
 
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
@@ -280,6 +293,9 @@ private:
                   address, DeployedContractHash{.hash = contract_hash,
                                                 .contract_size = contract_size})
               .has_value());
+      CHECK(get_db()
+                .write_address_auth_data(address, make_default_auth_data())
+                .has_value());
       grant_initial_tokens_for_account(address);
     }
   }
