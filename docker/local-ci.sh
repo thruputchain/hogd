@@ -70,8 +70,8 @@ build_image() {
         --build-arg UID="$(id -u)" \
         --build-arg GID="$(id -g)" \
         -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-        -f "${SCRIPT_DIR}/Dockerfile" \
-        "${SCRIPT_DIR}"
+        -f "${REPO_ROOT}/.devcontainer/Dockerfile" \
+        "${REPO_ROOT}/.devcontainer"
 }
 
 # Initialize submodules

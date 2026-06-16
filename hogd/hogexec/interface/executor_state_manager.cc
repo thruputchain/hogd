@@ -57,7 +57,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
     if (it->second.context.get().mode() != mode) {
       co_return ExecResult::ExecResultSystemError;
     }
-    if (it->second.open_block_count == 0) {
+    if (it->second.open_block_count <= 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
       co_return ExecResult::ExecResultSystemError;
     }
@@ -126,12 +126,15 @@ ExecutorStateManager::remove_block(BlockID block_id)
       error("Tried to remove block {} that does not exist", block_id);
       co_return ExecResult::ExecResultSystemError;
     }
-    it->second.open_block_count--;
-    if (it->second.open_block_count < 0) [[unlikely]] {
-      error("Tried to remove block {} that has a negative open_block_count",
+    if (it->second.open_block_count <= 0) [[unlikely]] {
+      // Validate before mutating: a stray remove on an already-closing block
+      // (count 0) must not leave the count at -1, which would defeat the
+      // reopen guard in open_block and let a shut-down context be revived.
+      error("Tried to remove block {} that has a non-positive open_block_count",
             block_id);
       co_return ExecResult::ExecResultSystemError;
     }
+    it->second.open_block_count--;
 
     if (it->second.open_block_count == 0) {
       if (it->second.context.initiate_shutdown()) {

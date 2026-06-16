@@ -1,7 +1,7 @@
 name: C++ CI (Namespace)
 
 # This workflow uses a custom base image with pre-installed toolchain.
-# Requires: Configure namespace-profile-hogd-linux with docker/Dockerfile as custom base image.
+# Requires: Configure namespace-profile-hogd-linux with .devcontainer/Dockerfile as custom base image.
 #
 # Jobs run in parallel where possible:
 #   format (fast) -> gcc-debug + llvm-debug (parallel) -> gcc-release (after gcc-debug)
