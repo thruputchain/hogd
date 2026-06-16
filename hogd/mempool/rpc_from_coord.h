@@ -598,7 +598,9 @@ private:
     // authentication should still affect validation.
     const BlockHeight cutoff = last_committed_block_.height;
     for (BlockHeight height = cutoff;
-         height > cutoff - kFailedAuthenticationTxsBlockExpiryDelta; height--) {
+         height > cutoff - static_cast<BlockHeight>(
+                               kFailedAuthenticationTxsBlockExpiryDelta);
+         height--) {
       failed_authentication_txs_.remove(height);
     }
   }
