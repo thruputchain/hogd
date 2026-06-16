@@ -19,8 +19,18 @@
 
 namespace hogd {
 
-class Histogram {
+template<typename T> class Histogram {
 public:
+  Histogram(T min, T max, size_t num_buckets)
+    : min_(min), max_(max), buckets_(/*count=*/num_buckets, /*alloc=*/0)
+  {}
+
+private:
+  const T min_;
+  const T max_;
+
+  // Holds the number of elements in each bucket.
+  std::vector<size_t> buckets_;
 };
 
 } // namespace hogd
