@@ -328,11 +328,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   info("submit_vetted, got lock. will now authenticate txs");
 
   const BlockHeight verify_height = scheduler_->current_block();
-  info("submit_vetted will check if {} txs are valid for height {}",
-       txs->size(), verify_height);
+  info("submit_vetted will check if {} txs are valid for height {}", txs.size(),
+       verify_height);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             *txs);
+                                                             txs);
 
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -343,7 +343,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   }
   info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
-    remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+    remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
 
   co_await scheduler_->add_txs(txs);
