@@ -20,6 +20,13 @@ TEST(ContractTraitTest, MethodIDDerivation)
 
   auto id4 = sdk_method_id("hogd", "0.1.0-alpha", "abc");
   ASSERT_EQ(id, id4);
+
+  // Golden vector pinning the exact preimage format:
+  //   sha256("<name>::<major_version>::<method>"), first 8 bytes -> method id.
+  // For ("hogd", "0.1.0", "abc") the preimage is "hogd::0.1::abc". This must
+  // byte-match the SDK's derivation; do not update it to match a code change
+  // without confirming the SDK derives the same value.
+  ASSERT_EQ(id, Runtime::MethodID{0x9432b95f6309d52bULL});
 }
 
 TEST(ContractTraitTest, EntrypointFromMethodID)

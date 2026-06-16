@@ -74,9 +74,24 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
 {
   auto semver_components = parse_semver(identifier_version);
 
-  std::string method_name_preimage = std::string(identifier_name) +
-                                     major_version(semver_components) +
-                                     std::string(method_name);
+  // Components are joined with a "::" domain separator so that distinct
+  // (name, version, method) triples cannot collide on the same preimage.
+  //
+  // The separator is a `u8"..."` literal so its bytes are the UTF-8 encoding
+  // (0x3a 0x3a) mandated by the standard, independent of the ordinary execution
+  // character set (`-fexec-charset`). An ordinary `"::"` literal would hash
+  // implementation-defined code units, so two honest validators built with
+  // different execution charsets could derive divergent ids. See hogd issue
+  // #2573.
+  constexpr std::u8string_view kSeparator = u8"::";
+  const auto *sep = reinterpret_cast<const char *>(kSeparator.data());
+
+  std::string method_name_preimage;
+  method_name_preimage.append(identifier_name);
+  method_name_preimage.append(sep, kSeparator.size());
+  method_name_preimage.append(major_version(semver_components));
+  method_name_preimage.append(sep, kSeparator.size());
+  method_name_preimage.append(method_name);
 
   auto h = sha256(method_name_preimage);
 
