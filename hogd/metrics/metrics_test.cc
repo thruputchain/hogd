@@ -317,7 +317,7 @@ TEST_F(MetricsTest, HistogramMetricDumpsBuckets)
                        "mempool_metrics_test_validation_latency_ms_count 4");
 }
 
-TEST_F(MetricsTest, MetricsRouteReturnsExpectedResponse)
+TEST_F(MetricsTest, MetricsRouteGadgetReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
   // We set the description before starting the HTTP server because accesses to
@@ -349,6 +349,53 @@ TEST_F(MetricsTest, MetricsRouteReturnsExpectedResponse)
             std::string::npos);
   EXPECT_NE(http_response.find("executor_metrics_test_executor_queue_depth 17"),
             std::string::npos);
+}
+
+TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
+{
+  Metrics &metrics = Metrics::instance();
+  metrics.init_histogram(Metrics::ComponentName::kMempool,
+                         "metrics_test_validation_latency_ms",
+                         "Validation latency in milliseconds", 0, 10, 5);
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
+
+  HttpServer server;
+
+  add_health_metrics_routes(server);
+  uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
+
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 0);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 1);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 3);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 11);
+
+  std::string http_response =
+      request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+  expect_dump_contains(http_response,
+                       "# HELP mempool_metrics_test_validation_latency_ms "
+                       "Validation latency in milliseconds");
+  expect_dump_contains(
+      http_response,
+      "# TYPE mempool_metrics_test_validation_latency_ms histogram");
+  expect_dump_contains(
+      http_response,
+      "mempool_metrics_test_validation_latency_ms_bucket{le=\"0\"} 1");
+  expect_dump_contains(
+      http_response,
+      "mempool_metrics_test_validation_latency_ms_bucket{le=\"2\"} 2");
+  expect_dump_contains(
+      http_response,
+      "mempool_metrics_test_validation_latency_ms_bucket{le=\"4\"} 3");
+  expect_dump_contains(
+      http_response,
+      "mempool_metrics_test_validation_latency_ms_bucket{le=\"+Inf\"} 4");
+  expect_dump_contains(http_response,
+                       "mempool_metrics_test_validation_latency_ms_count 4");
 }
 
 } // namespace
