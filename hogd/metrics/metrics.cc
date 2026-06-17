@@ -39,11 +39,12 @@ Metrics::dump_to_prometheus_string()
       }
       if (metric.is_histogram()) {
         os << std::format("# TYPE {} histogram\n", full_name);
-        os << metric.dump_to_prometheus_string(full_name);
+        os << metric.dump_to_string(full_name) << "\n";
       }
       else {
         os << std::format("# TYPE {} gauge\n", full_name);
-        os << std::format("{} {}\n", full_name, metric.value());
+        os << std::format("{} {}\n", full_name,
+                          metric.dump_to_string(full_name));
       }
     }
   }

@@ -290,14 +290,14 @@ TEST_F(MetricsTest, HistogramMetricDumpsBuckets)
                          "Validation latency in milliseconds", 0, 10, 5);
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 0);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 1);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 3);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 11);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 0);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 1);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 3);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 11);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -364,14 +364,14 @@ TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
   add_health_metrics_routes(server);
   uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
 
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 0);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 1);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 3);
-  metrics.observe(Metrics::ComponentName::kMempool,
-                  "metrics_test_validation_latency_ms", 11);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 0);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 1);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 3);
+  metrics.record(Metrics::ComponentName::kMempool,
+                 "metrics_test_validation_latency_ms", 11);
 
   std::string http_response =
       request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");

@@ -108,9 +108,12 @@ public:
             // not touching the values set by other threads, so which value is
             // authoritative?
             //
-            // You should either be calling [add] instead or using a raw
+            // You should either be calling [add] instead or using a single
             // [ssize_t].
             CHECK(false);
+          }
+          else if constexpr (std::is_same_v<T, Histogram<size_t>>) {
+            sample.add(metric_value);
           }
           else {
             CHECK(false);
@@ -136,28 +139,6 @@ public:
           }
           else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
             sample.inc(delta);
-          }
-          else {
-            CHECK(false);
-          }
-        },
-        it->second.sample);
-  }
-
-  void observe(ComponentName component_name, const std::string &metric_name,
-               size_t value)
-  {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    auto it = component.metrics.find(metric_name);
-    CHECK(it != component.metrics.end());
-    std::visit(
-        [value](auto &sample) {
-          using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, Histogram<size_t>>) {
-            sample.add(value);
           }
           else {
             CHECK(false);
@@ -214,7 +195,9 @@ private:
         sample.template emplace<PerThreadCounter<ssize_t>>();
         return;
       case SampleType::kHistogram:
-        init_histogram(0, 10, 10);
+        // TODO(jhumphri): Take this out and give each sample type its own
+        // [init] method.
+        sample.template emplace<Histogram<size_t>>(0, 10, 10);
         return;
       }
       CHECK(false);
@@ -230,11 +213,6 @@ private:
       return std::holds_alternative<Histogram<size_t>>(sample);
     }
 
-    std::string dump_to_prometheus_string(const std::string &metric_name) const
-    {
-      return std::get<Histogram<size_t>>(sample).dump_to_string(metric_name);
-    }
-
     ssize_t value()
     {
       return std::visit(
@@ -248,7 +226,29 @@ private:
             }
             else {
               CHECK(false);
-              return 0;
+              return -1;
+            }
+          },
+          sample);
+    }
+
+    std::string dump_to_string(const std::string &metric_name)
+    {
+      return std::visit(
+          [&metric_name](auto &sample) -> std::string {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+              return std::to_string(sample.load(std::memory_order_relaxed));
+            }
+            else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
+              return std::to_string(sample.get());
+            }
+            else if constexpr (std::is_same_v<T, Histogram<size_t>>) {
+              return sample.dump_to_string(metric_name);
+            }
+            else {
+              CHECK(false);
+              return "";
             }
           },
           sample);
