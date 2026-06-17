@@ -485,6 +485,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
               // The account for this tx does not exist in our copy of hogdb, so
               // we silently drop the tx.
+              info("scheduler: dropping tx for unknown account {}",
+                   show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               continue;
             }
             if (scheduler.add_txs_helper(txs[tx_idx])) {
@@ -990,6 +992,20 @@ Scheduler::schedule(size_t num_txs,
             from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
             from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
         if (tx.tx.invocation.gas_limit > all_hogs_available) {
+          info("scheduler: discarding tx {} for account {}: gas_limit {} "
+               "exceeds all hogs available {} (to_schedule {}, "
+               "already_scheduled {}, received {}, spent_this_block {})",
+               show_byte_array(tx_hash), show_byte_array(account),
+               static_cast<double>(tx.tx.invocation.gas_limit),
+               static_cast<double>(all_hogs_available),
+               static_cast<double>(
+                   from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule])),
+               static_cast<double>(
+                   from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled])),
+               static_cast<double>(
+                   from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived])),
+               static_cast<double>(hogs_spent_by_account));
+
           // This account does not have enough hogs across all three of its
           // groups to schedule the tx, so we discard the tx.
           // We want to discourage accounts from submitting txs that cannot be
