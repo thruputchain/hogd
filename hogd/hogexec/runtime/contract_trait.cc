@@ -20,7 +20,9 @@ struct SemverComponents {
   std::string major;
   std::string minor;
   std::string patch;
-  std::string prerelease; // empty if no prerelease
+  // The full, original version string. For a 0.0.0 version the major-version is
+  // the entire string (including any -prerelease/+build), matching the SDK.
+  std::string full;
 };
 
 SemverComponents
@@ -42,11 +44,7 @@ parse_semver(std::string_view identifier_version)
   components.major = matches[1].str();
   components.minor = matches[2].str();
   components.patch = matches[3].str();
-
-  // Prerelease (without the leading '-')
-  if (matches[4].matched && matches[4].length() > 1) {
-    components.prerelease = matches[4].str().substr(1); // skip the '-'
-  }
+  components.full = version_str;
 
   return components;
 }
@@ -63,7 +61,12 @@ major_version(SemverComponents const &components)
   if (components.patch != "0") {
     return "0.0." + components.patch;
   }
-  return "0.0.0" + components.prerelease;
+  // 0.0.0[-prerelease][+build]: the SDK (contract-util::major_version) returns
+  // the full original version string here, so match it byte-for-byte rather
+  // than reconstructing "0.0.0" + a hyphen-stripped prerelease. Otherwise the
+  // host derivation diverges from the SDK/generate_header.py kEntrypoints for
+  // any 0.0.0-prerelease contract.
+  return components.full;
 }
 } // namespace
 
@@ -74,9 +77,24 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
 {
   auto semver_components = parse_semver(identifier_version);
 
-  std::string method_name_preimage = std::string(identifier_name) +
-                                     major_version(semver_components) +
-                                     std::string(method_name);
+  // Components are joined with a "::" domain separator so that distinct
+  // (name, version, method) triples cannot collide on the same preimage.
+  //
+  // The separator is a `u8"..."` literal so its bytes are the UTF-8 encoding
+  // (0x3a 0x3a) mandated by the standard, independent of the ordinary execution
+  // character set (`-fexec-charset`). An ordinary `"::"` literal would hash
+  // implementation-defined code units, so two honest validators built with
+  // different execution charsets could derive divergent ids. See hogd issue
+  // #2573.
+  constexpr std::u8string_view kSeparator = u8"::";
+  const auto *sep = reinterpret_cast<const char *>(kSeparator.data());
+
+  std::string method_name_preimage;
+  method_name_preimage.append(identifier_name);
+  method_name_preimage.append(sep, kSeparator.size());
+  method_name_preimage.append(major_version(semver_components));
+  method_name_preimage.append(sep, kSeparator.size());
+  method_name_preimage.append(method_name);
 
   auto h = sha256(method_name_preimage);
 

@@ -117,6 +117,44 @@ endif()
 
 # Tests link against the object files directly so they can reach internal
 # C++ symbols that the dylib intentionally hides.
+
+# mock_syscall_test.cc drives internal C++ APIs directly (constructing
+# SyscallHandlerContext / mock_syscall_parser without going through an extern
+# "C" entry point), so it never reaches lazy_init() and needs logging and the
+# executor metrics initialized up front. It therefore keeps its own custom
+# main() (run_hogexec_tests, via GTest::gtest with no gtest_main) and lives in
+# its own binary. Keeping it separate lets test_ffi_test below rely solely on
+# lazy_init() -- the real initialization path FFI consumers take -- so a
+# subsystem an entry point forgets to initialize surfaces as a test failure
+# there instead of being masked by a test-only main.
+add_executable(
+  test_ffi_mock_syscall_test
+  mock_syscall_test.cc
+)
+
+target_include_directories(
+  test_ffi_mock_syscall_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(
+  test_ffi_mock_syscall_test
+  test_ffi_objects
+  auth_claim
+  precompiles
+  runtime
+  auth
+  runtime_test_util
+  GTest::gtest
+)
+gtest_discover_tests(test_ffi_mock_syscall_test)
+
+# These tests exercise the public extern "C" API, so they go through
+# lazy_init() on first use exactly as a real consumer does. They link the
+# default GTest::gtest_main (no custom init), so nothing is initialized ahead
+# of the first API call: an entry point that fails to initialize a subsystem
+# fails these tests rather than silently relying on a test-only main.
 #
 # Per-issue security-regression tests live in their own *_regression_test.cc
 # files and are picked up by this glob, so adding one never edits a shared file
@@ -127,7 +165,6 @@ file(GLOB TEST_FFI_REGRESSION_TESTS CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/*_regression_test.cc")
 add_executable(
   test_ffi_test
-  mock_syscall_test.cc
   test_bindings_test.cc
   ${TEST_FFI_REGRESSION_TESTS}
 )
@@ -147,6 +184,7 @@ target_link_libraries(
   auth
   runtime_test_util
   GTest::gtest
+  GTest::gtest_main
 )
 add_dependencies(
   test_ffi_test

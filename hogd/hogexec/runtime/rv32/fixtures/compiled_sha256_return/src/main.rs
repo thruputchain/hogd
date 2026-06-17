@@ -31,10 +31,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 // halves below must match SHA256_METHOD_ID / SHA256_REPEATED_METHOD_ID in
 // package_artifact.py and the Sha256Wrapper entrypoint hashes the C++ parity test
 // pins.
-const SHA256_LO: i32 = 0xA719_DD56_u32 as i32; // SHA256_METHOD_ID & 0xFFFF_FFFF
-const SHA256_HI: i32 = 0xCA57_1C66_u32 as i32; // SHA256_METHOD_ID >> 32
-const SHA256_REPEATED_LO: i32 = 0x5D1F_3CFE_u32 as i32;
-const SHA256_REPEATED_HI: i32 = 0x5749_E8FA_u32 as i32;
+const SHA256_LO: i32 = 0xFC9E_81B9_u32 as i32; // SHA256_METHOD_ID & 0xFFFF_FFFF
+const SHA256_HI: i32 = 0xE8CC_FC8F_u32 as i32; // SHA256_METHOD_ID >> 32
+const SHA256_REPEATED_LO: i32 = 0x70E3_8729_u32 as i32;
+const SHA256_REPEATED_HI: i32 = 0x2F2C_B892_u32 as i32;
 
 global_asm!(
     ".pushsection .text._start,\"ax\",@progbits",

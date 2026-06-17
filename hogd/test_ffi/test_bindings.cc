@@ -27,7 +27,9 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -136,12 +138,38 @@ lazy_init() noexcept
     static std::mutex init_mutex;
     std::lock_guard lock(init_mutex);
     static bool initialized = false;
+    // init_hogexec_metrics() registers several metrics and is not atomic: if it
+    // throws partway (e.g. bad_alloc mid-registration) it leaves the executor
+    // component partially populated with done_with_init still false. A naive
+    // retry would re-register a duplicate name and trip init_metric()'s CHECK
+    // (an abort, defeating this noexcept initializer's structured-error
+    // contract). Latch that as a permanent failure and keep reporting it
+    // instead of retrying into the abort.
+    static bool metrics_init_failed = false;
+    if (metrics_init_failed) {
+      std::fputs("test_ffi: executor metrics initialization previously failed; "
+                 "the library is unusable\n",
+                 stderr);
+      return false;
+    }
     ffi_trace("lazy_init: initialized={}", initialized);
     if (!initialized) {
       hogd_init(0, nullptr, false, LogLevel::kCritical);
       auto logger = std::make_unique<ThreadsafeLogger>(LogLevel::kCritical);
       global_logger = logger.get();
       hogd::swap_logger(std::move(logger));
+      // The runtime records executor metrics during transaction commit
+      // (HogexecMetrics::mark_tx_*), so a committing entry point trips Metrics'
+      // done_with_init CHECK unless those metrics are registered first. Guarded
+      // because a host that already initialized them (e.g. a test main calling
+      // init_hogexec_metrics()) must not double-initialize: init_metric()
+      // asserts the component is not yet marked done.
+      if (!Metrics::instance().done_with_init(
+              Metrics::ComponentName::kExecutor)) {
+        metrics_init_failed = true; // pessimistic; cleared only on full success
+        init_hogexec_metrics();
+        metrics_init_failed = false;
+      }
       initialized = true;
     }
     return true;
@@ -932,9 +960,13 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
       }
     }
 
-    // Verify wasm contracts before storing — reject contracts that would
-    // fail during instantiation (e.g., memory exceeding limits).
-    if (contract.contract_type() == ContractType::kWasmi) {
+    // Verify runtime-backed contracts before storing — reject contracts that
+    // would fail during instantiation (e.g., wasm memory exceeding limits, an
+    // RV32 artifact that cannot be translated, or an unknown native id).
+    // kMockTest is excluded because it has no production runtime to verify
+    // against (the base context only registers the real runtimes); its
+    // registration is checked above via has_mock_contract().
+    if (contract.contract_type() != ContractType::kMockTest) {
       auto verify_result = (*context_cast)->verify_contract(contract);
       if (verify_result == InvokeErrorCode::Unrecoverable) {
         return kTestFFIErrorCodeUnrecoverableError;

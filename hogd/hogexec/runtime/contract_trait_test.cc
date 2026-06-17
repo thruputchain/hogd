@@ -20,6 +20,25 @@ TEST(ContractTraitTest, MethodIDDerivation)
 
   auto id4 = sdk_method_id("hogd", "0.1.0-alpha", "abc");
   ASSERT_EQ(id, id4);
+
+  // Golden vector pinning the exact preimage format:
+  //   sha256("<name>::<major_version>::<method>"), first 8 bytes -> method id.
+  // For ("hogd", "0.1.0", "abc") the preimage is "hogd::0.1::abc". This must
+  // byte-match the SDK's derivation; do not update it to match a code change
+  // without confirming the SDK derives the same value.
+  ASSERT_EQ(id, Runtime::MethodID{0x9432b95f6309d52bULL});
+
+  // 0.0.0 versions use the full original version string (prerelease and build
+  // included) as the major-version component, matching the SDK and
+  // generate_header.py. Distinct prereleases therefore derive distinct ids, and
+  // the leading '-' is part of the preimage (not stripped).
+  auto z_alpha = sdk_method_id("hogd", "0.0.0-alpha", "abc");
+  auto z_beta = sdk_method_id("hogd", "0.0.0-beta", "abc");
+  auto z_plain = sdk_method_id("hogd", "0.0.0", "abc");
+  ASSERT_NE(z_alpha, z_beta);
+  ASSERT_NE(z_alpha, z_plain);
+  // Golden vector: preimage "hogd::0.0.0-alpha::abc".
+  ASSERT_EQ(z_alpha, Runtime::MethodID{0x99b536b207ea02cfULL});
 }
 
 TEST(ContractTraitTest, EntrypointFromMethodID)
