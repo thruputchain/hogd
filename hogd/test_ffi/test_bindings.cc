@@ -138,6 +138,20 @@ lazy_init() noexcept
     static std::mutex init_mutex;
     std::lock_guard lock(init_mutex);
     static bool initialized = false;
+    // init_hogexec_metrics() registers several metrics and is not atomic: if it
+    // throws partway (e.g. bad_alloc mid-registration) it leaves the executor
+    // component partially populated with done_with_init still false. A naive
+    // retry would re-register a duplicate name and trip init_metric()'s CHECK
+    // (an abort, defeating this noexcept initializer's structured-error
+    // contract). Latch that as a permanent failure and keep reporting it
+    // instead of retrying into the abort.
+    static bool metrics_init_failed = false;
+    if (metrics_init_failed) {
+      std::fputs("test_ffi: executor metrics initialization previously failed; "
+                 "the library is unusable\n",
+                 stderr);
+      return false;
+    }
     ffi_trace("lazy_init: initialized={}", initialized);
     if (!initialized) {
       hogd_init(0, nullptr, false, LogLevel::kCritical);
@@ -152,7 +166,9 @@ lazy_init() noexcept
       // asserts the component is not yet marked done.
       if (!Metrics::instance().done_with_init(
               Metrics::ComponentName::kExecutor)) {
+        metrics_init_failed = true; // pessimistic; cleared only on full success
         init_hogexec_metrics();
+        metrics_init_failed = false;
       }
       initialized = true;
     }

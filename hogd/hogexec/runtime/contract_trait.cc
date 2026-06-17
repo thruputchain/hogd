@@ -20,7 +20,9 @@ struct SemverComponents {
   std::string major;
   std::string minor;
   std::string patch;
-  std::string prerelease; // empty if no prerelease
+  // The full, original version string. For a 0.0.0 version the major-version is
+  // the entire string (including any -prerelease/+build), matching the SDK.
+  std::string full;
 };
 
 SemverComponents
@@ -42,11 +44,7 @@ parse_semver(std::string_view identifier_version)
   components.major = matches[1].str();
   components.minor = matches[2].str();
   components.patch = matches[3].str();
-
-  // Prerelease (without the leading '-')
-  if (matches[4].matched && matches[4].length() > 1) {
-    components.prerelease = matches[4].str().substr(1); // skip the '-'
-  }
+  components.full = version_str;
 
   return components;
 }
@@ -63,7 +61,12 @@ major_version(SemverComponents const &components)
   if (components.patch != "0") {
     return "0.0." + components.patch;
   }
-  return "0.0.0" + components.prerelease;
+  // 0.0.0[-prerelease][+build]: the SDK (contract-util::major_version) returns
+  // the full original version string here, so match it byte-for-byte rather
+  // than reconstructing "0.0.0" + a hyphen-stripped prerelease. Otherwise the
+  // host derivation diverges from the SDK/generate_header.py kEntrypoints for
+  // any 0.0.0-prerelease contract.
+  return components.full;
 }
 } // namespace
 
