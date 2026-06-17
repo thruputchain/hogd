@@ -30,11 +30,19 @@ def major_version(version_str):
 
 
 def compute_entrypoint_id(interface_name, version_str, method_name):
-    """Compute entrypoint ID: sha256(interface_name || major_ver || method_name)[0:8]."""
+    """Compute entrypoint ID: sha256(interface_name :: major_ver :: method_name)[0:8].
+
+    The "::" separators must match sdk_rs/contract-util/src/lib.rs
+    (contract_entrypoint_id) and the C++ sdk_entrypoint_derivation: without them
+    distinct (interface, major, method) triples can concatenate to identical
+    bytes and collide to the same id.
+    """
     mv = major_version(version_str)
     h = hashlib.sha256()
     h.update(interface_name.encode())
+    h.update(b"::")
     h.update(mv.encode())
+    h.update(b"::")
     h.update(method_name.encode())
     return struct.unpack(">Q", h.digest()[:8])[0]
 
