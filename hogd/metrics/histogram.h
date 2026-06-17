@@ -66,13 +66,18 @@ public:
     std::ostringstream os;
     const std::string bucket_name = std::format("{}_bucket", histogram_name);
 
-    os << std::format("{}{le=\"{}\"} {}", bucket_name, min_, underflow_count());
+    size_t cumulative_count = underflow_count();
+    os << std::format("{}{{le=\"{}\"}} {}\n", bucket_name, min_,
+                      cumulative_count);
     for (size_t i = 0; i < buckets_.size(); i++) {
-      T boundary = min_ + (i * bucket_delta_);
-      os << std::format("{}{le=\"{}\"} {}", bucket_name, boundary,
-                        bucket_count(i));
+      const double boundary = min_ + ((i + 1) * bucket_delta_);
+      cumulative_count += bucket_count(i);
+      os << std::format("{}{{le=\"{}\"}} {}\n", bucket_name, boundary,
+                        cumulative_count);
     }
-    os << std::format("{}{le=\"+Inf\"} {}", bucket_name, overflow_count());
+    cumulative_count += overflow_count();
+    os << std::format("{}{{le=\"+Inf\"}} {}\n", bucket_name, cumulative_count);
+    os << std::format("{}_count {}\n", histogram_name, cumulative_count);
     return os.str();
   }
 

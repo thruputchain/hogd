@@ -282,6 +282,41 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
   worker.join();
 }
 
+TEST_F(MetricsTest, HistogramMetricDumpsBuckets)
+{
+  Metrics &metrics = Metrics::instance();
+  metrics.init_histogram(Metrics::ComponentName::kMempool,
+                         "metrics_test_validation_latency_ms",
+                         "Validation latency in milliseconds", 0, 10, 5);
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
+
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 0);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 1);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 3);
+  metrics.observe(Metrics::ComponentName::kMempool,
+                  "metrics_test_validation_latency_ms", 11);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump,
+                       "# HELP mempool_metrics_test_validation_latency_ms "
+                       "Validation latency in milliseconds");
+  expect_dump_contains(
+      dump, "# TYPE mempool_metrics_test_validation_latency_ms histogram");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_validation_latency_ms_bucket{le=\"0\"} 1");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_validation_latency_ms_bucket{le=\"2\"} 2");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_validation_latency_ms_bucket{le=\"4\"} 3");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_validation_latency_ms_bucket{le=\"+Inf\"} 4");
+  expect_dump_contains(dump,
+                       "mempool_metrics_test_validation_latency_ms_count 4");
+}
+
 TEST_F(MetricsTest, MetricsRouteReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
