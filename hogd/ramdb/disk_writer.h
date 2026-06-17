@@ -92,7 +92,7 @@ public:
   // print_stats prints disk usage statistics.
   void print_stats();
 
-  static void register_metrics();
+  void register_metrics();
   void record_metrics();
 
   size_t get_bytes_out() const
@@ -134,6 +134,7 @@ private:
   size_t bytes_in_{0};
   // the bytes actually written to disk (not including commit records).
   std::atomic<size_t> bytes_out_{0};
+  Metrics::Gauge bytes_out_metric_;
   // value of bytes_out_ last time it was printed. used for running bw stats.
   size_t prev_bytes_out_{0};
   // timestamp of last time disk stats was printed. used for running bw stats.

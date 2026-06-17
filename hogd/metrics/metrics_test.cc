@@ -83,6 +83,122 @@ TEST_F(MetricsTest, DumpIncludesRecordedGaugeForComponent)
   expect_dump_contains(dump, "executor_metrics_test_executor_queue_depth 17");
 }
 
+TEST_F(MetricsTest, GaugeFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Gauge queue_depth = metrics.gauge(
+      Metrics::ComponentName::kExecutor, "metrics_test_factory_queue_depth",
+      "Current executor queue depth.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  queue_depth.set(17);
+  queue_depth.add(4);
+
+  EXPECT_EQ(queue_depth.get(), 21);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump,
+                       "# HELP executor_metrics_test_factory_queue_depth "
+                       "Current executor queue depth.");
+  expect_dump_contains(
+      dump, "# TYPE executor_metrics_test_factory_queue_depth gauge");
+  expect_dump_contains(dump, "executor_metrics_test_factory_queue_depth 21");
+}
+
+TEST_F(MetricsTest, CounterFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter tx_count =
+      metrics.counter(Metrics::ComponentName::kExecutor,
+                      "metrics_test_factory_tx_count", "Transactions.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  tx_count.inc();
+  tx_count.inc(3);
+
+  EXPECT_EQ(tx_count.get(), 4);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump, "# TYPE executor_metrics_test_factory_tx_count counter");
+  expect_dump_contains(dump, "executor_metrics_test_factory_tx_count 4");
+}
+
+TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter tx_count = metrics.per_thread_counter(
+      Metrics::ComponentName::kExecutor,
+      "metrics_test_factory_per_thread_tx_count", "Transactions.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  tx_count.inc(3);
+
+  std::atomic<bool> recorded = false;
+  std::atomic<bool> done = false;
+  std::thread worker([&] {
+    tx_count.inc(4);
+    recorded.store(true, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  });
+  while (!recorded.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_EQ(tx_count.get(), 7);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump,
+      "# TYPE executor_metrics_test_factory_per_thread_tx_count counter");
+  expect_dump_contains(dump,
+                       "executor_metrics_test_factory_per_thread_tx_count 7");
+
+  done.store(true, std::memory_order_release);
+  worker.join();
+}
+
+TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::HistogramHandle latency = metrics.histogram(
+      Metrics::ComponentName::kMempool,
+      "metrics_test_factory_validation_latency_ms",
+      "Validation latency in milliseconds", 0, 10, 5);
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
+
+  latency.observe(0);
+  latency.observe(1);
+  latency.observe(3);
+  latency.observe(11);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump,
+      "# TYPE mempool_metrics_test_factory_validation_latency_ms histogram");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"0\"} 1");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"2\"} 2");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"4\"} 3");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"+Inf\"} "
+      "4");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_factory_validation_latency_ms_count 4");
+}
+
 TEST_F(MetricsTest, DumpIncludesDescriptionForDescribedMetric)
 {
   Metrics &metrics = Metrics::instance();

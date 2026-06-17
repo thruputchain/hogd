@@ -7,6 +7,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/metrics/metrics.h"
 #include "rpc_types.hh"
 
@@ -55,13 +56,11 @@ public:
 
   static void mark_successful_proposed_tx()
   {
-    Metrics::instance().add(Metrics::ComponentName::kExecutor,
-                            "successful_proposed_tx_count", 1);
+    successful_proposed_tx_count_metric.inc();
   }
   static void mark_failed_proposed_tx()
   {
-    Metrics::instance().add(Metrics::ComponentName::kExecutor,
-                            "failed_proposed_tx_count", 1);
+    failed_proposed_tx_count_metric.inc();
   }
 
   static void mark_successful_validation_tx()
@@ -75,8 +74,7 @@ public:
 
   static void mark_gas_consumed(uint64_t gas)
   {
-    Metrics::instance().add(Metrics::ComponentName::kExecutor, "gas_consumed",
-                            static_cast<ssize_t>(gas));
+    gas_consumed_metric.add(static_cast<ssize_t>(gas));
   }
 
   ~HogexecMetrics() { stop_background_worker(); }

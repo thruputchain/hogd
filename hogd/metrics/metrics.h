@@ -21,6 +21,8 @@
 namespace hogd {
 
 class Metrics {
+  struct Metric;
+
 public:
   enum class ComponentName {
     kExecutor,
@@ -37,6 +39,12 @@ public:
     kHistogram,
   };
 
+  enum class MetricType {
+    kGauge,
+    kCounter,
+    kHistogram,
+  };
+
   static constexpr size_t kNumComponents =
       static_cast<size_t>(ComponentName::kComponentCount);
 
@@ -48,17 +56,122 @@ public:
   Metrics(Metrics &&) = delete;
   Metrics &operator=(Metrics &&) = delete;
 
+  class Gauge {
+  public:
+    Gauge() = default;
+
+    void set(ssize_t value)
+    {
+      CHECK(metric_ != nullptr);
+      metric_->set(value);
+    }
+    void add(ssize_t delta)
+    {
+      CHECK(metric_ != nullptr);
+      metric_->add(delta);
+    }
+    ssize_t get()
+    {
+      CHECK(metric_ != nullptr);
+      return metric_->value();
+    }
+    explicit operator bool() const { return metric_ != nullptr; }
+
+  private:
+    explicit Gauge(Metric *metric) : metric_(metric) {}
+
+    Metric *metric_;
+
+    friend class Metrics;
+  };
+
+  class Counter {
+  public:
+    Counter() = default;
+
+    void inc(ssize_t delta = 1)
+    {
+      CHECK(metric_ != nullptr);
+      metric_->add(delta);
+    }
+    void add(ssize_t delta)
+    {
+      CHECK(metric_ != nullptr);
+      metric_->add(delta);
+    }
+    ssize_t get()
+    {
+      CHECK(metric_ != nullptr);
+      return metric_->value();
+    }
+    explicit operator bool() const { return metric_ != nullptr; }
+
+  private:
+    explicit Counter(Metric *metric) : metric_(metric) {}
+
+    Metric *metric_;
+
+    friend class Metrics;
+  };
+
+  class HistogramHandle {
+  public:
+    HistogramHandle() = default;
+
+    void observe(size_t value)
+    {
+      CHECK(metric_ != nullptr);
+      metric_->observe(value);
+    }
+    explicit operator bool() const { return metric_ != nullptr; }
+
+  private:
+    explicit HistogramHandle(Metric *metric) : metric_(metric) {}
+
+    Metric *metric_;
+
+    friend class Metrics;
+  };
+
+  Gauge gauge(ComponentName component_name, const std::string &metric_name,
+              const std::string &description)
+  {
+    return Gauge(register_metric(component_name, metric_name, description,
+                                 SampleType::kSsizeT, MetricType::kGauge));
+  }
+
+  Counter counter(ComponentName component_name, const std::string &metric_name,
+                  const std::string &description)
+  {
+    return Counter(register_metric(component_name, metric_name, description,
+                                   SampleType::kSsizeT,
+                                   MetricType::kCounter));
+  }
+
+  Counter per_thread_counter(ComponentName component_name,
+                             const std::string &metric_name,
+                             const std::string &description)
+  {
+    return Counter(register_metric(component_name, metric_name, description,
+                                   SampleType::kPerThreadSsizeT,
+                                   MetricType::kCounter));
+  }
+
+  HistogramHandle histogram(ComponentName component_name,
+                            const std::string &metric_name,
+                            const std::string &description, size_t min,
+                            size_t max, size_t num_buckets)
+  {
+    return HistogramHandle(register_histogram(component_name, metric_name,
+                                             description, min, max,
+                                             num_buckets));
+  }
+
   void init_metric(ComponentName component_name, const std::string &metric_name,
                    const std::string &description, SampleType sample_type)
   {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(!done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    CHECK(component.descriptions.insert({metric_name, description}).second);
-    auto [it, inserted] = component.metrics.try_emplace(metric_name);
-    CHECK(inserted);
-    it->second.init_sample(sample_type);
+    register_metric(component_name, metric_name, description, sample_type,
+                    MetricType::kGauge);
   }
 
   void init_histogram(ComponentName component_name,
@@ -66,14 +179,8 @@ public:
                       const std::string &description, size_t min, size_t max,
                       size_t num_buckets)
   {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(!done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    CHECK(component.descriptions.insert({metric_name, description}).second);
-    auto [it, inserted] = component.metrics.try_emplace(metric_name);
-    CHECK(inserted);
-    it->second.init_histogram(min, max, num_buckets);
+    register_histogram(component_name, metric_name, description, min, max,
+                       num_buckets);
   }
 
   void mark_done_with_init(ComponentName component_name, bool mark = true)
@@ -185,8 +292,9 @@ private:
     using Sample = std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>,
                                 Histogram<size_t>>;
 
-    void init_sample(SampleType sample_type)
+    void init_sample(SampleType sample_type, MetricType metric_type)
     {
+      type = metric_type;
       switch (sample_type) {
       case SampleType::kSsizeT:
         sample.template emplace<std::atomic<ssize_t>>(0);
@@ -205,7 +313,56 @@ private:
 
     void init_histogram(size_t min, size_t max, size_t num_buckets)
     {
+      type = MetricType::kHistogram;
       sample.template emplace<Histogram<size_t>>(min, max, num_buckets);
+    }
+
+    void set(ssize_t metric_value)
+    {
+      std::visit(
+          [metric_value](auto &sample) {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+              sample.store(metric_value, std::memory_order_relaxed);
+            }
+            else {
+              CHECK(false);
+            }
+          },
+          sample);
+    }
+
+    void add(ssize_t delta)
+    {
+      std::visit(
+          [delta](auto &sample) {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+              sample.fetch_add(delta, std::memory_order_relaxed);
+            }
+            else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
+              sample.inc(delta);
+            }
+            else {
+              CHECK(false);
+            }
+          },
+          sample);
+    }
+
+    void observe(size_t value)
+    {
+      std::visit(
+          [value](auto &sample) {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, Histogram<size_t>>) {
+              sample.add(value);
+            }
+            else {
+              CHECK(false);
+            }
+          },
+          sample);
     }
 
     bool is_histogram() const
@@ -254,6 +411,7 @@ private:
           sample);
     }
 
+    MetricType type = MetricType::kGauge;
     Sample sample;
   };
 
@@ -263,6 +421,38 @@ private:
   };
 
   Metrics() = default;
+
+  Metric *register_metric(ComponentName component_name,
+                          const std::string &metric_name,
+                          const std::string &description,
+                          SampleType sample_type, MetricType metric_type)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    CHECK(component.descriptions.insert({metric_name, description}).second);
+    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    CHECK(inserted);
+    it->second.init_sample(sample_type, metric_type);
+    return &it->second;
+  }
+
+  Metric *register_histogram(ComponentName component_name,
+                             const std::string &metric_name,
+                             const std::string &description, size_t min,
+                             size_t max, size_t num_buckets)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    CHECK(component.descriptions.insert({metric_name, description}).second);
+    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    CHECK(inserted);
+    it->second.init_histogram(min, max, num_buckets);
+    return &it->second;
+  }
 
   static std::string fully_qualified_name(ComponentName component_name,
                                           const std::string &metric_name);

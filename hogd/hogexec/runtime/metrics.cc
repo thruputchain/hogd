@@ -15,9 +15,7 @@ namespace hogd {
 void
 HogexecMetrics::launch_log_worker()
 {
-  // The worker reports through Metrics::record, whose init CHECK is
-  // unreachable-UB in release builds; fail loudly here instead.
-  if (!Metrics::instance().done_with_init(Metrics::ComponentName::kExecutor)) {
+  if (!hogexec_metrics_initialized()) {
     throw std::runtime_error(
         "HogexecMetrics::launch_log_worker: executor metrics not initialized; "
         "call init_hogexec_metrics() (hogd/hogexec/shared.h) first");
@@ -52,15 +50,10 @@ HogexecMetrics::get_stats()
   MetricsSnapshot snapshot{};
   snapshot.time_ns = x23::fastclock::get_ns();
 
-  Metrics &metrics = Metrics::instance();
   snapshot.successful_proposed_tx_count =
-      metrics.get(Metrics::ComponentName::kExecutor,
-                  "successful_proposed_tx_count");
-  snapshot.failed_proposed_tx_count =
-      metrics.get(Metrics::ComponentName::kExecutor,
-                  "failed_proposed_tx_count");
-  snapshot.gas_consumed =
-      metrics.get(Metrics::ComponentName::kExecutor, "gas_consumed");
+      successful_proposed_tx_count_metric.get();
+  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_metric.get();
+  snapshot.gas_consumed = gas_consumed_metric.get();
 
   return snapshot;
 }

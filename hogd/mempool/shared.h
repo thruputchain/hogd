@@ -88,14 +88,21 @@ generate_block_hash(const BlockHeader &header)
   return sha256(header);
 }
 
+inline Metrics::Gauge mempool_current_block_height_metric;
+
 inline void
 init_metrics()
 {
-  Metrics::instance().init_metric(
+  mempool_current_block_height_metric = Metrics::instance().gauge(
       Metrics::ComponentName::kMempool, "current_block_height",
-      "The height of the last block committed by the mempool.",
-      Metrics::SampleType::kSsizeT);
+      "The height of the last block committed by the mempool.");
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kMempool);
+}
+
+inline void
+record_current_block_height_metric(BlockHeight height)
+{
+  mempool_current_block_height_metric.set(height);
 }
 
 } // namespace hogd

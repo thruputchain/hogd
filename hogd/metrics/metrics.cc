@@ -41,6 +41,11 @@ Metrics::dump_to_prometheus_string()
         os << std::format("# TYPE {} histogram\n", full_name);
         os << metric.dump_to_string(full_name) << "\n";
       }
+      else if (metric.type == MetricType::kCounter) {
+        os << std::format("# TYPE {} counter\n", full_name);
+        os << std::format("{} {}\n", full_name,
+                          metric.dump_to_string(full_name));
+      }
       else {
         os << std::format("# TYPE {} gauge\n", full_name);
         os << std::format("{} {}\n", full_name,
