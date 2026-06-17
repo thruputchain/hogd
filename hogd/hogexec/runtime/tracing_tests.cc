@@ -89,14 +89,18 @@ TEST_F(TracingTest, Sha256Repeated)
   auto const *trace = handler.get_trace();
 
   ASSERT_EQ(trace->invocation.gas_limit, 10000);
-  ASSERT_EQ(trace->system_calls.size(),
-            n + 2); // +2 for get_calldata and return
+  // +3: get_calldata_len, get_calldata, and return. The SDK reads the calldata
+  // length before fetching the calldata itself, so the prologue is two
+  // syscalls (kGetCalldataLen then kGetCalldata).
+  ASSERT_EQ(trace->system_calls.size(), n + 3);
   uint64_t gas_remaining = 10000;
 
   ASSERT_EQ(trace->system_calls[0].body.syscall_number(),
+            SyscallNo::kGetCalldataLen);
+  ASSERT_EQ(trace->system_calls[1].body.syscall_number(),
             SyscallNo::kGetCalldata);
 
-  for (size_t i = 1; i < n + 1; i++) {
+  for (size_t i = 2; i < n + 2; i++) {
     ASSERT_LT(trace->system_calls[i].gas_remaining_at_start, gas_remaining);
     ASSERT_LT(trace->system_calls[i].gas_remaining_at_end,
               trace->system_calls[i].gas_remaining_at_start);
@@ -114,7 +118,7 @@ TEST_F(TracingTest, Sha256Repeated)
               SyscallErrorCode::kSyscallErrorCodeNone);
   }
 
-  ASSERT_EQ(trace->system_calls[n + 1].body.syscall_number(),
+  ASSERT_EQ(trace->system_calls[n + 2].body.syscall_number(),
             SyscallNo::kReturn);
 }
 
