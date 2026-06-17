@@ -31,22 +31,21 @@ Metrics::dump_to_prometheus_string()
     Component &component = components_[i];
 
     for (auto &[name, metric] : component.metrics) {
+      const std::string full_name =
+          fully_qualified_name(static_cast<ComponentName>(i), name);
       auto it = component.descriptions.find(name);
       if (it != component.descriptions.end() && !it->second.empty()) {
-        os << std::format("# HELP {} {}\n",
-                          fully_qualified_name(static_cast<ComponentName>(i),
-                                               name),
-                          it->second);
+        os << std::format("# HELP {} {}\n", full_name, it->second);
       }
-      // We only support gauges for now but can easily expand this to other
-      // types.
-      os << std::format("# TYPE {} gauge\n",
-                        fully_qualified_name(static_cast<ComponentName>(i),
-                                             name));
-      os << std::format("{} {}\n",
-                        fully_qualified_name(static_cast<ComponentName>(i),
-                                             name),
-                        metric.value());
+      if (metric.is_histogram()) {
+        os << std::format("# TYPE {} histogram\n", full_name);
+        os << metric.dump_to_string(full_name) << "\n";
+      }
+      else {
+        os << std::format("# TYPE {} gauge\n", full_name);
+        os << std::format("{} {}\n", full_name,
+                          metric.dump_to_string(full_name));
+      }
     }
   }
 
