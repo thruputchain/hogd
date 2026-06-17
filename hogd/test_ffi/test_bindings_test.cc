@@ -3156,6 +3156,60 @@ TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
+// Regression test for #2683: setup_create_contract must run the runtime
+// verifier for RV32 contracts (not just Wasmi) before storing them. An invalid
+// RV32 artifact that do_verify_contract rejects must be rejected here too with
+// a structured ContractVerificationFailed error, rather than being stored and
+// surfacing later as an Unrecoverable error during invocation.
+TEST(TestBindingsTest, SetupCreateContractRejectsInvalidRv32)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data = {0xde, 0xad, 0xbe, 0xef};
+
+  auto bytes = x23::serialize(contract);
+
+  // Precondition: the generic verifier rejects this artifact.
+  auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
+  ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_EQ(verify_result.success, 0);
+
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
+}
+
+// Regression test for #2683 (native amendment): setup_create_contract must run
+// the runtime verifier for native contracts before storing them. A native
+// contract with an unknown id must be rejected with ContractVerificationFailed
+// rather than being stored and later triggering an "Unknown native contract
+// deployed" panic at deploy time.
+TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+
+  auto bytes = x23::serialize(contract);
+
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
+}
+
 namespace {
 
 // Append an unsigned LEB128-encoded u32 to a wasm byte buffer.

@@ -932,9 +932,13 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
       }
     }
 
-    // Verify wasm contracts before storing — reject contracts that would
-    // fail during instantiation (e.g., memory exceeding limits).
-    if (contract.contract_type() == ContractType::kWasmi) {
+    // Verify runtime-backed contracts before storing — reject contracts that
+    // would fail during instantiation (e.g., wasm memory exceeding limits, an
+    // RV32 artifact that cannot be translated, or an unknown native id).
+    // kMockTest is excluded because it has no production runtime to verify
+    // against (the base context only registers the real runtimes); its
+    // registration is checked above via has_mock_contract().
+    if (contract.contract_type() != ContractType::kMockTest) {
       auto verify_result = (*context_cast)->verify_contract(contract);
       if (verify_result == InvokeErrorCode::Unrecoverable) {
         return kTestFFIErrorCodeUnrecoverableError;
