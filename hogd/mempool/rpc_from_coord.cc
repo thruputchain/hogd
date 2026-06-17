@@ -37,7 +37,7 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/scheduler.h"
-#include "hogd/metrics/metrics.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "parallel.hh"
 #include "rpc_types.hh"

@@ -35,7 +35,6 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
-#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 

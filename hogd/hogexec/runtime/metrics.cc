@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "hogd/base/log.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/metrics/metrics.h"
 #include "x23/fastclock.h"
 
