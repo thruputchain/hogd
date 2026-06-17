@@ -11,12 +11,16 @@ inline Metrics::Counter gas_consumed_metric;
 inline void
 init_hogexec_metrics()
 {
-  successful_proposed_tx_count_metric = Metrics::instance().per_thread_counter(
-      Metrics::ComponentName::kExecutor, "successful_proposed_tx_count", "");
-  failed_proposed_tx_count_metric = Metrics::instance().per_thread_counter(
-      Metrics::ComponentName::kExecutor, "failed_proposed_tx_count", "");
-  gas_consumed_metric = Metrics::instance().per_thread_counter(
-      Metrics::ComponentName::kExecutor, "gas_consumed", "");
+  successful_proposed_tx_count_metric =
+      Metrics::instance().per_thread_counter(Metrics::ComponentName::kExecutor,
+                                             "successful_proposed_tx_count",
+                                             "");
+  failed_proposed_tx_count_metric =
+      Metrics::instance().per_thread_counter(Metrics::ComponentName::kExecutor,
+                                             "failed_proposed_tx_count", "");
+  gas_consumed_metric =
+      Metrics::instance().per_thread_counter(Metrics::ComponentName::kExecutor,
+                                             "gas_consumed", "");
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kExecutor);
 }
 

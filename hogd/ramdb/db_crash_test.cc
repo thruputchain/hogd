@@ -209,8 +209,8 @@ read_metrics(Database &db)
   db.record_metrics();
 
   return {
-      {"db_ramdb_snap_bytes_out", static_cast<ssize_t>(
-                                      db.snapshot_bytes_written())},
+      {"db_ramdb_snap_bytes_out",
+       static_cast<ssize_t>(db.snapshot_bytes_written())},
       {"db_ramdb_disk_writer_bytes_out",
        static_cast<ssize_t>(db.disk_bytes_written())},
   };
