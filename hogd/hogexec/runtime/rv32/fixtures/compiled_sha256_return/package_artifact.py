@@ -25,8 +25,8 @@ FIXTURE_INPUT_SYMBOL = "RV32_COMPILED_SHA256_RETURN_INPUT"
 # (SHA256_REPEATED_METHOD_ID), trapping on any other id. These MethodIDs are
 # emitted to the fixture header and the C++ parity test static_asserts them
 # against the generated Sha256Wrapper WASM contract metadata.
-SHA256_METHOD_ID = 0xCA571C66A719DD56
-SHA256_REPEATED_METHOD_ID = 0x5749E8FA5D1F3CFE
+SHA256_METHOD_ID = 0xE8CCFC8FFC9E81B9
+SHA256_REPEATED_METHOD_ID = 0x2F2CB89270E38729
 
 
 class FixtureError(RuntimeError):
