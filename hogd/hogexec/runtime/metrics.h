@@ -56,11 +56,11 @@ public:
 
   static void mark_successful_proposed_tx()
   {
-    successful_proposed_tx_count_metric.inc();
+    successful_proposed_tx_count_metric.increment();
   }
   static void mark_failed_proposed_tx()
   {
-    failed_proposed_tx_count_metric.inc();
+    failed_proposed_tx_count_metric.increment();
   }
 
   static void mark_successful_validation_tx()
@@ -74,7 +74,7 @@ public:
 
   static void mark_gas_consumed(uint64_t gas)
   {
-    gas_consumed_metric.add(static_cast<ssize_t>(gas));
+    gas_consumed_metric.increment(static_cast<ssize_t>(gas));
   }
 
   ~HogexecMetrics() { stop_background_worker(); }

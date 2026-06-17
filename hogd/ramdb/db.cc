@@ -134,7 +134,7 @@ Database::register_metrics()
 void
 Database::record_metrics()
 {
-  metrics_.snap_bytes_out_metric.set(
+  metrics_.snap_bytes_out_metric.record(
       metrics_.snap_bytes_out_.load(std::memory_order_relaxed));
   disk_writer_.record_metrics();
 }

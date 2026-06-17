@@ -102,7 +102,7 @@ init_metrics()
 inline void
 record_current_block_height_metric(BlockHeight height)
 {
-  mempool_current_block_height_metric.set(height);
+  mempool_current_block_height_metric.record(height);
 }
 
 } // namespace hogd

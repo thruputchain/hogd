@@ -52,9 +52,9 @@ HogexecMetrics::get_stats()
   snapshot.time_ns = x23::fastclock::get_ns();
 
   snapshot.successful_proposed_tx_count =
-      successful_proposed_tx_count_metric.get();
-  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_metric.get();
-  snapshot.gas_consumed = gas_consumed_metric.get();
+      successful_proposed_tx_count_metric.value();
+  snapshot.failed_proposed_tx_count = failed_proposed_tx_count_metric.value();
+  snapshot.gas_consumed = gas_consumed_metric.value();
 
   return snapshot;
 }

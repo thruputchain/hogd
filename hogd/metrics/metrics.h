@@ -33,6 +33,7 @@ public:
     kComponentCount
   };
 
+private:
   enum class SampleType {
     kSsizeT,
     kPerThreadSsizeT,
@@ -45,6 +46,7 @@ public:
     kHistogram,
   };
 
+public:
   static constexpr size_t kNumComponents =
       static_cast<size_t>(ComponentName::kComponentCount);
 
@@ -60,17 +62,12 @@ public:
   public:
     Gauge() = default;
 
-    void set(ssize_t value)
+    void record(ssize_t value)
     {
       CHECK(metric_ != nullptr);
       metric_->set(value);
     }
-    void add(ssize_t delta)
-    {
-      CHECK(metric_ != nullptr);
-      metric_->add(delta);
-    }
-    ssize_t get()
+    ssize_t value()
     {
       CHECK(metric_ != nullptr);
       return metric_->value();
@@ -89,17 +86,12 @@ public:
   public:
     Counter() = default;
 
-    void inc(ssize_t delta = 1)
+    void increment(ssize_t delta = 1)
     {
       CHECK(metric_ != nullptr);
       metric_->add(delta);
     }
-    void add(ssize_t delta)
-    {
-      CHECK(metric_ != nullptr);
-      metric_->add(delta);
-    }
-    ssize_t get()
+    ssize_t value()
     {
       CHECK(metric_ != nullptr);
       return metric_->value();
@@ -118,7 +110,7 @@ public:
   public:
     HistogramHandle() = default;
 
-    void observe(size_t value)
+    void record(size_t value)
     {
       CHECK(metric_ != nullptr);
       metric_->observe(value);
@@ -166,22 +158,6 @@ public:
                                               num_buckets));
   }
 
-  void init_metric(ComponentName component_name, const std::string &metric_name,
-                   const std::string &description, SampleType sample_type)
-  {
-    register_metric(component_name, metric_name, description, sample_type,
-                    MetricType::kGauge);
-  }
-
-  void init_histogram(ComponentName component_name,
-                      const std::string &metric_name,
-                      const std::string &description, size_t min, size_t max,
-                      size_t num_buckets)
-  {
-    register_histogram(component_name, metric_name, description, min, max,
-                       num_buckets);
-  }
-
   void mark_done_with_init(ComponentName component_name, bool mark = true)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
@@ -191,77 +167,6 @@ public:
     bool expected = !mark;
     CHECK(component.compare_exchange_strong(expected, /*desired=*/mark,
                                             std::memory_order_release));
-  }
-
-  void record(ComponentName component_name, const std::string &metric_name,
-              ssize_t metric_value)
-  {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    auto it = component.metrics.find(metric_name);
-    CHECK(it != component.metrics.end());
-    std::visit(
-        [metric_value](auto &sample) {
-          using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
-            sample.store(metric_value, std::memory_order_relaxed);
-          }
-          else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
-            // You cannot use [record] on a per-thread value as this does not
-            // make sense. You would only be setting your own thread's value and
-            // not touching the values set by other threads, so which value is
-            // authoritative?
-            //
-            // You should either be calling [add] instead or using a single
-            // [ssize_t].
-            CHECK(false);
-          }
-          else if constexpr (std::is_same_v<T, Histogram<size_t>>) {
-            sample.add(metric_value);
-          }
-          else {
-            CHECK(false);
-          }
-        },
-        it->second.sample);
-  }
-
-  void add(ComponentName component_name, const std::string &metric_name,
-           ssize_t delta)
-  {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    auto it = component.metrics.find(metric_name);
-    CHECK(it != component.metrics.end());
-    std::visit(
-        [delta](auto &sample) {
-          using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
-            sample.fetch_add(delta, std::memory_order_relaxed);
-          }
-          else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
-            sample.inc(delta);
-          }
-          else {
-            CHECK(false);
-          }
-        },
-        it->second.sample);
-  }
-
-  ssize_t get(ComponentName component_name, const std::string &metric_name)
-  {
-    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
-    CHECK(done_with_init(component_name));
-
-    Component &component = components_[static_cast<size_t>(component_name)];
-    auto it = component.metrics.find(metric_name);
-    CHECK(it != component.metrics.end());
-    return it->second.value();
   }
 
   std::string dump_to_prometheus_string();
