@@ -36,14 +36,13 @@ public:
   {
     if (val <= min_) {
       underflow_.fetch_add(1, std::memory_order_relaxed);
-      return;
     }
     else if (val > max_) {
       overflow_.fetch_add(1, std::memory_order_relaxed);
-      return;
     }
-
-    buckets_[bucket_idx(val)].fetch_add(1, std::memory_order_relaxed);
+    else {
+      buckets_[bucket_idx(val)].fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   size_t bucket_count(size_t idx) const
