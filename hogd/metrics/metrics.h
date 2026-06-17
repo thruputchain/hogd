@@ -144,8 +144,7 @@ public:
                   const std::string &description)
   {
     return Counter(register_metric(component_name, metric_name, description,
-                                   SampleType::kSsizeT,
-                                   MetricType::kCounter));
+                                   SampleType::kSsizeT, MetricType::kCounter));
   }
 
   Counter per_thread_counter(ComponentName component_name,
@@ -163,8 +162,8 @@ public:
                             size_t max, size_t num_buckets)
   {
     return HistogramHandle(register_histogram(component_name, metric_name,
-                                             description, min, max,
-                                             num_buckets));
+                                              description, min, max,
+                                              num_buckets));
   }
 
   void init_metric(ComponentName component_name, const std::string &metric_name,
@@ -179,8 +178,19 @@ public:
                       const std::string &description, size_t min, size_t max,
                       size_t num_buckets)
   {
+<<<<<<< HEAD
     register_histogram(component_name, metric_name, description, min, max,
                        num_buckets);
+=======
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    CHECK(component.descriptions.insert({metric_name, description}).second);
+    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    CHECK(inserted);
+    it->second.init_histogram(min, max, num_buckets);
+>>>>>>> 71a403c1003c847e213f2aa014487fc567f0456f
   }
 
   void mark_done_with_init(ComponentName component_name, bool mark = true)
@@ -313,6 +323,7 @@ private:
 
     void init_histogram(size_t min, size_t max, size_t num_buckets)
     {
+<<<<<<< HEAD
       type = MetricType::kHistogram;
       sample.template emplace<Histogram<size_t>>(min, max, num_buckets);
     }
@@ -365,6 +376,11 @@ private:
           sample);
     }
 
+=======
+      sample.template emplace<Histogram<size_t>>(min, max, num_buckets);
+    }
+
+>>>>>>> 71a403c1003c847e213f2aa014487fc567f0456f
     bool is_histogram() const
     {
       return std::holds_alternative<Histogram<size_t>>(sample);
@@ -385,6 +401,31 @@ private:
               CHECK(false);
               return -1;
             }
+<<<<<<< HEAD
+=======
+          },
+          sample);
+    }
+
+    std::string dump_to_string(const std::string &metric_name)
+    {
+      return std::visit(
+          [&metric_name](auto &sample) -> std::string {
+            using T = std::decay_t<decltype(sample)>;
+            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+              return std::to_string(sample.load(std::memory_order_relaxed));
+            }
+            else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
+              return std::to_string(sample.get());
+            }
+            else if constexpr (std::is_same_v<T, Histogram<size_t>>) {
+              return sample.dump_to_string(metric_name);
+            }
+            else {
+              CHECK(false);
+              return "";
+            }
+>>>>>>> 71a403c1003c847e213f2aa014487fc567f0456f
           },
           sample);
     }
