@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -22,6 +23,9 @@ namespace hogd {
 
 class Metrics {
   struct Metric;
+  struct GaugeMetric;
+  struct CounterMetric;
+  struct HistogramMetric;
 
 public:
   enum class ComponentName {
@@ -34,16 +38,15 @@ public:
   };
 
 private:
-  enum class SampleType {
-    kSsizeT,
-    kPerThreadSsizeT,
-    kHistogram,
-  };
-
   enum class MetricType {
     kGauge,
     kCounter,
     kHistogram,
+  };
+
+  enum class CounterStorage {
+    kAtomic,
+    kPerThread,
   };
 
 public:
@@ -65,7 +68,7 @@ public:
     void record(ssize_t value)
     {
       CHECK(metric_ != nullptr);
-      metric_->set(value);
+      metric_->record(value);
     }
     ssize_t value()
     {
@@ -75,9 +78,9 @@ public:
     explicit operator bool() const { return metric_ != nullptr; }
 
   private:
-    explicit Gauge(Metric *metric) : metric_(metric) {}
+    explicit Gauge(GaugeMetric *metric) : metric_(metric) {}
 
-    Metric *metric_;
+    GaugeMetric *metric_ = nullptr;
 
     friend class Metrics;
   };
@@ -89,7 +92,7 @@ public:
     void increment(ssize_t delta = 1)
     {
       CHECK(metric_ != nullptr);
-      metric_->add(delta);
+      metric_->increment(delta);
     }
     ssize_t value()
     {
@@ -99,9 +102,9 @@ public:
     explicit operator bool() const { return metric_ != nullptr; }
 
   private:
-    explicit Counter(Metric *metric) : metric_(metric) {}
+    explicit Counter(CounterMetric *metric) : metric_(metric) {}
 
-    Metric *metric_;
+    CounterMetric *metric_ = nullptr;
 
     friend class Metrics;
   };
@@ -113,14 +116,14 @@ public:
     void record(size_t value)
     {
       CHECK(metric_ != nullptr);
-      metric_->observe(value);
+      metric_->record(value);
     }
     explicit operator bool() const { return metric_ != nullptr; }
 
   private:
-    explicit HistogramHandle(Metric *metric) : metric_(metric) {}
+    explicit HistogramHandle(HistogramMetric *metric) : metric_(metric) {}
 
-    Metric *metric_;
+    HistogramMetric *metric_ = nullptr;
 
     friend class Metrics;
   };
@@ -128,24 +131,22 @@ public:
   Gauge gauge(ComponentName component_name, const std::string &metric_name,
               const std::string &description)
   {
-    return Gauge(register_metric(component_name, metric_name, description,
-                                 SampleType::kSsizeT, MetricType::kGauge));
+    return Gauge(register_gauge(component_name, metric_name, description));
   }
 
   Counter counter(ComponentName component_name, const std::string &metric_name,
                   const std::string &description)
   {
-    return Counter(register_metric(component_name, metric_name, description,
-                                   SampleType::kSsizeT, MetricType::kCounter));
+    return Counter(register_counter(component_name, metric_name, description,
+                                    CounterStorage::kAtomic));
   }
 
   Counter per_thread_counter(ComponentName component_name,
                              const std::string &metric_name,
                              const std::string &description)
   {
-    return Counter(register_metric(component_name, metric_name, description,
-                                   SampleType::kPerThreadSsizeT,
-                                   MetricType::kCounter));
+    return Counter(register_counter(component_name, metric_name, description,
+                                    CounterStorage::kPerThread));
   }
 
   HistogramHandle histogram(ComponentName component_name,
@@ -187,56 +188,62 @@ public:
 
       Component &component = components_[i];
       component.metrics.clear();
-      component.descriptions.clear();
     }
   }
 
 private:
   struct Metric {
-    using Sample = std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>,
-                                Histogram<size_t>>;
+    Metric(MetricType metric_type, std::string metric_description)
+      : type(metric_type), description(std::move(metric_description))
+    {}
 
-    void init_sample(SampleType sample_type, MetricType metric_type)
+    virtual ~Metric() = default;
+
+    virtual std::string dump_sample(const std::string &metric_name) = 0;
+
+    const MetricType type;
+    const std::string description;
+  };
+
+  struct GaugeMetric : Metric {
+    explicit GaugeMetric(std::string description)
+      : Metric(MetricType::kGauge, std::move(description))
+    {}
+
+    void record(ssize_t metric_value)
     {
-      type = metric_type;
-      switch (sample_type) {
-      case SampleType::kSsizeT:
-        sample.template emplace<std::atomic<ssize_t>>(0);
+      value_.store(metric_value, std::memory_order_relaxed);
+    }
+
+    ssize_t value() const { return value_.load(std::memory_order_relaxed); }
+
+    std::string dump_sample(const std::string &) override
+    {
+      return std::to_string(value());
+    }
+
+    std::atomic<ssize_t> value_ = 0;
+  };
+
+  struct CounterMetric : Metric {
+    using Sample =
+        std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>>;
+
+    CounterMetric(std::string description, CounterStorage storage)
+      : Metric(MetricType::kCounter, std::move(description))
+    {
+      switch (storage) {
+      case CounterStorage::kAtomic:
+        sample_.template emplace<std::atomic<ssize_t>>(0);
         return;
-      case SampleType::kPerThreadSsizeT:
-        sample.template emplace<PerThreadCounter<ssize_t>>();
-        return;
-      case SampleType::kHistogram:
-        // TODO(jhumphri): Take this out and give each sample type its own
-        // [init] method.
-        sample.template emplace<Histogram<size_t>>(0, 10, 10);
+      case CounterStorage::kPerThread:
+        sample_.template emplace<PerThreadCounter<ssize_t>>();
         return;
       }
       CHECK(false);
     }
 
-    void init_histogram(size_t min, size_t max, size_t num_buckets)
-    {
-      type = MetricType::kHistogram;
-      sample.template emplace<Histogram<size_t>>(min, max, num_buckets);
-    }
-
-    void set(ssize_t metric_value)
-    {
-      std::visit(
-          [metric_value](auto &sample) {
-            using T = std::decay_t<decltype(sample)>;
-            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
-              sample.store(metric_value, std::memory_order_relaxed);
-            }
-            else {
-              CHECK(false);
-            }
-          },
-          sample);
-    }
-
-    void add(ssize_t delta)
+    void increment(ssize_t delta)
     {
       std::visit(
           [delta](auto &sample) {
@@ -247,31 +254,8 @@ private:
             else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
               sample.inc(delta);
             }
-            else {
-              CHECK(false);
-            }
           },
-          sample);
-    }
-
-    void observe(size_t value)
-    {
-      std::visit(
-          [value](auto &sample) {
-            using T = std::decay_t<decltype(sample)>;
-            if constexpr (std::is_same_v<T, Histogram<size_t>>) {
-              sample.add(value);
-            }
-            else {
-              CHECK(false);
-            }
-          },
-          sample);
-    }
-
-    bool is_histogram() const
-    {
-      return std::holds_alternative<Histogram<size_t>>(sample);
+          sample_);
     }
 
     ssize_t value()
@@ -285,77 +269,91 @@ private:
             else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
               return sample.get();
             }
-            else {
-              CHECK(false);
-              return -1;
-            }
           },
-          sample);
+          sample_);
     }
 
-    std::string dump_to_string(const std::string &metric_name)
+    std::string dump_sample(const std::string &) override
     {
-      return std::visit(
-          [&metric_name](auto &sample) -> std::string {
-            using T = std::decay_t<decltype(sample)>;
-            if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
-              return std::to_string(sample.load(std::memory_order_relaxed));
-            }
-            else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
-              return std::to_string(sample.get());
-            }
-            else if constexpr (std::is_same_v<T, Histogram<size_t>>) {
-              return sample.dump_to_string(metric_name);
-            }
-            else {
-              CHECK(false);
-              return "";
-            }
-          },
-          sample);
+      return std::to_string(value());
     }
 
-    MetricType type = MetricType::kGauge;
-    Sample sample;
+    Sample sample_;
+  };
+
+  struct HistogramMetric : Metric {
+    HistogramMetric(std::string description, size_t min, size_t max,
+                    size_t num_buckets)
+      : Metric(MetricType::kHistogram, std::move(description)),
+        histogram(min, max, num_buckets)
+    {}
+
+    void record(size_t value) { histogram.add(value); }
+
+    std::string dump_sample(const std::string &metric_name) override
+    {
+      return histogram.dump_to_string(metric_name);
+    }
+
+    Histogram<size_t> histogram;
   };
 
   struct Component {
-    std::unordered_map<std::string, Metric> metrics;
-    std::unordered_map<std::string, std::string> descriptions;
+    std::unordered_map<std::string, std::unique_ptr<Metric>> metrics;
   };
 
   Metrics() = default;
 
-  Metric *register_metric(ComponentName component_name,
-                          const std::string &metric_name,
-                          const std::string &description,
-                          SampleType sample_type, MetricType metric_type)
+  GaugeMetric *register_gauge(ComponentName component_name,
+                              const std::string &metric_name,
+                              const std::string &description)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
-    CHECK(component.descriptions.insert({metric_name, description}).second);
-    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    auto metric = std::make_unique<GaugeMetric>(description);
+    GaugeMetric *metric_ptr = metric.get();
+    auto [_, inserted] =
+        component.metrics.try_emplace(metric_name, std::move(metric));
     CHECK(inserted);
-    it->second.init_sample(sample_type, metric_type);
-    return &it->second;
+    return metric_ptr;
   }
 
-  Metric *register_histogram(ComponentName component_name,
-                             const std::string &metric_name,
-                             const std::string &description, size_t min,
-                             size_t max, size_t num_buckets)
+  CounterMetric *register_counter(ComponentName component_name,
+                                  const std::string &metric_name,
+                                  const std::string &description,
+                                  CounterStorage storage)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
-    CHECK(component.descriptions.insert({metric_name, description}).second);
-    auto [it, inserted] = component.metrics.try_emplace(metric_name);
+    auto metric = std::make_unique<CounterMetric>(description, storage);
+    CounterMetric *metric_ptr = metric.get();
+    auto [_, inserted] =
+        component.metrics.try_emplace(metric_name, std::move(metric));
     CHECK(inserted);
-    it->second.init_histogram(min, max, num_buckets);
-    return &it->second;
+    return metric_ptr;
+  }
+
+  HistogramMetric *register_histogram(ComponentName component_name,
+                                      const std::string &metric_name,
+                                      const std::string &description,
+                                      size_t min, size_t max,
+                                      size_t num_buckets)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    auto metric =
+        std::make_unique<HistogramMetric>(description, min, max, num_buckets);
+    HistogramMetric *metric_ptr = metric.get();
+    auto [_, inserted] =
+        component.metrics.try_emplace(metric_name, std::move(metric));
+    CHECK(inserted);
+    return metric_ptr;
   }
 
   static std::string fully_qualified_name(ComponentName component_name,
