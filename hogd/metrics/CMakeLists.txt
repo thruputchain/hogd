@@ -24,6 +24,17 @@ target_link_libraries(
 gtest_discover_tests(health_test)
 
 add_executable(
+  histogram_test
+  histogram_test.cc
+)
+target_link_libraries(
+  histogram_test
+  metrics
+  GTest::gtest_main
+)
+gtest_discover_tests(histogram_test)
+
+add_executable(
   metrics_test
   metrics_test.cc
 )
