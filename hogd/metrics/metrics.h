@@ -38,12 +38,6 @@ public:
   };
 
 private:
-  enum class MetricType {
-    kGauge,
-    kCounter,
-    kHistogram,
-  };
-
   enum class CounterStorage {
     kAtomic,
     kPerThread,
@@ -193,21 +187,23 @@ public:
 
 private:
   struct Metric {
-    Metric(MetricType metric_type, std::string metric_description)
-      : type(metric_type), description(std::move(metric_description))
+    explicit Metric(std::string metric_description)
+      : description(std::move(metric_description))
     {}
 
     virtual ~Metric() = default;
 
+    virtual const char *prometheus_type() const = 0;
     virtual std::string dump_sample(const std::string &metric_name) = 0;
+    virtual void dump_prometheus_value(std::ostringstream &os,
+                                       const std::string &metric_name) = 0;
 
-    const MetricType type;
     const std::string description;
   };
 
   struct GaugeMetric : Metric {
     explicit GaugeMetric(std::string description)
-      : Metric(MetricType::kGauge, std::move(description))
+      : Metric(std::move(description))
     {}
 
     void record(ssize_t metric_value)
@@ -217,9 +213,17 @@ private:
 
     ssize_t value() const { return value_.load(std::memory_order_relaxed); }
 
+    const char *prometheus_type() const override { return "gauge"; }
+
     std::string dump_sample(const std::string & /*unused*/) override
     {
       return std::to_string(value());
+    }
+
+    void dump_prometheus_value(std::ostringstream &os,
+                               const std::string &metric_name) override
+    {
+      os << std::format("{} {}\n", metric_name, dump_sample(metric_name));
     }
 
     std::atomic<ssize_t> value_ = 0;
@@ -230,7 +234,7 @@ private:
         std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>>;
 
     CounterMetric(std::string description, CounterStorage storage)
-      : Metric(MetricType::kCounter, std::move(description))
+      : Metric(std::move(description))
     {
       switch (storage) {
       case CounterStorage::kAtomic:
@@ -273,9 +277,17 @@ private:
           sample_);
     }
 
+    const char *prometheus_type() const override { return "counter"; }
+
     std::string dump_sample(const std::string & /*unused*/) override
     {
       return std::to_string(value());
+    }
+
+    void dump_prometheus_value(std::ostringstream &os,
+                               const std::string &metric_name) override
+    {
+      os << std::format("{} {}\n", metric_name, dump_sample(metric_name));
     }
 
     Sample sample_;
@@ -284,15 +296,22 @@ private:
   struct HistogramMetric : Metric {
     HistogramMetric(std::string description, size_t min, size_t max,
                     size_t num_buckets)
-      : Metric(MetricType::kHistogram, std::move(description)),
-        histogram(min, max, num_buckets)
+      : Metric(std::move(description)), histogram(min, max, num_buckets)
     {}
 
     void record(size_t value) { histogram.add(value); }
 
+    const char *prometheus_type() const override { return "histogram"; }
+
     std::string dump_sample(const std::string &metric_name) override
     {
       return histogram.dump_to_string(metric_name);
+    }
+
+    void dump_prometheus_value(std::ostringstream &os,
+                               const std::string &metric_name) override
+    {
+      os << dump_sample(metric_name) << "\n";
     }
 
     Histogram<size_t> histogram;
