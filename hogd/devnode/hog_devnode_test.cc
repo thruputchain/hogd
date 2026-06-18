@@ -54,6 +54,8 @@
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/indexer/db.h"
+#include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -818,6 +820,91 @@ missing_test_bootstrap_manifest_path()
   return path;
 }
 
+std::filesystem::path
+make_test_data_dir()
+{
+  return std::filesystem::temp_directory_path() /
+         std::format(
+             "hog-devnode-data-{}-{}", getpid(),
+             std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+void
+initialize_persistent_data_dir(std::filesystem::path const &data_dir)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  expect_clean_exit(process);
+}
+
+GenesisConfiguration
+build_test_data_dir_genesis(BootstrapAccountConfig const &config)
+{
+  if (config.count == 0) {
+    GenesisConfigurationBuilder builder;
+    return builder.build(StorageCostModel::default_cost_model());
+  }
+
+  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
+  artifact.genesis_configuration.storage_cost_model =
+      StorageCostModel::default_cost_model().to_xdr();
+  return std::move(artifact.genesis_configuration);
+}
+
+void
+write_test_data_dir_metadata(std::filesystem::path const &data_dir,
+                             BootstrapAccountConfig const &config)
+{
+  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
+  std::string buffer;
+  json::Writer(buffer).object([&](json::Writer &w) {
+    w.field("schemaVersion", std::int64_t{1});
+    w.field("kind", "hog-devnode-data");
+    w.field("genesisHash", hex_string(sha256(genesis)));
+    w.object_field("bootstrapConfig", [&](json::Writer &w) {
+      w.field("devWalletProfile", config.dev_wallet_profile);
+      w.field("devAccounts", static_cast<std::int64_t>(config.count));
+      w.field("devAccountSeed", config.seed);
+      w.field("devAccountTokens", std::to_string(config.storage_tokens));
+    });
+  });
+
+  std::filesystem::create_directories(data_dir);
+  std::ofstream metadata(data_dir / "hog-devnode-data.json",
+                         std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(metadata);
+  metadata << buffer;
+}
+
+void
+expect_startup_failure(std::vector<std::string> args,
+                       std::string_view expected_stderr)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start(std::move(args));
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  if (!status.has_value()) {
+    ADD_FAILURE() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_NE(stderr_output.find(expected_stderr), std::string::npos)
+      << stderr_output;
+}
+
 TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start();
@@ -915,6 +1002,7 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.contains("Usage:"));
   EXPECT_TRUE(stdout_output.contains("--listen-host <ip>"));
+  EXPECT_TRUE(stdout_output.contains("--data-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--contract-artifacts-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--dev-wallet-profile <name>"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
@@ -1691,6 +1779,410 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
   }
 
   expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+
+  SignedTransactionHash tx_hash{};
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--dev-accounts",
+        "1",
+        "--dev-account-seed",
+        "groundhog-dev-accounts",
+        "--dev-account-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    EXPECT_TRUE(readiness.manifest_path.string().starts_with(
+        (data_dir / "runtime").string()));
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)();
+
+    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    ASSERT_TRUE(fibonacci_contract);
+    auto keypair =
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    const ContractAddress wallet_address =
+        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+
+    Transaction tx{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<"deploy">(
+                    make_nonce(17), sha256(*fibonacci_contract)),
+            },
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 17},
+        .contracts_to_deploy = {*fibonacci_contract},
+        .auth_claim = source_address_auth_claim(),
+    };
+    Signature signature(CryptographicScheme::Ed25519);
+    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    ASSERT_TRUE(signed_bytes.has_value());
+    signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
+    SignedTransaction signed_tx{
+        .tx = std::move(tx),
+        .signatures = {DecoratedSignature{
+            .public_key_id = 0,
+            .signature = signature,
+        }},
+    };
+    tx_hash = sha256(signed_tx.tx);
+    ASSERT_EQ(
+        submit_and_commit(scheduler, SignedTransactionBatch{signed_tx}).size(),
+        1UL);
+
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+    while (std::chrono::steady_clock::now() < deadline) {
+      result = reader.get_transaction_info(tx_hash)();
+      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+
+    expect_clean_exit(process);
+  }
+
+  {
+    std::filesystem::path indexer_db_path = data_dir / "indexer" / "indexer-db";
+    ASSERT_GT(std::filesystem::remove_all(indexer_db_path), 0UL);
+    IndexerStatus<IndexDB> indexer_status =
+        IndexDB::open_or_make_new(indexer_db_path);
+    ASSERT_TRUE(indexer_status.has_value()) << indexer_status.error();
+    TxEventLogBatch no_events;
+    ASSERT_TRUE(indexer_status->consume_events(1, no_events).has_value());
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--dev-accounts",
+        "1",
+        "--dev-account-seed",
+        "groundhog-dev-accounts",
+        "--dev-account-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)();
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().height, 2);
+
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)();
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+    EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+
+    int status = process.terminate();
+    std::string stderr_output = process.read_remaining_stderr();
+    ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
+    EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
+    EXPECT_NE(stderr_output.find(
+                  "recovered hog-devnode database at committed height 2"),
+              std::string::npos)
+        << stderr_output;
+    EXPECT_NE(stderr_output.find("replayed recovered event log"),
+              std::string::npos)
+        << stderr_output;
+    EXPECT_TRUE(process.read_remaining_stdout().empty());
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--dev-accounts",
+        "1",
+        "--dev-account-seed",
+        "groundhog-dev-accounts",
+        "--dev-account-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)();
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().height, 2);
+
+    int status = process.terminate();
+    std::string stderr_output = process.read_remaining_stderr();
+    ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
+    EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
+    EXPECT_NE(stderr_output.find(
+                  "recovered hog-devnode database at committed height 2"),
+              std::string::npos)
+        << stderr_output;
+    EXPECT_TRUE(process.read_remaining_stdout().empty());
+  }
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "different-seed",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "different --dev-account-seed");
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithOmittedDevAccounts)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+      },
+      "different --dev-accounts");
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithLargerDevAccountCount)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "2",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "different --dev-accounts");
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountTokens)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "42",
+      },
+      "different --dev-account-tokens");
+}
+
+TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+
+  HogDevnodeProcess first = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+  });
+  first.wait_for_readiness();
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+      },
+      "already locked by another process");
+
+  expect_clean_exit(first);
+}
+
+TEST(HogDevnode, DataDirRecoversCommittedChainWhenMetadataMissing)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  ASSERT_TRUE(std::filesystem::remove(data_dir / "hog-devnode-data.json"));
+
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  EXPECT_TRUE(std::filesystem::exists(data_dir / "hog-devnode-data.json"));
+
+  int status = process.terminate();
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
+  EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
+  EXPECT_NE(stderr_output.find("committed chain state but no metadata"),
+            std::string::npos)
+      << stderr_output;
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+}
+
+TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {.count = 1,
+                                          .seed = "groundhog-dev-accounts",
+                                          .storage_tokens = 1'000'000'000,
+                                          .dev_wallet_profile = std::string(
+                                              kDefaultDevWalletProfile)});
+
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args{
+      "--data-dir",           data_dir.string(),
+      "--dev-accounts",       "1",
+      "--dev-account-seed",   "groundhog-dev-accounts",
+      "--dev-account-tokens", "1000000000",
+  };
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(
+        args, {{"HOG_DEVNODE_TEST_THROW_AFTER_GENESIS_LOAD", "1"}});
+    std::optional<int> status =
+        process.wait_for_exit_for_test(startup_timeout());
+    if (!status.has_value()) {
+      ADD_FAILURE() << "hog-devnode did not exit";
+      return;
+    }
+    const int exit_status = *status;
+    ASSERT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+    EXPECT_TRUE(process.read_remaining_stdout().empty());
+    std::string stderr_output = process.read_remaining_stderr();
+    EXPECT_NE(stderr_output.find("injected hog-devnode post-genesis failure"),
+              std::string::npos)
+        << stderr_output;
+  }
+
+  expect_startup_failure(
+      args,
+      "hog-devnode data dir has bootstrap genesis but no initialization block");
+}
+
+TEST(HogDevnode, DataDirRejectsCorruptMetadataWithoutCommittedChain)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::create_directories(data_dir);
+  {
+    std::ofstream metadata(data_dir / "hog-devnode-data.json",
+                           std::ios::binary);
+    ASSERT_TRUE(metadata);
+    metadata << "{}";
+  }
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+      },
+      "hog-devnode data metadata missing root.schemaVersion");
+}
+
+TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  {
+    std::ofstream metadata(data_dir / "hog-devnode-data.json",
+                           std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(metadata);
+    metadata << "{";
+  }
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "hog-devnode data metadata JSON parse failed");
 }
 
 TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
