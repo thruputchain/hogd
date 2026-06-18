@@ -11,8 +11,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/metrics/metric.h"
 
-namespace hogd::metrics_detail {
+namespace hogd {
 
 enum class CounterStorage {
   kAtomic,
@@ -95,4 +96,4 @@ private:
   friend class hogd::Metrics;
 };
 
-} // namespace hogd::metrics_detail
+} // namespace hogd

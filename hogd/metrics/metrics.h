@@ -10,57 +10,17 @@
 #include <unordered_map>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/metrics/metric.h"
 
 namespace hogd {
 
 class Metrics;
-
-namespace metrics_detail {
-
-struct Metric {
-  explicit Metric(std::string metric_description)
-    : description(std::move(metric_description))
-  {}
-
-  virtual ~Metric() = default;
-
-  virtual const char *prometheus_type() const = 0;
-  virtual std::string dump_sample(const std::string &metric_name) = 0;
-  virtual void dump_prometheus_value(std::ostringstream &os,
-                                     const std::string &metric_name) = 0;
-
-  const std::string description;
-};
-
-template<typename MetricImpl> class MetricHandle {
-public:
-  MetricHandle() = default;
-
-  explicit operator bool() const { return metric_ != nullptr; }
-
-protected:
-  explicit MetricHandle(MetricImpl *metric) : metric_(metric) {}
-
-  MetricImpl &metric()
-  {
-    CHECK_PTR(metric_);
-    return *metric_;
-  }
-
-private:
-  MetricImpl *metric_ = nullptr;
-};
-
-} // namespace metrics_detail
 } // namespace hogd
 
-#define HOGD_METRICS_DEFINE_DETAIL 1
 #include "hogd/metrics/counter.h"
 #include "hogd/metrics/gauge.h"
 #include "hogd/metrics/histogram.h"
-#undef HOGD_METRICS_DEFINE_DETAIL
 #include "x23/corosync.h"
 
 namespace hogd {
@@ -94,16 +54,16 @@ namespace hogd {
 //
 // std::string prometheus = metrics.dump_to_prometheus_string();
 class Metrics {
-  using Metric = metrics_detail::Metric;
-  using GaugeImpl = metrics_detail::GaugeImpl;
-  using CounterImpl = metrics_detail::CounterImpl;
-  using HistogramImpl = metrics_detail::HistogramImpl;
-  using CounterStorage = metrics_detail::CounterStorage;
+  using Metric = hogd::Metric;
+  using GaugeImpl = hogd::GaugeImpl;
+  using CounterImpl = hogd::CounterImpl;
+  using HistogramImpl = hogd::HistogramImpl;
+  using CounterStorage = hogd::CounterStorage;
 
 public:
-  using Gauge = metrics_detail::Gauge;
-  using Counter = metrics_detail::Counter;
-  using Histogram = metrics_detail::Histogram;
+  using Gauge = hogd::Gauge;
+  using Counter = hogd::Counter;
+  using Histogram = hogd::Histogram;
 
   enum class ComponentName {
     kExecutor,

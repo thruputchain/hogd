@@ -7,7 +7,9 @@
 #include <sys/types.h>
 #include <utility>
 
-namespace hogd::metrics_detail {
+#include "hogd/metrics/metric.h"
+
+namespace hogd {
 
 struct GaugeImpl : Metric {
   explicit GaugeImpl(std::string description) : Metric(std::move(description))
@@ -49,4 +51,4 @@ private:
   friend class hogd::Metrics;
 };
 
-} // namespace hogd::metrics_detail
+} // namespace hogd
