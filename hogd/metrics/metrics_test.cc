@@ -398,7 +398,7 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
   worker.join();
 }
 
-TEST_F(MetricsTest, HistogramMetricDumpsBuckets)
+TEST_F(MetricsTest, HistogramDumpsBuckets)
 {
   Metrics &metrics = Metrics::instance();
   Metrics::HistogramHandle latency =

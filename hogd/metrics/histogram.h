@@ -10,12 +10,14 @@
 #include <sys/types.h>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
+#include "hogd/metrics/metric.h"
 #include "x23/corosync.h"
 
 namespace hogd {
@@ -95,5 +97,45 @@ private:
   std::atomic<size_t> underflow_ = 0;
   std::atomic<size_t> overflow_ = 0;
 };
+
+namespace metrics_detail {
+
+struct HistogramImpl : Metric {
+  HistogramImpl(std::string description, size_t min, size_t max,
+                size_t num_buckets)
+    : Metric(std::move(description)), histogram(min, max, num_buckets)
+  {}
+
+  void record(size_t value) { histogram.add(value); }
+
+  const char *prometheus_type() const override { return "histogram"; }
+
+  std::string dump_sample(const std::string &metric_name) override
+  {
+    return histogram.dump_to_string(metric_name);
+  }
+
+  void dump_prometheus_value(std::ostringstream &os,
+                             const std::string &metric_name) override
+  {
+    os << dump_sample(metric_name) << "\n";
+  }
+
+  Histogram<size_t> histogram;
+};
+
+class HistogramHandle : public MetricHandle<HistogramImpl> {
+public:
+  HistogramHandle() = default;
+
+  void record(size_t value) { metric().record(value); }
+
+private:
+  explicit HistogramHandle(HistogramImpl *metric) : MetricHandle(metric) {}
+
+  friend class hogd::Metrics;
+};
+
+} // namespace metrics_detail
 
 } // namespace hogd
