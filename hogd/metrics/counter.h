@@ -11,7 +11,6 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
-#include "hogd/metrics/metric.h"
 
 namespace hogd::metrics_detail {
 

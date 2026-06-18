@@ -17,7 +17,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
-#include "hogd/metrics/metric.h"
 #include "x23/corosync.h"
 
 namespace hogd {
@@ -98,6 +97,7 @@ private:
   std::atomic<size_t> overflow_ = 0;
 };
 
+#ifdef HOGD_METRICS_DEFINE_DETAIL
 namespace metrics_detail {
 
 struct HistogramImpl : Metric {
@@ -137,5 +137,6 @@ private:
 };
 
 } // namespace metrics_detail
+#endif
 
 } // namespace hogd

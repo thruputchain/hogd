@@ -4,6 +4,7 @@
 #include <atomic>
 #include <format>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <sys/types.h>
 #include <unordered_map>
@@ -11,9 +12,55 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+
+namespace hogd {
+
+class Metrics;
+
+namespace metrics_detail {
+
+struct Metric {
+  explicit Metric(std::string metric_description)
+    : description(std::move(metric_description))
+  {}
+
+  virtual ~Metric() = default;
+
+  virtual const char *prometheus_type() const = 0;
+  virtual std::string dump_sample(const std::string &metric_name) = 0;
+  virtual void dump_prometheus_value(std::ostringstream &os,
+                                     const std::string &metric_name) = 0;
+
+  const std::string description;
+};
+
+template<typename MetricImpl> class MetricHandle {
+public:
+  MetricHandle() = default;
+
+  explicit operator bool() const { return metric_ != nullptr; }
+
+protected:
+  explicit MetricHandle(MetricImpl *metric) : metric_(metric) {}
+
+  MetricImpl &metric()
+  {
+    CHECK_PTR(metric_);
+    return *metric_;
+  }
+
+private:
+  MetricImpl *metric_ = nullptr;
+};
+
+} // namespace metrics_detail
+} // namespace hogd
+
+#define HOGD_METRICS_DEFINE_DETAIL 1
 #include "hogd/metrics/counter.h"
 #include "hogd/metrics/gauge.h"
 #include "hogd/metrics/histogram.h"
+#undef HOGD_METRICS_DEFINE_DETAIL
 #include "x23/corosync.h"
 
 namespace hogd {

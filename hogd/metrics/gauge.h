@@ -7,8 +7,6 @@
 #include <sys/types.h>
 #include <utility>
 
-#include "hogd/metrics/metric.h"
-
 namespace hogd::metrics_detail {
 
 struct GaugeImpl : Metric {
