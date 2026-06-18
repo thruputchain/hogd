@@ -74,7 +74,7 @@ public:
 
   static void mark_gas_consumed(uint64_t gas)
   {
-    gas_consumed_metric.increment(static_cast<ssize_t>(gas));
+    gas_consumed_metric.increment(gas);
   }
 
   ~HogexecMetrics() { stop_background_worker(); }
