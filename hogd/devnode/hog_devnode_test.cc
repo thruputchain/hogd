@@ -55,6 +55,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
