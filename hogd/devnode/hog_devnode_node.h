@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,7 +40,8 @@ namespace hogd {
 class HogDevnodeNode {
 public:
   HogDevnodeNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-                 BootstrapAccountConfig const &bootstrap_config = {});
+                 BootstrapAccountConfig const &bootstrap_config = {},
+                 std::optional<std::filesystem::path> data_dir = std::nullopt);
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -92,15 +95,24 @@ private:
   void register_auth_with_mempool();
   void register_executor_with_mempool();
   x23::Async<void> register_coordinator_with_mempool();
+  BootstrapAccountConfig
+  validate_fresh_data_dir(BootstrapAccountConfig const &requested_config) const;
+  BootstrapAccountConfig
+  validate_recovered_data_dir(BootstrapAccountConfig const &requested_config);
+  void write_data_dir_metadata() const;
+  void load_recovered_bootstrap_metadata(BootstrapAccountConfig const &config);
   void materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
   void commit_initialization_batch(SignedTransactionBatch const &txs);
   void refresh_bootstrap_account_balances();
   void prepare_for_failed_construction() noexcept;
 
   std::string bind_host_;
+  std::optional<std::filesystem::path> data_dir_;
   BootstrapAccountConfig bootstrap_config_;
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
+  bool recovered_existing_chain_ = false;
+  bool recovered_data_dir_metadata_missing_ = false;
 
   HogDevnodeTmpDir runtime_dir_;
   HogDevnodeTmpDir db_dir_;

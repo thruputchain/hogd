@@ -1,10 +1,14 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -20,6 +24,7 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
@@ -107,14 +112,15 @@ hog_devnode_init(std::string listen_host,
                  std::uint16_t requested_scheduler_port,
                  ReadinessSink readiness_sink,
                  std::string_view runtime_network_id,
-                 BootstrapAccountConfig const &bootstrap_config)
+                 BootstrapAccountConfig const &bootstrap_config,
+                 std::optional<std::filesystem::path> data_dir)
 {
   install_signal_handler();
   init_hogexec_metrics();
   init_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config);
+                      bootstrap_config, std::move(data_dir));
   emit_readiness(node, readiness_sink, runtime_network_id);
   info("hog-devnode initialization complete.");
 
@@ -155,8 +161,63 @@ struct HogDevnodeOptions {
   std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
+  std::optional<std::filesystem::path> data_dir;
   hogd::BootstrapAccountConfig bootstrap_config;
   std::vector<std::filesystem::path> contract_artifact_directories;
+};
+
+class DataDirLock {
+public:
+  explicit DataDirLock(std::optional<std::filesystem::path> const &data_dir)
+  {
+    if (!data_dir.has_value()) {
+      return;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(*data_dir, ec);
+    if (ec) {
+      throw std::runtime_error(
+          std::format("could not create hog-devnode data directory '{}': {}",
+                      data_dir->string(), ec.message()));
+    }
+    if (!std::filesystem::is_directory(*data_dir, ec)) {
+      if (ec) {
+        throw std::runtime_error(
+            std::format("could not inspect hog-devnode data directory '{}': {}",
+                        data_dir->string(), ec.message()));
+      }
+      throw std::runtime_error(
+          std::format("hog-devnode data path '{}' is not a directory",
+                      data_dir->string()));
+    }
+
+    const std::filesystem::path lock_path = *data_dir / ".hog-devnode.lock";
+    const int fd =
+        ::open(lock_path.c_str(),
+               O_RDWR | O_CREAT | O_CLOEXEC, // NOLINT(misc-include-cleaner)
+               0600);
+    if (fd < 0) {
+      throw std::runtime_error(
+          std::format("failed to open hog-devnode data-dir lock '{}': {}",
+                      lock_path.string(), std::strerror(errno)));
+    }
+    lock_file_.emplace(fd);
+    if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+      const int err = errno;
+      if (err == EWOULDBLOCK || err == EAGAIN) {
+        throw std::runtime_error(std::format(
+            "hog-devnode data dir '{}' is already locked by another process",
+            data_dir->string()));
+      }
+      throw std::runtime_error(
+          std::format("failed to lock hog-devnode data dir '{}': {}",
+                      data_dir->string(), std::strerror(err)));
+    }
+  }
+
+private:
+  std::optional<hogd::File> lock_file_;
 };
 
 struct OptionSources {
@@ -172,13 +233,17 @@ print_usage(FILE *stream, char *argv[])
 {
   std::println(stream, R"(Usage: {} [OPTIONS]
 
-Start an ephemeral local Groundhog development node.
+Start a local Groundhog development node.
 
 Options:
   --listen-host <ip>             Host/interface for internal x23 services
                                  [default: 127.0.0.1]
   --scheduler-port <port>        SchedulerCoord port; use 0 for an OS port
                                  [default: 0]
+  --data-dir <dir>               Persist node state under this directory.
+                                 Reusing a populated directory recovers the
+                                 committed chain and requires the same
+                                 bootstrap flags. Omit for an ephemeral node.
   --readiness stdout             Emit one readiness JSON line on stdout
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
@@ -285,6 +350,17 @@ parse_args(int argc, char *argv[])
     }
     if (arg == "--scheduler-port" && i + 1 < argc) {
       options.scheduler_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--data-dir" && i + 1 < argc) {
+      if (options.data_dir.has_value()) {
+        throw std::runtime_error("--data-dir specified more than once");
+      }
+      std::filesystem::path dir(argv[++i]);
+      if (dir.empty()) {
+        throw std::runtime_error("Invalid data dir: path must not be empty");
+      }
+      options.data_dir = std::move(dir);
       continue;
     }
     if (arg == "--readiness" && i + 1 < argc) {
@@ -396,11 +472,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hog-devnode!");
 
   try {
+    DataDirLock data_dir_lock(options.data_dir);
     return hogd::hog_devnode_init(std::move(options.listen_host),
                                   options.scheduler_port,
                                   options.readiness_sink,
                                   options.runtime_network_id,
-                                  options.bootstrap_config);
+                                  options.bootstrap_config,
+                                  std::move(options.data_dir));
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;
