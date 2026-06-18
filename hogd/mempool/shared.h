@@ -99,10 +99,4 @@ init_metrics()
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kMempool);
 }
 
-inline void
-record_current_block_height_metric(BlockHeight height)
-{
-  mempool_current_block_height_metric.record(height);
-}
-
 } // namespace hogd
