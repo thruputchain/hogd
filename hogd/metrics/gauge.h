@@ -12,8 +12,7 @@
 namespace hogd::metrics_detail {
 
 struct GaugeImpl : Metric {
-  explicit GaugeImpl(std::string description)
-    : Metric(std::move(description))
+  explicit GaugeImpl(std::string description) : Metric(std::move(description))
   {}
 
   void record(ssize_t metric_value)
