@@ -234,8 +234,9 @@ private:
     CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
-    auto metric = std::make_unique<SummaryImpl>(
-        description, min, max, num_buckets, std::move(quantiles));
+    auto metric =
+        std::make_unique<SummaryImpl>(description, min, max, num_buckets,
+                                      std::move(quantiles));
     SummaryImpl *metric_ptr = metric.get();
     auto [_, inserted] =
         component.metrics.try_emplace(metric_name, std::move(metric));

@@ -228,9 +228,8 @@ TEST_F(MetricsTest, SummaryFactoryReturnsHandle)
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(
-      dump,
-      "# TYPE mempool_metrics_test_factory_validation_latency_summary_ms "
-      "summary");
+      dump, "# TYPE mempool_metrics_test_factory_validation_latency_summary_ms "
+            "summary");
   expect_dump_contains(
       dump,
       "mempool_metrics_test_factory_validation_latency_summary_ms{quantile="
