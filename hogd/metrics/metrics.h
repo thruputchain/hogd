@@ -61,12 +61,12 @@ public:
 
     void record(ssize_t value)
     {
-      CHECK(metric_ != nullptr);
+      CHECK_PTR(metric_);
       metric_->record(value);
     }
     ssize_t value()
     {
-      CHECK(metric_ != nullptr);
+      CHECK_PTR(metric_);
       return metric_->value();
     }
     explicit operator bool() const { return metric_ != nullptr; }
@@ -85,12 +85,12 @@ public:
 
     void increment(ssize_t delta = 1)
     {
-      CHECK(metric_ != nullptr);
+      CHECK_PTR(metric_);
       metric_->increment(delta);
     }
     ssize_t value()
     {
-      CHECK(metric_ != nullptr);
+      CHECK_PTR(metric_);
       return metric_->value();
     }
     explicit operator bool() const { return metric_ != nullptr; }
@@ -109,7 +109,7 @@ public:
 
     void record(size_t value)
     {
-      CHECK(metric_ != nullptr);
+      CHECK_PTR(metric_);
       metric_->record(value);
     }
     explicit operator bool() const { return metric_ != nullptr; }
