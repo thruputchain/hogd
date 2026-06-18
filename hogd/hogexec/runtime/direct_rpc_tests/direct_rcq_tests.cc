@@ -43,6 +43,27 @@ public:
     return QueueEntry{values.begin(), values.end()};
   }
 
+  // Builds `count` queue entries, each distinct by index. `entry_bytes` sets
+  // the payload size of each entry; the 1-byte default suits count/reservation
+  // tests, while the byte-size-limit test passes the full per-entry maximum.
+  // Successive prefixes match (make_entries(m) equals the first m entries of
+  // make_entries(n) for m < n), which the cumulative-subtransaction tests rely
+  // on.
+  static std::vector<QueueEntry> make_entries(size_t count,
+                                              size_t entry_bytes = 1)
+  {
+    std::vector<QueueEntry> entries;
+    entries.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      std::vector<uint8_t> payload(entry_bytes, static_cast<uint8_t>(i & 0xFF));
+      if (entry_bytes > 1) {
+        payload[1] = static_cast<uint8_t>(i >> 8);
+      }
+      entries.push_back(make_rcq_entry(payload));
+    }
+    return entries;
+  }
+
   constexpr static auto
   make_rcq_insert_delta(std::vector<QueueEntry> const &values)
   {
@@ -1969,7 +1990,7 @@ TEST_F(DirectRCQTests,
 // Target: item_lock.cc:130 CHECK(r.has_value())
 //
 // ExclusiveLock::try_atomic_change_lock does NOT enforce
-// kRetrocausalQueueBlockEntriesMaxLen (1000). It just returns cost(entries).
+// kRetrocausalQueueBlockEntriesMaxLen. It just returns cost(entries).
 // But at commit time, the exclusive downgrade creates a fresh
 // RetrocausalQueueLock and calls try_atomic_change_lock(nullptr, inner, ctx).
 // Inserting > kRetrocausalQueueBlockEntriesMaxLen entries is invalid executor
@@ -3645,45 +3666,34 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_h005_poison");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
-  // TX1: Insert 900 entries to fill most of the per-block budget (max=1000).
-  std::vector<QueueEntry> entries_900;
-  entries_900.reserve(900);
-  for (int i = 0; i < 900; ++i) {
-    entries_900.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
+  // TX1: Insert a full block (cap entries).
+  auto full_block = make_entries(cap);
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_rcq_insert_delta(entries_900),
+  tx1.add_delta(key, make_rcq_insert_delta(full_block),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value() && r.value()) << "TX1 insert 900 should succeed";
+  ASSERT_TRUE(r.has_value() && r.value()) << "TX1 full-block insert should "
+                                             "succeed";
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
-  // TX2: Consume + insert 200 entries. Aggregate reservation 900 + 200 = 1100
-  // exceeds the 1000-entry per-block cap, so push must fail with kConflict.
-  std::vector<QueueEntry> entries_200;
-  entries_200.reserve(200);
-  for (int i = 0; i < 200; ++i) {
-    entries_200.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 100) & 0xFF),
-                        static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
-  }
+  // TX2: consume + insert one more entry. Aggregate reservation cap + 1 > cap,
+  // so push must fail with kConflict.
+  auto one_more = make_entries(1);
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {entries_900[0]},
-                                              entries_200),
+                make_rcq_consume_insert_delta(0, 0, {full_block[0]}, one_more),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
-      << "TX2 consume+insert 200 should fail (aggregate > 1000)";
+      << "TX2 consume+insert one more should fail (aggregate > cap)";
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // TX3: legitimate pure consume. TX2's failed reservation must not leak the
   // consumed_ bit, so TX3 must succeed.
   auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_consume_delta(0, 0, {entries_900[0]}),
+  tx3.add_delta(key, make_rcq_consume_delta(0, 0, {full_block[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
@@ -3742,55 +3752,41 @@ TEST_F(DirectRCQTests,
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_invalid_leak_res");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
-  // TX1: reserve 500 entries.
-  std::vector<QueueEntry> entries_500;
-  entries_500.reserve(500);
-  for (int i = 0; i < 500; ++i) {
-    entries_500.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
+  // TX1: reserve cap/2 entries.
+  auto tx1_entries = make_entries(cap / 2);
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+  tx1.add_delta(key, make_rcq_insert_delta(tx1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
-  // TX2: consume_insert with 400 entries + invalid consume. Reservation
-  // 500 + 400 = 900 passes the 1000 cap, then kInvalidExecutorBehavior
-  // fires in the consume-validation block, leaking the 400-entry reservation.
-  std::vector<QueueEntry> entries_400;
-  entries_400.reserve(400);
-  for (int i = 0; i < 400; ++i) {
-    entries_400.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 200) & 0xFF),
-                        static_cast<uint8_t>(((i + 200) >> 8) & 0xFF)}));
-  }
+  // TX2: consume_insert with cap/2 entries + invalid consume. Reservation
+  // cap/2 + cap/2 = cap passes the cap (not > cap), then
+  // kInvalidExecutorBehavior fires in the consume-validation block, leaking
+  // the cap/2-entry reservation.
+  auto tx2_entries = make_entries(cap / 2);
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_400),
+  tx2.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, tx2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
       << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
-  // TX3: legitimate insert of 200 entries. Total 500 + 200 = 700 <= 1000,
-  // must succeed. With the leak it becomes 500 + 400 + 200 = 1100 and fails.
-  std::vector<QueueEntry> entries_200;
-  entries_200.reserve(200);
-  for (int i = 0; i < 200; ++i) {
-    entries_200.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 700) & 0xFF),
-                        static_cast<uint8_t>(((i + 700) >> 8) & 0xFF)}));
-  }
+  // TX3: legitimate insert of cap/2 entries. Total cap/2 + cap/2 = cap <= cap,
+  // must succeed. With the leak it becomes cap/2 + cap/2 + cap/2 > cap and
+  // fails.
+  auto tx3_entries = make_entries(cap / 2);
   auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_insert_delta(entries_200),
+  tx3.add_delta(key, make_rcq_insert_delta(tx3_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
-      << "TX3 insert 200 must succeed after TX2's reservation is rolled back";
+      << "TX3 insert cap/2 must succeed after TX2's reservation is rolled "
+         "back";
   ASSERT_TRUE(tx3.commit_transaction().has_value());
 }
 
@@ -3804,35 +3800,24 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_stacked_invalid");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
-  std::vector<QueueEntry> entries_100;
-  entries_100.reserve(100);
-  for (int i = 0; i < 100; ++i) {
-    entries_100.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
-  std::vector<QueueEntry> entries_300;
-  entries_300.reserve(300);
-  for (int i = 0; i < 300; ++i) {
-    entries_300.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
+  auto sub1_entries = make_entries(cap / 2);
+  auto sub2_entries = make_entries(cap);
 
   auto tx1 = make_new_per_tx_db_proxy();
 
-  // Sub1: insert-only, 100 entries. reservation becomes 100.
-  tx1.add_delta(key, make_rcq_insert_delta(entries_100),
+  // Sub1: insert-only, cap/2 entries. reservation becomes cap/2.
+  tx1.add_delta(key, make_rcq_insert_delta(sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
 
   // Sub2: consume_insert cumulative with invalid max_fully_consumed=1 on a
-  // fresh RCQ (max_live_block_num=0). Cumulative inserts = 300 (first 100
-  // are sub1's, narrow's prefix check passes). Must fail at lock-time
-  // consume validation.
-  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_300),
+  // fresh RCQ (max_live_block_num=0). Cumulative inserts = cap (first cap/2
+  // are sub1's; the additional cap/2 brings the reservation to cap, and
+  // narrow's prefix check passes). Must fail at lock-time consume validation.
+  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
@@ -3845,29 +3830,24 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   // A separate tx consumes one of sub1's current-block entries. Succeeds
   // iff sub2's CAS undo restored consumed_ to false.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entries_100[0]}),
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {sub1_entries[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx2 pure consume must succeed; sub2 must not leak consumed_";
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 
-  // A separate tx inserts 899 more entries. Succeeds iff the per-block
-  // reservation is 100 (sub1 only). With a leaked fetch_add, reservation
-  // would be 300 → 300+899>1000 → kConflict.
-  std::vector<QueueEntry> entries_899;
-  entries_899.reserve(899);
-  for (int i = 0; i < 899; ++i) {
-    entries_899.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 100) & 0xFF),
-                        static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
-  }
+  // A separate tx inserts cap/2 more entries. Succeeds iff the per-block
+  // reservation is cap/2 (sub1 only): cap/2 + cap/2 = cap <= cap. With a
+  // leaked fetch_add, reservation would be cap → cap + cap/2 > cap →
+  // kConflict.
+  auto refill_entries = make_entries(cap / 2);
   auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_insert_delta(entries_899),
+  tx3.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
-      << "tx3 insert 899 must succeed; sub2 must not leak fetch_add";
+      << "tx3 insert cap/2 must succeed; sub2 must not leak fetch_add";
   ASSERT_TRUE(tx3.commit_transaction().has_value());
 }
 
@@ -3881,60 +3861,43 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_stacked_overfull");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
-  // Filler tx: 800 inserts. Reservation becomes 800.
-  std::vector<QueueEntry> entries_filler;
-  entries_filler.reserve(800);
-  for (int i = 0; i < 800; ++i) {
-    entries_filler.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 1000) & 0xFF),
-                        static_cast<uint8_t>(((i + 1000) >> 8) & 0xFF)}));
-  }
+  // Filler tx: cap/2 inserts. Reservation becomes cap/2.
+  auto filler_entries = make_entries(cap / 2);
   auto tx_filler = make_new_per_tx_db_proxy();
-  tx_filler.add_delta(key, make_rcq_insert_delta(entries_filler),
+  tx_filler.add_delta(key, make_rcq_insert_delta(filler_entries),
                       std::to_underlying(StorageDeltaFlags::None));
   auto r = tx_filler.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx_filler.commit_transaction().has_value());
 
-  std::vector<QueueEntry> entries_100;
-  entries_100.reserve(100);
-  for (int i = 0; i < 100; ++i) {
-    entries_100.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
-  std::vector<QueueEntry> entries_300;
-  entries_300.reserve(300);
-  for (int i = 0; i < 300; ++i) {
-    entries_300.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
+  auto sub1_entries = make_entries(cap / 2);
+  auto sub2_entries = make_entries(cap);
 
   auto tx1 = make_new_per_tx_db_proxy();
 
-  // Sub1: 100 inserts. reservation: 800 -> 900.
-  tx1.add_delta(key, make_rcq_insert_delta(entries_100),
+  // Sub1: cap/2 inserts. reservation: cap/2 -> cap.
+  tx1.add_delta(key, make_rcq_insert_delta(sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
 
-  // Sub2: valid consume + 300 cumulative inserts. additional = 200.
-  // fetch_add would push reservation to 1100 > 1000 cap. Overflow returns
+  // Sub2: valid consume + cap cumulative inserts. additional = cap/2.
+  // fetch_add would push reservation to cap + cap/2 > cap. Overflow returns
   // kConflict (r.has_value() && !r.value() pattern).
-  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, entries_300),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
-      << "sub2 should fail with kConflict (800+100+200 > 1000)";
+      << "sub2 should fail with kConflict (cap/2+cap/2+cap/2 > cap)";
 
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // Verify consumed_ was restored: another tx can consume a current-block
   // entry from sub1. With a leaked CAS, this would return kConflict.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entries_100[0]}),
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {sub1_entries[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
@@ -3953,36 +3916,26 @@ TEST_F(DirectRCQTests,
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_stacked_already");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
-  std::vector<QueueEntry> entries_100;
-  entries_100.reserve(100);
-  for (int i = 0; i < 100; ++i) {
-    entries_100.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
-  std::vector<QueueEntry> entries_300;
-  entries_300.reserve(300);
-  for (int i = 0; i < 300; ++i) {
-    entries_300.push_back(
-        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
+  auto sub1_entries = make_entries(cap / 2);
+  auto sub2_entries = make_entries(cap);
 
   auto tx1 = make_new_per_tx_db_proxy();
 
-  // Sub1: valid consume_insert, 100 inserts. consumed_=true, reservation=100.
-  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, entries_100),
+  // Sub1: valid consume_insert, cap/2 inserts. consumed_=true,
+  // reservation=cap/2.
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 consume_insert must succeed";
 
-  // Sub2: invalid max_fully_consumed=1, cumulative 300 inserts. narrow
+  // Sub2: invalid max_fully_consumed=1, cumulative cap inserts. narrow
   // passes (consume is still present, monotonic; inserts grew). In the
-  // lock: this_tx_already_consumed=true so no new CAS. fetch_add(200)
+  // lock: this_tx_already_consumed=true so no new CAS. fetch_add(cap/2)
   // runs, undo pushed. Consume validation trips kInvalidExecutorBehavior.
   // Only the reservation undo fires.
-  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_300),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
@@ -3990,22 +3943,16 @@ TEST_F(DirectRCQTests,
 
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
-  // Reservation should be 100 (sub1 only) if fetch_add was undone; with a
-  // leak it would be 300. Verify by inserting 899 more entries from a
-  // separate tx: 100+899=999 <= 1000 passes; 300+899=1199 > 1000 fails.
-  std::vector<QueueEntry> entries_899;
-  entries_899.reserve(899);
-  for (int i = 0; i < 899; ++i) {
-    entries_899.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 100) & 0xFF),
-                        static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
-  }
+  // Reservation should be cap/2 (sub1 only) if fetch_add was undone; with a
+  // leak it would be cap. Verify by inserting cap/2 more entries from a
+  // separate tx: cap/2 + cap/2 = cap <= cap passes; cap + cap/2 > cap fails.
+  auto refill_entries = make_entries(cap / 2);
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_insert_delta(entries_899),
+  tx2.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
-      << "tx2 insert 899 must succeed; sub2 must not leak fetch_add";
+      << "tx2 insert cap/2 must succeed; sub2 must not leak fetch_add";
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 }
 
@@ -4159,17 +4106,13 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress,
                                         "rcq_self_consume_reservation");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
   auto tx1 = make_new_per_tx_db_proxy();
 
-  // Sub1: insert 500 entries.
-  std::vector<QueueEntry> entries_500;
-  entries_500.reserve(500);
-  for (int i = 0; i < 500; ++i) {
-    entries_500.push_back(make_rcq_entry(
-        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
-  }
-  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+  // Sub1: insert cap/2 entries.
+  auto peak_entries = make_entries(cap / 2);
+  tx1.add_delta(key, make_rcq_insert_delta(peak_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
@@ -4180,23 +4123,17 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
   r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  // Concurrent tx2: try to insert 501 entries.
-  // Reservation from tx1 is pinned at 500 (the peak), so 500 + 501 > 1000
-  // should conflict.
-  std::vector<QueueEntry> entries_501;
-  entries_501.reserve(501);
-  for (int i = 0; i < 501; ++i) {
-    entries_501.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 500) & 0xFF),
-                        static_cast<uint8_t>((i + 500) >> 8)}));
-  }
+  // Concurrent tx2: try to insert cap/2 + 1 entries.
+  // Reservation from tx1 is pinned at cap/2 (the peak), so
+  // cap/2 + (cap/2 + 1) > cap should conflict.
+  auto over_cap_entries = make_entries((cap / 2) + 1);
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_insert_delta(entries_501),
+  tx2.add_delta(key, make_rcq_insert_delta(over_cap_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
-      << "reservation must be pinned at peak 500; 500 + 501 > 1000 should "
-         "conflict";
+      << "reservation must be pinned at peak cap/2; cap/2 + (cap/2 + 1) > cap "
+         "should conflict";
 }
 
 TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
@@ -4204,17 +4141,13 @@ TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_commit_release_excess");
+  const size_t cap = kRetrocausalQueueBlockEntriesMaxLen;
 
   auto tx1 = make_new_per_tx_db_proxy();
 
-  // Sub1: insert 500 entries.
-  std::vector<QueueEntry> entries_500;
-  entries_500.reserve(500);
-  for (int i = 0; i < 500; ++i) {
-    entries_500.push_back(make_rcq_entry(
-        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
-  }
-  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+  // Sub1: insert cap/2 entries.
+  auto peak_entries = make_entries(cap / 2);
+  tx1.add_delta(key, make_rcq_insert_delta(peak_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
@@ -4226,26 +4159,20 @@ TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Commit tx1. The commit writes 0 actual entries but the reservation was
-  // pinned at 500 during execution. commit_change must release the excess
+  // pinned at cap/2 during execution. commit_change must release the excess
   // so other transactions can use those slots.
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
-  // tx2: insert 501 entries. After tx1 commits and releases the excess
-  // reservation, the block should have 0 reserved slots, so 501 fits.
-  std::vector<QueueEntry> entries_501;
-  entries_501.reserve(501);
-  for (int i = 0; i < 501; ++i) {
-    entries_501.push_back(
-        make_rcq_entry({static_cast<uint8_t>((i + 500) & 0xFF),
-                        static_cast<uint8_t>((i + 500) >> 8)}));
-  }
+  // tx2: insert cap/2 + 1 entries. After tx1 commits and releases the excess
+  // reservation, the block should have 0 reserved slots, so cap/2 + 1 fits.
+  auto refill_entries = make_entries((cap / 2) + 1);
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_insert_delta(entries_501),
+  tx2.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
-      << "after tx1 commits 0 actual entries, the 500-slot reservation must "
-         "be released so tx2 can insert 501";
+      << "after tx1 commits 0 actual entries, the cap/2-slot reservation must "
+         "be released so tx2 can insert cap/2 + 1";
 }
 
 TEST_F(DirectRCQTests, ObservedEntryMatchesInsert)
@@ -5042,6 +4969,61 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
     ASSERT_TRUE(tx.commit_transaction().has_value());
   }
   advance_block();
+}
+
+// Regression for #1437: the RCQ block entry cap (kRetrocausalQueueBlockEntries
+// MaxLen) is sized so a full block always fits ramdb's 64 KiB item limit
+// (kBigItemThreshold). Before the cap was lowered, a block of 256-byte entries
+// could stay under the old 1000-entry cap yet serialize past 64 KiB; it closed
+// successfully and failed only at commit, when ScalableMap::put rejected the
+// oversized item with kTooBig — a DbSchedResultError that the production commit
+// path turns into a node panic. Entries past the cap must instead be rejected
+// at admission, so an un-committable block is never produced.
+//
+// Sizing: a block of N 256-byte entries serializes to 12 + 260×N value bytes
+// (4-byte array length + N×(4-byte length + 256-byte value) + 8-byte block
+// number); the stored item adds a 73-byte key and 24-byte ItemHeader. A full
+// block of kRetrocausalQueueBlockEntriesMaxLen (250) entries is therefore
+// 12 + 260×250 + 73 + 24 = 65109 <= 65536, while one more entry overflows.
+TEST_F(DirectRCQTests, RCQBlockEntryCapFitsRamdbItemLimit)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_1437_oversize");
+
+  // A block exactly at the cap commits cleanly: the serialized block fits
+  // within ramdb's 64 KiB item limit, so commit no longer reaches the size
+  // guard. advance_block() closes and commits the block, asserting the
+  // commit result is DbSchedResultOK.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key,
+                 make_rcq_insert_delta(
+                     make_entries(kRetrocausalQueueBlockEntriesMaxLen, 256)),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value())
+        << "a full block (at the cap) is admitted";
+    ASSERT_TRUE(tx.commit_transaction().has_value());
+  }
+  advance_block();
+
+  // One entry past the cap is rejected at admission, so it can never reach
+  // commit and panic the node.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key,
+                 make_rcq_insert_delta(
+                     make_entries(kRetrocausalQueueBlockEntriesMaxLen + 1,
+                                  256)),
+                 std::to_underlying(StorageDeltaFlags::None));
+    auto r = tx.try_push_current_subtransaction();
+    // The over-cap insert is rejected at admission, so no block is ever staged
+    // and commit never reaches the ramdb size guard that previously panicked
+    // the node. Rejection surfaces as a failed push -- either a failed status
+    // or a false result, depending on which admission layer trips first.
+    ASSERT_FALSE(r.has_value() && r.value())
+        << "a block exceeding the entry cap must be rejected before commit";
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
