@@ -36,7 +36,7 @@ struct CounterImpl : Metric {
     CHECK(false);
   }
 
-  void increment(ssize_t delta)
+  void increment(size_t delta)
   {
     std::visit(
         [delta](auto &sample) {
@@ -86,7 +86,7 @@ class Counter : public MetricHandle<CounterImpl> {
 public:
   Counter() = default;
 
-  void increment(ssize_t delta = 1) { metric().increment(delta); }
+  void increment(size_t delta = 1) { metric().increment(delta); }
   ssize_t value() { return metric().value(); }
 
 private:

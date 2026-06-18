@@ -65,6 +65,34 @@ private:
 
 namespace hogd {
 
+// This is a process-wide metrics registry. It stores gauges, counters, and
+// histograms grouped by component, and can dump all registered metrics in
+// Prometheus text format.
+//
+// Metrics should be registered during component initialization. Keep the handle
+// returned by the registration call, then call [mark_done_with_init()] for that
+// component. After a component is marked done with initialization, registering
+// more metrics for that component is not allowed.
+//
+// Example:
+// Metrics &metrics = Metrics::instance();
+//
+// Metrics::Gauge queue_depth =
+//     metrics.gauge(Metrics::ComponentName::kExecutor, "queue_depth",
+//                   "Current executor queue depth.");
+// Metrics::Counter tx_count =
+//     metrics.counter(Metrics::ComponentName::kExecutor, "tx_count",
+//                     "Transactions processed.");
+// Metrics::HistogramHandle latency =
+//     metrics.histogram(Metrics::ComponentName::kExecutor, "latency_ms",
+//                       "Execution latency in milliseconds.", 0, 100, 10);
+// metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+//
+// queue_depth.record(17);
+// tx_count.increment();
+// latency.record(42);
+//
+// std::string prometheus = metrics.dump_to_prometheus_string();
 class Metrics {
   using Metric = metrics_detail::Metric;
   using GaugeImpl = metrics_detail::GaugeImpl;
