@@ -10,19 +10,21 @@
 #include <sys/types.h>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
+#include "hogd/metrics/metric.h"
 #include "x23/corosync.h"
 
 namespace hogd {
 
-template<typename T> class Histogram {
+template<typename T> class HistogramBuckets {
 public:
-  Histogram(T min, T max, size_t num_buckets)
+  HistogramBuckets(T min, T max, size_t num_buckets)
     : min_(min), max_(max),
       bucket_delta_((max_ - min_) / static_cast<double>(num_buckets)),
       buckets_(/*count=*/num_buckets)
@@ -94,6 +96,42 @@ private:
   std::vector<std::atomic<size_t>> buckets_;
   std::atomic<size_t> underflow_ = 0;
   std::atomic<size_t> overflow_ = 0;
+};
+
+struct HistogramImpl : Metric {
+  HistogramImpl(std::string description, size_t min, size_t max,
+                size_t num_buckets)
+    : Metric(std::move(description)), histogram(min, max, num_buckets)
+  {}
+
+  void record(size_t value) { histogram.add(value); }
+
+  const char *prometheus_type() const override { return "histogram"; }
+
+  std::string dump_sample(const std::string &metric_name) override
+  {
+    return histogram.dump_to_string(metric_name);
+  }
+
+  void dump_prometheus_value(std::ostringstream &os,
+                             const std::string &metric_name) override
+  {
+    os << dump_sample(metric_name) << "\n";
+  }
+
+  HistogramBuckets<size_t> histogram;
+};
+
+class Histogram : public MetricHandle<HistogramImpl> {
+public:
+  Histogram() = default;
+
+  void record(size_t value) { metric().record(value); }
+
+private:
+  explicit Histogram(HistogramImpl *metric) : MetricHandle(metric) {}
+
+  friend class hogd::Metrics;
 };
 
 } // namespace hogd

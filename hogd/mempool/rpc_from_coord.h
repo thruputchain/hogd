@@ -222,9 +222,7 @@ public:
     scheduler_->set_current_block(last_committed_block_.height);
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
-    Metrics::instance().record(Metrics::ComponentName::kMempool,
-                               "current_block_height",
-                               last_committed_block_.height);
+    mempool_current_block_height_metric.record(last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
 
     co_return ret;
@@ -441,9 +439,7 @@ private:
         /*current_block=*/last_committed_block_.height, db_sched_client_);
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
-    Metrics::instance().record(Metrics::ComponentName::kMempool,
-                               "current_block_height",
-                               last_committed_block_.height);
+    mempool_current_block_height_metric.record(last_committed_block_.height);
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
     auth_rpc_->register_callback(

@@ -35,7 +35,6 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
-#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 
@@ -208,12 +207,11 @@ read_metrics(Database &db)
 {
   db.record_metrics();
 
-  Metrics &metrics = Metrics::instance();
   return {
       {"db_ramdb_snap_bytes_out",
-       metrics.get(Metrics::ComponentName::kDb, "ramdb_snap_bytes_out")},
+       static_cast<ssize_t>(db.snapshot_bytes_written())},
       {"db_ramdb_disk_writer_bytes_out",
-       metrics.get(Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out")},
+       static_cast<ssize_t>(db.disk_bytes_written())},
   };
 }
 

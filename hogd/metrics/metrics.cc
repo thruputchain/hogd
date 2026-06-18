@@ -33,19 +33,11 @@ Metrics::dump_to_prometheus_string()
     for (auto &[name, metric] : component.metrics) {
       const std::string full_name =
           fully_qualified_name(static_cast<ComponentName>(i), name);
-      auto it = component.descriptions.find(name);
-      if (it != component.descriptions.end() && !it->second.empty()) {
-        os << std::format("# HELP {} {}\n", full_name, it->second);
+      if (!metric->description.empty()) {
+        os << std::format("# HELP {} {}\n", full_name, metric->description);
       }
-      if (metric.is_histogram()) {
-        os << std::format("# TYPE {} histogram\n", full_name);
-        os << metric.dump_to_string(full_name) << "\n";
-      }
-      else {
-        os << std::format("# TYPE {} gauge\n", full_name);
-        os << std::format("{} {}\n", full_name,
-                          metric.dump_to_string(full_name));
-      }
+      os << std::format("# TYPE {} {}\n", full_name, metric->prometheus_type());
+      metric->dump_prometheus_value(os, full_name);
     }
   }
 

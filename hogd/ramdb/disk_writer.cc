@@ -246,22 +246,18 @@ DiskWriter::print_stats()
   prev_stats_time_ = now;
 }
 
-// static
 void
 DiskWriter::register_metrics()
 {
-  Metrics::instance().init_metric(
+  bytes_out_metric_ = Metrics::instance().gauge(
       Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out",
-      "Number of bytes written to log files since the last database recovery.",
-      Metrics::SampleType::kSsizeT);
+      "Number of bytes written to log files since the last database recovery.");
 }
 
 void
 DiskWriter::record_metrics()
 {
-  Metrics::instance().record(Metrics::ComponentName::kDb,
-                             "ramdb_disk_writer_bytes_out",
-                             bytes_out_.load(std::memory_order_relaxed));
+  bytes_out_metric_.record(bytes_out_.load(std::memory_order_relaxed));
 }
 
 void

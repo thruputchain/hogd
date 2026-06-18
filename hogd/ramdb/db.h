@@ -169,6 +169,13 @@ public:
   // the last database recovery.
   size_t disk_bytes_written() const { return disk_writer_.get_bytes_out(); }
 
+  // snapshot_bytes_written returns the total bytes written to snapshot files
+  // since the last database recovery.
+  size_t snapshot_bytes_written() const
+  {
+    return metrics_.snap_bytes_out_.load(std::memory_order_relaxed);
+  }
+
   // estimate_heap_size returns the heap size needed to store n items,
   // including overheads for compacting and buffering to disk.
   //
@@ -216,6 +223,7 @@ private:
   // periodically updated stats; registered in register_metrics().
   struct DbMetrics {
     std::atomic<size_t> snap_bytes_out_;
+    Metrics::Gauge snap_bytes_out_metric;
   };
   DbMetrics metrics_{};
 

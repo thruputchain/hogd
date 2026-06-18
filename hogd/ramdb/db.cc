@@ -121,12 +121,11 @@ Database::set_active(bool yes)
 void
 Database::register_metrics()
 {
-  Metrics::instance().init_metric(
+  metrics_.snap_bytes_out_metric = Metrics::instance().gauge(
       Metrics::ComponentName::kDb, "ramdb_snap_bytes_out",
       "Number of bytes written to all snapshot files since the last database "
-      "recovery.",
-      Metrics::SampleType::kSsizeT);
-  DiskWriter::register_metrics();
+      "recovery.");
+  disk_writer_.register_metrics();
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kDb);
 
   record_metrics();
@@ -135,10 +134,8 @@ Database::register_metrics()
 void
 Database::record_metrics()
 {
-  Metrics::instance().record(Metrics::ComponentName::kDb,
-                             "ramdb_snap_bytes_out",
-                             metrics_.snap_bytes_out_.load(
-                                 std::memory_order_relaxed));
+  metrics_.snap_bytes_out_metric.record(
+      metrics_.snap_bytes_out_.load(std::memory_order_relaxed));
   disk_writer_.record_metrics();
 }
 

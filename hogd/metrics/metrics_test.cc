@@ -47,13 +47,25 @@ expect_dump_contains(std::string_view dump, std::string_view expected)
       << dump;
 }
 
-void
-init_metric(Metrics &metrics, Metrics::ComponentName component_name,
-            const std::string &metric_name, const std::string &description,
-            Metrics::SampleType sample_type = Metrics::SampleType::kSsizeT)
+Metrics::Gauge
+init_gauge(Metrics &metrics, Metrics::ComponentName component_name,
+           const std::string &metric_name, const std::string &description)
 {
-  metrics.init_metric(component_name, metric_name, description, sample_type);
+  Metrics::Gauge gauge =
+      metrics.gauge(component_name, metric_name, description);
   metrics.mark_done_with_init(component_name);
+  return gauge;
+}
+
+Metrics::Counter
+init_per_thread_counter(Metrics &metrics, Metrics::ComponentName component_name,
+                        const std::string &metric_name,
+                        const std::string &description)
+{
+  Metrics::Counter counter =
+      metrics.per_thread_counter(component_name, metric_name, description);
+  metrics.mark_done_with_init(component_name);
+  return counter;
 }
 
 TEST_F(MetricsTest, InstanceReturnsSingleton)
@@ -72,10 +84,10 @@ TEST_F(MetricsTest, DumpIncludesRecordedGaugeForComponent)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kExecutor,
-              "metrics_test_executor_queue_depth", "");
-  metrics.record(Metrics::ComponentName::kExecutor,
-                 "metrics_test_executor_queue_depth", 17);
+  Metrics::Gauge queue_depth =
+      init_gauge(metrics, Metrics::ComponentName::kExecutor,
+                 "metrics_test_executor_queue_depth", "");
+  queue_depth.record(17);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(
@@ -83,15 +95,129 @@ TEST_F(MetricsTest, DumpIncludesRecordedGaugeForComponent)
   expect_dump_contains(dump, "executor_metrics_test_executor_queue_depth 17");
 }
 
+TEST_F(MetricsTest, GaugeFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Gauge queue_depth = metrics.gauge(Metrics::ComponentName::kExecutor,
+                                             "metrics_test_factory_queue_depth",
+                                             "Current executor queue depth.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  queue_depth.record(17);
+
+  EXPECT_EQ(queue_depth.value(), 17);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "# HELP executor_metrics_test_factory_queue_depth "
+                             "Current executor queue depth.");
+  expect_dump_contains(
+      dump, "# TYPE executor_metrics_test_factory_queue_depth gauge");
+  expect_dump_contains(dump, "executor_metrics_test_factory_queue_depth 17");
+}
+
+TEST_F(MetricsTest, CounterFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter tx_count =
+      metrics.counter(Metrics::ComponentName::kExecutor,
+                      "metrics_test_factory_tx_count", "Transactions.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  tx_count.increment();
+  tx_count.increment(3);
+
+  EXPECT_EQ(tx_count.value(), 4);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump,
+                       "# TYPE executor_metrics_test_factory_tx_count counter");
+  expect_dump_contains(dump, "executor_metrics_test_factory_tx_count 4");
+}
+
+TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter tx_count =
+      metrics.per_thread_counter(Metrics::ComponentName::kExecutor,
+                                 "metrics_test_factory_per_thread_tx_count",
+                                 "Transactions.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  tx_count.increment(3);
+
+  std::atomic<bool> recorded = false;
+  std::atomic<bool> done = false;
+  std::thread worker([&] {
+    tx_count.increment(4);
+    recorded.store(true, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  });
+  while (!recorded.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_EQ(tx_count.value(), 7);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump, "# TYPE executor_metrics_test_factory_per_thread_tx_count counter");
+  expect_dump_contains(dump,
+                       "executor_metrics_test_factory_per_thread_tx_count 7");
+
+  done.store(true, std::memory_order_release);
+  worker.join();
+}
+
+TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Histogram latency =
+      metrics.histogram(Metrics::ComponentName::kMempool,
+                        "metrics_test_factory_validation_latency_ms",
+                        "Validation latency in milliseconds", 0, 10, 5);
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
+
+  latency.record(0);
+  latency.record(1);
+  latency.record(3);
+  latency.record(11);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump,
+      "# TYPE mempool_metrics_test_factory_validation_latency_ms histogram");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"0\"} 1");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"2\"} 2");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"4\"} 3");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_ms_bucket{le=\"+Inf\"} "
+      "4");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_factory_validation_latency_ms_count 4");
+}
+
 TEST_F(MetricsTest, DumpIncludesDescriptionForDescribedMetric)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kMempool,
-              "metrics_test_described_mempool_depth",
-              "Number of transactions waiting in the mempool");
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_described_mempool_depth", 42);
+  Metrics::Gauge mempool_depth =
+      init_gauge(metrics, Metrics::ComponentName::kMempool,
+                 "metrics_test_described_mempool_depth",
+                 "Number of transactions waiting in the mempool");
+  mempool_depth.record(42);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -107,10 +233,10 @@ TEST_F(MetricsTest, DumpOmitsMissingDescription)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kDb,
-              "metrics_test_unrecorded_db_snapshot_count", "");
-  metrics.record(Metrics::ComponentName::kDb,
-                 "metrics_test_unrecorded_db_snapshot_count", 5);
+  Metrics::Gauge snapshot_count =
+      init_gauge(metrics, Metrics::ComponentName::kDb,
+                 "metrics_test_unrecorded_db_snapshot_count", "");
+  snapshot_count.record(5);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   const std::vector<std::string_view> dump_lines = get_lines(dump);
@@ -128,9 +254,9 @@ TEST_F(MetricsTest, InitializedMetricStartsAtZero)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kDb,
-              "metrics_test_unrecorded_db_snapshot_count",
-              "Snapshots known to the database");
+  init_gauge(metrics, Metrics::ComponentName::kDb,
+             "metrics_test_unrecorded_db_snapshot_count",
+             "Snapshots known to the database");
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -145,12 +271,11 @@ TEST_F(MetricsTest, RecordingSameMetricUpdatesLatestSample)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kDb,
-              "metrics_test_db_snapshot_count", "");
-  metrics.record(Metrics::ComponentName::kDb, "metrics_test_db_snapshot_count",
-                 3);
-  metrics.record(Metrics::ComponentName::kDb, "metrics_test_db_snapshot_count",
-                 9);
+  Metrics::Gauge snapshot_count =
+      init_gauge(metrics, Metrics::ComponentName::kDb,
+                 "metrics_test_db_snapshot_count", "");
+  snapshot_count.record(3);
+  snapshot_count.record(9);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "db_metrics_test_db_snapshot_count 9");
@@ -161,35 +286,32 @@ TEST_F(MetricsTest, RecordingSameMetricUpdatesLatestSample)
       << dump;
 }
 
-TEST_F(MetricsTest, AddUpdatesSSizeTMetric)
+TEST_F(MetricsTest, CounterIncrementUpdatesMetric)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kDb,
-              "metrics_test_db_added_snapshot_count", "");
-  metrics.record(Metrics::ComponentName::kDb,
-                 "metrics_test_db_added_snapshot_count", 3);
-  metrics.add(Metrics::ComponentName::kDb,
-              "metrics_test_db_added_snapshot_count", 4);
+  Metrics::Counter snapshot_count =
+      metrics.counter(Metrics::ComponentName::kDb,
+                      "metrics_test_db_added_snapshot_count", "");
+  metrics.mark_done_with_init(Metrics::ComponentName::kDb);
+  snapshot_count.increment(3);
+  snapshot_count.increment(4);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "db_metrics_test_db_added_snapshot_count 7");
 }
 
-TEST_F(MetricsTest, SamplesSupportSignedValues)
+TEST_F(MetricsTest, GaugeSamplesSupportSignedValues)
 {
   Metrics &metrics = Metrics::instance();
 
-  init_metric(metrics, Metrics::ComponentName::kDb,
-              "metrics_test_signed_snapshot_delta", "");
-  metrics.record(Metrics::ComponentName::kDb,
-                 "metrics_test_signed_snapshot_delta", -3);
-  metrics.add(Metrics::ComponentName::kDb, "metrics_test_signed_snapshot_delta",
-              -4);
+  Metrics::Gauge snapshot_delta =
+      metrics.gauge(Metrics::ComponentName::kDb,
+                    "metrics_test_signed_snapshot_delta", "");
+  metrics.mark_done_with_init(Metrics::ComponentName::kDb);
+  snapshot_delta.record(-7);
 
-  EXPECT_EQ(metrics.get(Metrics::ComponentName::kDb,
-                        "metrics_test_signed_snapshot_delta"),
-            -7);
+  EXPECT_EQ(snapshot_delta.value(), -7);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "db_metrics_test_signed_snapshot_delta -7");
@@ -199,18 +321,16 @@ TEST_F(MetricsTest, DumpIncludesMetricsFromMultipleComponents)
 {
   Metrics &metrics = Metrics::instance();
 
-  metrics.init_metric(Metrics::ComponentName::kExecutor,
-                      "metrics_test_multi_executor", "",
-                      Metrics::SampleType::kSsizeT);
+  Metrics::Gauge executor_metric =
+      metrics.gauge(Metrics::ComponentName::kExecutor,
+                    "metrics_test_multi_executor", "");
   metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
-  metrics.init_metric(Metrics::ComponentName::kMempool,
-                      "metrics_test_multi_mempool", "",
-                      Metrics::SampleType::kSsizeT);
+  Metrics::Gauge mempool_metric =
+      metrics.gauge(Metrics::ComponentName::kMempool,
+                    "metrics_test_multi_mempool", "");
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
-  metrics.record(Metrics::ComponentName::kExecutor,
-                 "metrics_test_multi_executor", 11);
-  metrics.record(Metrics::ComponentName::kMempool, "metrics_test_multi_mempool",
-                 22);
+  executor_metric.record(11);
+  mempool_metric.record(22);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "executor_metrics_test_multi_executor 11");
@@ -220,17 +340,16 @@ TEST_F(MetricsTest, DumpIncludesMetricsFromMultipleComponents)
 TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
 {
   Metrics &metrics = Metrics::instance();
-  init_metric(metrics, Metrics::ComponentName::kExecutor,
-              "metrics_test_per_thread", "",
-              Metrics::SampleType::kPerThreadSsizeT);
+  Metrics::Counter per_thread =
+      init_per_thread_counter(metrics, Metrics::ComponentName::kExecutor,
+                              "metrics_test_per_thread", "");
 
-  metrics.add(Metrics::ComponentName::kExecutor, "metrics_test_per_thread", 3);
+  per_thread.increment(3);
 
   std::atomic<bool> recorded = false;
   std::atomic<bool> done = false;
   std::thread worker([&] {
-    metrics.add(Metrics::ComponentName::kExecutor, "metrics_test_per_thread",
-                4);
+    per_thread.increment(4);
     recorded.store(true, std::memory_order_release);
     while (!done.load(std::memory_order_acquire)) {
       std::this_thread::yield();
@@ -247,57 +366,19 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
   worker.join();
 }
 
-TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
+TEST_F(MetricsTest, HistogramDumpsBuckets)
 {
   Metrics &metrics = Metrics::instance();
-  init_metric(metrics, Metrics::ComponentName::kExecutor,
-              "metrics_test_per_thread_signed", "",
-              Metrics::SampleType::kPerThreadSsizeT);
-
-  metrics.add(Metrics::ComponentName::kExecutor,
-              "metrics_test_per_thread_signed", -3);
-
-  std::atomic<bool> recorded = false;
-  std::atomic<bool> done = false;
-  std::thread worker([&] {
-    metrics.add(Metrics::ComponentName::kExecutor,
-                "metrics_test_per_thread_signed", -4);
-    recorded.store(true, std::memory_order_release);
-    while (!done.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-  });
-  while (!recorded.load(std::memory_order_acquire)) {
-    std::this_thread::yield();
-  }
-
-  EXPECT_EQ(metrics.get(Metrics::ComponentName::kExecutor,
-                        "metrics_test_per_thread_signed"),
-            -7);
-
-  const std::string dump = metrics.dump_to_prometheus_string();
-  expect_dump_contains(dump, "executor_metrics_test_per_thread_signed -7");
-
-  done.store(true, std::memory_order_release);
-  worker.join();
-}
-
-TEST_F(MetricsTest, HistogramMetricDumpsBuckets)
-{
-  Metrics &metrics = Metrics::instance();
-  metrics.init_histogram(Metrics::ComponentName::kMempool,
-                         "metrics_test_validation_latency_ms",
-                         "Validation latency in milliseconds", 0, 10, 5);
+  Metrics::Histogram latency =
+      metrics.histogram(Metrics::ComponentName::kMempool,
+                        "metrics_test_validation_latency_ms",
+                        "Validation latency in milliseconds", 0, 10, 5);
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 0);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 1);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 3);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 11);
+  latency.record(0);
+  latency.record(1);
+  latency.record(3);
+  latency.record(11);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -323,17 +404,17 @@ TEST_F(MetricsTest, MetricsRouteGadgetReturnsExpectedResponse)
   // We set the description before starting the HTTP server because accesses to
   // the [descriptions] map are not thread safe. The HTTP server reads the
   // descriptions map, so we want to avoid a race.
-  init_metric(metrics, Metrics::ComponentName::kExecutor,
-              "metrics_test_executor_queue_depth",
-              "The executor queue length.");
+  Metrics::Gauge queue_depth =
+      init_gauge(metrics, Metrics::ComponentName::kExecutor,
+                 "metrics_test_executor_queue_depth",
+                 "The executor queue length.");
 
   HttpServer server;
 
   add_health_metrics_routes(server);
   uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
 
-  metrics.record(Metrics::ComponentName::kExecutor,
-                 "metrics_test_executor_queue_depth", 17);
+  queue_depth.record(17);
 
   std::string http_response =
       request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -354,9 +435,10 @@ TEST_F(MetricsTest, MetricsRouteGadgetReturnsExpectedResponse)
 TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
-  metrics.init_histogram(Metrics::ComponentName::kMempool,
-                         "metrics_test_validation_latency_ms",
-                         "Validation latency in milliseconds", 0, 10, 5);
+  Metrics::Histogram latency =
+      metrics.histogram(Metrics::ComponentName::kMempool,
+                        "metrics_test_validation_latency_ms",
+                        "Validation latency in milliseconds", 0, 10, 5);
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
   HttpServer server;
@@ -364,14 +446,10 @@ TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
   add_health_metrics_routes(server);
   uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
 
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 0);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 1);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 3);
-  metrics.record(Metrics::ComponentName::kMempool,
-                 "metrics_test_validation_latency_ms", 11);
+  latency.record(0);
+  latency.record(1);
+  latency.record(3);
+  latency.record(11);
 
   std::string http_response =
       request(port, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
