@@ -273,7 +273,7 @@ private:
           sample_);
     }
 
-    std::string dump_sample(const std::string &) override
+    std::string dump_sample(const std::string & /*unused*/) override
     {
       return std::to_string(value());
     }
