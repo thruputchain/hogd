@@ -209,6 +209,44 @@ TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
       dump, "mempool_metrics_test_factory_validation_latency_ms_count 4");
 }
 
+TEST_F(MetricsTest, SummaryFactoryReturnsHandle)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Summary latency =
+      metrics.summary(Metrics::ComponentName::kMempool,
+                      "metrics_test_factory_validation_latency_summary_ms",
+                      "Validation latency summary in milliseconds", 0, 10, 5,
+                      {0.5, 0.9});
+  metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
+
+  latency.record(0);
+  latency.record(1);
+  latency.record(3);
+  latency.record(7);
+  latency.record(9);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(
+      dump,
+      "# TYPE mempool_metrics_test_factory_validation_latency_summary_ms "
+      "summary");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_summary_ms{quantile="
+      "\"0.5\"} 4");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_summary_ms{quantile="
+      "\"0.9\"} 10");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_factory_validation_latency_summary_ms_sum "
+            "20");
+  expect_dump_contains(
+      dump,
+      "mempool_metrics_test_factory_validation_latency_summary_ms_count 5");
+}
+
 TEST_F(MetricsTest, DumpIncludesDescriptionForDescribedMetric)
 {
   Metrics &metrics = Metrics::instance();

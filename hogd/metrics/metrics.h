@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/metrics/metric.h"
@@ -21,12 +22,13 @@ class Metrics;
 #include "hogd/metrics/counter.h"
 #include "hogd/metrics/gauge.h"
 #include "hogd/metrics/histogram.h"
+#include "hogd/metrics/summary.h"
 #include "x23/corosync.h"
 
 namespace hogd {
 
-// This is a process-wide metrics registry. It stores gauges, counters, and
-// histograms grouped by component, and can dump all registered metrics in
+// This is a process-wide metrics registry. It stores gauges, counters,
+// histograms, and summaries grouped by component, and can dump all metrics in
 // Prometheus text format.
 //
 // Metrics should be registered during component initialization. Keep the handle
@@ -46,11 +48,16 @@ namespace hogd {
 // Metrics::Histogram latency =
 //     metrics.histogram(Metrics::ComponentName::kExecutor, "latency_ms",
 //                       "Execution latency in milliseconds.", 0, 100, 10);
+// Metrics::Summary latency_summary =
+//     metrics.summary(Metrics::ComponentName::kExecutor, "latency_summary_ms",
+//                     "Execution latency summary in milliseconds.", 0, 100, 10,
+//                     {0.5, 0.9, 0.99});
 // metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
 //
 // queue_depth.record(17);
 // tx_count.increment();
 // latency.record(42);
+// latency_summary.record(42);
 //
 // std::string prometheus = metrics.dump_to_prometheus_string();
 class Metrics {
@@ -58,12 +65,14 @@ class Metrics {
   using GaugeImpl = hogd::GaugeImpl;
   using CounterImpl = hogd::CounterImpl;
   using HistogramImpl = hogd::HistogramImpl;
+  using SummaryImpl = hogd::SummaryImpl;
   using CounterStorage = hogd::CounterStorage;
 
 public:
   using Gauge = hogd::Gauge;
   using Counter = hogd::Counter;
   using Histogram = hogd::Histogram;
+  using Summary = hogd::Summary;
 
   enum class ComponentName {
     kExecutor,
@@ -113,6 +122,16 @@ public:
   {
     return Histogram(register_histogram(component_name, metric_name,
                                         description, min, max, num_buckets));
+  }
+
+  Summary summary(ComponentName component_name, const std::string &metric_name,
+                  const std::string &description, size_t min, size_t max,
+                  size_t num_buckets,
+                  std::vector<double> quantiles = {0.5, 0.9, 0.99})
+  {
+    return Summary(register_summary(component_name, metric_name, description,
+                                    min, max, num_buckets,
+                                    std::move(quantiles)));
   }
 
   void mark_done_with_init(ComponentName component_name, bool mark = true)
@@ -199,6 +218,25 @@ private:
     auto metric =
         std::make_unique<HistogramImpl>(description, min, max, num_buckets);
     HistogramImpl *metric_ptr = metric.get();
+    auto [_, inserted] =
+        component.metrics.try_emplace(metric_name, std::move(metric));
+    CHECK(inserted);
+    return metric_ptr;
+  }
+
+  SummaryImpl *register_summary(ComponentName component_name,
+                                const std::string &metric_name,
+                                const std::string &description, size_t min,
+                                size_t max, size_t num_buckets,
+                                std::vector<double> quantiles)
+  {
+    CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
+    CHECK(!done_with_init(component_name));
+
+    Component &component = components_[static_cast<size_t>(component_name)];
+    auto metric = std::make_unique<SummaryImpl>(
+        description, min, max, num_buckets, std::move(quantiles));
+    SummaryImpl *metric_ptr = metric.get();
     auto [_, inserted] =
         component.metrics.try_emplace(metric_name, std::move(metric));
     CHECK(inserted);

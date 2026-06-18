@@ -34,6 +34,17 @@ target_link_libraries(
 gtest_discover_tests(histogram_test)
 
 add_executable(
+  summary_test
+  summary_test.cc
+)
+target_link_libraries(
+  summary_test
+  metrics
+  GTest::gtest_main
+)
+gtest_discover_tests(summary_test)
+
+add_executable(
   metrics_test
   metrics_test.cc
 )
