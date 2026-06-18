@@ -83,7 +83,7 @@ namespace hogd {
 // Metrics::Counter tx_count =
 //     metrics.counter(Metrics::ComponentName::kExecutor, "tx_count",
 //                     "Transactions processed.");
-// Metrics::HistogramHandle latency =
+// Metrics::Histogram latency =
 //     metrics.histogram(Metrics::ComponentName::kExecutor, "latency_ms",
 //                       "Execution latency in milliseconds.", 0, 100, 10);
 // metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
@@ -103,7 +103,7 @@ class Metrics {
 public:
   using Gauge = metrics_detail::Gauge;
   using Counter = metrics_detail::Counter;
-  using HistogramHandle = metrics_detail::HistogramHandle;
+  using Histogram = metrics_detail::Histogram;
 
   enum class ComponentName {
     kExecutor,
@@ -146,14 +146,13 @@ public:
                                     CounterStorage::kPerThread));
   }
 
-  HistogramHandle histogram(ComponentName component_name,
-                            const std::string &metric_name,
-                            const std::string &description, size_t min,
-                            size_t max, size_t num_buckets)
+  Histogram histogram(ComponentName component_name,
+                      const std::string &metric_name,
+                      const std::string &description, size_t min, size_t max,
+                      size_t num_buckets)
   {
-    return HistogramHandle(register_histogram(component_name, metric_name,
-                                              description, min, max,
-                                              num_buckets));
+    return Histogram(register_histogram(component_name, metric_name,
+                                        description, min, max, num_buckets));
   }
 
   void mark_done_with_init(ComponentName component_name, bool mark = true)

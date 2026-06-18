@@ -21,9 +21,9 @@
 
 namespace hogd {
 
-template<typename T> class Histogram {
+template<typename T> class HistogramBuckets {
 public:
-  Histogram(T min, T max, size_t num_buckets)
+  HistogramBuckets(T min, T max, size_t num_buckets)
     : min_(min), max_(max),
       bucket_delta_((max_ - min_) / static_cast<double>(num_buckets)),
       buckets_(/*count=*/num_buckets)
@@ -121,17 +121,17 @@ struct HistogramImpl : Metric {
     os << dump_sample(metric_name) << "\n";
   }
 
-  Histogram<size_t> histogram;
+  HistogramBuckets<size_t> histogram;
 };
 
-class HistogramHandle : public MetricHandle<HistogramImpl> {
+class Histogram : public MetricHandle<HistogramImpl> {
 public:
-  HistogramHandle() = default;
+  Histogram() = default;
 
   void record(size_t value) { metric().record(value); }
 
 private:
-  explicit HistogramHandle(HistogramImpl *metric) : MetricHandle(metric) {}
+  explicit Histogram(HistogramImpl *metric) : MetricHandle(metric) {}
 
   friend class hogd::Metrics;
 };

@@ -7,7 +7,7 @@ namespace {
 
 TEST(HistogramTest, BucketsAreLowerExclusiveUpperInclusive)
 {
-  Histogram<double> histogram(0.0, 5.0, 5);
+  HistogramBuckets<double> histogram(0.0, 5.0, 5);
 
   histogram.add(0.0);
   histogram.add(0.1);
@@ -27,7 +27,7 @@ TEST(HistogramTest, BucketsAreLowerExclusiveUpperInclusive)
 
 TEST(HistogramTest, ValuesOutsideRangeUseUnderflowAndOverflow)
 {
-  Histogram<int> histogram(0, 5, 5);
+  HistogramBuckets<int> histogram(0, 5, 5);
 
   histogram.add(-1);
   histogram.add(0);

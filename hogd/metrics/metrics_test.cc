@@ -177,7 +177,7 @@ TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
 {
   Metrics &metrics = Metrics::instance();
 
-  Metrics::HistogramHandle latency =
+  Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_factory_validation_latency_ms",
                         "Validation latency in milliseconds", 0, 10, 5);
@@ -401,7 +401,7 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
 TEST_F(MetricsTest, HistogramDumpsBuckets)
 {
   Metrics &metrics = Metrics::instance();
-  Metrics::HistogramHandle latency =
+  Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_validation_latency_ms",
                         "Validation latency in milliseconds", 0, 10, 5);
@@ -467,7 +467,7 @@ TEST_F(MetricsTest, MetricsRouteGadgetReturnsExpectedResponse)
 TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
 {
   Metrics &metrics = Metrics::instance();
-  Metrics::HistogramHandle latency =
+  Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_validation_latency_ms",
                         "Validation latency in milliseconds", 0, 10, 5);
