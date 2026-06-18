@@ -3683,8 +3683,7 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   auto one_more = make_entries(1);
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {full_block[0]},
-                                              one_more),
+                make_rcq_consume_insert_delta(0, 0, {full_block[0]}, one_more),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
@@ -5014,7 +5013,8 @@ TEST_F(DirectRCQTests, RCQBlockEntryCapFitsRamdbItemLimit)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(key,
                  make_rcq_insert_delta(
-                     make_entries(kRetrocausalQueueBlockEntriesMaxLen + 1, 256)),
+                     make_entries(kRetrocausalQueueBlockEntriesMaxLen + 1,
+                                  256)),
                  std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     // The over-cap insert is rejected at admission, so no block is ever staged
