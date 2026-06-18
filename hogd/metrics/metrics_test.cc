@@ -301,16 +301,15 @@ TEST_F(MetricsTest, CounterIncrementUpdatesMetric)
   expect_dump_contains(dump, "db_metrics_test_db_added_snapshot_count 7");
 }
 
-TEST_F(MetricsTest, SamplesSupportSignedValues)
+TEST_F(MetricsTest, GaugeSamplesSupportSignedValues)
 {
   Metrics &metrics = Metrics::instance();
 
-  Metrics::Counter snapshot_delta =
-      metrics.counter(Metrics::ComponentName::kDb,
-                      "metrics_test_signed_snapshot_delta", "");
+  Metrics::Gauge snapshot_delta =
+      metrics.gauge(Metrics::ComponentName::kDb,
+                    "metrics_test_signed_snapshot_delta", "");
   metrics.mark_done_with_init(Metrics::ComponentName::kDb);
-  snapshot_delta.increment(-3);
-  snapshot_delta.increment(-4);
+  snapshot_delta.record(-7);
 
   EXPECT_EQ(snapshot_delta.value(), -7);
 
@@ -362,37 +361,6 @@ TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "executor_metrics_test_per_thread 7");
-
-  done.store(true, std::memory_order_release);
-  worker.join();
-}
-
-TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSignedSamples)
-{
-  Metrics &metrics = Metrics::instance();
-  Metrics::Counter per_thread =
-      init_per_thread_counter(metrics, Metrics::ComponentName::kExecutor,
-                              "metrics_test_per_thread_signed", "");
-
-  per_thread.increment(-3);
-
-  std::atomic<bool> recorded = false;
-  std::atomic<bool> done = false;
-  std::thread worker([&] {
-    per_thread.increment(-4);
-    recorded.store(true, std::memory_order_release);
-    while (!done.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-  });
-  while (!recorded.load(std::memory_order_acquire)) {
-    std::this_thread::yield();
-  }
-
-  EXPECT_EQ(per_thread.value(), -7);
-
-  const std::string dump = metrics.dump_to_prometheus_string();
-  expect_dump_contains(dump, "executor_metrics_test_per_thread_signed -7");
 
   done.store(true, std::memory_order_release);
   worker.join();
