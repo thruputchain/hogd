@@ -27,9 +27,7 @@ init_hogexec_metrics()
 inline bool
 hogexec_metrics_initialized()
 {
-  return static_cast<bool>(successful_proposed_tx_count_metric) &&
-         static_cast<bool>(failed_proposed_tx_count_metric) &&
-         static_cast<bool>(gas_consumed_metric);
+  return Metrics::instance().done_with_init(Metrics::ComponentName::kExecutor);
 }
 
 } // namespace hogd
