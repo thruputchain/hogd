@@ -1,14 +1,18 @@
 #include "hogd/devnode/hog_devnode_node.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <expected>
 #include <fcntl.h>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -21,6 +25,8 @@
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
+#include "event.hh"
+#include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
@@ -29,12 +35,15 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
+#include "hogd/event/event_block_context.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -61,6 +70,10 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/err.h"
+#include "x23/fileio.h"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -73,7 +86,7 @@ constexpr char kIndexerSubdir[] = "indexer";
 constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
 constexpr std::size_t kMaxDataDirMetadataBytes = 64 * 1024;
 constexpr int kMetadataTempOpenFlags =
-    O_WRONLY | O_CREAT | O_TRUNC; // NOLINT(misc-include-cleaner)
+    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC; // NOLINT(misc-include-cleaner)
 
 void
 maybe_inject_post_executor_failure()
@@ -82,6 +95,15 @@ maybe_inject_post_executor_failure()
       std::getenv("HOG_DEVNODE_TEST_THROW_AFTER_EXECUTOR_START");
   if (value != nullptr && std::string_view(value) == "1") {
     throw std::runtime_error("injected hog-devnode constructor failure");
+  }
+}
+
+void
+maybe_inject_post_genesis_failure()
+{
+  const char *value = std::getenv("HOG_DEVNODE_TEST_THROW_AFTER_GENESIS_LOAD");
+  if (value != nullptr && std::string_view(value) == "1") {
+    throw std::runtime_error("injected hog-devnode post-genesis failure");
   }
 }
 
@@ -395,12 +417,39 @@ write_metadata_atomically(std::filesystem::path const &path,
              "rename hog-devnode data metadata");
   require_io(dir.sync(), "fsync hog-devnode data metadata directory");
 }
+
+TxEventLogBatch
+read_event_log_file(std::filesystem::path const &path)
+{
+  std::expected<x23::Buf, x23::Errno> bytes = x23::readfile<x23::Buf>(path);
+  if (!bytes.has_value()) {
+    throw std::runtime_error(
+        std::format("failed to read recovered event log '{}': {}",
+                    path.string(), bytes.error()));
+  }
+
+  TxEventLogBatch events;
+  TxEventLog log;
+  std::size_t offset = 0;
+  std::span<const std::uint8_t> data(*bytes);
+  try {
+    while (offset < data.size()) {
+      offset += x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
+      events.push_back(log);
+    }
+  } catch (const x23::XdrBadInput &e) {
+    throw std::runtime_error(
+        std::format("failed to parse recovered event log '{}': {}",
+                    path.string(), e.what()));
+  }
+  return events;
+}
 } // namespace
 
-HogDevnodeNode::HogDevnodeNode(std::string bind_host,
-                               std::uint16_t requested_scheduler_port,
-                               BootstrapAccountConfig const &bootstrap_config,
-                               std::optional<std::filesystem::path> data_dir)
+HogDevnodeNode::HogDevnodeNode(
+    std::string bind_host, std::uint16_t requested_scheduler_port,
+    BootstrapAccountConfig const &bootstrap_config,
+    std::optional<std::filesystem::path> const &data_dir)
   : bind_host_(std::move(bind_host)), data_dir_(data_dir),
     bootstrap_config_(bootstrap_config), runtime_dir_(data_dir, kRuntimeSubdir),
     db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
@@ -475,6 +524,7 @@ HogDevnodeNode::HogDevnodeNode(std::string bind_host,
                                                            /*port=*/0));
 
     init_indexer_backend();
+    reconcile_indexer_with_recovered_tip();
 
     // We start the executor server in [register_executor_with_mempool()].
 
@@ -592,6 +642,39 @@ HogDevnodeNode::init_indexer_backend()
 }
 
 void
+HogDevnodeNode::reconcile_indexer_with_recovered_tip()
+{
+  if (!recovered_existing_chain_) {
+    return;
+  }
+
+  const DbTip tip = ctx_->get_tip();
+  const BlockHeight indexed_height = indexer_db_->latest_block();
+  if (indexed_height >= tip.height) {
+    return;
+  }
+  if (tip.height <= 0 || indexed_height + 1 != tip.height) {
+    throw std::runtime_error(std::format(
+        "recovered hog-devnode indexer is behind chain tip: indexed height {}, "
+        "chain tip {}; only one-block tip replay is supported",
+        indexed_height, tip.height));
+  }
+
+  std::filesystem::path event_path =
+      EventBlockContext::final_events_filename(event_dir_.directory(),
+                                               tip.events_hash);
+  TxEventLogBatch events = read_event_log_file(event_path);
+  IndexerStatus<void> status = indexer_db_->consume_events(tip.height, events);
+  if (!status.has_value()) {
+    throw std::runtime_error(
+        std::format("failed to replay recovered event log into indexer: {}",
+                    status.error()));
+  }
+  info("replayed recovered event log '{}' into indexer at height {}",
+       event_path.string(), tip.height);
+}
+
+void
 HogDevnodeNode::register_indexer_with_event_service()
 {
   auto client =
@@ -684,15 +767,9 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().height == 0) {
-    if (recovered_data_dir_metadata_missing_) {
-      throw std::runtime_error(
-          "hog-devnode data dir has bootstrap genesis but no metadata; "
-          "restart with the original hog-devnode-data.json or reinitialize the "
-          "data dir");
-    }
-    SignedTransactionBatch batch;
-    batch.append_range(artifact.initialization_txs);
-    commit_initialization_batch(batch);
+    throw std::runtime_error(
+        "hog-devnode data dir has bootstrap genesis but no initialization "
+        "block; reinitialize the data dir");
   }
   refresh_bootstrap_account_balances();
 }
@@ -718,6 +795,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   CHECK_EQ(client.schedcoord_load_genesis_configuration(
                std::move(artifact.genesis_configuration))(),
            DbSchedResult::DbSchedResultOK);
+  maybe_inject_post_genesis_failure();
 
   SignedTransactionBatch batch;
   batch.append_range(artifact.initialization_txs);

@@ -54,6 +54,7 @@
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/indexer/db.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -890,9 +891,13 @@ expect_startup_failure(std::vector<std::string> args,
 {
   HogDevnodeProcess process = HogDevnodeProcess::start(std::move(args));
   std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
-  ASSERT_TRUE(status.has_value());
-  ASSERT_TRUE(WIFEXITED(*status));
-  EXPECT_EQ(WEXITSTATUS(*status), EXIT_FAILURE);
+  if (!status.has_value()) {
+    ADD_FAILURE() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_NE(stderr_output.find(expected_stderr), std::string::npos)
@@ -1860,6 +1865,16 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
   }
 
   {
+    std::filesystem::path indexer_db_path = data_dir / "indexer" / "indexer-db";
+    ASSERT_GT(std::filesystem::remove_all(indexer_db_path), 0UL);
+    IndexerStatus<IndexDB> indexer_status =
+        IndexDB::open_or_make_new(indexer_db_path);
+    ASSERT_TRUE(indexer_status.has_value()) << indexer_status.error();
+    TxEventLogBatch no_events;
+    ASSERT_TRUE(indexer_status->consume_events(1, no_events).has_value());
+  }
+
+  {
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
@@ -1895,6 +1910,9 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
     EXPECT_NE(stderr_output.find(
                   "recovered hog-devnode database at committed height 2"),
+              std::string::npos)
+        << stderr_output;
+    EXPECT_NE(stderr_output.find("replayed recovered event log"),
               std::string::npos)
         << stderr_output;
     EXPECT_TRUE(process.read_remaining_stdout().empty());
@@ -2083,6 +2101,41 @@ TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
   expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args{
+      "--data-dir",           data_dir.string(),
+      "--dev-accounts",       "1",
+      "--dev-account-seed",   "groundhog-dev-accounts",
+      "--dev-account-tokens", "1000000000",
+  };
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(
+        args, {{"HOG_DEVNODE_TEST_THROW_AFTER_GENESIS_LOAD", "1"}});
+    std::optional<int> status =
+        process.wait_for_exit_for_test(startup_timeout());
+    if (!status.has_value()) {
+      ADD_FAILURE() << "hog-devnode did not exit";
+      return;
+    }
+    const int exit_status = *status;
+    ASSERT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+    EXPECT_TRUE(process.read_remaining_stdout().empty());
+    std::string stderr_output = process.read_remaining_stderr();
+    EXPECT_NE(stderr_output.find("injected hog-devnode post-genesis failure"),
+              std::string::npos)
+        << stderr_output;
+  }
+
+  expect_startup_failure(
+      args,
+      "hog-devnode data dir has bootstrap genesis but no initialization block");
 }
 
 TEST(HogDevnode, DataDirRejectsCorruptMetadataWithoutCommittedChain)

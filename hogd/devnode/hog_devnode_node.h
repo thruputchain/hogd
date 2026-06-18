@@ -39,9 +39,10 @@ namespace hogd {
 
 class HogDevnodeNode {
 public:
-  HogDevnodeNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-                 BootstrapAccountConfig const &bootstrap_config = {},
-                 std::optional<std::filesystem::path> data_dir = std::nullopt);
+  HogDevnodeNode(
+      std::string bind_host, std::uint16_t requested_scheduler_port,
+      BootstrapAccountConfig const &bootstrap_config = {},
+      std::optional<std::filesystem::path> const &data_dir = std::nullopt);
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -89,6 +90,7 @@ private:
 
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
+  void reconcile_indexer_with_recovered_tip();
   void register_indexer_with_event_service();
   void register_db_with_mempool();
   void register_event_with_mempool();

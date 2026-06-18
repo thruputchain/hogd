@@ -4,6 +4,7 @@
 #include <format>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 
 #include "hogd/base/io.h"

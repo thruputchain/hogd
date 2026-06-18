@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -113,14 +114,14 @@ hog_devnode_init(std::string listen_host,
                  ReadinessSink readiness_sink,
                  std::string_view runtime_network_id,
                  BootstrapAccountConfig const &bootstrap_config,
-                 std::optional<std::filesystem::path> data_dir)
+                 std::optional<std::filesystem::path> const &data_dir)
 {
   install_signal_handler();
   init_hogexec_metrics();
   init_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, std::move(data_dir));
+                      bootstrap_config, data_dir);
   emit_readiness(node, readiness_sink, runtime_network_id);
   info("hog-devnode initialization complete.");
 
@@ -477,8 +478,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                   options.scheduler_port,
                                   options.readiness_sink,
                                   options.runtime_network_id,
-                                  options.bootstrap_config,
-                                  std::move(options.data_dir));
+                                  options.bootstrap_config, options.data_dir);
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;
