@@ -217,7 +217,7 @@ private:
 
     ssize_t value() const { return value_.load(std::memory_order_relaxed); }
 
-    std::string dump_sample(const std::string &) override
+    std::string dump_sample(const std::string & /*unused*/) override
     {
       return std::to_string(value());
     }
