@@ -354,10 +354,7 @@ private:
   };
 
   struct NominationTelemetry {
-    bool attempted = false;
     bool succeeded = false;
-    BlockID block_id = 0;
-    BlockHeight block_height = -1;
     double duration = 0.0;
     size_t scheduled_tx_count = 0;
     size_t nominated_tx_count = 0;

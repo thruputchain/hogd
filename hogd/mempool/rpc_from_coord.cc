@@ -52,6 +52,8 @@ namespace hogd {
 
 namespace {
 
+enum class CommitMetricsOutcome { kOk, kBlockNotFound };
+
 template<typename T>
 void
 remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
@@ -863,7 +865,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
-  nomination_telemetry.attempted = true;
   double last_stage_ts = 0.0;
   auto record_stage = [&](double &stage_out) {
     const double now = timer.elapsed();
@@ -1013,10 +1014,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
   nomination_telemetry.succeeded = true;
-  nomination_telemetry.block_id = nominated_block_cache_.block_id;
-  nomination_telemetry.block_height =
-      nominated_block_cache_.nomination_result.nominated_block()
-          .nomination.block_height;
   nomination_telemetry.scheduled_tx_count =
       nominated_block_cache_.tx_hashes.size();
   nomination_telemetry.nominated_tx_count =
@@ -1613,16 +1610,18 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   double stage_remove_from_scheduler = 0.0;
   double stage_await_handles = 0.0;
   double stage_finalize = 0.0;
-  auto emit_commit_stats = [&](const char *outcome, size_t /*handles_size*/,
+  auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
     MempoolMetrics::instance().last_commit_duration_ms.record(
         mempool_duration_ms(timer.elapsed()));
-    if (std::string_view(outcome) == "ok") {
+    switch (outcome) {
+    case CommitMetricsOutcome::kOk:
       MempoolMetrics::instance().commit_success_count.increment();
-    }
-    else if (std::string_view(outcome) == "block_not_found") {
+      break;
+    case CommitMetricsOutcome::kBlockNotFound:
       MempoolMetrics::instance().commit_block_not_found_count.increment();
+      break;
     }
     MempoolMetrics::instance().commit_reenqueued_tx_count.increment(
         reenqueue_size);
@@ -1643,7 +1642,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
        nominated_block_cache_.block_id != block_id) &&
       !validated_block_cache_.contains(block_id)) {
     record_stage(stage_precheck_block_presence);
-    emit_commit_stats("block_not_found", /*handles_size=*/0,
+    emit_commit_stats(CommitMetricsOutcome::kBlockNotFound,
                       /*reenqueue_size=*/0,
                       /*remove_from_scheduler_size=*/0);
     // A block with ID [block_id] was neither nominated nor validated, so it
@@ -1816,8 +1815,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   MempoolMetrics::instance().scheduler_tx_cache_size.record(
       scheduler_->tx_cache_size());
   record_stage(stage_finalize);
-  emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
-                    return_to_runqueue.size(), remove_from_scheduler_size);
+  emit_commit_stats(CommitMetricsOutcome::kOk, return_to_runqueue.size(),
+                    remove_from_scheduler_size);
   info("schedulercoord_commit_block ret");
   last_commit_ = std::chrono::steady_clock::now();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
