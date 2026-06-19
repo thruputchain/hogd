@@ -1,6 +1,6 @@
 /* Auto-genereated - do not edit. */
 
-const char hogd_version[] = "@PROJECT_VERSION@";
+const char hogd_version[] = "@HOGD_RELEASE_VERSION@";
 const char hogd_commit[] = "@GIT_HOGD_COMMIT@";
 const char protocol_commit[] = "@GIT_PROTOCOL_COMMIT@";
 const char cmake_repro[] = "@CMAKE_REPRO_COMMAND@";
