@@ -152,142 +152,143 @@ inline void
 MempoolMetrics::init()
 {
   Metrics &metrics = Metrics::instance();
-  constexpr Metrics::ComponentName component = Metrics::ComponentName::kMempool;
+  constexpr Metrics::ComponentName kComponent =
+      Metrics::ComponentName::kMempool;
 
   current_block_height =
       metrics.gauge(Metrics::ComponentName::kMempool, "current_block_height",
                     "The height of the last block committed by the mempool.");
   scheduler_pending_tx_count = metrics.gauge(
-      component, "scheduler_pending_tx_count",
+      kComponent, "scheduler_pending_tx_count",
       "The number of transactions currently pending in the scheduler.");
   scheduler_tx_cache_size =
-      metrics.gauge(component, "scheduler_tx_cache_size",
+      metrics.gauge(kComponent, "scheduler_tx_cache_size",
                     "The number of transactions cached by transaction hash.");
   validation_in_progress_count =
-      metrics.gauge(component, "validation_in_progress_count",
+      metrics.gauge(kComponent, "validation_in_progress_count",
                     "The number of block validations currently in progress.");
   last_submit_unvetted_duration_ms = metrics.gauge(
-      component, "last_submit_unvetted_duration_ms",
+      kComponent, "last_submit_unvetted_duration_ms",
       "The duration of the last unvetted transaction submission RPC in "
       "milliseconds.");
   last_submit_vetted_duration_ms = metrics.gauge(
-      component, "last_submit_vetted_duration_ms",
+      kComponent, "last_submit_vetted_duration_ms",
       "The duration of the last vetted transaction submission RPC in "
       "milliseconds.");
   last_nomination_duration_ms =
-      metrics.gauge(component, "last_nomination_duration_ms",
+      metrics.gauge(kComponent, "last_nomination_duration_ms",
                     "The duration of the last nomination RPC in milliseconds.");
   last_validation_duration_ms =
-      metrics.gauge(component, "last_validation_duration_ms",
+      metrics.gauge(kComponent, "last_validation_duration_ms",
                     "The duration of the last validation RPC in milliseconds.");
   last_commit_duration_ms =
-      metrics.gauge(component, "last_commit_duration_ms",
+      metrics.gauge(kComponent, "last_commit_duration_ms",
                     "The duration of the last commit RPC in milliseconds.");
   last_commit_interval_ms = metrics.gauge(
-      component, "last_commit_interval_ms",
+      kComponent, "last_commit_interval_ms",
       "The interval from the end of the previous commit to the start of the "
       "last commit in milliseconds.");
   last_scheduler_remove_duration_ms = metrics.gauge(
-      component, "last_scheduler_remove_duration_ms",
+      kComponent, "last_scheduler_remove_duration_ms",
       "The duration of the last scheduler removal pass in milliseconds.");
 
   submitted_unvetted_tx_count = metrics.per_thread_counter(
-      component, "submitted_unvetted_tx_count",
+      kComponent, "submitted_unvetted_tx_count",
       "Transactions submitted through the unvetted submission RPC.");
   submitted_vetted_tx_count = metrics.per_thread_counter(
-      component, "submitted_vetted_tx_count",
+      kComponent, "submitted_vetted_tx_count",
       "Transactions submitted through the vetted submission RPC.");
   accepted_unvetted_tx_count = metrics.per_thread_counter(
-      component, "accepted_unvetted_tx_count",
+      kComponent, "accepted_unvetted_tx_count",
       "Unvetted submitted transactions accepted into the scheduler.");
   accepted_vetted_tx_count = metrics.per_thread_counter(
-      component, "accepted_vetted_tx_count",
+      kComponent, "accepted_vetted_tx_count",
       "Vetted submitted transactions accepted into the scheduler.");
   discarded_capacity_tx_count = metrics.per_thread_counter(
-      component, "discarded_capacity_tx_count",
+      kComponent, "discarded_capacity_tx_count",
       "Unvetted submitted transactions discarded because the mempool was at "
       "capacity.");
   rejected_capacity_rpc_count = metrics.per_thread_counter(
-      component, "rejected_capacity_rpc_count",
+      kComponent, "rejected_capacity_rpc_count",
       "Unvetted submission RPCs rejected because the mempool was at capacity.");
   rejected_malformed_unvetted_rpc_count = metrics.per_thread_counter(
-      component, "rejected_malformed_unvetted_rpc_count",
+      kComponent, "rejected_malformed_unvetted_rpc_count",
       "Unvetted submission RPCs rejected due to malformed transaction "
       "batches.");
   rejected_malformed_vetted_rpc_count = metrics.per_thread_counter(
-      component, "rejected_malformed_vetted_rpc_count",
+      kComponent, "rejected_malformed_vetted_rpc_count",
       "Vetted submission RPCs rejected due to malformed transaction "
       "batches.");
   auth_failed_tx_count = metrics.per_thread_counter(
-      component, "auth_failed_tx_count",
+      kComponent, "auth_failed_tx_count",
       "Submitted transactions rejected by authentication.");
   nomination_attempt_count =
-      metrics.per_thread_counter(component, "nomination_attempt_count",
+      metrics.per_thread_counter(kComponent, "nomination_attempt_count",
                                  "Block nomination attempts.");
   nomination_success_count =
-      metrics.per_thread_counter(component, "nomination_success_count",
+      metrics.per_thread_counter(kComponent, "nomination_success_count",
                                  "Successful block nominations.");
   nomination_error_count =
-      metrics.per_thread_counter(component, "nomination_error_count",
+      metrics.per_thread_counter(kComponent, "nomination_error_count",
                                  "Failed block nominations.");
   nomination_scheduled_tx_count = metrics.per_thread_counter(
-      component, "nomination_scheduled_tx_count",
+      kComponent, "nomination_scheduled_tx_count",
       "Transactions scheduled during nomination attempts.");
   nomination_nominated_tx_count = metrics.per_thread_counter(
-      component, "nomination_nominated_tx_count",
+      kComponent, "nomination_nominated_tx_count",
       "Transactions included in successful nominations.");
   nomination_failed_tx_count = metrics.per_thread_counter(
-      component, "nomination_failed_tx_count",
+      kComponent, "nomination_failed_tx_count",
       "Transactions scheduled for nomination that failed proposal execution.");
   validation_attempt_count =
-      metrics.per_thread_counter(component, "validation_attempt_count",
+      metrics.per_thread_counter(kComponent, "validation_attempt_count",
                                  "Block validation attempts.");
   validation_ok_count =
-      metrics.per_thread_counter(component, "validation_ok_count",
+      metrics.per_thread_counter(kComponent, "validation_ok_count",
                                  "Successful block validations.");
   validation_invalid_count =
-      metrics.per_thread_counter(component, "validation_invalid_count",
+      metrics.per_thread_counter(kComponent, "validation_invalid_count",
                                  "Invalid block validations.");
   validation_too_late_count = metrics.per_thread_counter(
-      component, "validation_too_late_count",
+      kComponent, "validation_too_late_count",
       "Validation requests for blocks older than the current mempool height.");
   validation_missing_txs_count = metrics.per_thread_counter(
-      component, "validation_missing_txs_count",
+      kComponent, "validation_missing_txs_count",
       "Validation requests that could not complete due to missing "
       "transactions.");
   validation_unknown_parent_count = metrics.per_thread_counter(
-      component, "validation_unknown_parent_count",
+      kComponent, "validation_unknown_parent_count",
       "Validation requests whose parent block was unknown to the database.");
   validation_db_failed_count = metrics.per_thread_counter(
-      component, "validation_db_failed_count",
+      kComponent, "validation_db_failed_count",
       "Validation requests that failed due to database errors.");
   validation_executor_failed_count = metrics.per_thread_counter(
-      component, "validation_executor_failed_count",
+      kComponent, "validation_executor_failed_count",
       "Validation requests that failed due to executor errors.");
   validation_malformed_count = metrics.per_thread_counter(
-      component, "validation_malformed_count",
+      kComponent, "validation_malformed_count",
       "Validation requests rejected due to malformed nominations.");
   validation_tx_count = metrics.per_thread_counter(
-      component, "validation_tx_count",
+      kComponent, "validation_tx_count",
       "Transactions included in validation requests.");
   commit_attempt_count =
-      metrics.per_thread_counter(component, "commit_attempt_count",
+      metrics.per_thread_counter(kComponent, "commit_attempt_count",
                                  "Block commit attempts.");
   commit_success_count =
-      metrics.per_thread_counter(component, "commit_success_count",
+      metrics.per_thread_counter(kComponent, "commit_success_count",
                                  "Successful block commits.");
   commit_block_not_found_count = metrics.per_thread_counter(
-      component, "commit_block_not_found_count",
+      kComponent, "commit_block_not_found_count",
       "Commit requests for blocks that were not nominated or validated by "
       "this mempool.");
   commit_reenqueued_tx_count = metrics.per_thread_counter(
-      component, "commit_reenqueued_tx_count",
+      kComponent, "commit_reenqueued_tx_count",
       "Transactions returned to the scheduler after another block committed.");
   commit_removed_tx_count = metrics.per_thread_counter(
-      component, "commit_removed_tx_count",
+      kComponent, "commit_removed_tx_count",
       "Transactions removed from the scheduler after block commits.");
 
-  metrics.mark_done_with_init(component);
+  metrics.mark_done_with_init(kComponent);
 }
 
 inline void
