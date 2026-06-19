@@ -364,16 +364,11 @@ private:
   struct PreparedValidationChunk {
     x23::Vec<ProposedTransaction> proposed_txs;
     x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
-    double lookup_duration = 0.0;
-    double build_duration = 0.0;
   };
 
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
-    double lookup_duration = 0.0;
-    double build_duration = 0.0;
-    double validate_duration = 0.0;
     bool validated = true;
   };
 
