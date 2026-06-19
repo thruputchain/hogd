@@ -117,6 +117,8 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
+            -x "-DRUST_BUILD_CPU=x86-64-v2" \
             hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode
 
       - name: Prepare artifacts
