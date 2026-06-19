@@ -5,7 +5,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
-#include <ctime>
+#include <exception>
 #include <future>
 #include <memory>
 #include <span>
@@ -108,6 +108,18 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+template<typename F>
+void
+record_metric_cleanup(F &&f) noexcept
+{
+  try {
+    std::forward<F>(f)();
+  }
+  catch (...) {
+    std::terminate();
+  }
+}
+
 } // namespace
 
 void
@@ -185,8 +197,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
-    MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
-        mempool_duration_ms(timer.elapsed()));
+    record_metric_cleanup([&] {
+      MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
+          mempool_duration_ms(timer.elapsed()));
+    });
   });
 
   if (scheduler_->size() >= mempool_tx_size_limit_) {
@@ -291,8 +305,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   CHECK(ready());
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
-    MempoolMetrics::instance().last_submit_vetted_duration_ms.record(
-        mempool_duration_ms(timer.elapsed()));
+    record_metric_cleanup([&] {
+      MempoolMetrics::instance().last_submit_vetted_duration_ms.record(
+          mempool_duration_ms(timer.elapsed()));
+    });
   });
 
   // We deliberately do not discard *vetted* txs even if the mempool is at
@@ -879,11 +895,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   };
   x23::Defer record_nomination_stats([&] {
     nomination_telemetry.duration = timer.elapsed();
-    try {
+    record_metric_cleanup([&] {
       record_nomination_attempt(nomination_telemetry);
-    } catch (...) {
-      CHECK(false);
-    }
+    });
   });
   double stage_precheck = 0.0;
   double stage_wait_transfers = 0.0;
@@ -1267,11 +1281,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                            .tx_count = 0};
   x23::Defer record_validation_stats([&] {
     validation_telemetry.duration = timer.elapsed();
-    try {
+    record_metric_cleanup([&] {
       record_validation_attempt(validation_telemetry);
-    } catch (...) {
-      CHECK(false);
-    }
+    });
   });
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {

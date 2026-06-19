@@ -24,6 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
