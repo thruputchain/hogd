@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <ios>
 #include <memory>
+#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -96,6 +97,26 @@ print_version(const char *process, bool do_print_binary_hash)
 }
 
 } // namespace
+
+bool
+print_version_and_exit_if_requested(int argc, char *argv[])
+{
+  if (argc != 2 || argv == nullptr || argv[1] == nullptr ||
+      std::string_view(argv[1]) != "--version") {
+    return false;
+  }
+
+  std::string_view program = "hogd";
+  if (argv[0] != nullptr && !std::string_view(argv[0]).empty()) {
+    program = argv[0];
+    const size_t slash = program.find_last_of("/\\");
+    if (slash != std::string_view::npos) {
+      program.remove_prefix(slash + 1);
+    }
+  }
+  std::println("{} {}", program, version::kHogdVersion);
+  return true;
+}
 
 int
 hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
