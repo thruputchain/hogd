@@ -629,18 +629,6 @@ Scheduler::cycle_groups(HogAge &current_averages)
 }
 
 void
-Scheduler::dump_runqueue()
-{
-  size_t actual_size = 0;
-  accounts_.for_each(
-      [&actual_size](const std::pair<ContractAddress, const AccountState> &kv) {
-        actual_size += kv.second.txs.size();
-      });
-  MempoolMetrics::instance().scheduler_pending_tx_count.record(actual_size);
-  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
-}
-
-void
 Scheduler::process_transfers_helper(const Delta &delta,
                                     BlockHeight block_height) noexcept
 {

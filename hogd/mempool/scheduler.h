@@ -169,9 +169,6 @@ public:
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
 
-  // Debug.
-  void dump_runqueue();
-
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.
   x23::CoroLock pending_hog_age_update_lock_;
