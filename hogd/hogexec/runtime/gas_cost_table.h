@@ -31,7 +31,11 @@ constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
 struct SyscallGasCostEntry {
-  const char *name;
+  // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
+  // wire constant), so the hashed bytes must be the standard's UTF-8 code units
+  // rather than implementation-defined ordinary-literal bytes that depend on
+  // the execution character set (`-fexec-charset`). See hogd issue #2689.
+  const char8_t *name;
   uint64_t cost;
 };
 
@@ -39,10 +43,10 @@ struct SyscallGasCostEntry {
 // return zero direct host gas today; child invocation gas is metered by the
 // invoked VM or WASM runtime rather than a fixed syscall-cost constant.
 constexpr std::array<SyscallGasCostEntry, 4> kSyscallGasCostSchedule = {{
-    {.name = "SHA256HashBase", .cost = kSHA256HashBaseCost},
-    {.name = "SHA256HashByte", .cost = kSHA256HashByteCost},
-    {.name = "NoSyscall", .cost = kNoSyscallCost},
-    {.name = "GenericBadSyscall", .cost = kGenericBadSyscallCost},
+    {.name = u8"SHA256HashBase", .cost = kSHA256HashBaseCost},
+    {.name = u8"SHA256HashByte", .cost = kSHA256HashByteCost},
+    {.name = u8"NoSyscall", .cost = kNoSyscallCost},
+    {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};
 
 } // namespace hogd
