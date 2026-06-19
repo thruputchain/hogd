@@ -70,30 +70,6 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
   remove_from.resize(write_idx);
 }
 
-auto
-validation_outcome_str(SchedulerValidationOutcome outcome) -> const char *
-{
-  switch (outcome) {
-  case SchedulerValidationOutcome::SchedulerValidationOK:
-    return "ok";
-  case SchedulerValidationOutcome::SchedulerValidationInvalid:
-    return "invalid";
-  case SchedulerValidationOutcome::SchedulerValidationTooLateToValidate:
-    return "too_late";
-  case SchedulerValidationOutcome::SchedulerValidationMissingTxs:
-    return "missing_txs";
-  case SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock:
-    return "unknown_parent";
-  case SchedulerValidationOutcome::SchedulerValidationDbFailed:
-    return "db_failed";
-  case SchedulerValidationOutcome::SchedulerValidationExecutorFailed:
-    return "executor_failed";
-  case SchedulerValidationOutcome::SchedulerValidationMalformed:
-    return "malformed";
-  }
-  return "unknown";
-}
-
 bool
 tx_succeeded(const ExecResult &r)
 {
@@ -156,35 +132,37 @@ MempoolCoordinatorRpc::record_nomination_attempt(
 
 void
 MempoolCoordinatorRpc::record_validation_attempt(
-    const ValidationTelemetry &telemetry)
+    SchedulerValidationOutcome outcome, double duration, size_t tx_count)
 {
   MempoolMetrics::instance().last_validation_duration_ms.record(
-      mempool_duration_ms(telemetry.duration));
+      mempool_duration_ms(duration));
   MempoolMetrics::instance().validation_attempt_count.increment();
-  MempoolMetrics::instance().validation_tx_count.increment(telemetry.tx_count);
-  if (telemetry.outcome == "ok") {
+  MempoolMetrics::instance().validation_tx_count.increment(tx_count);
+  switch (outcome) {
+  case SchedulerValidationOutcome::SchedulerValidationOK:
     MempoolMetrics::instance().validation_ok_count.increment();
-  }
-  else if (telemetry.outcome == "invalid") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationInvalid:
     MempoolMetrics::instance().validation_invalid_count.increment();
-  }
-  else if (telemetry.outcome == "too_late") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationTooLateToValidate:
     MempoolMetrics::instance().validation_too_late_count.increment();
-  }
-  else if (telemetry.outcome == "missing_txs") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationMissingTxs:
     MempoolMetrics::instance().validation_missing_txs_count.increment();
-  }
-  else if (telemetry.outcome == "unknown_parent") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock:
     MempoolMetrics::instance().validation_unknown_parent_count.increment();
-  }
-  else if (telemetry.outcome == "db_failed") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationDbFailed:
     MempoolMetrics::instance().validation_db_failed_count.increment();
-  }
-  else if (telemetry.outcome == "executor_failed") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationExecutorFailed:
     MempoolMetrics::instance().validation_executor_failed_count.increment();
-  }
-  else if (telemetry.outcome == "malformed") {
+    break;
+  case SchedulerValidationOutcome::SchedulerValidationMalformed:
     MempoolMetrics::instance().validation_malformed_count.increment();
+    break;
   }
 }
 
@@ -1267,16 +1245,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_cache_validated_block = 0.0;
   double stage_finalize = 0.0;
   double stage_reserve_cache = 0.0;
-  ValidationTelemetry validation_telemetry{.block_id = 0,
-                                           .block_height =
-                                               nomination.block_height,
-                                           .outcome = "unknown",
-                                           .duration = 0.0,
-                                           .tx_count = 0};
+  SchedulerValidationOutcome validation_outcome =
+      SchedulerValidationOutcome::SchedulerValidationInvalid;
+  size_t validation_tx_count = 0;
   x23::Defer record_validation_stats([&] {
-    validation_telemetry.duration = timer.elapsed();
-    record_metric_cleanup(
-        [&] { record_validation_attempt(validation_telemetry); });
+    record_metric_cleanup([&] {
+      record_validation_attempt(validation_outcome, timer.elapsed(),
+                                validation_tx_count);
+    });
   });
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
@@ -1287,8 +1263,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     if (nomination.block_height < last_committed_block_.height + 1) {
       // This block is too old to validate.
       co_await decrement_num_validations_in_progress();
-      validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+      validation_outcome =
+          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
       info("schedulercoord_validate ret");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
@@ -1318,8 +1294,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
-    validation_telemetry.outcome = validation_outcome_str(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -1354,8 +1329,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
     if (!decoded_tx_nominations || !decoded_tx_hashes) {
       co_await decrement_num_validations_in_progress();
-      validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationMalformed);
+      validation_outcome =
+          SchedulerValidationOutcome::SchedulerValidationMalformed;
       info("schedulercoord_validate rejected malformed nomination batch");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationMalformed);
@@ -1363,8 +1338,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
     if (cache.tx_hashes.size() != tx_nominations.size()) {
       co_await decrement_num_validations_in_progress();
-      validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationMalformed);
+      validation_outcome =
+          SchedulerValidationOutcome::SchedulerValidationMalformed;
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationMalformed);
     }
@@ -1373,8 +1348,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     // correctly when we use the helper functions above to send txs to the
     // executors.
     cache.block_id = generate_block_id();
-    validation_telemetry.block_id = cache.block_id;
-    validation_telemetry.tx_count = cache.tx_hashes.size();
+    validation_tx_count = cache.tx_hashes.size();
   }
 
   co_await wait_for_transfer_data(nomination.block_height - 1);
@@ -1389,16 +1363,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   if (snapshot_result != DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
     if (snapshot_result == DbSchedResult::DbSchedResultInvalidParentId) {
-      validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
+      validation_outcome =
+          SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
       info("schedulercoord_validate ret");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
     }
     info("schedulercoord_validate ret");
     CHECK_EQ(snapshot_result, DbSchedResult::DbSchedResultError);
-    validation_telemetry.outcome = validation_outcome_str(
-        SchedulerValidationOutcome::SchedulerValidationDbFailed);
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationDbFailed;
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1423,8 +1397,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    validation_telemetry.outcome = validation_outcome_str(
-        SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
@@ -1477,8 +1451,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
         co_await decrement_num_validations_in_progress();
-        validation_telemetry.outcome = validation_outcome_str(
-            SchedulerValidationOutcome::SchedulerValidationInvalid);
+        validation_outcome =
+            SchedulerValidationOutcome::SchedulerValidationInvalid;
         info("schedulercoord_validate ret");
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -1489,8 +1463,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_await finish_all_executors(cache.block_id);
       co_await abandon_block(cache);
       co_await decrement_num_validations_in_progress();
-      validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+      validation_outcome =
+          SchedulerValidationOutcome::SchedulerValidationMissingTxs;
 
       SchedulerValidationResult ret(
           SchedulerValidationOutcome::SchedulerValidationMissingTxs);
@@ -1506,8 +1480,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    validation_telemetry.outcome = validation_outcome_str(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -1539,8 +1512,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                  DbSchedResult::DbSchedResultOK);
         co_await finish_block_handle;
         co_await decrement_num_validations_in_progress();
-        validation_telemetry.outcome = validation_outcome_str(
-            SchedulerValidationOutcome::SchedulerValidationInvalid);
+        validation_outcome =
+            SchedulerValidationOutcome::SchedulerValidationInvalid;
         info("schedulercoord_validate ret");
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -1566,8 +1539,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     // avoid leaking the event block context and orphaning its events file.
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    validation_telemetry.outcome = validation_outcome_str(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -1597,8 +1569,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   record_stage(stage_cache_validated_block);
   co_await decrement_num_validations_in_progress();
   record_stage(stage_finalize);
-  validation_telemetry.outcome =
-      validation_outcome_str(SchedulerValidationOutcome::SchedulerValidationOK);
+  validation_outcome = SchedulerValidationOutcome::SchedulerValidationOK;
   info("schedulercoord_validate ret");
   co_return result;
 }

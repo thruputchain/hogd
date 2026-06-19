@@ -294,8 +294,6 @@ public:
 
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
 
-  void dump_stats() { scheduler_->dump_runqueue(); }
-
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      KeyChangeBatch key_changes);
 
@@ -364,14 +362,6 @@ private:
     size_t scheduled_tx_count = 0;
     size_t nominated_tx_count = 0;
     size_t failed_tx_count = 0;
-  };
-
-  struct ValidationTelemetry {
-    BlockID block_id = 0;
-    BlockHeight block_height = -1;
-    std::string outcome;
-    double duration = 0.0;
-    size_t tx_count = 0;
   };
 
   struct PreparedValidationChunk {
@@ -523,7 +513,8 @@ private:
   static void record_submitted_vetted(size_t count);
   static void record_submitted_unvetted(size_t count);
   static void record_nomination_attempt(const NominationTelemetry &telemetry);
-  static void record_validation_attempt(const ValidationTelemetry &telemetry);
+  static void record_validation_attempt(SchedulerValidationOutcome outcome,
+                                        double duration, size_t tx_count);
 
   x23::Async<bool> increment_num_validations_in_progress()
   {
