@@ -60,6 +60,8 @@ private:
   HistogramBuckets<T> histogram_;
   std::vector<double> quantiles_;
   std::atomic<double> sum_ = 0;
+  static_assert(std::atomic<double>::is_always_lock_free,
+                "std::atomic<double> must be lock-free on this platform");
 };
 
 struct SummaryImpl : Metric {
