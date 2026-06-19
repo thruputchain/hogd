@@ -54,10 +54,13 @@ using rv32::DecodedInstruction;
 using rv32::InstructionKind;
 using rv32::Op;
 
-const char *
+std::string_view
 op_name(Op op)
 {
-  return rv32::kInstructionGasSchedule[static_cast<size_t>(op)].name;
+  // The schedule names are `u8"..."` (ASCII) wire constants; reinterpret the
+  // bytes as a narrow view purely for printing.
+  return reinterpret_cast<const char *>(
+      rv32::kInstructionGasSchedule[static_cast<size_t>(op)].name);
 }
 
 // Whether an instruction of this kind, as the *first* of a pair, can be the
