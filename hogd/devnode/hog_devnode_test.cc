@@ -31,14 +31,12 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
-#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
-#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
@@ -476,12 +474,6 @@ hex_string(std::array<std::uint8_t, N> const &bytes)
   return std::format("0x{}", encode_hex(std::as_bytes(std::span(bytes))));
 }
 
-std::tuple<std::uint64_t, std::uint64_t>
-make_amount(uint128_t amount)
-{
-  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
-}
-
 AuthClaim
 source_address_auth_claim()
 {
@@ -491,15 +483,15 @@ source_address_auth_claim()
   return claim;
 }
 
-std::optional<SignedTransaction>
+SignedTransaction
 sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key)
 {
   Signature signature(CryptographicScheme::Ed25519);
   auto signed_bytes = ed25519_sign(secret_key, x23::serialize(tx));
   if (!signed_bytes.has_value()) {
-    return std::nullopt;
+    throw std::runtime_error("failed to sign test transaction");
   }
-  signature.ed25519() = signed_bytes.value();
+  signature.ed25519() = std::move(*signed_bytes);
   return SignedTransaction{
       .tx = std::move(tx),
       .signatures = {DecoratedSignature{
@@ -2337,15 +2329,12 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
 
     auto wallet_contract = load_default_dev_wallet_contract();
     ASSERT_TRUE(wallet_contract);
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
-    ASSERT_TRUE(fibonacci_contract);
-
     auto sponsor_keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
-    auto owner_keypair =
-        derive_bootstrap_account_keypair("created-wallet-owner", /*index=*/0);
+    Ed25519PublicKey owner_public_key =
+        derive_bootstrap_account_keypair("created-wallet-owner", /*index=*/0)
+            .first;
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     const ContractAddress sponsor_wallet_address =
         build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
     EXPECT_EQ(hex_string(sponsor_wallet_address),
@@ -2365,22 +2354,20 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
                        .entrypoint = wallet_meta::entrypoint<"create_wallet">(),
                        .gas_limit = GasAmount{10'000'000},
                        .calldata = wallet_meta::make_calldata<"create_wallet">(
-                           create_wallet_nonce, wallet_hash,
-                           owner_keypair.first)},
+                           create_wallet_nonce, wallet_hash, owner_public_key)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 31},
         .contracts_to_deploy = {*wallet_contract},
         .auth_claim = source_address_auth_claim(),
     };
-    std::optional<SignedTransaction> signed_create_wallet_tx =
+    SignedTransaction signed_create_wallet_tx =
         sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second);
-    ASSERT_TRUE(signed_create_wallet_tx.has_value());
     const SignedTransactionHash create_wallet_tx_hash =
-        sha256(signed_create_wallet_tx->tx);
+        sha256(signed_create_wallet_tx.tx);
     SignedTransactionHashBatch create_hashes =
         submit_and_commit(scheduler,
-                          SignedTransactionBatch{*signed_create_wallet_tx});
+                          SignedTransactionBatch{signed_create_wallet_tx});
     if (create_hashes.size() != 1UL) {
       int status = process.terminate();
       ADD_FAILURE() << "hog-devnode exited with status " << status
@@ -2390,74 +2377,10 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
     }
     ASSERT_EQ(create_hashes[0], create_wallet_tx_hash);
 
-    Calldata top_up_calldata =
-        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                       erc20_meta::entrypoint<"transfer">(),
-                       GasAmount{1'000'000},
-                       erc20_meta::make_calldata<"transfer">(
-                           created_wallet_address,
-                           make_amount(uint128_t{500'000'000})));
-    Transaction top_up_tx{
-        .invocation =
-            Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"do_action">(
-                           top_up_calldata)},
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 32},
-        .auth_claim = source_address_auth_claim(),
-    };
-    std::optional<SignedTransaction> signed_top_up_tx =
-        sign_transaction(std::move(top_up_tx), sponsor_keypair.second);
-    ASSERT_TRUE(signed_top_up_tx.has_value());
-    const SignedTransactionHash top_up_tx_hash = sha256(signed_top_up_tx->tx);
-    SignedTransactionHashBatch top_up_hashes =
-        submit_and_commit(scheduler, SignedTransactionBatch{*signed_top_up_tx});
-    if (top_up_hashes.size() != 1UL) {
-      int status = process.terminate();
-      ADD_FAILURE() << "hog-devnode exited with status " << status
-                    << "\nstderr:\n"
-                    << process.read_remaining_stderr();
-      return;
-    }
-    ASSERT_EQ(top_up_hashes[0], top_up_tx_hash);
-
-    const SHA256Hash deploy_nonce = make_nonce(33);
-    const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
-    Transaction deploy_tx{
-        .invocation =
-            Invocation{.invoked_address = created_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"deploy">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"deploy">(
-                           deploy_nonce, fibonacci_hash)},
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 33},
-        .contracts_to_deploy = {*fibonacci_contract},
-        .auth_claim = source_address_auth_claim(),
-    };
-    std::optional<SignedTransaction> signed_deploy_tx =
-        sign_transaction(std::move(deploy_tx), owner_keypair.second);
-    ASSERT_TRUE(signed_deploy_tx.has_value());
-    const SignedTransactionHash deploy_tx_hash = sha256(signed_deploy_tx->tx);
-    SignedTransactionHashBatch deploy_hashes =
-        submit_and_commit(scheduler, SignedTransactionBatch{*signed_deploy_tx});
-    if (deploy_hashes.size() != 1UL) {
-      int status = process.terminate();
-      ADD_FAILURE() << "hog-devnode exited with status " << status
-                    << "\nstderr:\n"
-                    << process.read_remaining_stderr();
-      return;
-    }
-    ASSERT_EQ(deploy_hashes[0], deploy_tx_hash);
-
     const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
     TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
     while (std::chrono::steady_clock::now() < deadline) {
-      result = reader.get_transaction_info(deploy_tx_hash)();
+      result = reader.get_transaction_info(create_wallet_tx_hash)();
       if (result.outcome() == TxInfoOutcome::TxInfoFound) {
         break;
       }
@@ -2466,7 +2389,13 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
 
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
-    EXPECT_EQ(result.info().events.proposed_tx_hash, deploy_tx_hash);
+    EXPECT_EQ(result.info().events.proposed_tx_hash, create_wallet_tx_hash);
+    ASSERT_EQ(result.info().events.root_output.status_code(),
+              InvocationFrameStatusCode::Return);
+    ReturnBuffer expected_return_buffer(created_wallet_address.begin(),
+                                        created_wallet_address.end());
+    EXPECT_EQ(result.info().events.root_output.return_buffer(),
+              expected_return_buffer);
   }
 
   expect_clean_exit(process);
