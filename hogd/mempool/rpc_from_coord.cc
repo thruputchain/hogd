@@ -114,33 +114,33 @@ tx_failed(const ExecResult &r)
 void
 MempoolCoordinatorRpc::record_submitted_vetted(size_t count)
 {
-  mempool_submitted_vetted_tx_count_metric.increment(count);
+  MempoolMetrics::shared().submitted_vetted_tx_count.increment(count);
 }
 
 void
 MempoolCoordinatorRpc::record_submitted_unvetted(size_t count)
 {
-  mempool_submitted_unvetted_tx_count_metric.increment(count);
+  MempoolMetrics::shared().submitted_unvetted_tx_count.increment(count);
 }
 
 void
 MempoolCoordinatorRpc::record_nomination_attempt(
     const NominationTelemetry &telemetry)
 {
-  mempool_last_nomination_duration_ms_metric.record(
+  MempoolMetrics::shared().last_nomination_duration_ms.record(
       mempool_duration_ms(telemetry.duration));
-  mempool_nomination_attempt_count_metric.increment();
+  MempoolMetrics::shared().nomination_attempt_count.increment();
   if (telemetry.succeeded) {
-    mempool_nomination_success_count_metric.increment();
+    MempoolMetrics::shared().nomination_success_count.increment();
   }
   else {
-    mempool_nomination_error_count_metric.increment();
+    MempoolMetrics::shared().nomination_error_count.increment();
   }
-  mempool_nomination_scheduled_tx_count_metric.increment(
+  MempoolMetrics::shared().nomination_scheduled_tx_count.increment(
       telemetry.scheduled_tx_count);
-  mempool_nomination_nominated_tx_count_metric.increment(
+  MempoolMetrics::shared().nomination_nominated_tx_count.increment(
       telemetry.nominated_tx_count);
-  mempool_nomination_failed_tx_count_metric.increment(
+  MempoolMetrics::shared().nomination_failed_tx_count.increment(
       telemetry.failed_tx_count);
 }
 
@@ -148,33 +148,33 @@ void
 MempoolCoordinatorRpc::record_validation_attempt(
     ValidationTelemetry telemetry) noexcept
 {
-  mempool_last_validation_duration_ms_metric.record(
+  MempoolMetrics::shared().last_validation_duration_ms.record(
       mempool_duration_ms(telemetry.duration));
-  mempool_validation_attempt_count_metric.increment();
-  mempool_validation_tx_count_metric.increment(telemetry.tx_count);
+  MempoolMetrics::shared().validation_attempt_count.increment();
+  MempoolMetrics::shared().validation_tx_count.increment(telemetry.tx_count);
   if (telemetry.outcome == "ok") {
-    mempool_validation_ok_count_metric.increment();
+    MempoolMetrics::shared().validation_ok_count.increment();
   }
   else if (telemetry.outcome == "invalid") {
-    mempool_validation_invalid_count_metric.increment();
+    MempoolMetrics::shared().validation_invalid_count.increment();
   }
   else if (telemetry.outcome == "too_late") {
-    mempool_validation_too_late_count_metric.increment();
+    MempoolMetrics::shared().validation_too_late_count.increment();
   }
   else if (telemetry.outcome == "missing_txs") {
-    mempool_validation_missing_txs_count_metric.increment();
+    MempoolMetrics::shared().validation_missing_txs_count.increment();
   }
   else if (telemetry.outcome == "unknown_parent") {
-    mempool_validation_unknown_parent_count_metric.increment();
+    MempoolMetrics::shared().validation_unknown_parent_count.increment();
   }
   else if (telemetry.outcome == "db_failed") {
-    mempool_validation_db_failed_count_metric.increment();
+    MempoolMetrics::shared().validation_db_failed_count.increment();
   }
   else if (telemetry.outcome == "executor_failed") {
-    mempool_validation_executor_failed_count_metric.increment();
+    MempoolMetrics::shared().validation_executor_failed_count.increment();
   }
   else if (telemetry.outcome == "malformed") {
-    mempool_validation_malformed_count_metric.increment();
+    MempoolMetrics::shared().validation_malformed_count.increment();
   }
 }
 
@@ -186,12 +186,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
-    mempool_last_submit_unvetted_duration_ms_metric.record(
+    MempoolMetrics::shared().last_submit_unvetted_duration_ms.record(
         mempool_duration_ms(timer.elapsed()));
   });
 
   if (scheduler_->size() >= mempool_tx_size_limit_) {
-    mempool_rejected_capacity_rpc_count_metric.increment();
+    MempoolMetrics::shared().rejected_capacity_rpc_count.increment();
     info(
         "submit_unvetted rejected txs as the mempool has too many pending txs");
     co_return;
@@ -199,7 +199,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto txs = std::make_shared<SignedTransactionBatch>();
   if (!(co_await parallel_batch_to_t(batch, *txs))) {
-    mempool_rejected_malformed_unvetted_rpc_count_metric.increment();
+    MempoolMetrics::shared().rejected_malformed_unvetted_rpc_count.increment();
     info("submit_unvetted rejected malformed transaction batch");
     co_return;
   }
@@ -216,7 +216,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     // mempool tx capacity limit.
     ssize_t scheduler_size = scheduler_->size();
     if (scheduler_size >= mempool_tx_size_limit_) {
-      mempool_rejected_capacity_rpc_count_metric.increment();
+      MempoolMetrics::shared().rejected_capacity_rpc_count.increment();
       info("submit_unvetted rejected txs as the mempool has too many pending "
            "txs");
       co_return;
@@ -232,7 +232,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       const auto resize_to = static_cast<size_t>(num_slots_left);
       const size_t num_discarded = txs->size() - resize_to;
 
-      mempool_discarded_capacity_tx_count_metric.increment(num_discarded);
+      MempoolMetrics::shared().discarded_capacity_tx_count.increment(
+          num_discarded);
       txs->resize(resize_to);
     }
   }
@@ -250,7 +251,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.push_back(i);
     }
   }
-  mempool_auth_failed_tx_count_metric.increment(to_remove_indices.size());
+  MempoolMetrics::shared().auth_failed_tx_count.increment(
+      to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
   }
@@ -278,7 +280,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // would make the txs visible to nominate() and validate() before the txs have
   // been verified.
   co_await scheduler_->add_txs(*txs);
-  mempool_accepted_unvetted_tx_count_metric.increment(txs->size());
+  MempoolMetrics::shared().accepted_unvetted_tx_count.increment(txs->size());
   co_return;
 }
 
@@ -289,7 +291,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   CHECK(ready());
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
-    mempool_last_submit_vetted_duration_ms_metric.record(
+    MempoolMetrics::shared().last_submit_vetted_duration_ms.record(
         mempool_duration_ms(timer.elapsed()));
   });
 
@@ -311,7 +313,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    free up capacity.
   SignedTransactionBatch txs;
   if (!(co_await parallel_batch_to_t(batch, txs))) {
-    mempool_rejected_malformed_vetted_rpc_count_metric.increment();
+    MempoolMetrics::shared().rejected_malformed_vetted_rpc_count.increment();
     info("submit_vetted rejected malformed transaction batch");
     co_return;
   }
@@ -334,13 +336,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
       to_remove_indices.push_back(i);
     }
   }
-  mempool_auth_failed_tx_count_metric.increment(to_remove_indices.size());
+  MempoolMetrics::shared().auth_failed_tx_count.increment(
+      to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
 
   co_await scheduler_->add_txs(txs);
-  mempool_accepted_vetted_tx_count_metric.increment(txs.size());
+  MempoolMetrics::shared().accepted_vetted_tx_count.increment(txs.size());
   co_return;
 }
 
@@ -1596,7 +1599,7 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
   CHECK(ready());
-  mempool_commit_attempt_count_metric.increment();
+  MempoolMetrics::shared().commit_attempt_count.increment();
 
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
@@ -1605,7 +1608,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         commit_started_at - last_commit_;
     auto delta_raw =
         std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-    mempool_last_commit_interval_ms_metric.record(delta_raw.count());
+    MempoolMetrics::shared().last_commit_interval_ms.record(delta_raw.count());
   }
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
@@ -1629,16 +1632,17 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
     (void)handles_size;
-    mempool_last_commit_duration_ms_metric.record(
+    MempoolMetrics::shared().last_commit_duration_ms.record(
         mempool_duration_ms(timer.elapsed()));
     if (std::string_view(outcome) == "ok") {
-      mempool_commit_success_count_metric.increment();
+      MempoolMetrics::shared().commit_success_count.increment();
     }
     else if (std::string_view(outcome) == "block_not_found") {
-      mempool_commit_block_not_found_count_metric.increment();
+      MempoolMetrics::shared().commit_block_not_found_count.increment();
     }
-    mempool_commit_reenqueued_tx_count_metric.increment(reenqueue_size);
-    mempool_commit_removed_tx_count_metric.increment(
+    MempoolMetrics::shared().commit_reenqueued_tx_count.increment(
+        reenqueue_size);
+    MempoolMetrics::shared().commit_removed_tx_count.increment(
         remove_from_scheduler_size);
   };
 
@@ -1822,9 +1826,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   scheduler_->increment_current_block();
   co_await Health::instance().set_current_block_height(
       last_committed_block_.height);
-  mempool_current_block_height_metric.record(last_committed_block_.height);
-  mempool_scheduler_pending_tx_count_metric.record(scheduler_->size());
-  mempool_scheduler_tx_cache_size_metric.record(scheduler_->tx_cache_size());
+  MempoolMetrics::shared().current_block_height.record(
+      last_committed_block_.height);
+  MempoolMetrics::shared().scheduler_pending_tx_count.record(
+      scheduler_->size());
+  MempoolMetrics::shared().scheduler_tx_cache_size.record(
+      scheduler_->tx_cache_size());
   record_stage(stage_finalize);
   emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
                     return_to_runqueue.size(), remove_from_scheduler_size);
