@@ -719,48 +719,50 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
 
 TEST(Rv32GasTest, version_pins_full_cost_table)
 {
+  // Expected names are `u8"..."` (like the schedule) so the comparison stays
+  // on UTF-8 bytes, independent of the execution charset (`-fexec-charset`).
   struct ExpectedGasEntry {
     Op op;
-    const char *name;
+    const char8_t *name;
     uint64_t cost;
   };
   struct ExpectedSyscallGasEntry {
-    const char *name;
+    const char8_t *name;
     uint64_t cost;
   };
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
-      {Op::kLui, "LUI", 1},     {Op::kAuipc, "AUIPC", 1},
-      {Op::kJal, "JAL", 1},     {Op::kJalr, "JALR", 1},
-      {Op::kBeq, "BEQ", 1},     {Op::kBne, "BNE", 1},
-      {Op::kBlt, "BLT", 1},     {Op::kBge, "BGE", 1},
-      {Op::kBltu, "BLTU", 1},   {Op::kBgeu, "BGEU", 1},
-      {Op::kLb, "LB", 1},       {Op::kLh, "LH", 1},
-      {Op::kLw, "LW", 1},       {Op::kLbu, "LBU", 1},
-      {Op::kLhu, "LHU", 1},     {Op::kSb, "SB", 1},
-      {Op::kSh, "SH", 1},       {Op::kSw, "SW", 1},
-      {Op::kAddi, "ADDI", 1},   {Op::kSlti, "SLTI", 1},
-      {Op::kSltiu, "SLTIU", 1}, {Op::kXori, "XORI", 1},
-      {Op::kOri, "ORI", 1},     {Op::kAndi, "ANDI", 1},
-      {Op::kSlli, "SLLI", 1},   {Op::kSrli, "SRLI", 1},
-      {Op::kSrai, "SRAI", 1},   {Op::kAdd, "ADD", 1},
-      {Op::kSub, "SUB", 1},     {Op::kSll, "SLL", 1},
-      {Op::kSlt, "SLT", 1},     {Op::kSltu, "SLTU", 1},
-      {Op::kXor, "XOR", 1},     {Op::kSrl, "SRL", 1},
-      {Op::kSra, "SRA", 1},     {Op::kOr, "OR", 1},
-      {Op::kAnd, "AND", 1},     {Op::kMul, "MUL", 3},
-      {Op::kMulh, "MULH", 3},   {Op::kMulhsu, "MULHSU", 3},
-      {Op::kMulhu, "MULHU", 3}, {Op::kDiv, "DIV", 8},
-      {Op::kDivu, "DIVU", 8},   {Op::kRem, "REM", 8},
-      {Op::kRemu, "REMU", 8},   {Op::kFence, "FENCE", 1},
-      {Op::kEcall, "ECALL", 1}, {Op::kEbreak, "EBREAK", 1},
-      {Op::kUnimp, "UNIMP", 1},
+      {Op::kLui, u8"LUI", 1},     {Op::kAuipc, u8"AUIPC", 1},
+      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 1},
+      {Op::kBeq, u8"BEQ", 1},     {Op::kBne, u8"BNE", 1},
+      {Op::kBlt, u8"BLT", 1},     {Op::kBge, u8"BGE", 1},
+      {Op::kBltu, u8"BLTU", 1},   {Op::kBgeu, u8"BGEU", 1},
+      {Op::kLb, u8"LB", 1},       {Op::kLh, u8"LH", 1},
+      {Op::kLw, u8"LW", 1},       {Op::kLbu, u8"LBU", 1},
+      {Op::kLhu, u8"LHU", 1},     {Op::kSb, u8"SB", 1},
+      {Op::kSh, u8"SH", 1},       {Op::kSw, u8"SW", 1},
+      {Op::kAddi, u8"ADDI", 1},   {Op::kSlti, u8"SLTI", 1},
+      {Op::kSltiu, u8"SLTIU", 1}, {Op::kXori, u8"XORI", 1},
+      {Op::kOri, u8"ORI", 1},     {Op::kAndi, u8"ANDI", 1},
+      {Op::kSlli, u8"SLLI", 1},   {Op::kSrli, u8"SRLI", 1},
+      {Op::kSrai, u8"SRAI", 1},   {Op::kAdd, u8"ADD", 1},
+      {Op::kSub, u8"SUB", 1},     {Op::kSll, u8"SLL", 1},
+      {Op::kSlt, u8"SLT", 1},     {Op::kSltu, u8"SLTU", 1},
+      {Op::kXor, u8"XOR", 1},     {Op::kSrl, u8"SRL", 1},
+      {Op::kSra, u8"SRA", 1},     {Op::kOr, u8"OR", 1},
+      {Op::kAnd, u8"AND", 1},     {Op::kMul, u8"MUL", 3},
+      {Op::kMulh, u8"MULH", 3},   {Op::kMulhsu, u8"MULHSU", 3},
+      {Op::kMulhu, u8"MULHU", 3}, {Op::kDiv, u8"DIV", 8},
+      {Op::kDivu, u8"DIVU", 8},   {Op::kRem, u8"REM", 8},
+      {Op::kRemu, u8"REMU", 8},   {Op::kFence, u8"FENCE", 1},
+      {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
+      {Op::kUnimp, u8"UNIMP", 1},
   }};
   const std::array<ExpectedSyscallGasEntry, 4> expected_syscalls = {{
-      {"SHA256HashBase", hogd::kSHA256HashBaseCost},
-      {"SHA256HashByte", hogd::kSHA256HashByteCost},
-      {"NoSyscall", hogd::kNoSyscallCost},
-      {"GenericBadSyscall", hogd::kGenericBadSyscallCost},
+      {u8"SHA256HashBase", hogd::kSHA256HashBaseCost},
+      {u8"SHA256HashByte", hogd::kSHA256HashByteCost},
+      {u8"NoSyscall", hogd::kNoSyscallCost},
+      {u8"GenericBadSyscall", hogd::kGenericBadSyscallCost},
   }};
 
   EXPECT_EQ(kOpCount, 49U);
@@ -769,14 +771,19 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
-    EXPECT_STREQ(kInstructionGasSchedule[i].name, expected[i].name);
+    // Both names are `u8"..."`; compare as UTF-8 byte strings via a narrow
+    // reinterpret so EXPECT_STREQ stays charset-independent.
+    EXPECT_STREQ(reinterpret_cast<const char *>(
+                     kInstructionGasSchedule[i].name),
+                 reinterpret_cast<const char *>(expected[i].name));
     EXPECT_EQ(kInstructionGasSchedule[i].cost, expected[i].cost);
     EXPECT_EQ(kInstructionGasCosts[i], expected[i].cost);
   }
   ASSERT_EQ(hogd::kSyscallGasCostSchedule.size(), expected_syscalls.size());
   for (size_t i = 0; i < expected_syscalls.size(); ++i) {
-    EXPECT_STREQ(hogd::kSyscallGasCostSchedule[i].name,
-                 expected_syscalls[i].name);
+    EXPECT_STREQ(reinterpret_cast<const char *>(
+                     hogd::kSyscallGasCostSchedule[i].name),
+                 reinterpret_cast<const char *>(expected_syscalls[i].name));
     EXPECT_EQ(hogd::kSyscallGasCostSchedule[i].cost, expected_syscalls[i].cost);
   }
 }
