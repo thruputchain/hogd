@@ -1,6 +1,6 @@
-#include <cstddef>
 #include <gtest/gtest.h>
 
+#include "hogd/base/types.h"
 #include "hogd/metrics/summary.h"
 
 namespace hogd {
