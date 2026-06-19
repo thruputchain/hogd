@@ -1141,15 +1141,12 @@ Scheduler::remove_from_scheduler(
     x23::Async<size_t> &handle = handles[i];
     total_removed_from_runqueue += co_await handle;
   }
-  double a = timer.elapsed();
-
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   });
-  double b = timer.elapsed();
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
