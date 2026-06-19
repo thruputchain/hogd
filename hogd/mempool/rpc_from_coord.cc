@@ -114,8 +114,7 @@ record_metric_cleanup(F &&f) noexcept
 {
   try {
     std::forward<F>(f)();
-  }
-  catch (...) {
+  } catch (...) {
     std::terminate();
   }
 }
@@ -895,9 +894,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   };
   x23::Defer record_nomination_stats([&] {
     nomination_telemetry.duration = timer.elapsed();
-    record_metric_cleanup([&] {
-      record_nomination_attempt(nomination_telemetry);
-    });
+    record_metric_cleanup(
+        [&] { record_nomination_attempt(nomination_telemetry); });
   });
   double stage_precheck = 0.0;
   double stage_wait_transfers = 0.0;
@@ -1281,9 +1279,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                            .tx_count = 0};
   x23::Defer record_validation_stats([&] {
     validation_telemetry.duration = timer.elapsed();
-    record_metric_cleanup([&] {
-      record_validation_attempt(validation_telemetry);
-    });
+    record_metric_cleanup(
+        [&] { record_validation_attempt(validation_telemetry); });
   });
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
