@@ -685,8 +685,6 @@ private:
   std::atomic<size_t> num_coordinators_registered_ = 0;
   std::atomic<bool> ready_ = false;
 
-  std::chrono::steady_clock::time_point last_ =
-      std::chrono::steady_clock::now();
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();
 };

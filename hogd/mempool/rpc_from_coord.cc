@@ -929,7 +929,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   if (db_tip.height != last_committed_block_.height ||
       db_tip.id != last_committed_block_.id ||
       db_tip.block_hash != last_committed_block_.block_hash) {
-    last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -938,7 +937,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
-    last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -1018,7 +1016,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       co_await cg(scheduler_->global_lock_);
       scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
     }
-    last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -1058,7 +1055,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
-  last_ = std::chrono::steady_clock::now();
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.nomination_result;
 }
@@ -1681,7 +1677,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                       /*remove_from_scheduler_size=*/0);
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
-    last_ = std::chrono::steady_clock::now();
     info("schedulercoord_commit_block ret");
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
@@ -1852,7 +1847,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   record_stage(stage_finalize);
   emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
                     return_to_runqueue.size(), remove_from_scheduler_size);
-  last_ = std::chrono::steady_clock::now();
   info("schedulercoord_commit_block ret");
   last_commit_ = std::chrono::steady_clock::now();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
