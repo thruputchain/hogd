@@ -30,17 +30,28 @@ namespace hogd {
 
 namespace {
 
-bool
-has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids)
+// Returns whether the span contains duplicate ids, or a SystemError with
+// SystemErrorCode::Unrecoverable if the duplicate-detection set could not be
+// allocated. Both call sites run inside noexcept syscall bodies, so a
+// std::bad_alloc from the unordered_set must be caught here rather than
+// escaping to std::terminate (issue #2698).
+SystemStatus<bool>
+has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids) noexcept
 {
-  std::unordered_set<uint32_t> seen;
-  seen.reserve(auth_token_ids.size());
-  for (uint32_t auth_token_id : auth_token_ids) {
-    if (!seen.insert(auth_token_id).second) {
-      return true;
+  try {
+    std::unordered_set<uint32_t> seen;
+    seen.reserve(auth_token_ids.size());
+    for (uint32_t auth_token_id : auth_token_ids) {
+      if (!seen.insert(auth_token_id).second) {
+        return true;
+      }
     }
+    return false;
+  } catch (std::exception const &e) {
+    error("unrecoverable: failed to allocate auth token duplicate set: {}",
+          e.what());
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
-  return false;
 }
 
 } // namespace
@@ -223,7 +234,13 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_owned_auth_token_ids.size());
   }
 
-  if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
+  auto owned_has_duplicate =
+      has_duplicate_auth_token_ids(owned_auth_token_ids_vec);
+  if (!owned_has_duplicate.has_value()) {
+    return {owned_has_duplicate.error().to_host_fn_error(),
+            WrappedGasAmount{0}};
+  }
+  if (*owned_has_duplicate) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
@@ -325,7 +342,13 @@ syscall_Return_inner(
                 input_returned_auth_token_ids.size());
   }
 
-  if (has_duplicate_auth_token_ids(returned_auth_token_ids_vec)) {
+  auto returned_has_duplicate =
+      has_duplicate_auth_token_ids(returned_auth_token_ids_vec);
+  if (!returned_has_duplicate.has_value()) {
+    return {returned_has_duplicate.error().to_host_fn_error(),
+            WrappedGasAmount{0}};
+  }
+  if (*returned_has_duplicate) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
