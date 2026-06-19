@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <sys/socket.h>
 #include <vector>
@@ -90,13 +91,22 @@ generate_block_hash(const BlockHeader &header)
 
 class MempoolMetrics {
 public:
-  static MempoolMetrics &shared()
+  static MempoolMetrics &instance()
   {
     static MempoolMetrics metrics;
+
+    // Initialize the metrics library on the first call to this function.
+    Metrics &registry = Metrics::instance();
+    if (!registry.done_with_init(Metrics::ComponentName::kMempool)) {
+      static std::mutex init_mutex;
+      std::lock_guard<std::mutex> lock(init_mutex);
+      if (registry.done_with_init(Metrics::ComponentName::kMempool)) {
+        return metrics;
+      }
+      metrics.init();
+    }
     return metrics;
   }
-
-  void init();
 
   Metrics::Gauge current_block_height;
   Metrics::Gauge scheduler_pending_tx_count;
@@ -140,6 +150,9 @@ public:
   Metrics::Counter commit_block_not_found_count;
   Metrics::Counter commit_reenqueued_tx_count;
   Metrics::Counter commit_removed_tx_count;
+
+private:
+  void init();
 };
 
 inline ssize_t
@@ -289,12 +302,6 @@ MempoolMetrics::init()
       "Transactions removed from the scheduler after block commits.");
 
   metrics.mark_done_with_init(kComponent);
-}
-
-inline void
-init_metrics()
-{
-  MempoolMetrics::shared().init();
 }
 
 } // namespace hogd

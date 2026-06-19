@@ -110,8 +110,8 @@ public:
       }
     }
     size_.fetch_add(num_inserted, std::memory_order_release);
-    MempoolMetrics::shared().scheduler_pending_tx_count.record(size());
-    MempoolMetrics::shared().scheduler_tx_cache_size.record(tx_cache_size());
+    MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+    MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
   }
 
   x23::Async<void>

@@ -510,8 +510,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     }
     ready_accounts_.insert(get_account_key(account));
   }
-  MempoolMetrics::shared().scheduler_pending_tx_count.record(size());
-  MempoolMetrics::shared().scheduler_tx_cache_size.record(tx_cache_size());
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 void
@@ -635,8 +635,8 @@ Scheduler::dump_runqueue()
       [&actual_size](const std::pair<ContractAddress, const AccountState> &kv) {
         actual_size += kv.second.txs.size();
       });
-  MempoolMetrics::shared().scheduler_pending_tx_count.record(actual_size);
-  MempoolMetrics::shared().scheduler_tx_cache_size.record(tx_cache_size());
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(actual_size);
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 void
@@ -1056,8 +1056,8 @@ Scheduler::schedule(size_t num_txs,
       }
     }
   }
-  MempoolMetrics::shared().scheduler_pending_tx_count.record(size());
-  MempoolMetrics::shared().scheduler_tx_cache_size.record(tx_cache_size());
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 x23::Async<void>
@@ -1155,10 +1155,10 @@ Scheduler::remove_from_scheduler(
 
   (void)a;
   (void)b;
-  MempoolMetrics::shared().last_scheduler_remove_duration_ms.record(
+  MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
       mempool_duration_ms(c));
-  MempoolMetrics::shared().scheduler_pending_tx_count.record(size());
-  MempoolMetrics::shared().scheduler_tx_cache_size.record(tx_cache_size());
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 } // namespace hogd

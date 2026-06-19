@@ -222,11 +222,11 @@ public:
     scheduler_->set_current_block(last_committed_block_.height);
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
-    MempoolMetrics::shared().current_block_height.record(
+    MempoolMetrics::instance().current_block_height.record(
         last_committed_block_.height);
-    MempoolMetrics::shared().scheduler_pending_tx_count.record(
+    MempoolMetrics::instance().scheduler_pending_tx_count.record(
         scheduler_->size());
-    MempoolMetrics::shared().scheduler_tx_cache_size.record(
+    MempoolMetrics::instance().scheduler_tx_cache_size.record(
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(last_committed_block_.height);
 
@@ -437,11 +437,11 @@ private:
         /*current_block=*/last_committed_block_.height, db_sched_client_);
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
-    MempoolMetrics::shared().current_block_height.record(
+    MempoolMetrics::instance().current_block_height.record(
         last_committed_block_.height);
-    MempoolMetrics::shared().scheduler_pending_tx_count.record(
+    MempoolMetrics::instance().scheduler_pending_tx_count.record(
         scheduler_->size());
-    MempoolMetrics::shared().scheduler_tx_cache_size.record(
+    MempoolMetrics::instance().scheduler_tx_cache_size.record(
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
@@ -536,7 +536,7 @@ private:
       admitted = true;
     });
     if (admitted) {
-      MempoolMetrics::shared().validation_in_progress_count.record(
+      MempoolMetrics::instance().validation_in_progress_count.record(
           num_validations_in_progress_.load());
     }
     co_return admitted;
@@ -560,7 +560,7 @@ private:
       CHECK_GT(count, 0L);
       --count;
     });
-    MempoolMetrics::shared().validation_in_progress_count.record(
+    MempoolMetrics::instance().validation_in_progress_count.record(
         num_validations_in_progress_.load());
     num_validations_in_progress_.broadcast(&default_threadpool());
     co_return;
@@ -580,7 +580,7 @@ private:
         }
       });
       if (closed) {
-        MempoolMetrics::shared().validation_in_progress_count.record(0);
+        MempoolMetrics::instance().validation_in_progress_count.record(0);
         co_return;
       }
       co_await num_validations_in_progress_.wait(current_validations);
@@ -593,7 +593,7 @@ private:
       CHECK_EQ(count, -1L);
       count = 0;
     });
-    MempoolMetrics::shared().validation_in_progress_count.record(0);
+    MempoolMetrics::instance().validation_in_progress_count.record(0);
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
