@@ -22,7 +22,7 @@ public:
     : histogram_(min, max, num_buckets), quantiles_(std::move(quantiles))
   {
     CHECK(!quantiles_.empty());
-    CHECK(std::ranges::is_sorted(quantiles_);
+    CHECK(std::ranges::is_sorted(quantiles_));
     for (double quantile : quantiles_) {
       CHECK_GE(quantile, 0.0);
       CHECK_LE(quantile, 1.0);
