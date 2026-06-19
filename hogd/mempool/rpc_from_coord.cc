@@ -232,17 +232,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       const auto resize_to = static_cast<size_t>(num_slots_left);
       const size_t num_discarded = txs->size() - resize_to;
 
-      info("submit_unvetted received {} txs, but only {} will fit in the "
-           "mempool. discarding {} txs.",
-           num_submitted_txs, resize_to, num_discarded);
       mempool_discarded_capacity_tx_count_metric.increment(num_discarded);
       txs->resize(resize_to);
     }
   }
 
   const BlockHeight verify_height = scheduler_->current_block();
-  info("submit_unvetted will check if {} txs are valid for height {}",
-       txs->size(), verify_height);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                              *txs);
@@ -256,7 +251,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     }
   }
   mempool_auth_failed_tx_count_metric.increment(to_remove_indices.size());
-  info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
   }
@@ -272,12 +266,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we
     // do not remove any txs above. I am not sure this is the common case
     // though.
-    ElapsedTimer timer;
     ParallelBatch response;
     co_await t_to_parallel_batch(*txs, response);
     co_await coord.coord_client_->coordscheduler_notify_vetted(response);
     coord.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
-    info("submit_unvetted() prepare response and notify = {}", timer.elapsed());
   }(*this, txs);
 
   // Careful: it is tempting to overlap the overhead of
@@ -325,15 +317,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   }
   size_t num_submitted_txs = txs.size();
   record_submitted_vetted(num_submitted_txs);
-  info("submit_vetted, {} txs", txs.size());
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
-  info("submit_vetted, got lock. will now authenticate txs");
 
   const BlockHeight verify_height = scheduler_->current_block();
-  info("submit_vetted will check if {} txs are valid for height {}", txs.size(),
-       verify_height);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                              txs);
@@ -347,14 +335,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     }
   }
   mempool_auth_failed_tx_count_metric.increment(to_remove_indices.size());
-  info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
 
   co_await scheduler_->add_txs(txs);
   mempool_accepted_vetted_tx_count_metric.increment(txs.size());
-  info("submit_vetted, finished adding txs. will now return");
   co_return;
 }
 
@@ -998,11 +984,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
-    info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
-    if (!nominated_block_cache_.tx_hashes.empty()) {
-      info("one of the hashes is: {}",
-           HexArray(nominated_block_cache_.tx_hashes[0]).str());
-    }
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
@@ -1028,8 +1009,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   // Schedule the block and send the txs to the executors.
   co_await schedule(nominated_block_cache_);
   record_stage(stage_schedule_remaining);
-  info("schedule() gave us {} txs, scheduler size is {}",
-       nominated_block_cache_.tx_hashes.size(), scheduler_->size());
 
   co_await finish_nominating_block(db_tip, nominated_block_cache_);
   record_stage(stage_finish_nominating);
@@ -1264,7 +1243,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_create_snapshot = 0.0;
   double stage_open_event_block = 0.0;
   double stage_open_validation_blocks = 0.0;
-  double stage_lookup_txs = 0.0;
   double stage_block_execution = 0.0;
   double stage_close_snapshot = 0.0;
   double stage_close_event_block = 0.0;
@@ -1284,9 +1262,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     validation_telemetry.duration = timer.elapsed();
     record_validation_attempt(std::move(validation_telemetry));
   });
-  info("schedulercoord_validate, validating block for height = {}",
-       nomination.block_height);
-
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
       co_await wait_for_validation_gate_open();
@@ -1374,9 +1349,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_await decrement_num_validations_in_progress();
       validation_telemetry.outcome = validation_outcome_str(
           SchedulerValidationOutcome::SchedulerValidationMalformed);
-      info("schedulercoord_validate rejected nomination with {} tx hashes and "
-           "{} nondeterministic data entries",
-           cache.tx_hashes.size(), tx_nominations.size());
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationMalformed);
     }
@@ -1442,7 +1414,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
 
-  info("schedulercoord_validate here");
   // [nomination] includes the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
@@ -1480,13 +1451,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       chunk_results.push_back(co_await handle);
     }
     for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
-      stage_lookup_txs += chunk_result.lookup_duration;
       validated = chunk_result.validated && validated;
       missing_tx_hashes += chunk_result.missing_tx_hashes;
       cache.txs += chunk_result.txs;
-    }
-    if (!chunk_results.empty()) {
-      stage_lookup_txs /= chunk_results.size();
     }
 
     for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
@@ -1724,8 +1691,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // We are committing the block that we nominated.
     commit_handles.push_back(commit_block(nominated_block_cache_));
     last_committed_block_ = nominated_block_cache_.db_tip;
-    info("setting last_committed_block_ height to {}",
-         nominated_block_cache_.db_tip.height);
   }
   else {
     // We are committing a block that we validated.
@@ -1741,8 +1706,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
           }(*this, nominated_block_cache_.block_id));
     }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
-    info("setting last_committed_block_ height to {}",
-         validated_block_cache_[block_id].db_tip.height);
   }
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
@@ -1880,9 +1843,6 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          KeyChangeBatch key_changes)
 {
-  info("auth_data_changed, height = {}, key_changes.size() = {}", height,
-       key_changes.size());
-
   CHECK(ready());
   CHECK_EQ(height, auth_data_height_.load() + 1);
 
