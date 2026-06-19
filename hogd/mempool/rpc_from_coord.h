@@ -223,6 +223,8 @@ public:
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
     mempool_current_block_height_metric.record(last_committed_block_.height);
+    mempool_scheduler_pending_tx_count_metric.record(scheduler_->size());
+    mempool_scheduler_tx_cache_size_metric.record(scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(last_committed_block_.height);
 
     co_return ret;
@@ -385,13 +387,6 @@ private:
     bool validated = true;
   };
 
-  struct CommitWindowTelemetry {
-    size_t submitted_vetted = 0;
-    size_t submitted_unvetted = 0;
-    NominationTelemetry nomination;
-    std::vector<ValidationTelemetry> validations;
-  };
-
   x23::Async<void> finish_init()
   {
     coord_client_ =
@@ -440,6 +435,8 @@ private:
     co_await Health::instance().set_current_block_height(
         last_committed_block_.height);
     mempool_current_block_height_metric.record(last_committed_block_.height);
+    mempool_scheduler_pending_tx_count_metric.record(scheduler_->size());
+    mempool_scheduler_tx_cache_size_metric.record(scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
     auth_rpc_->register_callback(
@@ -521,8 +518,6 @@ private:
   void record_submitted_unvetted(size_t count);
   void record_nomination_attempt(const NominationTelemetry &telemetry);
   void record_validation_attempt(ValidationTelemetry telemetry) noexcept;
-  CommitWindowTelemetry snapshot_commit_window_telemetry() const;
-  void reset_commit_window_telemetry();
 
   x23::Async<bool> increment_num_validations_in_progress()
   {
@@ -534,6 +529,10 @@ private:
       ++count;
       admitted = true;
     });
+    if (admitted) {
+      mempool_validation_in_progress_count_metric.record(
+          num_validations_in_progress_.load());
+    }
     co_return admitted;
   }
 
@@ -555,6 +554,8 @@ private:
       CHECK_GT(count, 0L);
       --count;
     });
+    mempool_validation_in_progress_count_metric.record(
+        num_validations_in_progress_.load());
     num_validations_in_progress_.broadcast(&default_threadpool());
     co_return;
   }
@@ -573,6 +574,7 @@ private:
         }
       });
       if (closed) {
+        mempool_validation_in_progress_count_metric.record(0);
         co_return;
       }
       co_await num_validations_in_progress_.wait(current_validations);
@@ -585,6 +587,7 @@ private:
       CHECK_EQ(count, -1L);
       count = 0;
     });
+    mempool_validation_in_progress_count_metric.record(0);
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
@@ -680,9 +683,6 @@ private:
       std::chrono::steady_clock::now();
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();
-
-  mutable std::mutex telemetry_mutex_;
-  CommitWindowTelemetry commit_window_telemetry_;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
