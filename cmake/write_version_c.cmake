@@ -7,8 +7,53 @@ include("${SOURCE_DIR}/cmake/repro.cmake")
 # In particular, the protocol repo is a submodule, so its checked-out commit can
 # change without any edit to the top-level CMake files. Doing the lookup here
 # ensures version.c tracks that submodule move automatically.
-git_describe_string(GIT_HOGD_COMMIT "${SOURCE_DIR}")
+find_package(Git QUIET)
+if(Git_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${SOURCE_DIR}"
+    OUTPUT_VARIABLE GIT_HOGD_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" diff-index --quiet HEAD --
+    WORKING_DIRECTORY "${SOURCE_DIR}"
+    RESULT_VARIABLE git_dirty_status
+    OUTPUT_QUIET
+    ERROR_QUIET)
+
+  if(git_dirty_status EQUAL 1)
+    string(APPEND GIT_HOGD_COMMIT "+dirty")
+  endif()
+else()
+  set(GIT_HOGD_COMMIT "git-not-found")
+endif()
+
+if(NOT GIT_HOGD_COMMIT)
+  set(GIT_HOGD_COMMIT "unknown")
+endif()
+
 git_describe_string(GIT_PROTOCOL_COMMIT "${SOURCE_DIR}/protocol" NODIRTY)
+
+if(DEFINED ENV{HOGD_RELEASE_VERSION} AND NOT "$ENV{HOGD_RELEASE_VERSION}" STREQUAL "")
+  set(HOGD_RELEASE_VERSION "$ENV{HOGD_RELEASE_VERSION}")
+elseif(Git_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" describe --tags --exact-match
+    WORKING_DIRECTORY "${SOURCE_DIR}"
+    OUTPUT_VARIABLE HOGD_RELEASE_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+endif()
+
+if(HOGD_RELEASE_VERSION MATCHES "^v(.+)$")
+  set(HOGD_RELEASE_VERSION "${CMAKE_MATCH_1}")
+endif()
+
+if(NOT HOGD_RELEASE_VERSION)
+  set(HOGD_RELEASE_VERSION "${PROJECT_VERSION}")
+endif()
 
 # Load the template source and substitute the values we just computed into the
 # @VAR@ placeholders used by cmake/version.c.in.
