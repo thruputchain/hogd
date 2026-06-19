@@ -8,7 +8,6 @@
 #include <ctime>
 #include <future>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string_view>
 #include <unordered_set>
@@ -146,7 +145,7 @@ MempoolCoordinatorRpc::record_nomination_attempt(
 
 void
 MempoolCoordinatorRpc::record_validation_attempt(
-    ValidationTelemetry telemetry) noexcept
+    const ValidationTelemetry &telemetry)
 {
   MempoolMetrics::instance().last_validation_duration_ms.record(
       mempool_duration_ms(telemetry.duration));
@@ -880,7 +879,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   };
   x23::Defer record_nomination_stats([&] {
     nomination_telemetry.duration = timer.elapsed();
-    record_nomination_attempt(nomination_telemetry);
+    try {
+      record_nomination_attempt(nomination_telemetry);
+    } catch (...) {
+      CHECK(false);
+    }
   });
   double stage_precheck = 0.0;
   double stage_wait_transfers = 0.0;
@@ -1264,7 +1267,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                            .tx_count = 0};
   x23::Defer record_validation_stats([&] {
     validation_telemetry.duration = timer.elapsed();
-    record_validation_attempt(std::move(validation_telemetry));
+    try {
+      record_validation_attempt(validation_telemetry);
+    } catch (...) {
+      CHECK(false);
+    }
   });
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
@@ -1630,7 +1637,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   double stage_remove_from_scheduler = 0.0;
   double stage_await_handles = 0.0;
   double stage_finalize = 0.0;
-  auto emit_commit_stats = [&](const char *outcome, size_t handles_size,
+  auto emit_commit_stats = [&](const char *outcome, size_t /*handles_size*/,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
     MempoolMetrics::instance().last_commit_duration_ms.record(

@@ -520,10 +520,10 @@ private:
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
 
-  void record_submitted_vetted(size_t count);
-  void record_submitted_unvetted(size_t count);
-  void record_nomination_attempt(const NominationTelemetry &telemetry);
-  void record_validation_attempt(ValidationTelemetry telemetry) noexcept;
+  static void record_submitted_vetted(size_t count);
+  static void record_submitted_unvetted(size_t count);
+  static void record_nomination_attempt(const NominationTelemetry &telemetry);
+  static void record_validation_attempt(const ValidationTelemetry &telemetry);
 
   x23::Async<bool> increment_num_validations_in_progress()
   {

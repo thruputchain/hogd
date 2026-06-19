@@ -35,7 +35,6 @@
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
 
 namespace hogd {
 
