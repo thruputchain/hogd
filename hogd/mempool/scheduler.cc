@@ -1153,8 +1153,6 @@ Scheduler::remove_from_scheduler(
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
-  (void)a;
-  (void)b;
   MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
       mempool_duration_ms(c));
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());

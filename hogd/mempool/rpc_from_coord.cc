@@ -199,7 +199,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto txs = std::make_shared<SignedTransactionBatch>();
   if (!(co_await parallel_batch_to_t(batch, *txs))) {
-    MempoolMetrics::instance().rejected_malformed_unvetted_rpc_count.increment();
+    MempoolMetrics::instance()
+        .rejected_malformed_unvetted_rpc_count.increment();
     info("submit_unvetted rejected malformed transaction batch");
     co_return;
   }
@@ -1608,7 +1609,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         commit_started_at - last_commit_;
     auto delta_raw =
         std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-    MempoolMetrics::instance().last_commit_interval_ms.record(delta_raw.count());
+    MempoolMetrics::instance().last_commit_interval_ms.record(
+        delta_raw.count());
   }
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
@@ -1631,7 +1633,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   auto emit_commit_stats = [&](const char *outcome, size_t handles_size,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
-    (void)handles_size;
     MempoolMetrics::instance().last_commit_duration_ms.record(
         mempool_duration_ms(timer.elapsed()));
     if (std::string_view(outcome) == "ok") {
