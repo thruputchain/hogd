@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -62,6 +63,44 @@ public:
     return overflow_.load(std::memory_order_relaxed);
   }
 
+  size_t count() const
+  {
+    size_t total = underflow_count() + overflow_count();
+    for (size_t i = 0; i < buckets_.size(); i++) {
+      total += bucket_count(i);
+    }
+    return total;
+  }
+
+  std::string quantile_upper_bound(double quantile) const
+  {
+    CHECK_GE(quantile, 0.0);
+    CHECK_LE(quantile, 1.0);
+
+    const size_t total_count = count();
+    if (total_count == 0) {
+      return "NaN";
+    }
+
+    const size_t target_count =
+        std::max<size_t>(1, static_cast<size_t>(std::ceil(
+                                quantile * static_cast<double>(total_count))));
+
+    size_t cumulative_count = underflow_count();
+    if (cumulative_count >= target_count) {
+      return std::format("{}", min_);
+    }
+
+    for (size_t i = 0; i < buckets_.size(); i++) {
+      cumulative_count += bucket_count(i);
+      if (cumulative_count >= target_count) {
+        return std::format("{}", bucket_upper_bound(i));
+      }
+    }
+
+    return "+Inf";
+  }
+
   std::string dump_to_string(const std::string &histogram_name) const
   {
     std::ostringstream os;
@@ -86,6 +125,11 @@ private:
   size_t bucket_idx(const T &val)
   {
     return static_cast<size_t>(std::ceil((val - min_) / bucket_delta_) - 1);
+  }
+
+  double bucket_upper_bound(size_t idx) const
+  {
+    return min_ + ((idx + 1) * bucket_delta_);
   }
 
   const T min_;
