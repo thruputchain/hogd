@@ -1,11 +1,13 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
+#include <exception>
 #include <span>
 #include <string_view>
 #include <utility>
 
 #include "event.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -17,9 +19,22 @@ namespace hogd {
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer) noexcept
 {
-  trace("ConsoleLog: {}",
-        std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
-                         input_buffer.size()));
+  // Logging the contract-controlled payload formats into heap-backed buffers.
+  // This runs in the noexcept syscall body, so a throw (typically
+  // std::bad_alloc out of memory) must not cross the noexcept boundary and
+  // terminate the process. Treat the failure as unrecoverable and return a
+  // structured error instead of pretending the syscall succeeded (issue #2717).
+  try {
+    trace("ConsoleLog: {}",
+          std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
+                           input_buffer.size()));
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
 
   // TODO(geoff): maybe entirely disable this call in release builds?  Unclear
   // if spinning on this could be e.g. a DoS vector, if we charge 0 gas forit.

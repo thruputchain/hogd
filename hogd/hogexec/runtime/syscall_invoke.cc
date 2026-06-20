@@ -324,7 +324,18 @@ syscall_Return_inner(
     returned_auth_token_ids_vec.resize(input_returned_auth_token_ids.size() /
                                        sizeof(uint32_t));
   } catch (std::exception &e) {
-    error("unrecoverable: failed to resize return buffer: {}", e.what());
+    // The resize failed (typically std::bad_alloc out of memory); this syscall
+    // returns Unrecoverable. Emit a best-effort diagnostic, but the diagnostic
+    // itself allocates while formatting, so swallow any throw from it: it must
+    // not cross the noexcept boundary and terminate before we return the
+    // structured Unrecoverable result (issue #2719).
+    try {
+      error("unrecoverable: failed to resize return buffer: {}", e.what());
+    } catch (...) {
+      // The diagnostic itself failed (e.g. a nested allocation failure); emit a
+      // best-effort breadcrumb and return Unrecoverable below.
+      report_dropped_log("Return resize-failure diagnostic");
+    }
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
   if (!input_buffer.empty()) {

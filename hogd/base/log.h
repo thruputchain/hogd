@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdio>
 #include <unistd.h>
 
 #include <array>
@@ -337,6 +338,23 @@ format_arg(T &&t)
   else {
     return std::forward<T>(t);
   }
+}
+
+// report_dropped_log writes a best-effort breadcrumb to stderr, without
+// allocating, that a diagnostic log line could not be emitted because emitting
+// it threw (typically std::bad_alloc while formatting) inside a noexcept body.
+// Callers on noexcept syscall/runtime paths catch the throw, call this so the
+// failure is not completely silent, and then fail the operation as
+// Unrecoverable -- the throw must never cross the noexcept boundary and call
+// std::terminate(). Re-allocating to log the failure would be unsafe on the
+// (cold) allocation-failure path, so this writes fixed strings straight to
+// stderr. Mirrors report_dropped_syscall_trace() in syscall_entry_outer.h.
+inline void
+report_dropped_log(const char *what) noexcept
+{
+  std::fputs("error emitting log message: ", stderr);
+  std::fputs(what, stderr);
+  std::fputc('\n', stderr);
 }
 
 } // namespace hogd
