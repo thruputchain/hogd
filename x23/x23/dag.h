@@ -211,14 +211,14 @@ private:
   template<typename T, typename Fn>
   std::function<Async<void>(size_t)> make_cpu_runner(Fn &&fn)
   {
-    auto fnp = std::make_shared<std::decay_t<Fn>>(std::forward<Fn>(fn));
-    return [this, fnp](size_t id) -> Async<void> {
+    return [this, fn = std::decay_t<Fn>(std::forward<Fn>(fn))](
+               size_t id) mutable -> Async<void> {
       co_await pool_.bg();
       if constexpr (std::is_void_v<T>) {
-        std::invoke(*fnp);
+        std::invoke(fn);
       }
       else {
-        storage<T>(id).value.emplace(std::invoke(*fnp));
+        storage<T>(id).value.emplace(std::invoke(fn));
       }
       co_return;
     };
@@ -227,16 +227,17 @@ private:
   template<typename T, typename Fn>
   std::function<Async<void>(size_t)> make_async_runner(Fn &&fn)
   {
-    auto fnp = std::make_shared<std::decay_t<Fn>>(std::forward<Fn>(fn));
     if constexpr (std::is_void_v<T>) {
-      return [fnp](size_t) -> Async<void> {
-        co_await std::invoke(*fnp);
+      return [fn = std::decay_t<Fn>(std::forward<Fn>(fn))](
+                 size_t) mutable -> Async<void> {
+        co_await std::invoke(fn);
         co_return;
       };
     }
     else {
-      return [this, fnp](size_t id) -> Async<void> {
-        storage<T>(id).value.emplace(co_await std::invoke(*fnp));
+      return [this, fn = std::decay_t<Fn>(std::forward<Fn>(fn))](
+                 size_t id) mutable -> Async<void> {
+        storage<T>(id).value.emplace(co_await std::invoke(fn));
         co_return;
       };
     }
