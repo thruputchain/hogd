@@ -125,6 +125,8 @@ public:
   Async<void> run()
   {
     auto [done, cb] = make_async<void>();
+    std::vector<size_t> to_start;
+    CoroCB<void> done_cb;
     {
       std::lock_guard lock(mutex_);
       x23assert(!started_);
@@ -132,9 +134,12 @@ public:
       done_cb_ = cb;
       for (size_t i = 0; i < nodes_.size(); i++)
         nodes_[i]->queued_at = std::chrono::steady_clock::now();
-      start_ready_nodes_locked();
-      maybe_finish_locked();
+      mark_ready_nodes_locked(to_start);
+      done_cb = finish_cb_locked();
     }
+    launch_nodes(to_start);
+    if (done_cb)
+      done_cb();
     co_await done;
   }
 
@@ -272,31 +277,34 @@ private:
     return true;
   }
 
-  void start_ready_nodes_locked()
+  void mark_ready_nodes_locked(std::vector<size_t> &to_start)
   {
     if (failure_.kind != DagFailureKind::None)
       return;
 
-    bool started_any;
-    do {
-      started_any = false;
-      for (size_t i = 0; i < nodes_.size(); i++) {
-        if (!ready_locked(i))
-          continue;
-        start_node_locked(i);
-        started_any = true;
-      }
-    } while (started_any);
+    for (size_t i = 0; i < nodes_.size(); i++) {
+      if (!ready_locked(i))
+        continue;
+      mark_node_running_locked(i);
+      to_start.push_back(i);
+    }
   }
 
-  void start_node_locked(size_t id)
+  void mark_node_running_locked(size_t id)
   {
     NodeBase &node = *nodes_[id];
     node.state = NodeState::Running;
     node.started_at = std::chrono::steady_clock::now();
     running_++;
-    run_node(id);
   }
+
+  void launch_nodes(const std::vector<size_t> &ids)
+  {
+    for (const size_t id : ids)
+      launch_node(id);
+  }
+
+  void launch_node(size_t id) { run_node(id); }
 
   Detached run_node(size_t id)
   {
@@ -314,15 +322,22 @@ private:
 
   void finish_node(size_t id, bool failed)
   {
-    std::lock_guard lock(mutex_);
-    NodeBase &node = *nodes_[id];
-    x23assert(node.state == NodeState::Running);
-    node.state = failed ? NodeState::Failed : NodeState::Done;
-    node.finished_at = std::chrono::steady_clock::now();
-    x23assert(running_ > 0);
-    running_--;
-    start_ready_nodes_locked();
-    maybe_finish_locked();
+    std::vector<size_t> to_start;
+    CoroCB<void> done_cb;
+    {
+      std::lock_guard lock(mutex_);
+      NodeBase &node = *nodes_[id];
+      x23assert(node.state == NodeState::Running);
+      node.state = failed ? NodeState::Failed : NodeState::Done;
+      node.finished_at = std::chrono::steady_clock::now();
+      x23assert(running_ > 0);
+      running_--;
+      mark_ready_nodes_locked(to_start);
+      done_cb = finish_cb_locked();
+    }
+    launch_nodes(to_start);
+    if (done_cb)
+      done_cb();
   }
 
   void fail_locked(DagFailureKind kind, std::string_view node,
@@ -337,20 +352,19 @@ private:
     };
   }
 
-  void maybe_finish_locked()
+  CoroCB<void> finish_cb_locked()
   {
     if (!started_ || finished_ || running_ != 0)
-      return;
+      return {};
 
     if (failure_.kind == DagFailureKind::None) {
       for (size_t i = 0; i < nodes_.size(); i++)
         if (ready_locked(i))
-          return;
+          return {};
     }
 
     finished_ = true;
-    if (done_cb_)
-      done_cb_();
+    return done_cb_;
   }
 
   std::string name_;
