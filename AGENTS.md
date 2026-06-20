@@ -45,8 +45,10 @@ Ubuntu 26.04 / clang-21 / gcc-15); here the same toolchain is layered onto Ubunt
 
    The cloud agent shell has **no GitHub credential that can read these private repos**
    (the default installation token is scoped to `hogd`, and there is no git credential
-   helper for `github.com`). To fetch them you need either an SSH key for the
-   `groundhogchain` org or a read-scoped token. With a token `$T` that has access:
+   helper for `github.com`). The update script will auto-fetch the private submodules
+   **if a read-scoped PAT is provided as the secret `GH_PRIVATE_SUBMODULE_TOKEN`** (it
+   rewrites the `git@github.com:` URLs to token-authenticated HTTPS). To fetch them
+   manually with a token `$T` that has access:
    ```sh
    git -c url."https://x-access-token:${T}@github.com/".insteadOf="git@github.com:" \
        submodule update --init --recursive protocol hogx groundhog-go \
