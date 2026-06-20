@@ -110,6 +110,8 @@ public:
       }
     }
     size_.fetch_add(num_inserted, std::memory_order_release);
+    MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+    MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
   }
 
   x23::Async<void>
@@ -166,9 +168,6 @@ public:
   // and those that are stranded.
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
-
-  // Debug.
-  void dump_runqueue();
 
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.

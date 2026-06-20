@@ -35,7 +35,6 @@
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
 
 namespace hogd {
 
@@ -118,7 +117,6 @@ hog_devnode_init(std::string listen_host,
 {
   install_signal_handler();
   init_hogexec_metrics();
-  init_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
                       bootstrap_config, data_dir);

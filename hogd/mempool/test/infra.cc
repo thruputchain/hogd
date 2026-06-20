@@ -36,7 +36,6 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   Registration::registration().clear();
   Metrics::instance().clear();
   init_hogexec_metrics();
-  init_metrics();
 
   mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
 

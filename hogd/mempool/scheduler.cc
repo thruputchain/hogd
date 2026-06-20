@@ -24,6 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
@@ -510,6 +511,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     }
     ready_accounts_.insert(get_account_key(account));
   }
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 void
@@ -623,17 +626,6 @@ Scheduler::cycle_groups(HogAge &current_averages)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   current_averages = new_averages;
-}
-
-void
-Scheduler::dump_runqueue()
-{
-  size_t actual_size = 0;
-  accounts_.for_each(
-      [&actual_size](const std::pair<ContractAddress, const AccountState> &kv) {
-        actual_size += kv.second.txs.size();
-      });
-  info("dump_runqueue(), size() = {}, actual size = {}", size(), actual_size);
 }
 
 void
@@ -1053,6 +1045,8 @@ Scheduler::schedule(size_t num_txs,
       }
     }
   }
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 x23::Async<void>
@@ -1136,19 +1130,19 @@ Scheduler::remove_from_scheduler(
     x23::Async<size_t> &handle = handles[i];
     total_removed_from_runqueue += co_await handle;
   }
-  double a = timer.elapsed();
-
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   });
-  double b = timer.elapsed();
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
-  info("remove_from_scheduler a {}, b-a {}, c-b {}", a, b - a, c - b);
+  MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
+      mempool_duration_ms(c));
+  MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
+  MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
 } // namespace hogd
