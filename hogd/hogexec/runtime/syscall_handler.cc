@@ -789,12 +789,33 @@ SystemCallHandler::invoke(ContractAddress const &address,
 
   auto runtime = resolve_runtime(address);
   if (!runtime) {
-    trace("SystemError: resolving runtime for address: {}, error {}",
-          x23::show(address), runtime.error());
+    // invoke() is reached from the noexcept syscall_Invoke_inner() body. A
+    // logger allocation/sink failure (typically std::bad_alloc out of memory)
+    // must not throw across the noexcept boundary and terminate the caller;
+    // fail the invocation as unrecoverable instead (issue #2714).
+    try {
+      trace("SystemError: resolving runtime for address: {}, error {}",
+            x23::show(address), runtime.error());
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    } catch (...) {
+      report_dropped_log("unknown exception");
+      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    }
     return std::pair{runtime.error(), 0};
   }
   if (!runtime.value()) {
-    trace("Failed to instantiate runtime for address: {}", x23::show(address));
+    try {
+      trace("Failed to instantiate runtime for address: {}",
+            x23::show(address));
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    } catch (...) {
+      report_dropped_log("unknown exception");
+      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    }
     return {SyscallError{
                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
             0};

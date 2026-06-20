@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <format>
 #include <memory>
 #include <string_view>
@@ -208,8 +209,20 @@ WasmtimeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
       wasmtime_invoke(wasmtime_runtime_ptr_, &method_name[0], 16, gas_limit);
 
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
-  trace("Wasmtime Invoke Result: {}",
-        x23::show(static_cast<InvokeErrorCode>(res.error)));
+  // invoke_internal() is reached from the noexcept syscall_Invoke_inner() body
+  // via Runtime::invoke(). A logger allocation/sink failure (typically
+  // std::bad_alloc out of memory) must not throw across the noexcept boundary
+  // and terminate; fail the invocation as unrecoverable instead (issue #2715).
+  try {
+    trace("Wasmtime Invoke Result: {}",
+          x23::show(static_cast<InvokeErrorCode>(res.error)));
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, res.gas_consumed};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, res.gas_consumed};
+  }
   if (wasmtime_error != InvokeErrorCode::None) {
     return {InvokeError{wasmtime_error}, res.gas_consumed};
   }
