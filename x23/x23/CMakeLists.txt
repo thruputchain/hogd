@@ -11,6 +11,7 @@ add_library(x23
   cpumap.h
   debug.h
   debug.cc
+  dag.h
   err.h
   event.cc
   event.h
