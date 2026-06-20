@@ -222,7 +222,7 @@ TEST(Dag, StatsRecordStartedAndFinishedNodes)
   Dag dag("stats", pool);
 
   auto a = dag.cpu<int>("a", [] { return 1; });
-  auto b = dag.cpu<int>("b", dag.after(a), [&] { return a.get() + 1; });
+  dag.cpu<int>("b", dag.after(a), [&] { return a.get() + 1; });
 
   dag.run()();
 
