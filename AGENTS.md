@@ -25,30 +25,39 @@ The following are installed system-wide and do **not** belong in the update scri
 The `.devcontainer/Dockerfile` is the source of truth for the toolchain (it targets
 Ubuntu 26.04 / clang-21 / gcc-15); here the same toolchain is layered onto Ubuntu 24.04.
 
-### Required credentials NOT available to the default cloud token (build blockers)
+### Credentials
 
-A full build/test/run is **blocked** until both of these are provided:
+1. **Private Cargo registry — WORKING.** The Rust workspace (`hogd/rust`) and
+   `built_contracts/` depend on crates from the private `groundhog` registry
+   (`hogexec-internal`, `groundhog-xdr`, `groundhog-wasm-meter`, `groundhog-cli`, `xdrs`, …).
+   `CARGO_REGISTRIES_GROUNDHOG_TOKEN` is provided as a secret and
+   `CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS=cargo:token` is set in the environment, so
+   `cargo build`/`test`/`fetch` work directly in `hogd/rust`. (If you ever need to set it
+   manually: `export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS=cargo:token`.)
 
-1. **Private git submodules.** `protocol`, `hogx`, `groundhog-go`, and
-   `built_contracts/integration_test_contracts` live in the private `groundhogchain`
-   GitHub org and use `git@github.com:` URLs. The default cloud token only has access
-   to `hogd` itself. Without the `protocol` submodule the C++ build fails at
+2. **Private git submodules — still a blocker for the C++ build.** `protocol`, `hogx`,
+   `groundhog-go`, and `built_contracts/integration_test_contracts` live in the private
+   `groundhogchain` GitHub org and `.gitmodules` references them via `git@github.com:`
+   (SSH). Without the `protocol` submodule the C++ build fails at
    `protocol/syscalls.yaml` (it supplies all the XDR `.x` interface definitions that
    `hogd/xdr` and nearly everything else depends on). The public submodules
    (`external/*`) are initialized by the update script.
-2. **Private Cargo registry token.** The Rust workspace (`hogd/rust`) and
-   `built_contracts/` depend on crates from the `groundhog` registry
-   (`hogexec-internal`, `groundhog-xdr`, `groundhog-wasm-meter`, `groundhog-cli`, …).
-   Even building a single public-only crate (e.g. `crypto_lib`) fails during
-   workspace resolution with "authenticated registries require a credential-provider".
-   Set:
-   ```sh
-   export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="cargo:token"
-   export CARGO_REGISTRIES_GROUNDHOG_TOKEN="Bearer <token>"   # from groundhog.dev/crates
-   ```
 
-Once both are present, `git submodule update --init --recursive` will pull the private
-submodules and `./scripts/fetch.sh` will fetch the Rust deps.
+   The cloud agent shell has **no GitHub credential that can read these private repos**
+   (the default installation token is scoped to `hogd`, and there is no git credential
+   helper for `github.com`). To fetch them you need either an SSH key for the
+   `groundhogchain` org or a read-scoped token. With a token `$T` that has access:
+   ```sh
+   git -c url."https://x-access-token:${T}@github.com/".insteadOf="git@github.com:" \
+       submodule update --init --recursive protocol hogx groundhog-go \
+       built_contracts/integration_test_contracts
+   ```
+   Then `./scripts/fetch.sh` fetches the remaining Rust deps (it also installs
+   `groundhog-cli` / `groundhog-rv32-lower` from the registry for `built_contracts/`).
+
+Once the private submodules are present, build the daemon with
+`./scripts/build.sh -c clang` (see the build notes below) and run tests via
+`make -C <builddir> test` or `./scripts/check.sh -p -s`.
 
 ### Building / testing / running
 
