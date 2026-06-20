@@ -60,22 +60,25 @@ TEST(Dag, IndependentRootsOverlapBeforeDependentStarts)
   Dag dag("overlap", pool);
   std::atomic_bool a_started{false};
   std::atomic_bool b_started{false};
-  std::atomic_bool release_roots{false};
   std::atomic_bool dependent_started{false};
+  CoroCB<int> finish_a;
+  CoroCB<int> finish_b;
 
-  auto a = dag.cpu<int>("a", [&] {
+  auto a = dag.async<int>("a", [&]() -> Async<int> {
+    auto pending_pair = make_async<int>();
+    Async<int> pending = std::move(pending_pair.first);
+    finish_a = pending_pair.second;
     a_started.store(true, std::memory_order_release);
     a_started.notify_all();
-    while (!release_roots.load(std::memory_order_acquire))
-      release_roots.wait(false);
-    return 1;
+    co_return co_await pending;
   });
-  auto b = dag.cpu<int>("b", [&] {
+  auto b = dag.async<int>("b", [&]() -> Async<int> {
+    auto pending_pair = make_async<int>();
+    Async<int> pending = std::move(pending_pair.first);
+    finish_b = pending_pair.second;
     b_started.store(true, std::memory_order_release);
     b_started.notify_all();
-    while (!release_roots.load(std::memory_order_acquire))
-      release_roots.wait(false);
-    return 2;
+    co_return co_await pending;
   });
   auto c = dag.cpu<int>("c", dag.after(a, b), [&] {
     dependent_started.store(true, std::memory_order_release);
@@ -89,17 +92,27 @@ TEST(Dag, IndependentRootsOverlapBeforeDependentStarts)
     done.notify_all();
   }(dag, done);
 
-  while (!a_started.load(std::memory_order_acquire))
-    a_started.wait(false);
-  while (!b_started.load(std::memory_order_acquire))
-    b_started.wait(false);
+  const auto deadline = std::chrono::steady_clock::now() + 1s;
+  while (std::chrono::steady_clock::now() < deadline &&
+         (!a_started.load(std::memory_order_acquire) ||
+          !b_started.load(std::memory_order_acquire))) {
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_TRUE(a_started.load(std::memory_order_acquire));
+  EXPECT_TRUE(b_started.load(std::memory_order_acquire));
   EXPECT_FALSE(dependent_started.load(std::memory_order_acquire));
 
-  release_roots.store(true, std::memory_order_release);
-  release_roots.notify_all();
-  while (!done.load(std::memory_order_acquire))
-    done.wait(false);
+  ASSERT_TRUE(finish_a);
+  ASSERT_TRUE(finish_b);
+  finish_a(1);
+  finish_b(2);
+  const auto done_deadline = std::chrono::steady_clock::now() + 1s;
+  while (std::chrono::steady_clock::now() < done_deadline &&
+         !done.load(std::memory_order_acquire)) {
+    std::this_thread::sleep_for(1ms);
+  }
 
+  EXPECT_TRUE(done.load(std::memory_order_acquire));
   EXPECT_TRUE(dag.ok());
   EXPECT_EQ(c.get(), 3);
 }
@@ -111,8 +124,9 @@ TEST(Dag, AsyncNodeCanBeCompletedLater)
   std::atomic_bool async_started{false};
 
   auto a = dag.async<int>("a", [&]() -> Async<int> {
-    auto [pending, cb] = make_async<int>();
-    finish = cb;
+    auto pending_pair = make_async<int>();
+    Async<int> pending = std::move(pending_pair.first);
+    finish = pending_pair.second;
     async_started.store(true, std::memory_order_release);
     async_started.notify_all();
     co_return co_await pending;

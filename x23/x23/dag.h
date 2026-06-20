@@ -124,7 +124,9 @@ public:
 
   Async<void> run()
   {
-    auto [done, cb] = make_async<void>();
+    auto done_pair = make_async<void>();
+    Async<void> done = std::move(done_pair.first);
+    CoroCB<void> cb = done_pair.second;
     std::vector<size_t> to_start;
     CoroCB<void> done_cb;
     {
