@@ -45,19 +45,31 @@ The startup update script initializes the public `external/*` submodules and, wh
    `protocol/syscalls.yaml` (it supplies all the XDR `.x` interface definitions that
    `hogd/xdr` and nearly everything else depends on).
 
-   The cloud agent shell has **no GitHub credential that can read these private repos**
-   (the default installation token is scoped to `hogd`, and there is no git credential
-   helper for `github.com`). The update script will auto-fetch the private submodules
-   **if a read-scoped PAT is provided as the secret `GH_PRIVATE_SUBMODULE_TOKEN`** (it
-   rewrites the `git@github.com:` URLs to token-authenticated HTTPS). To fetch them
-   manually with a token `$T` that has access:
+   No separate token is required *in principle* — the Cursor GitHub App integration
+   credential can be reused. Two mechanical issues are why it isn't automatic:
+   - The App installation token is minted at VM boot, so a grant added mid-run only
+     takes effect on a **fresh agent run**.
+   - `.gitmodules` uses SSH URLs while Cursor provides an **HTTPS** token (embedded in
+     the `origin` remote), and there is no git credential helper — so a plain
+     `git submodule update` falls back to keyless SSH and fails.
+
+   The update script handles the second issue: it reuses the App token from the `origin`
+   remote (falling back to a `GH_PRIVATE_SUBMODULE_TOKEN` secret if one is set) and
+   rewrites `git@github.com:` to token-authenticated HTTPS:
    ```sh
-   git -c url."https://x-access-token:${T}@github.com/".insteadOf="git@github.com:" \
+   TOK="$(git config --get remote.origin.url | sed -nE 's#https://[^:/]+:([^@]+)@github.com/.*#\1#p')"
+   git -c url."https://x-access-token:${TOK}@github.com/".insteadOf="git@github.com:" \
        submodule update --init --recursive protocol hogx groundhog-go \
        built_contracts/integration_test_contracts
    ```
-   Then `./scripts/fetch.sh` fetches the remaining Rust deps (it also installs
-   `groundhog-cli` / `groundhog-rv32-lower` from the registry for `built_contracts/`).
+   For this to succeed on a fresh run, the App token must actually be **scoped** to the
+   four private repos (not just `hogd`). Ensure the Cursor GitHub App installation
+   includes them (dashboard → integrations → Manage Connections) and, if Cursor scopes
+   the agent token per-repo, add them to the cloud environment's repo selection. If the
+   org cannot broaden the App token's scope, set the `GH_PRIVATE_SUBMODULE_TOKEN` secret
+   as a fallback. Then `./scripts/fetch.sh` fetches the remaining Rust deps (it also
+   installs `groundhog-cli` / `groundhog-rv32-lower` from the registry for
+   `built_contracts/`).
 
 Once the private submodules are present, build the daemon with
 `./scripts/build.sh -c clang` (see the build notes below) and run tests via
