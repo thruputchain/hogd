@@ -85,6 +85,8 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+// clang tidy complains if the body of [x23::Defer()] can throw an exception, so
+// we wrap the body in this try/catch block.
 template<typename F>
 void
 record_metric_cleanup(F &&f) noexcept
