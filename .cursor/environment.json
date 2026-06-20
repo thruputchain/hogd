@@ -1,0 +1,11 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "install": "bash .cursor/cloud-agent-install.sh",
+  "env": {
+    "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+    "CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS": "cargo:token"
+  }
+}

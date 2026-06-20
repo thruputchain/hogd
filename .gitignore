@@ -1,5 +1,5 @@
 **/.DS_STORE
-AGENTS.md
+!AGENTS.md
 *.a
 *.codex
 *.combined
@@ -9,6 +9,7 @@ AGENTS.md
 *.json
 *.pyc
 !.devcontainer/devcontainer.json
+!.cursor/environment.json
 *.log
 *.o
 *.out
