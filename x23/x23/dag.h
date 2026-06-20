@@ -228,15 +228,18 @@ private:
   std::function<Async<void>(size_t)> make_async_runner(Fn &&fn)
   {
     auto fnp = std::make_shared<std::decay_t<Fn>>(std::forward<Fn>(fn));
-    return [this, fnp](size_t id) -> Async<void> {
-      if constexpr (std::is_void_v<T>) {
+    if constexpr (std::is_void_v<T>) {
+      return [fnp](size_t) -> Async<void> {
         co_await std::invoke(*fnp);
-      }
-      else {
+        co_return;
+      };
+    }
+    else {
+      return [this, fnp](size_t id) -> Async<void> {
         storage<T>(id).value.emplace(co_await std::invoke(*fnp));
-      }
-      co_return;
-    };
+        co_return;
+      };
+    }
   }
 
   template<typename T>
