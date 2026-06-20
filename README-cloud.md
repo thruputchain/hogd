@@ -1,14 +1,14 @@
-# AGENTS.md
+# Cursor Cloud dev environment
 
-## Cursor Cloud specific instructions
+Notes for running `hogd` in a Cursor Cloud agent VM. `hogd` (groundhogchain) is a
+C++23 + Rust blockchain validator/daemon. The build is driven by CMake
+(`scripts/build.sh`, `scripts/check.sh`) and pulls in both public git submodules and
+several **private** dependencies.
 
-`hogd` (groundhogchain) is a C++23 + Rust blockchain validator/daemon. The build is
-driven by CMake (`scripts/build.sh`, `scripts/check.sh`) and pulls in both public
-git submodules and several **private** dependencies.
+## Toolchain (provisioned in the VM snapshot)
 
-### Toolchain (already provisioned in the VM snapshot)
-
-The following are installed system-wide and do **not** belong in the update script:
+The following are installed system-wide (they live in the snapshot, not the startup
+update script):
 
 - `clang-21` / `clang++-21` (default `clang`/`clang++` via update-alternatives), `lld-21`,
   `libc++-21`, `clang-format-21`, `clang-tidy-21`, plus the `llvm-*-21` tools.
@@ -25,7 +25,10 @@ The following are installed system-wide and do **not** belong in the update scri
 The `.devcontainer/Dockerfile` is the source of truth for the toolchain (it targets
 Ubuntu 26.04 / clang-21 / gcc-15); here the same toolchain is layered onto Ubuntu 24.04.
 
-### Credentials
+The startup update script initializes the public `external/*` submodules and, when
+`GH_PRIVATE_SUBMODULE_TOKEN` is set, the private submodules too (see below).
+
+## Credentials
 
 1. **Private Cargo registry — WORKING.** The Rust workspace (`hogd/rust`) and
    `built_contracts/` depend on crates from the private `groundhog` registry
@@ -35,13 +38,12 @@ Ubuntu 26.04 / clang-21 / gcc-15); here the same toolchain is layered onto Ubunt
    `cargo build`/`test`/`fetch` work directly in `hogd/rust`. (If you ever need to set it
    manually: `export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS=cargo:token`.)
 
-2. **Private git submodules — still a blocker for the C++ build.** `protocol`, `hogx`,
+2. **Private git submodules — blocker for the C++ build.** `protocol`, `hogx`,
    `groundhog-go`, and `built_contracts/integration_test_contracts` live in the private
    `groundhogchain` GitHub org and `.gitmodules` references them via `git@github.com:`
    (SSH). Without the `protocol` submodule the C++ build fails at
    `protocol/syscalls.yaml` (it supplies all the XDR `.x` interface definitions that
-   `hogd/xdr` and nearly everything else depends on). The public submodules
-   (`external/*`) are initialized by the update script.
+   `hogd/xdr` and nearly everything else depends on).
 
    The cloud agent shell has **no GitHub credential that can read these private repos**
    (the default installation token is scoped to `hogd`, and there is no git credential
@@ -61,7 +63,7 @@ Once the private submodules are present, build the daemon with
 `./scripts/build.sh -c clang` (see the build notes below) and run tests via
 `make -C <builddir> test` or `./scripts/check.sh -p -s`.
 
-### Building / testing / running
+## Building / testing / running
 
 Standard commands are documented in `README.md` and `docker/README.md`; non-obvious points:
 
