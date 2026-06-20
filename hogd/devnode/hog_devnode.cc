@@ -258,6 +258,7 @@ Options:
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
+  --version                      Print version
   -h, --help                     Print help
 
 Environment:
@@ -456,6 +457,9 @@ parse_args(int argc, char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (hogd::print_version_and_exit_if_requested(argc, argv)) {
+    return EXIT_SUCCESS;
+  }
   HogDevnodeOptions options;
   try {
     options = parse_args(argc, argv);

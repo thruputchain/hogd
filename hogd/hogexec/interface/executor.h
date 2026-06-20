@@ -41,14 +41,19 @@ public:
   {
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
-    // actually start our server (especially because [port_number] could be 0,
-    // in which case the kernel will assign a port number to us).
-    // Thus, we start the RPC server first, then below we register with the
-    // coordinator, and finally we start handling incoming RPCs in
-    // [start_rpc_service()].
+    // actually bind our server socket (especially because [self_port] could be
+    // 0, in which case the kernel will assign a port number to us).
+    //
+    // We must NOT start handling incoming RPCs until init() has finished
+    // publishing executor_states_/self_executor_id_, or coordinator RPCs would
+    // race that initialization (the handlers read those members without
+    // synchronization). So we split startup into three sequenced steps: bind to
+    // learn the port, register + init, and only then start accepting. While
+    // init() runs, the kernel queues any coordinator connections/requests in
+    // the listen backlog; we drain them once start_accepting() is called.
     server_->max_message_size_ = kMessageSize;
-    uint16_t executor_port =
-        server_.start_server(make_bind_host_port(bind_ip, self_port));
+    auto [executor_port, listen_fd] =
+        server_.bind_server(make_bind_host_port(bind_ip, self_port));
     assert(executor_port == self_port || self_port == 0);
 
     // Now register with the coordinator.
@@ -56,8 +61,11 @@ public:
         MempoolExecutorClient::register_with_coordinator(
             make_bind_host_port(bind_ip, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
-    // Then begins serving RPCs to the coordinator.
     server_->impl()->init(std::move(exec_result), n_exec_threads_);
+
+    // init() has published all state the RPC handlers read; it is now safe to
+    // begin serving RPCs to the coordinator.
+    server_.start_accepting(std::move(listen_fd));
 
     return executor_port;
   }

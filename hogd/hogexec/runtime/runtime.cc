@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 
+#include <exception>
 #include <memory>
 #include <string_view>
 
@@ -73,11 +74,36 @@ InvokeResult
 Runtime::invoke(MethodID method_id, uint64_t gas_limit)
 {
 
-  trace("Invoking method {} with gas limit {}", method_id, gas_limit);
+  // This runs on the child-Invoke path inside the noexcept syscall body. A
+  // logger allocation/sink failure (typically std::bad_alloc out of memory)
+  // must not throw across the noexcept boundary and terminate the process;
+  // treat it as an unrecoverable invocation failure instead (issues #2713,
+  // #2718).
+  try {
+    trace("Invoking method {} with gas limit {}", method_id, gas_limit);
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  }
   auto [res, gas_consumed] = invoke_internal(method_id, gas_limit);
-  trace("Invoke result: {}, gas consumed: {}",
-        res.has_value() ? "success" : x23::show(res.error().code()),
-        gas_consumed);
+  try {
+    trace("Invoke result: {}, gas consumed: {}",
+          res.has_value() ? "success" : x23::show(res.error().code()),
+          gas_consumed);
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = gas_consumed};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = gas_consumed};
+  }
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.

@@ -183,6 +183,8 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
                 entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
         w.field("doActionEntrypoint",
                 entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+        w.field("createWalletEntrypoint",
+                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);

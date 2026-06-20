@@ -59,10 +59,16 @@ fnv_digest_u64(uint64_t digest, uint64_t value)
   return digest;
 }
 
+// Folds a name into the digest. The parameter is `const char8_t *` (fed from
+// `u8"..."` literals) so the hashed code units are the standard-defined UTF-8
+// bytes, independent of the ordinary execution character set
+// (`-fexec-charset`). These digests are RV32 artifact wire constants; an
+// ordinary `const char *` literal would hash implementation-defined bytes. See
+// hogd issue #2689.
 constexpr uint64_t
-fnv_digest_name(uint64_t digest, const char *name)
+fnv_digest_name(uint64_t digest, const char8_t *name)
 {
-  for (const char *cursor = name; *cursor != '\0'; ++cursor) {
+  for (const char8_t *cursor = name; *cursor != u8'\0'; ++cursor) {
     digest = fnv_digest_byte(digest, static_cast<uint8_t>(*cursor));
   }
   return fnv_digest_byte(digest, 0);

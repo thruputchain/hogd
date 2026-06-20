@@ -483,6 +483,24 @@ source_address_auth_claim()
   return claim;
 }
 
+SignedTransaction
+sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key)
+{
+  Signature signature(CryptographicScheme::Ed25519);
+  auto signed_bytes = ed25519_sign(secret_key, x23::serialize(tx));
+  if (!signed_bytes.has_value()) {
+    throw std::runtime_error("failed to sign test transaction");
+  }
+  signature.ed25519() = std::move(*signed_bytes);
+  return SignedTransaction{
+      .tx = std::move(tx),
+      .signatures = {DecoratedSignature{
+          .public_key_id = 0,
+          .signature = signature,
+      }},
+  };
+}
+
 SignedTransactionHashBatch
 submit_and_commit(sched_coord_client_t &scheduler,
                   SignedTransactionBatch const &txs)
@@ -517,7 +535,8 @@ class HogDevnodeProcess {
 public:
   static HogDevnodeProcess
   start(std::vector<std::string> extra_args = {},
-        const std::vector<std::pair<std::string, std::string>> &extra_env = {})
+        const std::vector<std::pair<std::string, std::string>> &extra_env = {},
+        bool include_default_args = true)
   {
     int stdout_pipe[2];
     int stderr_pipe[2];
@@ -551,13 +570,12 @@ public:
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
 
-      std::vector<std::string> args{HOG_DEVNODE_BINARY,
-                                    "--listen-host",
-                                    "127.0.0.1",
-                                    "--scheduler-port",
-                                    "0",
-                                    "--readiness",
-                                    "stdout"};
+      std::vector<std::string> args{HOG_DEVNODE_BINARY};
+      if (include_default_args) {
+        args.insert(args.end(),
+                    {"--listen-host", "127.0.0.1", "--scheduler-port", "0",
+                     "--readiness", "stdout"});
+      }
       args.insert(args.end(), extra_args.begin(), extra_args.end());
 
       for (auto const &[key, value] : extra_env) {
@@ -935,8 +953,10 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
-  EXPECT_EQ(require_string_field(*producer, "version", ""),
-            version::kHogdVersion);
+  const std::string_view producer_version =
+      require_string_field(*producer, "version", "");
+  EXPECT_EQ(producer_version, version::kHogdVersion);
+  EXPECT_NE(producer_version, "0.0.1");
   std::string_view git_hash = version::kHogdGitHash;
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
@@ -964,6 +984,8 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
             entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
             entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+  EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),
+            entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -1005,8 +1027,31 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--data-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--contract-artifacts-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--dev-wallet-profile <name>"));
+  EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
+  EXPECT_TRUE(stderr_output.empty()) << stderr_output;
+}
+
+TEST(HogDevnode, VersionPrintsBeforeInitialization)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--version"}, {},
+                               /*include_default_args=*/false);
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_SUCCESS);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_EQ(stdout_output,
+            std::format("hog-devnode {}\n", version::kHogdVersion));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
@@ -2277,6 +2322,105 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+
+  {
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)();
+
+    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+              IndexerBlockExplorerIntroOutcome::IntroSuccess);
+
+    auto wallet_contract = load_default_dev_wallet_contract();
+    ASSERT_TRUE(wallet_contract);
+    auto sponsor_keypair =
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+    Ed25519PublicKey owner_public_key =
+        derive_bootstrap_account_keypair("created-wallet-owner", /*index=*/0)
+            .first;
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    const ContractAddress sponsor_wallet_address =
+        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+    EXPECT_EQ(hex_string(sponsor_wallet_address),
+              readiness.bootstrap_accounts[0].address);
+
+    const SHA256Hash wallet_hash = sha256(*wallet_contract);
+    const SHA256Hash create_wallet_nonce = make_nonce(31);
+    const ContractAddress created_wallet_address =
+        sha256(ContractDeploymentHashPreimage{.deployer_address =
+                                                  sponsor_wallet_address,
+                                              .nonce = create_wallet_nonce,
+                                              .contract_hash = wallet_hash});
+
+    Transaction create_wallet_tx{
+        .invocation =
+            Invocation{.invoked_address = sponsor_wallet_address,
+                       .entrypoint = wallet_meta::entrypoint<"create_wallet">(),
+                       .gas_limit = GasAmount{10'000'000},
+                       .calldata = wallet_meta::make_calldata<"create_wallet">(
+                           create_wallet_nonce, wallet_hash, owner_public_key)},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 31},
+        .contracts_to_deploy = {*wallet_contract},
+        .auth_claim = source_address_auth_claim(),
+    };
+    SignedTransaction signed_create_wallet_tx =
+        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second);
+    const SignedTransactionHash create_wallet_tx_hash =
+        sha256(signed_create_wallet_tx.tx);
+    SignedTransactionHashBatch create_hashes =
+        submit_and_commit(scheduler,
+                          SignedTransactionBatch{signed_create_wallet_tx});
+    if (create_hashes.size() != 1UL) {
+      int status = process.terminate();
+      ADD_FAILURE() << "hog-devnode exited with status " << status
+                    << "\nstderr:\n"
+                    << process.read_remaining_stderr();
+      return;
+    }
+    ASSERT_EQ(create_hashes[0], create_wallet_tx_hash);
+
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+    while (std::chrono::steady_clock::now() < deadline) {
+      result = reader.get_transaction_info(create_wallet_tx_hash)();
+      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+    EXPECT_EQ(result.info().events.proposed_tx_hash, create_wallet_tx_hash);
+    ASSERT_EQ(result.info().events.root_output.status_code(),
+              InvocationFrameStatusCode::Return);
+    ReturnBuffer expected_return_buffer(created_wallet_address.begin(),
+                                        created_wallet_address.end());
+    EXPECT_EQ(result.info().events.root_output.return_buffer(),
+              expected_return_buffer);
   }
 
   expect_clean_exit(process);
