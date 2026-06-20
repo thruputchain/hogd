@@ -106,7 +106,7 @@ usage(char *argv[])
   std::println("usage: {} --mempool-addr <host:port> --work-dir <path> "
                "--bind-ip <ip> [--executor-port <port>] "
                "[--indexer-port <port>] [--mempool-port <port>] "
-               "[--metrics-port <port>]",
+               "[--metrics-port <port>] [--version]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -127,6 +127,9 @@ parse_port(const std::string &value)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (hogd::print_version_and_exit_if_requested(argc, argv)) {
+    return EXIT_SUCCESS;
+  }
   int ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;

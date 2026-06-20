@@ -535,7 +535,8 @@ class HogDevnodeProcess {
 public:
   static HogDevnodeProcess
   start(std::vector<std::string> extra_args = {},
-        const std::vector<std::pair<std::string, std::string>> &extra_env = {})
+        const std::vector<std::pair<std::string, std::string>> &extra_env = {},
+        bool include_default_args = true)
   {
     int stdout_pipe[2];
     int stderr_pipe[2];
@@ -569,13 +570,12 @@ public:
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
 
-      std::vector<std::string> args{HOG_DEVNODE_BINARY,
-                                    "--listen-host",
-                                    "127.0.0.1",
-                                    "--scheduler-port",
-                                    "0",
-                                    "--readiness",
-                                    "stdout"};
+      std::vector<std::string> args{HOG_DEVNODE_BINARY};
+      if (include_default_args) {
+        args.insert(args.end(),
+                    {"--listen-host", "127.0.0.1", "--scheduler-port", "0",
+                     "--readiness", "stdout"});
+      }
       args.insert(args.end(), extra_args.begin(), extra_args.end());
 
       for (auto const &[key, value] : extra_env) {
@@ -953,8 +953,10 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
-  EXPECT_EQ(require_string_field(*producer, "version", ""),
-            version::kHogdVersion);
+  const std::string_view producer_version =
+      require_string_field(*producer, "version", "");
+  EXPECT_EQ(producer_version, version::kHogdVersion);
+  EXPECT_NE(producer_version, "0.0.1");
   std::string_view git_hash = version::kHogdGitHash;
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
@@ -1025,8 +1027,31 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--data-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--contract-artifacts-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--dev-wallet-profile <name>"));
+  EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
+  EXPECT_TRUE(stderr_output.empty()) << stderr_output;
+}
+
+TEST(HogDevnode, VersionPrintsBeforeInitialization)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--version"}, {},
+                               /*include_default_args=*/false);
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_SUCCESS);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_EQ(stdout_output,
+            std::format("hog-devnode {}\n", version::kHogdVersion));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
