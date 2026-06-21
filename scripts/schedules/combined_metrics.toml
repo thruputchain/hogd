@@ -31,13 +31,16 @@ popd >/dev/null
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
-echo 'reap any control server left over from a previous run'
-# A control server from a previous run can still be alive and holding the
-# deterministic control port, which fails this run's bind with "address already
-# in use". The shutdown RPC is sent, but the server can fail to actually come
-# down. Free the port before we start.
-fuser -k -TERM "$CI_CONTROL_PORT"/tcp 2>/dev/null && sleep 3 || true
-fuser -k "$CI_CONTROL_PORT"/tcp 2>/dev/null || true
+echo 'reap any control_server left over from a previous run'
+# A control_server from a previous run can still be alive and holding the
+# deterministic control port, failing this run's bind with "address already in
+# use". The end-of-run shutdown RPC is sent, but the server can fail to actually
+# come down. Reap it by name before we start, matching the killall cleanup idiom
+# the benchmark scripts already use. Fail loudly if killall is missing, so a
+# stale server can't silently slip through and recreate the bind failure.
+command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
+killall -TERM control_server 2>/dev/null && sleep 3 || true
+killall -KILL control_server 2>/dev/null || true
 
 echo 'run bench server'
 mkdir -p ci_work_dir/
@@ -118,13 +121,16 @@ shutdown_bench_servers() {
 }
 trap shutdown_bench_servers EXIT
 
-echo 'reap any control server left over from a previous run'
-# A control server from a previous run can still be alive and holding the
-# deterministic control port, which fails this run's bind with "address already
-# in use". The shutdown RPC is sent, but the server can fail to actually come
-# down. Free the port before we start.
-fuser -k -TERM "$CI_CONTROL_PORT"/tcp 2>/dev/null && sleep 3 || true
-fuser -k "$CI_CONTROL_PORT"/tcp 2>/dev/null || true
+echo 'reap any control_server left over from a previous run'
+# A control_server from a previous run can still be alive and holding the
+# deterministic control port, failing this run's bind with "address already in
+# use". The end-of-run shutdown RPC is sent, but the server can fail to actually
+# come down. Reap it by name before we start, matching the killall cleanup idiom
+# the benchmark scripts already use. Fail loudly if killall is missing, so a
+# stale server can't silently slip through and recreate the bind failure.
+command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
+killall -TERM control_server 2>/dev/null && sleep 3 || true
+killall -KILL control_server 2>/dev/null || true
 
 echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
