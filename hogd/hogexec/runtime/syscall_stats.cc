@@ -3,6 +3,7 @@
 #include <exception>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"

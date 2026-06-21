@@ -7,6 +7,8 @@
 #include <span>
 #include <utility>
 
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"

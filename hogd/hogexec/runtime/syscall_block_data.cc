@@ -5,6 +5,7 @@
 #include <exception>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"

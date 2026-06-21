@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
