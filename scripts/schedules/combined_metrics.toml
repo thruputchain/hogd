@@ -31,6 +31,17 @@ popd >/dev/null
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
+echo 'reap any control_server left over from a previous run'
+# A control_server from a previous run can still be alive and holding the
+# deterministic control port, failing this run's bind with "address already in
+# use". The end-of-run shutdown RPC is sent, but the server can fail to actually
+# come down. Reap it by name before we start, matching the killall cleanup idiom
+# the benchmark scripts already use. Fail loudly if killall is missing, so a
+# stale server can't silently slip through and recreate the bind failure.
+command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
+killall -TERM control_server 2>/dev/null && sleep 3 || true
+killall -KILL control_server 2>/dev/null || true
+
 echo 'run bench server'
 mkdir -p ci_work_dir/
 ./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/
@@ -109,6 +120,17 @@ shutdown_bench_servers() {
   ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 }
 trap shutdown_bench_servers EXIT
+
+echo 'reap any control_server left over from a previous run'
+# A control_server from a previous run can still be alive and holding the
+# deterministic control port, failing this run's bind with "address already in
+# use". The end-of-run shutdown RPC is sent, but the server can fail to actually
+# come down. Reap it by name before we start, matching the killall cleanup idiom
+# the benchmark scripts already use. Fail loudly if killall is missing, so a
+# stale server can't silently slip through and recreate the bind failure.
+command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
+killall -TERM control_server 2>/dev/null && sleep 3 || true
+killall -KILL control_server 2>/dev/null || true
 
 echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
