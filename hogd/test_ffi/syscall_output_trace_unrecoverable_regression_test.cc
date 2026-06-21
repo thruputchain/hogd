@@ -93,7 +93,7 @@ run_in_traced_frame(Body &&body, ContractAddress contract_addr = {0x42})
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   // Tracing was enabled, so the finished frame carries a serialized trace built
-  // by the now-best-effort trace-output paths.
+  // by the trace-output recording paths.
   EXPECT_NE(finish_res.serialized_trace.data, nullptr);
   EXPECT_GT(finish_res.serialized_trace.len, 0U);
   free_ffi_data_buffer(finish_res.serialized_output);
@@ -117,9 +117,10 @@ TEST(TestBindingsTest, TracedGetBlockHeightOutputRecordsTraceWithoutCrashing)
 {
   run_in_traced_frame([](void * /*handler*/) {
     BlockHeight height = -1;
-    auto result = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kGetBlockHeight),
-        reinterpret_cast<uint64_t>(&height), 0, 0, 0, 0, 0, 0);
+    auto result =
+        mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetBlockHeight),
+                                reinterpret_cast<uint64_t>(&height), 0, 0, 0, 0,
+                                0, 0);
     expect_syscall_ok(result);
     EXPECT_EQ(height, 0);
   });
@@ -132,10 +133,12 @@ TEST(TestBindingsTest, TracedSha256OutputRecordsTraceWithoutCrashing)
     std::array<std::byte, 3> input{std::byte{0x61}, std::byte{0x62},
                                    std::byte{0x63}};
     SHA256Hash output_hash{};
-    auto result = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kSHA256),
-        reinterpret_cast<uint64_t>(input.data()), input.size(),
-        reinterpret_cast<uint64_t>(&output_hash), 0, 0, 0, 0);
+    auto result =
+        mock_syscall_entrypoint(std::to_underlying(SyscallNo::kSHA256),
+                                reinterpret_cast<uint64_t>(input.data()),
+                                input.size(),
+                                reinterpret_cast<uint64_t>(&output_hash), 0, 0,
+                                0, 0);
     expect_syscall_ok(result);
     EXPECT_EQ(output_hash, sha256(std::span<const std::byte>(input)));
   });
@@ -143,14 +146,14 @@ TEST(TestBindingsTest, TracedSha256OutputRecordsTraceWithoutCrashing)
 
 // #2697: GetCurrentAddress writes the frame address, then records its trace
 // output.
-TEST(TestBindingsTest,
-     TracedGetCurrentAddressOutputRecordsTraceWithoutCrashing)
+TEST(TestBindingsTest, TracedGetCurrentAddressOutputRecordsTraceWithoutCrashing)
 {
   run_in_traced_frame([](void * /*handler*/) {
     ContractAddress address{};
-    auto result = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kGetCurrentAddress),
-        reinterpret_cast<uint64_t>(&address), 0, 0, 0, 0, 0, 0);
+    auto result = mock_syscall_entrypoint(std::to_underlying(
+                                              SyscallNo::kGetCurrentAddress),
+                                          reinterpret_cast<uint64_t>(&address),
+                                          0, 0, 0, 0, 0, 0);
     expect_syscall_ok(result);
     EXPECT_EQ(address, ContractAddress{0x42});
   });
@@ -189,8 +192,8 @@ TEST(TestBindingsTest,
   });
 }
 
-// #2750: RetrocausalQueuePeekLen stages the entry length, then records its trace
-// output.
+// #2750: RetrocausalQueuePeekLen stages the entry length, then records its
+// trace output.
 TEST(TestBindingsTest,
      TracedRetrocausalQueuePeekLenOutputRecordsTraceWithoutCrashing)
 {

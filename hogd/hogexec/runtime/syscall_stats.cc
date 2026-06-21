@@ -31,7 +31,8 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
             SyscallGetTransactionStatisticsOutputs{.result = output_result});
       } catch (std::exception &e) {
         report_dropped_syscall_trace(e.what());
-        return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+        return {HostFnError{HostFnErrorCode::Unrecoverable},
+                WrappedGasAmount{0}};
       }
     }
     return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
