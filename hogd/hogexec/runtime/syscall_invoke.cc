@@ -72,8 +72,8 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetMsgSenderOutputs{.sender = output_sender});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetMsgSender,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -91,8 +91,8 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetCurrentAddressOutputs{.address = output_address});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCurrentAddress,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -111,8 +111,8 @@ syscall_GetSourceTransactionHash_inner(
       trace_data->outputs.emplace(SyscallGetSourceTransactionHashOutputs{
           .source_tx_hash = output_source_tx_hash});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kGetSourceTransactionHash, e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -133,8 +133,8 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(SyscallGetCalldataLenOutputs{
           .len = output_len, .auth_token_count = output_auth_token_count});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -172,8 +172,8 @@ syscall_GetCalldata_inner(
           SyscallGetCalldataOutputs{.calldata = calldata,
                                     .auth_tokens = auth_token_list});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -414,8 +414,8 @@ syscall_GetReturnedBuffer_inner(
       trace_data->outputs.emplace(
           SyscallGetReturnedBufferOutputs{.buffer = return_buffer});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetReturnedBuffer,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 

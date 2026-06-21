@@ -5,7 +5,6 @@
 #include <exception>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
@@ -32,8 +31,8 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetBlockHeightOutputs{.result = output_result});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetBlockHeight,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};

@@ -3,7 +3,6 @@
 #include <exception>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -31,8 +30,8 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
         trace_data->outputs.emplace(
             SyscallGetTransactionStatisticsOutputs{.result = output_result});
       } catch (std::exception &e) {
-        panic("Failed to trace syscall {}: {}",
-              SyscallNo::kGetTransactionStatistics, e.what());
+        report_dropped_syscall_trace(e.what());
+        return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
       }
     }
     return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};

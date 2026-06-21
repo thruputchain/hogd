@@ -7,7 +7,6 @@
 #include <span>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -47,8 +46,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallBytestringGetOutputs{.bytestring = *bs});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 
@@ -77,8 +76,8 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallBytestringGetLenOutputs{.length = output_length});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGetLen,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 

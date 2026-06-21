@@ -8,7 +8,6 @@
 #include <span>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_buffer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -67,8 +66,8 @@ syscall_RetrocausalQueueConsume_inner(
       trace_data->outputs.emplace(
           SyscallRetrocausalQueueConsumeOutputs{.queue_entry = queue_entry});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kRetrocausalQueueConsume, e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 
@@ -101,8 +100,8 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallRetrocausalQueuePeekLenOutputs{.len = output_len});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kRetrocausalQueuePeekLen, e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 

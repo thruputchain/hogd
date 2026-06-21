@@ -5,7 +5,6 @@
 #include <optional>
 #include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -57,8 +56,8 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
       }
       trace_data->outputs->current_add = to_xdr(output_current_add);
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kNonnegativeIntGet,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
