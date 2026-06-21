@@ -31,6 +31,14 @@ popd >/dev/null
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
+echo 'reap any control server left over from a previous run'
+# A control server from a previous run can still be alive and holding the
+# deterministic control port, which fails this run's bind with "address already
+# in use". The shutdown RPC is sent, but the server can fail to actually come
+# down. Free the port before we start.
+fuser -k -TERM "$CI_CONTROL_PORT"/tcp 2>/dev/null && sleep 3 || true
+fuser -k "$CI_CONTROL_PORT"/tcp 2>/dev/null || true
+
 echo 'run bench server'
 mkdir -p ci_work_dir/
 ./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/
@@ -109,6 +117,14 @@ shutdown_bench_servers() {
   ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 }
 trap shutdown_bench_servers EXIT
+
+echo 'reap any control server left over from a previous run'
+# A control server from a previous run can still be alive and holding the
+# deterministic control port, which fails this run's bind with "address already
+# in use". The shutdown RPC is sent, but the server can fail to actually come
+# down. Free the port before we start.
+fuser -k -TERM "$CI_CONTROL_PORT"/tcp 2>/dev/null && sleep 3 || true
+fuser -k "$CI_CONTROL_PORT"/tcp 2>/dev/null || true
 
 echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
