@@ -20,18 +20,25 @@
 
 namespace x23 {
 
+// Terminal failure state for a DAG run.  A failure stops scheduling new nodes,
+// but nodes that are already running are allowed to finish.
 enum class DagFailureKind {
   None,
   Cancelled,
   Exception,
 };
 
+// Captures the first graph-level failure.  For exceptions, exception contains
+// the original exception_ptr from the failing node.
 struct DagFailure {
   DagFailureKind kind{DagFailureKind::None};
   std::string node;
   std::exception_ptr exception;
 };
 
+// Timing and lifecycle information for one node.  queued_at is set for every
+// node when run() starts; started_at and finished_at are meaningful only when
+// the corresponding flags are true.
 struct DagNodeStats {
   std::string name;
   std::chrono::steady_clock::time_point queued_at;
@@ -41,6 +48,7 @@ struct DagNodeStats {
   bool finished{false};
 };
 
+// Opaque dependency list built by Dag::after(...).
 struct DagDeps {
   std::vector<size_t> ids;
 };
@@ -51,15 +59,19 @@ template<typename T> class DagNode {
 public:
   DagNode() = default;
 
+  // Return the stored result.  The node must have completed successfully.
   const T &get() const;
   T &get();
+  // True once the node has completed successfully and its result is available.
   bool ready() const;
+  // Stable insertion-order id used internally for dependency wiring.
   size_t id() const { return id_; }
 
 private:
   friend class Dag;
   DagNode(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
+  // Owning graph and insertion-order id.  DagNode is a lightweight handle.
   Dag *dag_{nullptr};
   size_t id_{0};
 };
@@ -68,19 +80,61 @@ template<> class DagNode<void> {
 public:
   DagNode() = default;
 
+  // True once the void node has completed successfully.
   bool ready() const;
+  // Stable insertion-order id used internally for dependency wiring.
   size_t id() const { return id_; }
 
 private:
   friend class Dag;
   DagNode(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
+  // Owning graph and insertion-order id.  DagNode is a lightweight handle.
   Dag *dag_{nullptr};
   size_t id_{0};
 };
 
+// A small one-shot dependency graph for mixing CPU work and coroutine work.
+//
+// Example:
+//
+//   ThreadPool pool;
+//   Dag dag("payments", pool);
+//
+//   auto account = dag.cpu<Account>("load-account", [] {
+//     return load_account_from_disk();
+//   });
+//
+//   auto balance = dag.async<uint64_t>(
+//       "fetch-balance", dag.after(account), [&]() -> Async<uint64_t> {
+//         co_return co_await fetch_balance(account.get().id);
+//       });
+//
+//   auto receipt = dag.cpu<Receipt>("build-receipt", dag.after(account,
+//   balance),
+//                                  [&] {
+//                                    return build_receipt(account.get(),
+//                                                         balance.get());
+//                                  });
+//
+//   dag.run()();
+//   if (!dag.ok()) {
+//     DagFailure failure = dag.failure();
+//     // failure.node names the first failed node.  If a node threw,
+//     failure.kind
+//     // is DagFailureKind::Exception and failure.exception has the exception.
+//   }
+//   else {
+//     use_receipt(receipt.get());
+//   }
+//
+// Nodes are added before run() and the graph can only be run once.  A node
+// starts after all dependencies passed to after(...) have completed
+// successfully.  If any node throws or calls fail(...), no additional nodes are
+// scheduled.
 class Dag {
 public:
+  // name is retained for diagnostics; pool is used for cpu(...) nodes.
   explicit Dag(std::string_view name, ThreadPool &pool)
     : name_(name), pool_(pool)
   {}
@@ -88,12 +142,15 @@ public:
   Dag(const Dag &) = delete;
   Dag &operator=(const Dag &) = delete;
 
+  // Add a CPU-bound root node.  The callable runs on pool_.bg() and either
+  // returns T or, for T=void, returns nothing.
   template<typename T, typename Fn>
   DagNode<T> cpu(std::string_view name, Fn &&fn)
   {
     return cpu<T>(name, DagDeps{}, std::forward<Fn>(fn));
   }
 
+  // Add a CPU-bound node with dependencies.
   template<typename T, typename Fn>
   DagNode<T> cpu(std::string_view name, DagDeps deps, Fn &&fn)
   {
@@ -101,12 +158,14 @@ public:
                        make_cpu_runner<T>(std::forward<Fn>(fn)));
   }
 
+  // Add an async root node.  The callable must return Async<T> or Async<void>.
   template<typename T, typename Fn>
   DagNode<T> async(std::string_view name, Fn &&fn)
   {
     return async<T>(name, DagDeps{}, std::forward<Fn>(fn));
   }
 
+  // Add an async node with dependencies.
   template<typename T, typename Fn>
   DagNode<T> async(std::string_view name, DagDeps deps, Fn &&fn)
   {
@@ -114,6 +173,7 @@ public:
                        make_async_runner<T>(std::forward<Fn>(fn)));
   }
 
+  // Build a dependency list from previously-added nodes.
   template<typename... Nodes> DagDeps after(const Nodes &...nodes)
   {
     DagDeps deps;
@@ -122,6 +182,10 @@ public:
     return deps;
   }
 
+  // Start the graph and wait for completion.  Completion means all runnable
+  // nodes finished, or a failure occurred and all already-running nodes
+  // drained. Exceptions from nodes are recorded in failure() rather than
+  // rethrown.
   Async<void> run()
   {
     auto done_pair = make_async<void>();
@@ -145,6 +209,7 @@ public:
     co_await done;
   }
 
+  // Record an explicit graph failure.  The first failure wins.
   void fail(DagFailureKind kind, std::string_view node = {},
             std::exception_ptr exception = nullptr)
   {
@@ -152,17 +217,20 @@ public:
     fail_locked(kind, node, exception);
   }
 
+  // True if no node has thrown and fail(...) has not been called.
   bool ok() const
   {
     std::lock_guard lock(mutex_);
     return failure_.kind == DagFailureKind::None;
   }
 
+  // Return the first recorded graph failure, or kind None if the run succeeded.
   DagFailure failure() const
   {
     std::lock_guard lock(mutex_);
     return failure_;
   }
+  // Return a snapshot of per-node lifecycle timing and state.
   std::vector<DagNodeStats> stats() const
   {
     std::lock_guard lock(mutex_);
@@ -183,6 +251,7 @@ public:
   }
 
 private:
+  // Internal lifecycle state for one node.
   enum class NodeState {
     Pending,
     Running,
@@ -190,16 +259,21 @@ private:
     Failed,
   };
 
+  // Type-erased storage base for typed node results.
   struct NodeStorageBase {
     virtual ~NodeStorageBase() = default;
   };
 
+  // Result storage for non-void nodes.  The value is populated only on success.
   template<typename T> struct NodeStorage : NodeStorageBase {
     std::optional<T> value;
   };
 
+  // Marker storage for void nodes.
   struct VoidNodeStorage : NodeStorageBase {};
 
+  // Internal graph node: dependency edges, runnable body, result storage, and
+  // lifecycle timestamps.
   struct NodeBase {
     std::string name;
     std::vector<size_t> deps;
@@ -212,6 +286,8 @@ private:
     std::chrono::steady_clock::time_point finished_at;
   };
 
+  // Wrap a synchronous callable as an Async<void> runner that first switches to
+  // the thread pool and then stores the result.
   template<typename T, typename Fn>
   std::function<Async<void>(size_t)> make_cpu_runner(Fn &&fn)
   {
@@ -228,6 +304,8 @@ private:
     };
   }
 
+  // Wrap an Async-returning callable as the common node runner type and store
+  // the awaited result for non-void nodes.
   template<typename T, typename Fn>
   std::function<Async<void>(size_t)> make_async_runner(Fn &&fn)
   {
@@ -247,6 +325,8 @@ private:
     }
   }
 
+  // Register a node before the graph starts and wire predecessor/successor
+  // edges.  Dependencies must refer to earlier nodes.
   template<typename T>
   DagNode<T> add_node(std::string_view name, DagDeps deps,
                       std::function<Async<void>(size_t)> runner)
@@ -273,11 +353,15 @@ private:
     return DagNode<T>(this, id);
   }
 
+  // Return typed storage for a node.  The caller is responsible for requesting
+  // the same T that was used when the node was added.
   template<typename T> NodeStorage<T> &storage(size_t id) const
   {
     return static_cast<NodeStorage<T> &>(*nodes_[id]->storage);
   }
 
+  // A node is ready to start when it is still pending and all dependencies
+  // completed successfully.
   bool ready_locked(size_t id) const
   {
     const NodeBase &node = *nodes_[id];
@@ -289,6 +373,7 @@ private:
     return true;
   }
 
+  // Queue all root nodes that are ready at graph start.
   void mark_ready_roots_locked(std::vector<size_t> &to_start)
   {
     if (failure_.kind != DagFailureKind::None)
@@ -302,6 +387,8 @@ private:
     }
   }
 
+  // Queue successors of a completed node whose dependencies are now satisfied.
+  // Once the graph has failed, no new successors are scheduled.
   void mark_ready_successors_locked(size_t id, std::vector<size_t> &to_start)
   {
     if (failure_.kind != DagFailureKind::None)
@@ -315,6 +402,7 @@ private:
     }
   }
 
+  // Transition a pending node to running and update the active-node count.
   void mark_node_running_locked(size_t id)
   {
     NodeBase &node = *nodes_[id];
@@ -323,14 +411,18 @@ private:
     running_++;
   }
 
+  // Launch a batch of nodes outside the mutex.
   void launch_nodes(const std::vector<size_t> &ids)
   {
     for (const size_t id : ids)
       launch_node(id);
   }
 
+  // Start one node coroutine.
   void launch_node(size_t id) { run_node(id); }
 
+  // Run one node, convert any exception into a graph failure, and then finish
+  // the node.
   Detached run_node(size_t id)
   {
     bool failed = false;
@@ -345,6 +437,8 @@ private:
     finish_node(id, failed);
   }
 
+  // Mark a node done or failed, schedule newly-ready successors, and complete
+  // run() if this was the last running node.
   void finish_node(size_t id, bool failed)
   {
     std::vector<size_t> to_start;
@@ -365,6 +459,8 @@ private:
       done_cb();
   }
 
+  // Record the first failure only.  Later failures from already-running nodes
+  // are ignored.
   void fail_locked(DagFailureKind kind, std::string_view node,
                    std::exception_ptr exception)
   {
@@ -377,6 +473,7 @@ private:
     };
   }
 
+  // Return the run() completion callback if the graph is now terminal.
   CoroCB<void> finish_cb_locked()
   {
     if (!started_ || finished_ || running_ != 0)
@@ -392,15 +489,25 @@ private:
     return done_cb_;
   }
 
+  // Diagnostic graph name.
   std::string name_;
+  // Thread pool used by CPU nodes.
   ThreadPool &pool_;
+  // Protects graph structure, node state, failure_, and run lifecycle fields.
   mutable std::mutex mutex_;
+  // Nodes in insertion order.  Node ids are indexes into this vector.
   std::vector<std::unique_ptr<NodeBase>> nodes_;
+  // Node ids with no dependencies.
   std::vector<size_t> roots_;
+  // First graph-level failure, if any.
   DagFailure failure_;
+  // Callback used to resume run() when the graph reaches a terminal state.
   CoroCB<void> done_cb_;
+  // Count of currently-running nodes.
   size_t running_{0};
+  // True after run() has been called.
   bool started_{false};
+  // True after run() has completed or is ready to complete.
   bool finished_{false};
 
   template<typename T> friend class DagNode;
