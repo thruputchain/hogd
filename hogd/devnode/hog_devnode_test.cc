@@ -795,7 +795,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("artifactHint", "./dev-wallet.rv32a");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
+              entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
       w.field("doActionEntrypoint",
               entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
     });
@@ -981,7 +981,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "contracts/dev_wallet.rv32a");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
+            entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
             entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),

@@ -215,8 +215,7 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
   if (std::optional<std::string_view> deploy_entrypoint =
           optional_string_field(dev_wallet, "deployEntrypoint", "devWallet")) {
     require_string_value(*deploy_entrypoint,
-                         entrypoint_hex(
-                             wallet_meta::entrypoint<"initialize">()),
+                         entrypoint_hex(wallet_meta::entrypoint<"deploy">()),
                          "devWallet.deployEntrypoint");
   }
   if (std::optional<std::string_view> do_action_entrypoint =

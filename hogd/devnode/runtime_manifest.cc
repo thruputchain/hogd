@@ -180,7 +180,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"initialize">()));
+                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
         w.field("doActionEntrypoint",
                 entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
         w.field("createWalletEntrypoint",
