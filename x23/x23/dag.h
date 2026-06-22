@@ -158,7 +158,11 @@ public:
     return failure_.kind == DagFailureKind::None;
   }
 
-  const DagFailure &failure() const { return failure_; }
+  DagFailure failure() const
+  {
+    std::lock_guard lock(mutex_);
+    return failure_;
+  }
   std::vector<DagNodeStats> stats() const
   {
     std::lock_guard lock(mutex_);
