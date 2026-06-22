@@ -53,7 +53,7 @@ jobs:
                     --key=git_branch --value=$BRANCH_NAME \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                    --timeout-sec=2400 \
+                    --timeout-sec=3600 \
                     ./scripts/schedules/combined_metrics.toml
             - name: Print Log Download Instructions
               if: always()
