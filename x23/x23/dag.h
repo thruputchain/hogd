@@ -411,6 +411,7 @@ template<typename T>
 const T &
 DagNode<T>::get() const
 {
+  x23assert(ready());
   return dag_->storage<T>(id_).value.value();
 }
 
@@ -418,6 +419,7 @@ template<typename T>
 T &
 DagNode<T>::get()
 {
+  x23assert(ready());
   return dag_->storage<T>(id_).value.value();
 }
 
