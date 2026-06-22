@@ -113,6 +113,10 @@ struct InvokeHarness {
   void *db = nullptr;
   void *rc = nullptr;
   void *syscall_handler = nullptr;
+  // The logger displaced by run_with_logger(), restored in teardown() after
+  // free_db() so the global logger pointer is never swapped while the DB
+  // background worker thread is alive.
+  std::unique_ptr<Logger> previous_logger = nullptr;
 };
 
 InvokeHarness
@@ -224,12 +228,20 @@ run_with_logger(ContractAddress *child_addr_storage, bool deploy_child,
 {
   g_in_child_invoke.store(false, std::memory_order_relaxed);
   enable_syscall_logging(kTestFFILogLevelTrace);
-  auto harness = setup_root_invokes_child(child_addr_storage, deploy_child);
 
+  // Install the throwing logger before make_db() (called inside setup) and
+  // restore it after free_db() (in teardown). The DB spawns a background worker
+  // thread that logs through the global logger; swapping that global pointer
+  // while the worker is alive is a data race (TSAN flags hogd::swap_logger vs
+  // the worker's read). The diagnostic logger is gated on the targeted trace,
+  // so the DB's own logging and the teardown path are unaffected.
   auto previous_logger = swap_logger(
       std::make_unique<ThrowingDiagnosticLogger>(target_fmt, gate_on_child));
+
+  auto harness = setup_root_invokes_child(child_addr_storage, deploy_child);
+  harness.previous_logger = std::move(previous_logger);
+
   result_out = root_invoke(harness.syscall_handler, /*enable_tracing=*/1);
-  swap_logger(std::move(previous_logger));
   enable_syscall_logging(kTestFFILogLevelError);
   return harness;
 }
@@ -240,6 +252,9 @@ teardown(InvokeHarness &h)
   close_syscall_handler(h.syscall_handler);
   close_runtime_context(h.rc);
   free_db(h.db);
+  // Restore the logger only after free_db() has joined the DB background worker
+  // thread, so the global logger pointer is not swapped out from under it.
+  swap_logger(std::move(h.previous_logger));
 }
 
 } // namespace

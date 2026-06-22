@@ -77,6 +77,18 @@ TEST(TestBindingsTest, ConsoleLogInnerTraceLoggerThrowDoesNotTerminate)
   x23::Defer reset_logging(
       [] { enable_syscall_logging(kTestFFILogLevelError); });
 
+  // Install the throwing logger before make_db() and restore it after free_db()
+  // (Defers run in reverse order, so reset_logger runs after d). The DB spawns
+  // a background worker thread that logs through the global logger; swapping
+  // that global pointer while the worker is alive is a data race (TSAN flags
+  // hogd::swap_logger vs the worker's read). Bracketing the DB lifetime keeps
+  // the pointer constant for the worker's entire lifetime. The throwing logger
+  // only throws on the ConsoleLog inner trace, so the DB's own logging and the
+  // teardown path are unaffected.
+  auto previous_logger =
+      swap_logger(std::make_unique<ThrowingConsoleLogLogger>());
+  x23::Defer reset_logger([&] { swap_logger(std::move(previous_logger)); });
+
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
   x23::Defer d([db] { free_db(db); });
@@ -100,10 +112,6 @@ TEST(TestBindingsTest, ConsoleLogInnerTraceLoggerThrowDoesNotTerminate)
             kTestFFIErrorCodeNone);
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
-  auto previous_logger =
-      swap_logger(std::make_unique<ThrowingConsoleLogLogger>());
-  x23::Defer reset_logger([&] { swap_logger(std::move(previous_logger)); });
-
   std::array<std::byte, 4> input{};
   auto result = call_console_log(input);
 
@@ -115,8 +123,8 @@ TEST(TestBindingsTest, ConsoleLogInnerTraceLoggerThrowDoesNotTerminate)
   // Finish the mock frame so the handler closes cleanly during teardown; an
   // unfinished frame leaves the handler open and free_db() hangs on exit. The
   // throwing logger only throws on the ConsoleLog inner trace, so it does not
-  // interfere with the finish path. (The reset_logger Defer restores the normal
-  // logger before close_syscall_handler runs.)
+  // interfere with the finish path or any teardown logging (the normal logger
+  // is restored last, after free_db()).
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
