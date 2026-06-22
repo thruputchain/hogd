@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -37,7 +38,8 @@ syscall_SHA256_inner(SystemCallHandler &handler,
     try {
       trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256, e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone,
@@ -72,8 +74,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
       trace_data->outputs.emplace(
           SyscallSHA256FinalizeOutputs{.hash = output_output});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Finalize,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
