@@ -85,7 +85,7 @@ struct ManifestBuilder {
   {
     dev_wallet_content_hash = real_dev_wallet_content_hash();
     dev_wallet_deploy_entrypoint =
-        entrypoint_hex(wallet_meta::entrypoint<"initialize">());
+        entrypoint_hex(wallet_meta::entrypoint<"deploy">());
     dev_wallet_do_action_entrypoint =
         entrypoint_hex(wallet_meta::entrypoint<"do_action">());
   }

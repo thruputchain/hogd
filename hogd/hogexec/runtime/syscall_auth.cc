@@ -135,8 +135,8 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetAuthClaimOutputs{.auth_claim = claim});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -235,8 +235,8 @@ syscall_ConsumeAuthToken_inner(
           .unwrapped_token_id_start = result.new_token_id_start,
           .unwrapped_token_id_count = result.new_token_id_count});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kConsumeAuthToken,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 

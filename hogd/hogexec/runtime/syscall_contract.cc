@@ -3,7 +3,7 @@
 #include <exception>
 #include <utility>
 
-#include "hogd/base/log.h"
+#include "ffi_enums.hh"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
@@ -38,8 +38,8 @@ syscall_GetDeployAddress_inner(
       trace_data->outputs.emplace(SyscallGetDeployAddressOutputs{
           .to_be_deployed = output_to_be_deployed});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetDeployAddress,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -68,8 +68,8 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(SyscallDeployContractOutputs{
           .deployed_address = output_deployed_address});
     } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kDeployContract,
-            e.what());
+      report_dropped_syscall_trace(e.what());
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
     }
   }
 

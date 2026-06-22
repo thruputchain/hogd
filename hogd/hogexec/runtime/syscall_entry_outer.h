@@ -474,30 +474,9 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
-// Report a dropped syscall-trace diagnostic straight to stderr without
-// allocating (same fallback pattern as test_ffi's do_ffi_trace).
-//
-// The trace logging and trace-record construction in wrap_after_parse() run
-// inside a noexcept syscall-body lambda (noexcept so gas accounting and
-// return-state validation can never be skipped). An escaping std::bad_alloc --
-// e.g. while formatting a trace message or copying a span into the XDR trace
-// record -- would terminate the process before the caller's structured-error
-// boundary (mock_syscall_entrypoint() / wrap_outer()) could translate it. Trace
-// data is best-effort diagnostics, mirroring SystemCallHandler::start_frame()'s
-// drop-and-continue handling of trace allocation failure (#2473), so each of
-// those steps is wrapped in an inline try/catch that drops the affected
-// record/log line, reports it here, and lets the syscall finish with its real
-// result instead of crashing an honest caller (issues #2561, #2562). The catch
-// bodies are inlined rather than routed through a helper so the syscall hot
-// path takes no added call overhead; this reporter only runs on the (cold)
-// failure path, where allocating again to log would be unsafe.
-inline void
-report_dropped_syscall_trace(char const *what) noexcept
-{
-  std::fputs("error tracing syscall: ", stderr);
-  std::fputs(what, stderr);
-  std::fputc('\n', stderr);
-}
+// report_dropped_syscall_trace() lives in syscall_types.h so the per-syscall
+// inner bodies (which also materialize optional XDR trace outputs and must not
+// panic on allocation failure) can share it.
 
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
