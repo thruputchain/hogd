@@ -20,7 +20,7 @@
 
 namespace x23 {
 
-// Terminal failure state for a DAG run.  A failure stops scheduling new nodes,
+// Terminal failure state for a DAG run. A failure stops scheduling new nodes,
 // but nodes that are already running are allowed to finish.
 enum class DagFailureKind {
   None,
@@ -28,7 +28,7 @@ enum class DagFailureKind {
   Exception,
 };
 
-// Captures the first graph-level failure.  For exceptions, exception contains
+// Captures the first graph-level failure. For exceptions, exception contains
 // the original exception_ptr from the failing node.
 struct DagFailure {
   DagFailureKind kind{DagFailureKind::None};
@@ -36,7 +36,7 @@ struct DagFailure {
   std::exception_ptr exception;
 };
 
-// Timing and lifecycle information for one node.  queued_at is set for every
+// Timing and lifecycle information for one node. queued_at is set for every
 // node when run() starts; started_at and finished_at are meaningful only when
 // the corresponding flags are true.
 struct DagNodeStats {
@@ -59,7 +59,7 @@ template<typename T> class DagNode {
 public:
   DagNode() = default;
 
-  // Return the stored result.  The node must have completed successfully.
+  // Return the stored result. The node must have completed successfully.
   const T &get() const;
   T &get();
   // True once the node has completed successfully and its result is available.
@@ -71,7 +71,7 @@ private:
   friend class Dag;
   DagNode(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
-  // Owning graph and insertion-order id.  DagNode is a lightweight handle.
+  // Owning graph and insertion-order id. DagNode is a lightweight handle.
   Dag *dag_{nullptr};
   size_t id_{0};
 };
@@ -89,7 +89,7 @@ private:
   friend class Dag;
   DagNode(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
-  // Owning graph and insertion-order id.  DagNode is a lightweight handle.
+  // Owning graph and insertion-order id. DagNode is a lightweight handle.
   Dag *dag_{nullptr};
   size_t id_{0};
 };
@@ -98,39 +98,38 @@ private:
 //
 // Example:
 //
-//   ThreadPool pool;
-//   Dag dag("payments", pool);
+// ThreadPool pool;
+// Dag dag("payments", pool);
 //
-//   auto account = dag.cpu<Account>("load-account", [] {
-//     return load_account_from_disk();
+// auto account = dag.cpu<Account>("load-account", [] {
+//  return load_account_from_disk();
+// });
+//
+// auto balance = dag.async<uint64_t>(
+//   "fetch-balance", dag.after(account), [&]() -> Async<uint64_t> {
+//    co_return co_await fetch_balance(account.get().id);
 //   });
 //
-//   auto balance = dag.async<uint64_t>(
-//       "fetch-balance", dag.after(account), [&]() -> Async<uint64_t> {
-//         co_return co_await fetch_balance(account.get().id);
-//       });
+// auto receipt = dag.cpu<Receipt>("build-receipt", dag.after(account, balance),
+//                [&] {
+//                 return build_receipt(account.get(),
+//                            balance.get());
+//                });
 //
-//   auto receipt = dag.cpu<Receipt>("build-receipt", dag.after(account,
-//   balance),
-//                                  [&] {
-//                                    return build_receipt(account.get(),
-//                                                         balance.get());
-//                                  });
+// dag.run()();
+// if (!dag.ok()) {
+//  DagFailure failure = dag.failure();
+//  // failure.node names the first failed node. If a node threw an exception,
+//  // failure.kind is DagFailureKind::Exception and failure.exception has the
+//  // exception.
+// }
+// else {
+//  use_receipt(receipt.get());
+// }
 //
-//   dag.run()();
-//   if (!dag.ok()) {
-//     DagFailure failure = dag.failure();
-//     // failure.node names the first failed node.  If a node threw,
-//     failure.kind
-//     // is DagFailureKind::Exception and failure.exception has the exception.
-//   }
-//   else {
-//     use_receipt(receipt.get());
-//   }
-//
-// Nodes are added before run() and the graph can only be run once.  A node
+// Nodes are added before run() and the graph can only be run once. A node
 // starts after all dependencies passed to after(...) have completed
-// successfully.  If any node throws or calls fail(...), no additional nodes are
+// successfully. If any node throws or calls fail(...), no additional nodes are
 // scheduled.
 class Dag {
 public:
@@ -142,7 +141,7 @@ public:
   Dag(const Dag &) = delete;
   Dag &operator=(const Dag &) = delete;
 
-  // Add a CPU-bound root node.  The callable runs on pool_.bg() and either
+  // Add a CPU-bound root node. The callable runs on pool_.bg() and either
   // returns T or, for T=void, returns nothing.
   template<typename T, typename Fn>
   DagNode<T> cpu(std::string_view name, Fn &&fn)
@@ -158,7 +157,7 @@ public:
                        make_cpu_runner<T>(std::forward<Fn>(fn)));
   }
 
-  // Add an async root node.  The callable must return Async<T> or Async<void>.
+  // Add an async root node. The callable must return Async<T> or Async<void>.
   template<typename T, typename Fn>
   DagNode<T> async(std::string_view name, Fn &&fn)
   {
@@ -182,7 +181,7 @@ public:
     return deps;
   }
 
-  // Start the graph and wait for completion.  Completion means all runnable
+  // Start the graph and wait for completion. Completion means all runnable
   // nodes finished, or a failure occurred and all already-running nodes
   // drained. Exceptions from nodes are recorded in failure() rather than
   // rethrown.
@@ -209,7 +208,7 @@ public:
     co_await done;
   }
 
-  // Record an explicit graph failure.  The first failure wins.
+  // Record an explicit graph failure. The first failure wins.
   void fail(DagFailureKind kind, std::string_view node = {},
             std::exception_ptr exception = nullptr)
   {
@@ -264,7 +263,7 @@ private:
     virtual ~NodeStorageBase() = default;
   };
 
-  // Result storage for non-void nodes.  The value is populated only on success.
+  // Result storage for non-void nodes. The value is populated only on success.
   template<typename T> struct NodeStorage : NodeStorageBase {
     std::optional<T> value;
   };
@@ -326,7 +325,7 @@ private:
   }
 
   // Register a node before the graph starts and wire predecessor/successor
-  // edges.  Dependencies must refer to earlier nodes.
+  // edges. Dependencies must refer to earlier nodes.
   template<typename T>
   DagNode<T> add_node(std::string_view name, DagDeps deps,
                       std::function<Async<void>(size_t)> runner)
@@ -353,7 +352,7 @@ private:
     return DagNode<T>(this, id);
   }
 
-  // Return typed storage for a node.  The caller is responsible for requesting
+  // Return typed storage for a node. The caller is responsible for requesting
   // the same T that was used when the node was added.
   template<typename T> NodeStorage<T> &storage(size_t id) const
   {
@@ -459,7 +458,7 @@ private:
       done_cb();
   }
 
-  // Record the first failure only.  Later failures from already-running nodes
+  // Record the first failure only. Later failures from already-running nodes
   // are ignored.
   void fail_locked(DagFailureKind kind, std::string_view node,
                    std::exception_ptr exception)
@@ -495,7 +494,7 @@ private:
   ThreadPool &pool_;
   // Protects graph structure, node state, failure_, and run lifecycle fields.
   mutable std::mutex mutex_;
-  // Nodes in insertion order.  Node ids are indexes into this vector.
+  // Nodes in insertion order. Node ids are indexes into this vector.
   std::vector<std::unique_ptr<NodeBase>> nodes_;
   // Node ids with no dependencies.
   std::vector<size_t> roots_;
