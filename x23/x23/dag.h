@@ -136,7 +136,7 @@ public:
       done_cb_ = cb;
       for (size_t i = 0; i < nodes_.size(); i++)
         nodes_[i]->queued_at = std::chrono::steady_clock::now();
-      mark_ready_nodes_locked(to_start);
+      mark_ready_roots_locked(to_start);
       done_cb = finish_cb_locked();
     }
     launch_nodes(to_start);
@@ -260,6 +260,8 @@ private:
     else
       node->storage = std::make_unique<NodeStorage<T>>();
     nodes_.push_back(std::move(node));
+    if (nodes_[id]->deps.empty())
+      roots_.push_back(id);
     for (const size_t dep : nodes_[id]->deps) {
       x23assert(dep < id);
       nodes_[dep]->successors.push_back(id);
@@ -283,16 +285,29 @@ private:
     return true;
   }
 
-  void mark_ready_nodes_locked(std::vector<size_t> &to_start)
+  void mark_ready_roots_locked(std::vector<size_t> &to_start)
   {
     if (failure_.kind != DagFailureKind::None)
       return;
 
-    for (size_t i = 0; i < nodes_.size(); i++) {
-      if (!ready_locked(i))
+    for (const size_t id : roots_) {
+      if (!ready_locked(id))
         continue;
-      mark_node_running_locked(i);
-      to_start.push_back(i);
+      mark_node_running_locked(id);
+      to_start.push_back(id);
+    }
+  }
+
+  void mark_ready_successors_locked(size_t id, std::vector<size_t> &to_start)
+  {
+    if (failure_.kind != DagFailureKind::None)
+      return;
+
+    for (const size_t successor : nodes_[id]->successors) {
+      if (!ready_locked(successor))
+        continue;
+      mark_node_running_locked(successor);
+      to_start.push_back(successor);
     }
   }
 
@@ -338,7 +353,7 @@ private:
       node.finished_at = std::chrono::steady_clock::now();
       x23assert(running_ > 0);
       running_--;
-      mark_ready_nodes_locked(to_start);
+      mark_ready_successors_locked(id, to_start);
       done_cb = finish_cb_locked();
     }
     launch_nodes(to_start);
@@ -377,6 +392,7 @@ private:
   ThreadPool &pool_;
   mutable std::mutex mutex_;
   std::vector<std::unique_ptr<NodeBase>> nodes_;
+  std::vector<size_t> roots_;
   DagFailure failure_;
   CoroCB<void> done_cb_;
   size_t running_{0};
