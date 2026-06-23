@@ -3,6 +3,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstdio>
+#include <exception>
 #include <format>
 #include <map>
 #include <source_location>
@@ -111,7 +113,30 @@ private:
 
   static int make_fd() noexcept
   {
-    env_val = get_debug_env(EnvVar);
+    try {
+      env_val = get_debug_env(EnvVar);
+    } catch (std::exception const &e) {
+      // make_fd() is noexcept and lazily runs at first use from callers that
+      // are themselves noexcept (e.g. the test FFI create_db() start trace,
+      // #2641). get_debug_env() allocates a std::string, so a std::bad_alloc
+      // here would cross the noexcept boundary and terminate the process.
+      // Disable this debug fd instead: leave env_val empty and report
+      // best-effort to stderr without allocating.
+      env_val.clear();
+      std::fputs("x23 debug: failed to read debug env: ", stderr);
+      std::fputs(e.what(), stderr);
+      std::fputc('\n', stderr);
+      return -1;
+    } catch (...) {
+      // make_fd() is a shared x23 helper consumed beyond the test FFI, so guard
+      // a non-std::exception throw too: otherwise it would still hit the
+      // noexcept specifier and terminate (parallel to the catch(...) on the
+      // test FFI root_invoke()). No exception object to format here.
+      env_val.clear();
+      std::fputs("x23 debug: failed to read debug env (unknown exception)\n",
+                 stderr);
+      return -1;
+    }
     return make_debug_fd(env_val);
   }
 };

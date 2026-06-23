@@ -664,6 +664,18 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
   } catch (std::exception const &e) {
     log_error("unrecoverable: unhandled error during root_invoke: {}", e);
     return kUnrecoverableError;
+  } catch (...) {
+    // A mock contract callback (ForeignEntryPoint) is not declared noexcept and
+    // is not restricted to std::exception throws;
+    // MockRuntime::invoke_internal() lets callback exceptions unwind. A
+    // non-std::exception throw (e.g. int) would otherwise escape this noexcept
+    // boundary and terminate an honest caller (#2693), so translate it to a
+    // structured error -- as mock_syscall_entrypoint() already does. Report via
+    // fputs (no allocation), since there is no exception object to format.
+    std::fputs(
+        "test_ffi: unrecoverable: unknown exception during root_invoke\n",
+        stderr);
+    return kUnrecoverableError;
   }
 }
 
@@ -1003,26 +1015,35 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   std::memcpy(addr.data(), deployment_addr, addr.size());
 
   auto &dao = db_cast->get_base_db().get_db();
-  auto res = dao.read_wasm_code(h);
-  if (!res) {
-    // setup_deploy_contract() is noexcept and this guard runs before the
-    // try/catch below, so route the diagnostic through best_effort_log: a
-    // std::bad_alloc from error()'s allocating formatter would otherwise cross
-    // the noexcept boundary and terminate an honest caller instead of returning
-    // the structured missing-contract code (issue #2584, same pattern as
-    // #2559).
-    best_effort_log([] {
-      error("Attempt to deploy contract that has not been created in the "
-            "database");
-    });
-    return kTestFFIErrorCodeDeployNonexistentContract;
-  }
   Contract contract;
   try {
+    // read_wasm_code() copies the stored row out of RAMDB (make_byte_buffer()
+    // allocates the returned byte buffer, #2765) and x23::deserialize() resizes
+    // the opaque-vector destination (#2642/#2766); both can throw
+    // std::bad_alloc on a valid stored contract. setup_deploy_contract() is
+    // noexcept, so wrap the read and decode in one exception-translation
+    // boundary -- mirroring setup_create_contract() -- rather than letting an
+    // allocation failure cross the noexcept boundary and terminate an honest
+    // caller.
+    auto res = dao.read_wasm_code(h);
+    if (!res) {
+      // best_effort_log keeps the not-found diagnostic non-throwing so it still
+      // returns the structured missing-contract code (#2584, same pattern as
+      // #2559) even under memory pressure.
+      best_effort_log([] {
+        error("Attempt to deploy contract that has not been created in the "
+              "database");
+      });
+      return kTestFFIErrorCodeDeployNonexistentContract;
+    }
     x23::deserialize(&contract,
                      x23::BufView{res.value().data(), res.value().size()});
   } catch (x23::XdrException &e) {
     log_error("unrecoverable: error deserializing contract from db: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  } catch (std::exception const &e) {
+    log_error("unrecoverable: error reading/deserializing stored contract: {}",
+              e);
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
