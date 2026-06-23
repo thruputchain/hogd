@@ -266,3 +266,21 @@ TEST(Dag, DotIncludesNodesAndEdges)
             std::string::npos);
   EXPECT_NE(dot.find("n0 -> n1"), std::string::npos);
 }
+
+TEST(Dag, DotIncludesRuntimeStatsAfterRun)
+{
+  Dag dag("runtime stats", pool);
+
+  auto root = dag.cpu<int>("root", [] { return 1; });
+  dag.cpu<void>("child", dag.after(root), [] {});
+
+  dag.run()();
+
+  const std::string dot = dag.dot();
+  EXPECT_NE(dot.find("n0 [label=\"0: root\\nstate: done\\nwait: "),
+            std::string::npos);
+  EXPECT_NE(dot.find("\\nrun: "), std::string::npos);
+  EXPECT_NE(dot.find("\\ntotal: "), std::string::npos);
+  EXPECT_NE(dot.find("n1 [label=\"1: child\\nstate: done\\nwait: "),
+            std::string::npos);
+}

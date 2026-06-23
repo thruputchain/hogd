@@ -250,12 +250,13 @@ public:
     return ret;
   }
 
-  // Return a Graphviz DOT rendering of the graph structure. This is intended
-  // for diagnostics before or after run(); lifecycle state is available from
-  // stats().
+  // Return a Graphviz DOT rendering of the graph structure. Before run(), this
+  // contains only graph structure. Once run() has started, node labels also
+  // include lifecycle state and timing.
   std::string dot() const
   {
     std::lock_guard lock(mutex_);
+    const auto now = std::chrono::steady_clock::now();
     std::string ret;
     ret += "digraph ";
     ret += dot_id(name_);
@@ -263,8 +264,8 @@ public:
     ret += "  rankdir=LR;\n";
     ret += "  node [shape=box];\n";
     for (size_t id = 0; id < nodes_.size(); id++) {
-      ret += std::format("  n{} [label=\"{}: {}\"];\n", id, id,
-                         dot_escape(nodes_[id]->name));
+      ret += std::format("  n{} [label=\"{}\"];\n", id,
+                         dot_escape(dot_node_label_locked(id, now)));
     }
     for (size_t id = 0; id < nodes_.size(); id++) {
       for (const size_t dep : nodes_[id]->deps)
@@ -275,6 +276,20 @@ public:
   }
 
 private:
+  static std::string format_duration(std::chrono::steady_clock::duration d)
+  {
+    using namespace std::chrono;
+    const auto us = duration_cast<microseconds>(d).count();
+    if (us < 1'000)
+      return std::format("{}us", us);
+
+    const double ms = duration<double, std::milli>(d).count();
+    if (ms < 1'000)
+      return std::format("{:.3f}ms", ms);
+
+    return std::format("{:.3f}s", duration<double>(d).count());
+  }
+
   static std::string dot_escape(std::string_view s)
   {
     std::string ret;
@@ -329,6 +344,21 @@ private:
     Done,
     Failed,
   };
+
+  static std::string_view state_name(NodeState state)
+  {
+    switch (state) {
+    case NodeState::Pending:
+      return "pending";
+    case NodeState::Running:
+      return "running";
+    case NodeState::Done:
+      return "done";
+    case NodeState::Failed:
+      return "failed";
+    }
+    return "unknown";
+  }
 
   // Type-erased storage base for typed node results.
   struct NodeStorageBase {
@@ -429,6 +459,45 @@ private:
   template<typename T> NodeStorage<T> &storage(size_t id) const
   {
     return static_cast<NodeStorage<T> &>(*nodes_[id]->storage);
+  }
+
+  std::string
+  dot_node_label_locked(size_t id,
+                        std::chrono::steady_clock::time_point now) const
+  {
+    const NodeBase &node = *nodes_[id];
+    std::string label = std::format("{}: {}", id, node.name);
+    if (!started_)
+      return label;
+
+    label += std::format("\nstate: {}", state_name(node.state));
+    switch (node.state) {
+    case NodeState::Pending:
+      if (finished_)
+        label += "\nwait: not started";
+      else
+        label += std::format("\nwait: {} so far",
+                             format_duration(now - node.queued_at));
+      break;
+    case NodeState::Running:
+      label += std::format("\nwait: {}",
+                           format_duration(node.started_at - node.queued_at));
+      label += std::format("\nrun: {} so far",
+                           format_duration(now - node.started_at));
+      label += std::format("\ntotal: {} so far",
+                           format_duration(now - node.queued_at));
+      break;
+    case NodeState::Done:
+    case NodeState::Failed:
+      label += std::format("\nwait: {}",
+                           format_duration(node.started_at - node.queued_at));
+      label += std::format("\nrun: {}",
+                           format_duration(node.finished_at - node.started_at));
+      label += std::format("\ntotal: {}",
+                           format_duration(node.finished_at - node.queued_at));
+      break;
+    }
+    return label;
   }
 
   // A node is ready to start when it is still pending and all dependencies

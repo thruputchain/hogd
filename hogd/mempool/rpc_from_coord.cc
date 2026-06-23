@@ -1031,11 +1031,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       nomination_dag.after(schedule_nodes.summarize));
 
-  info("DAG:\n{}", nomination_dag.dot());
   co_await nomination_dag.run();
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
+  info("DAG:\n{}", nomination_dag.dot());
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
