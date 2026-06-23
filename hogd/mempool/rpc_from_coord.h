@@ -46,6 +46,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/dag.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -473,10 +474,36 @@ private:
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
 
-  x23::Async<bool> initialize_block(const PendingBlock &cache);
-  x23::Async<void> schedule(PendingBlock &cache);
-  x23::Async<void> finish_nominating_block(const DbTip &db_tip,
-                                           PendingBlock &cache);
+  struct InitializeBlockNodes {
+    x23::DagNode<DbSchedResult> create_snapshot;
+    x23::DagNode<RPCError> open_event;
+    x23::Vec<x23::DagNode<ExecResult>> open_proposal_blocks;
+    x23::DagNode<bool> initialized;
+  };
+  struct ScheduleNodes {
+    x23::DagNode<void> lock_scheduler;
+    x23::Vec<x23::DagNode<void>> schedule_chunks;
+    x23::Vec<x23::DagNode<void>> propose_chunks;
+    x23::DagNode<void> summarize;
+  };
+  struct FinishNominationNodes {
+    x23::DagNode<void> finish_executors;
+    x23::DagNode<DbBlockResult> close_snapshot;
+    x23::DagNode<EventBlockResult> close_event;
+    x23::DagNode<SHA256Hash> txset_hash;
+    x23::DagNode<void> serialize_nomination;
+    x23::DagNode<void> build_header;
+  };
+
+  InitializeBlockNodes add_initialize_block_nodes(x23::Dag &dag,
+                                                  const PendingBlock &cache,
+                                                  const x23::DagDeps &deps);
+  ScheduleNodes add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
+                                   x23::DagDeps scheduling_deps,
+                                   const x23::DagDeps &proposal_deps);
+  FinishNominationNodes add_finish_nominating_block_nodes(
+      x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
+      const x23::DagDeps &proposal_deps, const x23::DagDeps &summary_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
