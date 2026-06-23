@@ -1007,7 +1007,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 
   InitializeBlockNodes initialize_block_nodes =
       add_initialize_block_nodes(nomination_dag, nominated_block_cache_,
-                                 nomination_dag.after(prepare_cache_node));
+                                 nomination_dag.after(transfer_data_node,
+                                                      auth_data_node,
+                                                      prepare_cache_node));
   auto check_initialize_block_node = nomination_dag.async<void>(
       "check initialize block",
       nomination_dag.after(initialize_block_nodes.initialized),
@@ -1020,7 +1022,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       });
   ScheduleNodes schedule_nodes =
       add_schedule_nodes(nomination_dag, nominated_block_cache_,
-                         nomination_dag.after(prepare_cache_node),
+                         nomination_dag.after(transfer_data_node,
+                                              auth_data_node,
+                                              prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
