@@ -497,12 +497,12 @@ private:
 
   InitializeBlockNodes add_initialize_block_nodes(x23::Dag &dag,
                                                   const PendingBlock &cache,
-                                                  x23::DagDeps deps);
+                                                  const x23::DagDeps &deps);
   ScheduleNodes add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                    x23::DagDeps deps);
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
-      x23::DagDeps proposal_deps, x23::DagDeps summary_deps);
+      const x23::DagDeps &proposal_deps, const x23::DagDeps &summary_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
