@@ -179,10 +179,11 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
       client_
           .executorsched_propose_transaction(
               test_block_id,
-              Transaction{
-                  .uniquifier = {.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 1}})
+              SignedTransaction{
+                  .tx = Transaction{.uniquifier = {.block_expiry_height =
+                                                       std::numeric_limits<
+                                                           BlockHeight>::max(),
+                                                   .nonce = 1}}})
           .result(),
       ExecResult::ExecResultTxDeterministicError);
 
@@ -192,14 +193,16 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   //     it), so it is not included
   //     (#2568).
   EXPECT_EQ(client_
-                .executorsched_propose_transaction(test_block_id, Transaction{})
+                .executorsched_propose_transaction(test_block_id,
+                                                   SignedTransaction{})
                 .result(),
             ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(test_block_id);
 
   EXPECT_EQ(client_
-                .executorsched_propose_transaction(test_block_id, Transaction{})
+                .executorsched_propose_transaction(test_block_id,
+                                                   SignedTransaction{})
                 .result(),
             ExecResult::ExecResultSystemError);
 }
@@ -223,7 +226,8 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id),
             ExecResult::ExecResultOK);
 
-  TransactionBatch txs = {Transaction{}, Transaction{}, Transaction{}};
+  SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{},
+                                SignedTransaction{}};
   auto result = client_.executorsched_propose_batch(test_block_id, txs);
   ASSERT_EQ(result.size(), 3);
   for (auto &res : result) {

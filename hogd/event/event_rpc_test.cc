@@ -17,6 +17,7 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 #include "x23/srpc.h"
 
@@ -41,15 +42,18 @@ TEST_F(EventRpcTest, BasicUsage)
   EventMempoolRpc mempool_rpc(ctx);
 
   EXPECT_NE(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{})(),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
 
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
@@ -57,7 +61,8 @@ TEST_F(EventRpcTest, BasicUsage)
   auto result = mempool_rpc.eventsched_close_block(1, 1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
 
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
 }
@@ -104,13 +109,15 @@ TEST_F(EventRpcTest, TestFromRPC)
                             ->client<EventSched1>();
   EXPECT_NE(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
-  EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
+  EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{},
+                                                 ProposedTransaction{}),
             RPCError::kRPCNone);
 
   EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
-  EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
+  EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{},
+                                                 ProposedTransaction{}),
             RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
@@ -187,9 +194,11 @@ TEST_F(EventRpcTest, MultipleExecutors)
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 
   // Add events from different executors
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
 
   // Close two executors
@@ -253,7 +262,8 @@ TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
   EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
 
   // Add an event and close executor
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
@@ -321,7 +331,8 @@ TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
     EXPECT_EQ(exec_rpc.eventexecutor_open_block(block_id)(),
               RPCError::kRPCNone);
 
-    EXPECT_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1, TxEventLog{})(),
+    EXPECT_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1, TxEventLog{},
+                                                ProposedTransaction{})(),
               RPCError::kRPCNone);
 
     EXPECT_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
@@ -357,7 +368,8 @@ TEST_F(EventRpcTest, AbandonClosedBlockDeletesFinalFile)
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
@@ -381,7 +393,8 @@ TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
             RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 

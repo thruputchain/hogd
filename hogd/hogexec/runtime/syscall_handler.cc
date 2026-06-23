@@ -1193,7 +1193,8 @@ SystemCallHandler::get_proposal_data() const
 }
 
 x23::Async<SystemStatus<void>>
-SystemCallHandler::emit_events(ExecResult exec_result)
+SystemCallHandler::emit_events(ExecResult exec_result,
+                               ProposedTransaction proposed_tx)
 {
   assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
   auto events = (root_invoke_succeeded_ && last_frame_.has_value())
@@ -1203,12 +1204,14 @@ SystemCallHandler::emit_events(ExecResult exec_result)
       last_frame_.has_value()
           ? last_frame_.value().get_frame_output()
           : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
-  co_return co_await event_server_proxy_.emit_events(TxEventLog{
-      .proposed_tx_hash = get_source_tx_hash(),
-      .exec_result = exec_result,
-      .root_output = std::move(root_output),
-      .events = std::move(events),
-  });
+  co_return co_await event_server_proxy_.emit_events(
+      TxEventLog{
+          .proposed_tx_hash = get_source_tx_hash(),
+          .exec_result = exec_result,
+          .root_output = std::move(root_output),
+          .events = std::move(events),
+      },
+      std::move(proposed_tx));
 }
 
 SyscallStatus<void>

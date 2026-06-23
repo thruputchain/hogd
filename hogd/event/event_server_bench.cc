@@ -25,6 +25,7 @@
 #include "hogd/init.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
@@ -137,8 +138,10 @@ event_sender_coro(event_exec_client_t &exec_client, x23::CoroCB<void> &cb,
 
     for (size_t i = start; i < end; i++) {
       auto event_log = create_fake_event_log(i);
-      auto res = co_await exec_client.eventexecutor_emit_event(block_number, i,
-                                                               event_log);
+      auto res =
+          co_await exec_client.eventexecutor_emit_event(block_number, i,
+                                                        event_log,
+                                                        ProposedTransaction{});
       if (res != RPCError::kRPCNone) {
         throw std::runtime_error(
             std::format("Failed to emit event {}: error code {}", i,

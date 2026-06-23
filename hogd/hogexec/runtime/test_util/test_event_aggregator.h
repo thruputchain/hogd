@@ -9,6 +9,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -111,9 +112,10 @@ struct TestEventAggregatorExecRpc {
     co_return RPCError::kRPCNone;
   }
 
-  x23::Async<RPCError> eventexecutor_emit_event(BlockID block_id,
-                                                TransactionID tx_id,
-                                                TxEventLog const &event_log)
+  x23::Async<RPCError>
+  eventexecutor_emit_event(BlockID block_id, TransactionID tx_id,
+                           TxEventLog const &event_log,
+                           ProposedTransaction const & /*proposed_tx*/)
   {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }

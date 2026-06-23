@@ -8,6 +8,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/format.h"
@@ -36,9 +37,10 @@ public:
   x23::Async<SystemStatus<void>> open_block(BlockID block_id);
   x23::Async<SystemStatus<void>> close_block(BlockID block_id);
 
-  x23::Async<SystemStatus<void>> emit_event(BlockID block_id,
-                                            TransactionID tx_id,
-                                            TxEventLog const &tx_event_log);
+  x23::Async<SystemStatus<void>>
+  emit_event(BlockID block_id, TransactionID tx_id,
+             TxEventLog const &tx_event_log,
+             ProposedTransaction const &proposed_tx);
 
 private:
   using client_t =
@@ -61,7 +63,9 @@ public:
   PerTransactionEventServerProxy &
   operator=(PerTransactionEventServerProxy &&) = delete;
 
-  x23::Async<SystemStatus<void>> emit_events(TxEventLog const &tx_event_log);
+  x23::Async<SystemStatus<void>>
+  emit_events(TxEventLog const &tx_event_log,
+              ProposedTransaction const &proposed_tx);
 
 private:
   EventServerProxy &event_server_proxy_;

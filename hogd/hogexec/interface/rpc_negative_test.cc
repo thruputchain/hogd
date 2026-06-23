@@ -212,7 +212,7 @@ TEST_F(RpcNegativeTest, TestModeMismatchProposeOnValidationBlock)
 
   // Proposing on a validation block should fail
   auto result =
-      client_.executorsched_propose_transaction(block_id, Transaction{});
+      client_.executorsched_propose_transaction(block_id, SignedTransaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
 
   client_.executorsched_finish_block(block_id);
@@ -268,7 +268,7 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
 
   // Block 999999 was never opened
   auto result =
-      client_.executorsched_propose_transaction(999999, Transaction{});
+      client_.executorsched_propose_transaction(999999, SignedTransaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
 }
 
@@ -290,7 +290,8 @@ TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
 
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(
-                    block_id, make_tx_with_expiry(/*expiry=*/0))
+                    block_id,
+                    SignedTransaction{.tx = make_tx_with_expiry(/*expiry=*/0)})
                 .result(),
             ExecResult::ExecResultTxValidationFailure);
 
@@ -367,7 +368,7 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   open_db_block(block_id);
 
   // Empty batch should return an empty result, not crash
-  TransactionBatch empty_batch;
+  SignedTransactionBatch empty_batch;
   auto result = client_.executorsched_propose_batch(block_id, empty_batch);
   EXPECT_EQ(result.size(), 0);
 
@@ -456,9 +457,9 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
-  TransactionBatch batch;
-  batch.push_back(
-      make_stalled_syscall_misc_transaction(setup.contract_address));
+  SignedTransactionBatch batch;
+  batch.push_back(SignedTransaction{
+      .tx = make_stalled_syscall_misc_transaction(setup.contract_address)});
 
   auto propose_client = make_srpc_multiclient<ExecutorSched1>(
       x23::HostPort{"localhost", server_port_}, false);

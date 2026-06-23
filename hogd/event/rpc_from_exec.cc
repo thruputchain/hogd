@@ -5,6 +5,7 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -52,8 +53,11 @@ EventExecRpc::eventexecutor_close_block(BlockID block_id)
 x23::Async<RPCError>
 EventExecRpc::eventexecutor_emit_event(BlockID block_id,
                                        TransactionID /*unused*/,
-                                       TxEventLog event_log)
+                                       TxEventLog event_log,
+                                       ProposedTransaction /*proposed_tx*/)
 {
+  // TODO(gramseyer): persist the transaction body to the indexer.  For now the
+  // event server accepts and drops it; only the event log is processed.
   auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     co_return RPCError::kRPCBadBlockID;
