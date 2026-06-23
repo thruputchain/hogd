@@ -261,10 +261,16 @@ TEST(Dag, DotIncludesNodesAndEdges)
 
   const std::string dot = dag.dot();
   EXPECT_NE(dot.find("digraph test_dag"), std::string::npos);
+  EXPECT_NE(dot.find("dag_start [label=\"start\"]"), std::string::npos);
+  EXPECT_NE(dot.find("dag_end [label=\"end\"]"), std::string::npos);
   EXPECT_NE(dot.find("n0 [label=\"0: root\"]"), std::string::npos);
   EXPECT_NE(dot.find("n1 [label=\"1: quote \\\"slash\\\\\\\"\"]"),
             std::string::npos);
+  EXPECT_NE(dot.find("dag_start -> n0"), std::string::npos);
   EXPECT_NE(dot.find("n0 -> n1"), std::string::npos);
+  EXPECT_NE(dot.find("n1 -> dag_end"), std::string::npos);
+  EXPECT_EQ(dot.find("-> dag_start"), std::string::npos);
+  EXPECT_EQ(dot.find("dag_end ->"), std::string::npos);
 }
 
 TEST(Dag, DotIncludesRuntimeStatsAfterRun)
@@ -277,10 +283,13 @@ TEST(Dag, DotIncludesRuntimeStatsAfterRun)
   dag.run()();
 
   const std::string dot = dag.dot();
+  EXPECT_NE(dot.find("dag_end [label=\"end\\ntime: "), std::string::npos);
   EXPECT_NE(dot.find("n0 [label=\"0: root\\nstate: done\\nwait: "),
             std::string::npos);
   EXPECT_NE(dot.find("\\nrun: "), std::string::npos);
   EXPECT_NE(dot.find("\\ntotal: "), std::string::npos);
   EXPECT_NE(dot.find("n1 [label=\"1: child\\nstate: done\\nwait: "),
             std::string::npos);
+  EXPECT_NE(dot.find("dag_start -> n0"), std::string::npos);
+  EXPECT_NE(dot.find("n1 -> dag_end"), std::string::npos);
 }

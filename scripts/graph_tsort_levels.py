@@ -7,8 +7,9 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 
-NODE_RE = re.compile(r"^\s*(n\d+)\s+\[label=(.*)\];\s*$")
-EDGE_RE = re.compile(r"^\s*(n\d+)\s*->\s*(n\d+)\s*;\s*$")
+DOT_ID = r"[A-Za-z_][A-Za-z0-9_]*"
+NODE_RE = re.compile(rf"^\s*({DOT_ID})\s+\[label=(.*)\];\s*$")
+EDGE_RE = re.compile(rf"^\s*({DOT_ID})\s*->\s*({DOT_ID})\s*;\s*$")
 TIME_RE = re.compile(r"(wait|run|total):\s*([0-9.]+)(us|ms|s)")
 TIME_FACTORS = {
     "us": 0.000001,
@@ -18,7 +19,13 @@ TIME_FACTORS = {
 
 
 def node_sort_key(node_id):
-    return int(node_id[1:])
+    if node_id == "dag_start" or node_id == "start":
+        return (-1, 0, node_id)
+    if node_id.startswith("n") and node_id[1:].isdigit():
+        return (0, int(node_id[1:]), node_id)
+    if node_id == "dag_end" or node_id == "end":
+        return (1, 0, node_id)
+    return (0, 1_000_000_000, node_id)
 
 
 def wrap_words(text, width):
@@ -211,10 +218,11 @@ def slowest_path(node_labels, edges, levels):
         indegree[target] = indegree.get(target, 0) + 1
         indegree.setdefault(source, 0)
 
-    queue = deque(sorted(
+    source_nodes = sorted(
         [node_id for node_id, degree in indegree.items() if degree == 0],
         key=node_sort_key,
-    ))
+    )
+    queue = deque(source_nodes)
     topo_order = []
     while queue:
         node_id = queue.popleft()
@@ -231,7 +239,9 @@ def slowest_path(node_labels, edges, levels):
         node_id: parse_node_times(label).get("run", 0.0)
         for node_id, label in node_labels.items()
     }
-    best_time = {node_id: run_times[node_id] for node_id in node_labels}
+    best_time = {node_id: float("-inf") for node_id in node_labels}
+    for node_id in source_nodes:
+        best_time[node_id] = run_times[node_id]
     predecessor = {node_id: None for node_id in node_labels}
 
     for source in topo_order:
@@ -260,6 +270,14 @@ def slowest_path(node_labels, edges, levels):
         end = source
 
     return path_nodes, path_edges
+
+
+def explicit_terminal_nodes(node_labels):
+    return {
+        node_id
+        for node_id in node_labels
+        if node_id in {"start", "dag_start", "end", "dag_end"}
+    }
 
 
 def parse_dot(path):
@@ -339,6 +357,7 @@ def write_ranked_dot(node_labels, edges, grouped, levels, output_path):
 
     title_columns = title_order(node_labels)
     critical_nodes, critical_edges = slowest_path(node_labels, edges, levels)
+    critical_nodes |= explicit_terminal_nodes(node_labels)
 
     lines = [
         "digraph schedulercoord_nominate_levels {",

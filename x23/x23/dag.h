@@ -198,8 +198,9 @@ public:
       x23assert(!started_);
       started_ = true;
       done_cb_ = cb;
+      graph_started_at_ = std::chrono::steady_clock::now();
       for (size_t i = 0; i < nodes_.size(); i++)
-        nodes_[i]->queued_at = std::chrono::steady_clock::now();
+        nodes_[i]->queued_at = graph_started_at_;
       mark_ready_roots_locked(to_start);
       done_cb = finish_cb_locked();
     }
@@ -263,14 +264,23 @@ public:
     ret += " {\n";
     ret += "  rankdir=LR;\n";
     ret += "  node [shape=box];\n";
+    ret += "  dag_start [label=\"start\"];\n";
+    ret += std::format("  dag_end [label=\"{}\"];\n",
+                       dot_escape(dot_end_label_locked(now)));
     for (size_t id = 0; id < nodes_.size(); id++) {
       ret += std::format("  n{} [label=\"{}\"];\n", id,
                          dot_escape(dot_node_label_locked(id, now)));
     }
+    for (const size_t root : roots_)
+      ret += std::format("  dag_start -> n{};\n", root);
     for (size_t id = 0; id < nodes_.size(); id++) {
       for (const size_t dep : nodes_[id]->deps)
         ret += std::format("  n{} -> n{};\n", dep, id);
+      if (nodes_[id]->successors.empty())
+        ret += std::format("  n{} -> dag_end;\n", id);
     }
+    if (nodes_.empty())
+      ret += "  dag_start -> dag_end;\n";
     ret += "}\n";
     return ret;
   }
@@ -500,6 +510,22 @@ private:
     return label;
   }
 
+  std::string
+  dot_end_label_locked(std::chrono::steady_clock::time_point now) const
+  {
+    std::string label = "end";
+    if (!started_)
+      return label;
+
+    label += "\ntime: ";
+    if (finished_)
+      label += format_duration(graph_finished_at_ - graph_started_at_);
+    else
+      label +=
+          std::format("{} so far", format_duration(now - graph_started_at_));
+    return label;
+  }
+
   // A node is ready to start when it is still pending and all dependencies
   // completed successfully.
   bool ready_locked(size_t id) const
@@ -626,6 +652,7 @@ private:
     }
 
     finished_ = true;
+    graph_finished_at_ = std::chrono::steady_clock::now();
     return done_cb_;
   }
 
@@ -643,6 +670,9 @@ private:
   DagFailure failure_;
   // Callback used to resume run() when the graph reaches a terminal state.
   CoroCB<void> done_cb_;
+  // Wall-clock lifecycle of the whole graph run.
+  std::chrono::steady_clock::time_point graph_started_at_;
+  std::chrono::steady_clock::time_point graph_finished_at_;
   // Count of currently-running nodes.
   size_t running_{0};
   // True after run() has been called.
