@@ -54,16 +54,17 @@ x23::Async<RPCError>
 EventExecRpc::eventexecutor_emit_event(BlockID block_id,
                                        TransactionID /*unused*/,
                                        TxEventLog event_log,
-                                       ProposedTransaction /*proposed_tx*/)
+                                       ProposedTransaction proposed_tx)
 {
-  // TODO(gramseyer): persist the transaction body to the indexer.  For now the
-  // event server accepts and drops it; only the event log is processed.
   auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     co_return RPCError::kRPCBadBlockID;
   }
 
-  bool ok = co_await context->add_event(std::move(event_log));
+  // The body is accumulated alongside the event log and forwarded to the
+  // indexer when the block commits (see send_events_to_indexers).
+  bool ok =
+      co_await context->add_event(std::move(event_log), std::move(proposed_tx));
 
   if (context.release_reference()) [[unlikely]] {
     co_await ctx_.gc_context(block_id);
