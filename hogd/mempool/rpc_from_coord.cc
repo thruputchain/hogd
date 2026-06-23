@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <exception>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <unordered_set>
@@ -46,7 +47,6 @@
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
-#include "x23/fileio.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -678,7 +678,7 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
 MempoolCoordinatorRpc::ScheduleNodes
 MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                           x23::DagDeps scheduling_deps,
-                                          x23::DagDeps proposal_deps)
+                                          const x23::DagDeps &proposal_deps)
 {
   ScheduleNodes nodes;
   cache.transaction_nomination_chunks.clear();
