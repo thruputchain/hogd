@@ -911,7 +911,17 @@ SystemCallHandler::finish_frame(
   }
 
   if (invocation_frame_trace_) {
-    invocation_frame_stack_.log_trace_finish(*invocation_frame_trace_);
+    try {
+      invocation_frame_stack_.log_trace_finish(*invocation_frame_trace_);
+    } catch (std::exception &e) {
+      // finish_frame() is noexcept and reachable from the test FFI mock-frame
+      // path. Finish-time trace collection (collect_storage_deltas()) allocates
+      // and can throw std::bad_alloc after the real storage writes already
+      // succeeded; treat it as a best-effort trace drop rather than terminating
+      // an honest caller (#2646), preserving the frame cleanup and parent-trace
+      // restoration below. The no-allocation reporter avoids throwing again.
+      report_dropped_log(e.what());
+    }
   }
 
   // Restore parent trace and attach child
@@ -931,7 +941,14 @@ SystemCallHandler::finish_frame(
         out.outputs.emplace(SyscallInvokeOutputs());
         out.outputs->child_trace = std::move(*child_trace);
       } catch (std::exception &e) {
-        panic("Failed to attach child trace to parent: {}", e.what());
+        // Child-trace attachment is best-effort diagnostics. finish_frame() is
+        // noexcept and reachable from the test FFI mock-frame path, so a
+        // std::bad_alloc while materializing the optional SyscallInvokeOutputs
+        // must drop the optional trace rather than panic()-terminate an honest
+        // caller (#2741), mirroring start_frame()'s drop-and-continue (#2473).
+        // A failed emplace() leaves out.outputs empty (no partial attachment),
+        // and the no-allocation reporter avoids throwing again from this catch.
+        report_dropped_log(e.what());
       }
     }
   }
@@ -956,15 +973,29 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
   }
 
   if (invocation_frame_trace_) {
-    invocation_frame_trace_->system_calls.push_back(SyscallTrace{
-        .gas_remaining_at_start = current_gas_remaining,
-        // This field is filled in when the syscall finishes.
-        .gas_remaining_at_end = std::numeric_limits<GasAmount>::max(),
-        // This field is filled in by the individual syscall
-        .body = SyscallTraceBody(syscall_number),
-        // This field is filled in when the syscall finishes.
-        .status = HostFunctionStatusXdr(HostFnErrorCode::Unrecoverable),
-    });
+    try {
+      invocation_frame_trace_->system_calls.push_back(SyscallTrace{
+          .gas_remaining_at_start = current_gas_remaining,
+          // This field is filled in when the syscall finishes.
+          .gas_remaining_at_end = std::numeric_limits<GasAmount>::max(),
+          // This field is filled in by the individual syscall
+          .body = SyscallTraceBody(syscall_number),
+          // This field is filled in when the syscall finishes.
+          .status = HostFunctionStatusXdr(HostFnErrorCode::Unrecoverable),
+      });
+    } catch (std::exception &e) {
+      // Trace data is best-effort diagnostics. start_syscall_trace() runs from
+      // wrap_after_parse() just before the noexcept syscall body, and on the
+      // real WASM path the syscall dispatches through wrap_outer() noexcept, so
+      // an escaping std::bad_alloc here would terminate an honest test FFI
+      // caller (#2644). Drop this frame's trace and continue untraced,
+      // mirroring start_frame()'s drop-and-continue (#2473).
+      // finish_syscall_trace() and get_syscall_trace_data() both tolerate a
+      // null trace, so no later step touches a stale system_calls.back(). The
+      // no-allocation reporter avoids throwing again from this catch.
+      report_dropped_log(e.what());
+      invocation_frame_trace_ = nullptr;
+    }
   }
 }
 
