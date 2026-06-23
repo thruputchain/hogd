@@ -180,7 +180,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     // Propose all transactions in this initialization block
     for (const auto &stx : init_block) {
       auto propose_res =
-          client_.executorsched_propose_transaction(current_block_id, stx.tx);
+          client_.executorsched_propose_transaction(current_block_id, stx);
       ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
     }
 
@@ -212,7 +212,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Propose each transaction
   for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, stx.tx);
+        client_.executorsched_propose_transaction(test_block_id, stx);
     // Transactions might succeed or fail depending on account balances, etc.
     // But they should not return SystemError if everything is set up correctly
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
@@ -276,7 +276,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
     // Propose all transactions in this initialization block
     for (const auto &stx : init_block) {
       auto propose_res =
-          client_.executorsched_propose_transaction(current_block_id, stx.tx);
+          client_.executorsched_propose_transaction(current_block_id, stx);
       ASSERT_EQ(propose_res.result(), ExecResult::ExecResultOK);
     }
 
@@ -311,7 +311,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Propose transactions while events are blocked
   for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, stx.tx);
+        client_.executorsched_propose_transaction(test_block_id, stx);
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
   }
 
