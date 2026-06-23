@@ -730,10 +730,17 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     bool active{false};
   };
 
+  struct SummarizedChunk {
+    size_t start{0};
+    size_t end{0};
+    bool active{false};
+  };
+
   struct ScheduleState {
     x23::CoroGuard schedule_guard;
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
+    x23::Vec<SummarizedChunk> summarized_chunks;
     ElapsedTimer summarize_timer;
     size_t num_tx_outcomes_processed{0};
     size_t tx_write_idx{0};
@@ -747,6 +754,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   auto state = std::make_shared<ScheduleState>();
   state->handle_end_indices.reserve(kNumSchedulerIterations);
   state->scheduled_chunks.resize(kNumSchedulerIterations, {});
+  state->summarized_chunks.resize(kNumSchedulerIterations, {});
   nodes.schedule_chunks.reserve(kNumSchedulerIterations);
   nodes.propose_chunks.reserve(kNumSchedulerIterations);
   nodes.serialize_chunks.reserve(kNumSchedulerIterations);
@@ -761,7 +769,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                       });
 
   x23::DagNode<void> previous_schedule_node;
-  x23::DagNode<void> previous_serialize_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     x23::DagDeps deps = i == 0 ? dag.after(nodes.lock_scheduler)
                                : dag.after(previous_schedule_node);
@@ -810,57 +817,16 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               ret_span);
         });
     nodes.propose_chunks.push_back(propose_node);
-    x23::DagDeps serialize_deps = i == 0
-                                      ? dag.after(propose_node)
-                                      : dag.after(propose_node,
-                                                  previous_serialize_node);
-    auto serialize_node = dag.async<void>(
-        "serialize nomination batch", std::move(serialize_deps),
-        [&, state, i]() -> x23::Async<void> {
-          if (i == 0) {
-            Nomination &nomination =
-                cache.nomination_result.nominated_block().nomination;
-            nomination.transactions_hash = {};
-            nomination.transactions_nondeterministic_data = {};
-            cache.nomination_result.nominated_block().txs = {};
-          }
-          if (!state->scheduled_chunks[i].active) {
-            co_return;
-          }
-          const size_t start = state->scheduled_chunks[i].start;
-          const size_t end = state->scheduled_chunks[i].end;
-          x23::span<const bool> status_span(cache.statuses.begin() + start,
-                                            cache.statuses.begin() + end);
-          x23::span<const SignedTransactionHash> tx_hashes_span(
-              cache.tx_hashes.begin() + start, cache.tx_hashes.begin() + end);
-          x23::span<const SignedTransaction> txs_span(cache.txs.begin() + start,
-                                                      cache.txs.begin() + end);
-          x23::span<const NondeterministicProposalData> nominations_span(
-              cache.transaction_nomination_chunks[i].begin(),
-              cache.transaction_nomination_chunks[i].end());
-          co_await default_coropoll().pool_.bg();
-          Nomination &nomination =
-              cache.nomination_result.nominated_block().nomination;
-          append_selected_serialized_segment(
-              tx_hashes_span, status_span, nomination.transactions_hash);
-          append_serialized_segment(
-              nominations_span,
-              nomination.transactions_nondeterministic_data);
-          append_selected_serialized_segment(
-              txs_span, status_span,
-              cache.nomination_result.nominated_block().txs);
-          co_return;
-        });
-    nodes.serialize_chunks.push_back(serialize_node);
-    previous_serialize_node = serialize_node;
     previous_schedule_node = schedule_node;
   }
 
+  x23::Vec<x23::DagNode<void>> summary_nodes;
+  summary_nodes.reserve(kNumSchedulerIterations);
   x23::DagNode<void> previous_summary_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     x23::DagDeps summary_deps =
-        i == 0 ? dag.after(nodes.serialize_chunks[i], previous_schedule_node)
-               : dag.after(nodes.serialize_chunks[i], previous_summary_node);
+        i == 0 ? dag.after(nodes.propose_chunks[i])
+               : dag.after(nodes.propose_chunks[i], previous_summary_node);
     auto summary_node =
         dag.async<void>("summarize nomination schedule",
                         std::move(summary_deps),
@@ -876,6 +842,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
 
                           if (state->scheduled_chunks[i].active) {
                             ElapsedTimer part_timer;
+                            const size_t result_start =
+                                cache.result_tx_hashes.size();
                             x23::XdrVec<NondeterministicProposalData>
                                 &chunk_nominations =
                                     cache.transaction_nomination_chunks[i];
@@ -914,6 +882,11 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                             state->compact_txs_seconds += part_timer.elapsed();
                             state->num_tx_outcomes_processed =
                                 state->handle_end_indices[i];
+                            state->summarized_chunks[i] = SummarizedChunk{
+                                .start = result_start,
+                                .end = cache.result_tx_hashes.size(),
+                                .active = true,
+                            };
                           }
 
                           if (i + 1 == kNumSchedulerIterations) {
@@ -939,9 +912,54 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                           }
                           co_return;
                         });
+    summary_nodes.push_back(summary_node);
     previous_summary_node = summary_node;
   }
   nodes.summarize = previous_summary_node;
+
+  x23::DagNode<void> previous_serialize_node;
+  for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    x23::DagDeps serialize_deps =
+        i == 0 ? dag.after(summary_nodes[i])
+               : dag.after(summary_nodes[i], previous_serialize_node);
+    auto serialize_node = dag.async<void>(
+        "serialize nomination batch", std::move(serialize_deps),
+        [&, state, i]() -> x23::Async<void> {
+          if (i == 0) {
+            Nomination &nomination =
+                cache.nomination_result.nominated_block().nomination;
+            nomination.transactions_hash = {};
+            nomination.transactions_nondeterministic_data = {};
+            cache.nomination_result.nominated_block().txs = {};
+          }
+          if (!state->summarized_chunks[i].active) {
+            co_return;
+          }
+          const size_t start = state->summarized_chunks[i].start;
+          const size_t end = state->summarized_chunks[i].end;
+          x23::span<const SignedTransactionHash> tx_hashes_span(
+              cache.result_tx_hashes.begin() + start,
+              cache.result_tx_hashes.begin() + end);
+          x23::span<const NondeterministicProposalData> nominations_span(
+              cache.result_tx_nominations.begin() + start,
+              cache.result_tx_nominations.begin() + end);
+          x23::span<const SignedTransaction> txs_span(cache.txs.begin() + start,
+                                                      cache.txs.begin() + end);
+          co_await default_coropoll().pool_.bg();
+          Nomination &nomination =
+              cache.nomination_result.nominated_block().nomination;
+          append_serialized_segment(tx_hashes_span,
+                                    nomination.transactions_hash);
+          append_serialized_segment(
+              nominations_span,
+              nomination.transactions_nondeterministic_data);
+          append_serialized_segment(
+              txs_span, cache.nomination_result.nominated_block().txs);
+          co_return;
+        });
+    nodes.serialize_chunks.push_back(serialize_node);
+    previous_serialize_node = serialize_node;
+  }
   return nodes;
 }
 
