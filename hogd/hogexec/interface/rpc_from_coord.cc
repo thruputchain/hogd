@@ -46,7 +46,7 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 
 x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(BlockID block_id,
-                                                      Transaction tx)
+                                                      SignedTransaction signed_tx)
 {
   auto ctx_status =
       co_await try_get_context(block_id, ExecutionMode::kProposing);
@@ -58,7 +58,8 @@ ExecutorMempoolRpc::executorsched_propose_transaction(BlockID block_id,
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
-  auto r = co_await ctx->get().propose_transaction(tx, allocate_tx_ids(1));
+  auto r =
+      co_await ctx->get().propose_transaction(signed_tx, allocate_tx_ids(1));
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
     co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
@@ -91,28 +92,28 @@ ExecutorMempoolRpc::executorsched_validate_transaction(
 
 x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
-                                                TransactionBatch txs)
+                                                SignedTransactionBatch signed_txs)
 {
   auto ctx_status =
       co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx_status.has_value()) [[unlikely]] {
-    co_return ExecProposeBatchResult(txs.size(),
+    co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultUnrecoverable));
   }
   auto *ctx = *ctx_status;
   if (!ctx) {
-    co_return ExecProposeBatchResult(txs.size(),
+    co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
   }
 
-  CHECK(txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto first_tx_id = allocate_tx_ids(txs.size());
-  auto r = co_await ctx->get().propose_transaction_batch(txs, first_tx_id);
+  CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
+  auto first_tx_id = allocate_tx_ids(signed_txs.size());
+  auto r = co_await ctx->get().propose_transaction_batch(signed_txs, first_tx_id);
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecProposeBatchResult(txs.size(),
+    co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultUnrecoverable));
   }

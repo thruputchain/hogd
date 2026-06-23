@@ -209,7 +209,13 @@ public:
   ExecResult commit_body_discarded(ExecResult success_result);
   // Emit the transaction's event log to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
-  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result);
+  //
+  // [proposed_tx] is the full transaction body forwarded to the event server
+  // alongside the event log (assembled in proposal mode, forwarded in
+  // validation mode).  Defaults to an empty body for test/bench callers that
+  // only exercise the event-log path.
+  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result,
+                                             ProposedTransaction proposed_tx = {});
 
   // Get the proposal data.
   // Can only be called after root_invoke()

@@ -74,10 +74,11 @@ EventServerProxy::close_block(BlockID block_id)
 
 x23::Async<SystemStatus<void>>
 EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
-                             TxEventLog const &tx_event_log)
+                             TxEventLog const &tx_event_log,
+                             ProposedTransaction const &proposed_tx)
 {
-  auto r =
-      co_await client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log);
+  auto r = co_await client_.eventexecutor_emit_event(block_id, tx_id,
+                                                     tx_event_log, proposed_tx);
   if (r != RPCError::kRPCNone) {
     error("emit_event failed: {}", r);
   }
@@ -94,14 +95,15 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
 }
 
 x23::Async<SystemStatus<void>>
-PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log)
+PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log,
+                                            ProposedTransaction const &proposed_tx)
 {
   if (emitted_event_) {
     co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
   emitted_event_ = true;
   co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,
-                                                    tx_event_log);
+                                                    tx_event_log, proposed_tx);
 }
 
 } // namespace hogd

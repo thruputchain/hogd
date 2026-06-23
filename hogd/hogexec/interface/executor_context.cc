@@ -41,35 +41,37 @@ ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
+ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
+                                     TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeResult> awaitable;
   x23::CoroCB<ExecProposeResult> cb(awaitable);
-  worker_pool_.submit([this, &tx, tx_id, cb]() {
-    auto res = run_propose_transaction(tx, tx_id);
+  worker_pool_.submit([this, &signed_tx, tx_id, cb]() {
+    auto res = run_propose_transaction(signed_tx, tx_id);
     cb(res);
   });
   co_return co_await awaitable;
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorContext::propose_transaction_batch(TransactionBatch const &txs,
+ExecutorContext::propose_transaction_batch(SignedTransactionBatch const &signed_txs,
                                            TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeBatchResult> awaitable;
   x23::CoroCB<ExecProposeBatchResult> cb(awaitable);
-  worker_pool_.submit([this, &txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
-    batch_res.reserve(txs.size());
-    for (size_t i = 0; i < txs.size(); i++) {
-      batch_res.push_back(run_propose_transaction(txs[i], first_tx_id + i));
+    batch_res.reserve(signed_txs.size());
+    for (size_t i = 0; i < signed_txs.size(); i++) {
+      batch_res.push_back(
+          run_propose_transaction(signed_txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
   auto r = co_await awaitable;
-  assert(r.size() == txs.size());
+  assert(r.size() == signed_txs.size());
   co_return std::move(r);
 }
 
@@ -144,14 +146,14 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 // public RPCs and must not return arbitrarily old data.  See
 // ViewGatewayRpc::request_refresh() for the view-side mitigation.
 ExecProposeResult
-ExecutorContext::run_propose_transaction(Transaction const &tx,
+ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
                                          TransactionID tx_id)
 {
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(signed_tx.tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, *context);
   syscall_handler.root_invoke();
@@ -194,7 +196,15 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
     //
     // Hence, once shutdown has started, the final cleanup owner can drain
     // pending_event_calls_ before this ExecutorContext is destroyed.
-    syscall_handler.emit_events(exec_res)(
+    //
+    // Assemble the full transaction body forwarded to the event server: the
+    // SignedTransaction we executed plus the nondeterministic data this proposal
+    // produced.
+    ProposedTransaction proposed_tx{
+        .signed_tx = signed_tx,
+        .nondeterministic_proposal_data = syscall_handler.get_proposal_data(),
+    };
+    syscall_handler.emit_events(exec_res, std::move(proposed_tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return;
@@ -225,7 +235,8 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
-    syscall_handler.emit_events(exec_res)(
+    // In validation mode the full body was given to us; forward it as-is.
+    syscall_handler.emit_events(exec_res, tx)(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();

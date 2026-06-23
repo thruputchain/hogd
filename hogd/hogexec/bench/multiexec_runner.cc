@@ -47,7 +47,6 @@
 #include "x23/fastclock.h"
 #include "x23/format.h"
 #include "x23/rpc.h"
-#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -297,11 +296,8 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
         co_return;
       }
 
-      using TxProjection =
-          x23::ProjectedView<SignedTransaction, &SignedTransaction::tx>;
       auto r =
-          co_await exec_client.executorsched_propose_batch(block_number,
-                                                           TxProjection(batch));
+          co_await exec_client.executorsched_propose_batch(block_number, batch);
       assert(r.size() == batch.size());
       for (auto const &result : r) {
         if (result.result() != ExecResult::ExecResultOK) {

@@ -44,7 +44,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -459,11 +458,9 @@ MempoolCoordinatorRpc::propose_batch(
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
     x23::span<bool> ret_chunk, size_t executor_idx)
 {
-  using TxProjection =
-      x23::ProjectedView<SignedTransaction, &SignedTransaction::tx>;
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(
-          block_id, TxProjection(txs));
+          block_id, txs);
   // Record nomination metadata for txs that succeeded on the executor and mark
   // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
