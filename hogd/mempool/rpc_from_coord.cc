@@ -86,6 +86,18 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+template<typename T>
+x23::DagDeps
+dag_after_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
+{
+  x23::DagDeps deps;
+  deps.ids.reserve(nodes.size());
+  for (const x23::DagNode<T> &node : nodes) {
+    deps.ids.push_back(node.id());
+  }
+  return deps;
+}
+
 // clang tidy complains if the body of [x23::Defer()] can throw an exception, so
 // we wrap the body in this try/catch block.
 template<typename F>
@@ -579,13 +591,14 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-x23::Async<bool>
-MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
+MempoolCoordinatorRpc::InitializeBlockNodes
+MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
+                                                  const PendingBlock &cache,
+                                                  x23::DagDeps deps)
 {
-  x23::Dag dag("schedulercoord_nominate_initialize_block",
-               default_threadpool());
-  auto create_snapshot_node = dag.async<DbSchedResult>(
-      "create proposal snapshot", [&]() -> x23::Async<DbSchedResult> {
+  InitializeBlockNodes nodes;
+  nodes.create_snapshot = dag.async<DbSchedResult>(
+      "create proposal snapshot", deps, [&]() -> x23::Async<DbSchedResult> {
         co_return co_await create_snapshot(
             /*prev_block_id=*/last_committed_block_.id, cache.block_id,
             BlockExecutionMode::kBlockExecutionModeProposal);
@@ -593,66 +606,69 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 
   // Executor proposal blocks depend on the event block being open because they
   // can send event RPCs as soon as they start processing.
-  auto open_event_node =
-      dag.async<RPCError>("open event block", [&]() -> x23::Async<RPCError> {
+  nodes.open_event = dag.async<RPCError>(
+      "open event block", deps, [&]() -> x23::Async<RPCError> {
         co_return co_await eventsched_open_block(cache.block_id);
       });
 
-  x23::Vec<x23::DagNode<ExecResult>> open_proposal_block_nodes;
-  open_proposal_block_nodes.reserve(exec_clients_.size());
+  nodes.open_proposal_blocks.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
-    open_proposal_block_nodes.push_back(dag.async<ExecResult>(
-        "open executor proposal block", dag.after(open_event_node),
+    nodes.open_proposal_blocks.push_back(dag.async<ExecResult>(
+        "open executor proposal block", dag.after(nodes.open_event),
         [&, i]() -> x23::Async<ExecResult> {
           co_return co_await open_proposal_block(cache.block_id,
                                                  /*executor_idx=*/i);
         }));
   }
 
-  co_await dag.run();
-  if (!dag.ok() && dag.failure().exception) {
-    std::rethrow_exception(dag.failure().exception);
+  x23::DagDeps check_initialized_deps =
+      dag.after(nodes.create_snapshot, nodes.open_event);
+  for (const x23::DagNode<ExecResult> &node : nodes.open_proposal_blocks) {
+    check_initialized_deps.ids.push_back(node.id());
   }
 
-  const DbSchedResult create_snapshot_result = create_snapshot_node.get();
-  bool open_proposal_block_success = true;
-  for (const x23::DagNode<ExecResult> &node : open_proposal_block_nodes) {
-    if (node.get() != ExecResult::ExecResultOK) {
-      open_proposal_block_success = false;
-    }
-  }
+  x23::Vec<x23::DagNode<ExecResult>> open_proposal_blocks =
+      nodes.open_proposal_blocks;
+  nodes.initialized = dag.async<bool>(
+      "check initialized block", std::move(check_initialized_deps),
+      [&, create_snapshot = nodes.create_snapshot,
+       open_event = nodes.open_event,
+       open_proposal_blocks]() -> x23::Async<bool> {
+        const DbSchedResult create_snapshot_result = create_snapshot.get();
+        bool open_proposal_block_success = true;
+        for (const x23::DagNode<ExecResult> &node : open_proposal_blocks) {
+          if (node.get() != ExecResult::ExecResultOK) {
+            open_proposal_block_success = false;
+          }
+        }
 
-  if (create_snapshot_result != DbSchedResult::DbSchedResultOK ||
-      open_event_node.get() != RPCError::kRPCNone ||
-      !open_proposal_block_success) {
-    // One of the RPCs failed, so we need to undo any of the successful RPC
-    // calls.
-    if (create_snapshot_result == DbSchedResult::DbSchedResultOK) {
-      CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-               DbSchedResult::DbSchedResultOK);
-    }
-    if (open_event_node.get() == RPCError::kRPCNone) {
-      CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
-               RPCError::kRPCNone);
-    }
-    co_await finish_all_executors(cache.block_id);
+        if (create_snapshot_result != DbSchedResult::DbSchedResultOK ||
+            open_event.get() != RPCError::kRPCNone ||
+            !open_proposal_block_success) {
+          // One of the RPCs failed, so we need to undo any of the successful
+          // RPC calls.
+          if (create_snapshot_result == DbSchedResult::DbSchedResultOK) {
+            CHECK_EQ(co_await abandon_snapshot(cache.block_id),
+                     DbSchedResult::DbSchedResultOK);
+          }
+          if (open_event.get() == RPCError::kRPCNone) {
+            CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
+                     RPCError::kRPCNone);
+          }
+          co_await finish_all_executors(cache.block_id);
 
-    co_return false;
-  }
-  co_return true;
+          co_return false;
+        }
+        co_return true;
+      });
+  return nodes;
 }
 
-x23::Async<void>
-MempoolCoordinatorRpc::schedule(PendingBlock &cache)
+MempoolCoordinatorRpc::ScheduleNodes
+MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
+                                          x23::DagDeps deps)
 {
-  x23::CoroGuard cg;
-  co_await cg(scheduler_->global_lock_);
-
-  x23::Dag dag("schedulercoord_nominate_schedule", default_threadpool());
-  x23::Vec<x23::DagNode<void>> propose_nodes;
-  propose_nodes.reserve(kNumSchedulerIterations);
-  x23::Vec<size_t> handle_end_indices;
-  handle_end_indices.reserve(kNumSchedulerIterations);
+  ScheduleNodes nodes;
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
 
@@ -661,18 +677,38 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     size_t end{0};
     bool active{false};
   };
-  x23::Vec<ScheduledChunk> scheduled_chunks(kNumSchedulerIterations, {});
 
-  size_t num_scheduled = 0;
-  bool stopped = false;
+  struct ScheduleState {
+    x23::CoroGuard schedule_guard;
+    x23::Vec<x23::DagNode<void>> propose_nodes;
+    x23::Vec<size_t> handle_end_indices;
+    x23::Vec<ScheduledChunk> scheduled_chunks;
+    size_t num_scheduled{0};
+    bool stopped{false};
+  };
+  auto state = std::make_shared<ScheduleState>();
+  state->propose_nodes.reserve(kNumSchedulerIterations);
+  state->handle_end_indices.reserve(kNumSchedulerIterations);
+  state->scheduled_chunks.resize(kNumSchedulerIterations, {});
+  nodes.schedule_chunks.reserve(kNumSchedulerIterations);
+  nodes.propose_chunks.reserve(kNumSchedulerIterations);
+
+  nodes.lock_scheduler =
+      dag.async<void>("lock scheduler nomination", std::move(deps),
+                      [&, state]() -> x23::Async<void> {
+                        co_await state->schedule_guard(
+                            scheduler_->global_lock_);
+                        co_return;
+                      });
+
   x23::DagNode<void> previous_schedule_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
-    x23::DagDeps schedule_deps =
-        i == 0 ? x23::DagDeps{} : dag.after(previous_schedule_node);
+    x23::DagDeps schedule_deps = i == 0 ? dag.after(nodes.lock_scheduler)
+                                        : dag.after(previous_schedule_node);
     auto schedule_node =
         dag.async<void>("schedule nomination chunk", std::move(schedule_deps),
-                        [&, i]() -> x23::Async<void> {
-                          if (stopped) {
+                        [&, state, i]() -> x23::Async<void> {
+                          if (state->stopped) {
                             co_return;
                           }
                           if (i > 0) {
@@ -680,28 +716,29 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
                                                      kNumSchedulerIterations,
                                                  cache.tx_hashes, cache.txs);
                           }
-                          const size_t start = num_scheduled;
+                          const size_t start = state->num_scheduled;
                           const size_t end = cache.tx_hashes.size();
                           if (end == start) {
-                            stopped = true;
+                            state->stopped = true;
                             co_return;
                           }
-                          scheduled_chunks[i] = ScheduledChunk{
+                          state->scheduled_chunks[i] = ScheduledChunk{
                               .start = start,
                               .end = end,
                               .active = true,
                           };
-                          handle_end_indices.push_back(end);
-                          num_scheduled = end;
+                          state->handle_end_indices.push_back(end);
+                          state->num_scheduled = end;
                         });
-    propose_nodes.push_back(dag.async<void>(
+    nodes.schedule_chunks.push_back(schedule_node);
+    auto propose_node = dag.async<void>(
         "propose nomination chunk", dag.after(schedule_node),
-        [&, i]() -> x23::Async<void> {
-          if (!scheduled_chunks[i].active) {
+        [&, state, i]() -> x23::Async<void> {
+          if (!state->scheduled_chunks[i].active) {
             co_return;
           }
-          const size_t start = scheduled_chunks[i].start;
-          const size_t end = scheduled_chunks[i].end;
+          const size_t start = state->scheduled_chunks[i].start;
+          const size_t end = state->scheduled_chunks[i].end;
           x23::span<bool> ret_span(cache.statuses.begin() + start,
                                    cache.statuses.begin() + end);
           // [schedule()] appends transactions to the end of [txs]. We reserve
@@ -712,126 +749,132 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
           co_await propose_batch_in_chunks(
               cache.block_id, txs_span, cache.transaction_nomination_chunks[i],
               ret_span);
-        }));
+        });
+    state->propose_nodes.push_back(propose_node);
+    nodes.propose_chunks.push_back(propose_node);
     previous_schedule_node = schedule_node;
   }
-  co_await dag.run();
-  if (!dag.ok() && dag.failure().exception) {
-    std::rethrow_exception(dag.failure().exception);
-  }
 
-  cache.failed_tx_hashes.clear();
-  size_t num_tx_outcomes_processed = 0;
-  // We need to remove failed txs from [cache.txs], so we use [tx_write_idx] to
-  // track where to overwrite successful txs to in [cache.txs]. We do a single
-  // overwrite per tx, so removing the failed txs is efficient.
-  size_t tx_write_idx = 0;
-  CHECK(cache.result_tx_nominations.empty());
-  for (size_t handle_idx = 0; handle_idx < propose_nodes.size(); handle_idx++) {
-    if (!scheduled_chunks[handle_idx].active) {
-      continue;
-    }
-    cache.result_tx_nominations +=
-        cache.transaction_nomination_chunks[handle_idx];
+  nodes.summarize = dag.async<void>(
+      "summarize nomination schedule", dag_after_nodes(state->propose_nodes),
+      [&, state]() -> x23::Async<void> {
+        cache.failed_tx_hashes.clear();
+        size_t num_tx_outcomes_processed = 0;
+        // We need to remove failed txs from [cache.txs], so we use
+        // [tx_write_idx] to track where to overwrite successful txs to in
+        // [cache.txs]. We do a single overwrite per tx, so removing the failed
+        // txs is efficient.
+        size_t tx_write_idx = 0;
+        CHECK(cache.result_tx_nominations.empty());
+        for (size_t handle_idx = 0; handle_idx < state->propose_nodes.size();
+             handle_idx++) {
+          if (!state->scheduled_chunks[handle_idx].active) {
+            continue;
+          }
+          cache.result_tx_nominations +=
+              cache.transaction_nomination_chunks[handle_idx];
 
-    // TODO(jhumphri): Start adding the txs to the merkle trie here.
-    for (size_t tx_idx = num_tx_outcomes_processed;
-         tx_idx < handle_end_indices[handle_idx]; tx_idx++) {
-      if (cache.statuses[tx_idx]) {
-        cache.result_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
-        if (tx_write_idx != tx_idx) {
-          cache.txs[tx_write_idx] = std::move(cache.txs[tx_idx]);
+          // TODO(jhumphri): Start adding the txs to the merkle trie here.
+          for (size_t tx_idx = num_tx_outcomes_processed;
+               tx_idx < state->handle_end_indices[handle_idx]; tx_idx++) {
+            if (cache.statuses[tx_idx]) {
+              cache.result_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
+              if (tx_write_idx != tx_idx) {
+                cache.txs[tx_write_idx] = std::move(cache.txs[tx_idx]);
+              }
+              tx_write_idx++;
+            }
+            else {
+              cache.failed_tx_hashes.push_back((cache.tx_hashes[tx_idx]));
+            }
+          }
+          num_tx_outcomes_processed = state->handle_end_indices[handle_idx];
         }
-        tx_write_idx++;
-      }
-      else {
-        cache.failed_tx_hashes.push_back((cache.tx_hashes[tx_idx]));
-      }
-    }
-    num_tx_outcomes_processed = handle_end_indices[handle_idx];
-  }
-  cache.txs.resize(tx_write_idx);
-  CHECK_EQ(num_tx_outcomes_processed, cache.tx_hashes.size());
-  CHECK_EQ(cache.result_tx_hashes.size(), cache.result_tx_nominations.size());
+        cache.txs.resize(tx_write_idx);
+        CHECK_EQ(num_tx_outcomes_processed, cache.tx_hashes.size());
+        CHECK_EQ(cache.result_tx_hashes.size(),
+                 cache.result_tx_nominations.size());
 
-  co_return;
-}
-
-x23::Async<void>
-MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
-                                               PendingBlock &cache)
-{
-  x23::Dag dag("schedulercoord_nominate_finish", default_threadpool());
-  auto finish_executors_node =
-      dag.async<void>("finish executors", [&]() -> x23::Async<void> {
-        co_await finish_all_executors(cache.block_id);
+        state->schedule_guard.reset();
         co_return;
       });
-  auto close_snapshot_node = dag.async<DbBlockResult>(
-      "close proposal snapshot", [&]() -> x23::Async<DbBlockResult> {
-        co_return co_await close_snapshot(cache.block_id);
+  return nodes;
+}
+
+MempoolCoordinatorRpc::FinishNominationNodes
+MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
+    x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
+    x23::DagDeps proposal_deps, x23::DagDeps summary_deps)
+{
+  FinishNominationNodes nodes;
+  nodes.finish_executors =
+      dag.async<void>("finish executors", proposal_deps,
+                      [&]() -> x23::Async<void> {
+                        co_await finish_all_executors(cache.block_id);
+                        co_return;
+                      });
+  nodes.close_snapshot =
+      dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
+                               [&]() -> x23::Async<DbBlockResult> {
+                                 co_return co_await close_snapshot(
+                                     cache.block_id);
+                               });
+  nodes.close_event =
+      dag.async<EventBlockResult>("close event block", proposal_deps,
+                                  [&]() -> x23::Async<EventBlockResult> {
+                                    co_return co_await eventsched_close_block(
+                                        cache.block_id, db_tip.height + 1);
+                                  });
+  nodes.txset_hash =
+      dag.cpu<SHA256Hash>("compute txset hash", summary_deps, [&] {
+        return get_txset_hash(cache.result_tx_hashes);
       });
-  auto close_event_node = dag.async<EventBlockResult>(
-      "close event block", [&]() -> x23::Async<EventBlockResult> {
-        co_return co_await eventsched_close_block(cache.block_id,
-                                                  db_tip.height + 1);
+  nodes.serialize_nomination = dag.async<void>(
+      "serialize nomination batches", summary_deps, [&]() -> x23::Async<void> {
+        Nomination &nomination =
+            cache.nomination_result.nominated_block().nomination;
+        nomination.transactions_hash = {};
+        nomination.transactions_nondeterministic_data = {};
+        co_await t_to_parallel_batch(cache.result_tx_hashes,
+                                     nomination.transactions_hash);
+        co_await t_to_parallel_batch(
+            cache.result_tx_nominations,
+            nomination.transactions_nondeterministic_data);
+        co_await t_to_parallel_batch(
+            cache.txs, cache.nomination_result.nominated_block().txs);
+        co_return;
       });
-  auto txset_hash_node = dag.cpu<SHA256Hash>("compute txset hash", [&] {
-    return get_txset_hash(cache.result_tx_hashes);
-  });
-  auto serialize_nomination_node = dag.async<
-      void>("serialize nomination batches", [&]() -> x23::Async<void> {
-    Nomination &nomination =
-        cache.nomination_result.nominated_block().nomination;
-    nomination.transactions_hash = {};
-    nomination.transactions_nondeterministic_data = {};
-    co_await t_to_parallel_batch(cache.result_tx_hashes,
-                                 nomination.transactions_hash);
-    co_await t_to_parallel_batch(cache.result_tx_nominations,
-                                 nomination.transactions_nondeterministic_data);
-    co_await t_to_parallel_batch(cache.txs,
-                                 cache.nomination_result.nominated_block().txs);
-    co_return;
-  });
-  dag.async<void>("build nomination header",
-                  dag.after(close_snapshot_node, close_event_node,
-                            txset_hash_node),
-                  [&]() -> x23::Async<void> {
-                    {
-                      DbBlockResult result = close_snapshot_node.get();
-                      CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-                      cache.db_tip.db_hash = result.db_hash();
-                    }
-                    {
-                      EventBlockResult result = close_event_node.get();
-                      CHECK_EQ(result.error(), RPCError::kRPCNone);
-                      cache.db_tip.events_hash = result.root_hash();
-                    }
-                    Nomination &nomination =
-                        cache.nomination_result.nominated_block().nomination;
-                    nomination.block_height = db_tip.height + 1;
+  nodes.build_header = dag.async<void>(
+      "build nomination header",
+      dag.after(nodes.close_snapshot, nodes.close_event, nodes.txset_hash),
+      [&, close_snapshot = nodes.close_snapshot,
+       close_event = nodes.close_event,
+       txset_hash = nodes.txset_hash]() -> x23::Async<void> {
+        {
+          DbBlockResult result = close_snapshot.get();
+          CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+          cache.db_tip.db_hash = result.db_hash();
+        }
+        {
+          EventBlockResult result = close_event.get();
+          CHECK_EQ(result.error(), RPCError::kRPCNone);
+          cache.db_tip.events_hash = result.root_hash();
+        }
+        Nomination &nomination =
+            cache.nomination_result.nominated_block().nomination;
+        nomination.block_height = db_tip.height + 1;
 
-                    BlockHeader header{.network_id = network_id_,
-                                       .block_height = nomination.block_height,
-                                       .txset_hash = txset_hash_node.get(),
-                                       .db_hash = cache.db_tip.db_hash,
-                                       .events_hash = cache.db_tip.events_hash,
-                                       .prev_block_hash = db_tip.block_hash};
-                    nomination.block_hash = sha256(header);
-                    nomination.prev_block_hash = db_tip.block_hash;
-                    co_return;
-                  });
-
-  dag.async<void>("finish nomination",
-                  dag.after(finish_executors_node, serialize_nomination_node),
-                  []() -> x23::Async<void> { co_return; });
-
-  co_await dag.run();
-  if (!dag.ok() && dag.failure().exception) {
-    std::rethrow_exception(dag.failure().exception);
-  }
-
-  co_return;
+        BlockHeader header{.network_id = network_id_,
+                           .block_height = nomination.block_height,
+                           .txset_hash = txset_hash.get(),
+                           .db_hash = cache.db_tip.db_hash,
+                           .events_hash = cache.db_tip.events_hash,
+                           .prev_block_hash = db_tip.block_hash};
+        nomination.block_hash = sha256(header);
+        nomination.prev_block_hash = db_tip.block_hash;
+        co_return;
+      });
+  return nodes;
 }
 
 x23::Async<void>
@@ -951,20 +994,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
         co_return;
       });
 
-  bool initialized_block = false;
-  auto initialize_block_node = nomination_dag.async<void>(
-      "initialize block", nomination_dag.after(prepare_cache_node),
-      [&]() -> x23::Async<void> {
-        // Block initialization work takes ~10ms, so overlap it with the first
-        // local scheduling batch. The DAG keeps that overlap explicit without
-        // making the source order carry scheduling policy.
-        initialized_block = co_await initialize_block(nominated_block_cache_);
-        if (!initialized_block) {
-          nomination_dag.fail(x23::DagFailureKind::Cancelled,
-                              "initialize block");
-        }
-        co_return;
-      });
+  // Block initialization work takes ~10ms, so overlap it with the first local
+  // scheduling batch. The DAG keeps that overlap explicit without making the
+  // source order carry scheduling policy.
+  InitializeBlockNodes initialize_block_nodes =
+      add_initialize_block_nodes(nomination_dag, nominated_block_cache_,
+                                 nomination_dag.after(prepare_cache_node));
   auto first_schedule_node = nomination_dag.async<void>(
       "first schedule batch", nomination_dag.after(prepare_cache_node),
       [&]() -> x23::Async<void> {
@@ -976,26 +1011,31 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
                              nominated_block_cache_.txs);
         co_return;
       });
-  auto schedule_node =
-      nomination_dag.async<void>("schedule and propose block",
-                                 nomination_dag.after(initialize_block_node,
-                                                      first_schedule_node),
-                                 [&]() -> x23::Async<void> {
-                                   co_await schedule(nominated_block_cache_);
-                                   co_return;
-                                 });
-  nomination_dag.async<void>(
-      "finish nomination", nomination_dag.after(schedule_node),
+  auto check_initialize_block_node = nomination_dag.async<void>(
+      "check initialize block",
+      nomination_dag.after(initialize_block_nodes.initialized,
+                           first_schedule_node),
       [&]() -> x23::Async<void> {
-        co_await finish_nominating_block(db_tip, nominated_block_cache_);
+        if (!initialize_block_nodes.initialized.get()) {
+          nomination_dag.fail(x23::DagFailureKind::Cancelled,
+                              "initialize block");
+        }
         co_return;
       });
+  ScheduleNodes schedule_nodes =
+      add_schedule_nodes(nomination_dag, nominated_block_cache_,
+                         nomination_dag.after(check_initialize_block_node));
+  add_finish_nominating_block_nodes(
+      nomination_dag, db_tip, nominated_block_cache_,
+      dag_after_nodes(schedule_nodes.propose_chunks),
+      nomination_dag.after(schedule_nodes.summarize));
 
   co_await nomination_dag.run();
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
 
+  const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
     // Add the txs from the first call to [schedule()] above back to the
     // scheduler.
