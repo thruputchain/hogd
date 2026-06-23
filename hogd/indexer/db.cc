@@ -1355,4 +1355,186 @@ IndexDB::get_events(EventQuery const &query) const
   return page;
 }
 
+IndexerStatus<TransactionPage>
+IndexDB::get_transactions(TransactionQuery const &query) const
+{
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+
+  TransactionPage page;
+  const BlockHeight max_serve_block = latest_block();
+  page.latest_block = max_serve_block;
+  page.oldest_block = oldest_block();
+
+  const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
+
+  IterationOrder order;
+  BlockHeight anchor_block;
+  bool have_cursor = false;
+  Position cursor_pos{};
+
+  if (!query.cursor.empty()) {
+    auto decoded = cursor::decode(
+        std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
+                         query.cursor.size()));
+    if (!decoded || !is_valid_iteration_order(decoded->order)) {
+      return page;
+    }
+    order = decoded->order;
+    cursor_pos.block = decoded->block_height;
+    cursor_pos.tx = decoded->tx_hash;
+    cursor_pos.seq = 0;
+    anchor_block = cursor_pos.block;
+    have_cursor = true;
+  }
+  else {
+    order = query.order;
+    if (!is_valid_iteration_order(order)) {
+      return page;
+    }
+    switch (query.anchor.kind()) {
+    case BlockAnchorKind::AnchorAtBeginning:
+      if (order == IterationOrder::IterationOrderDescending) {
+        return page;
+      }
+      anchor_block = oldest_block();
+      break;
+    case BlockAnchorKind::AnchorAtEnd:
+      if (order == IterationOrder::IterationOrderAscending) {
+        return page;
+      }
+      anchor_block = max_serve_block;
+      break;
+    case BlockAnchorKind::AnchorAtHeight:
+      anchor_block = query.anchor.height();
+      if (anchor_block < oldest_block()) {
+        if (order == IterationOrder::IterationOrderDescending) {
+          return page;
+        }
+        anchor_block = oldest_block();
+      }
+      break;
+    }
+  }
+
+  if (order == IterationOrder::IterationOrderDescending &&
+      anchor_block > max_serve_block) {
+    anchor_block = max_serve_block;
+  }
+
+  struct TransactionRow {
+    Position pos;
+    TxEventLog events;
+  };
+  std::vector<TransactionRow> rows;
+
+  rocksdb::ReadOptions read_options;
+  std::unique_ptr<rocksdb::Iterator> iter(
+      db_->NewIterator(read_options, tx_cf_handle_));
+  for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+    rocksdb::Slice key = iter->key();
+    if (key.size() != IndexerKeyFormat::kTxKeySize) {
+      error("get_transactions: unexpected tx_index key size {}", key.size());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    rocksdb::Slice value = iter->value();
+    if (value.size() < sizeof(BlockHeight)) {
+      error("get_transactions: short tx_index value for key size {}",
+            key.size());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    BlockHeight block_height;
+    std::memcpy(&block_height, value.data(), sizeof(BlockHeight));
+    if (block_height < oldest_block() || block_height > max_serve_block) {
+      continue;
+    }
+
+    Position pos{.block = block_height, .tx = {}, .seq = 0};
+    std::memcpy(pos.tx.data(), key.data(), pos.tx.size());
+
+    if (have_cursor) {
+      if (order == IterationOrder::IterationOrderAscending &&
+          !(pos > cursor_pos)) {
+        continue;
+      }
+      if (order == IterationOrder::IterationOrderDescending &&
+          !(pos < cursor_pos)) {
+        continue;
+      }
+    }
+    else if (order == IterationOrder::IterationOrderAscending) {
+      if (pos.block < anchor_block) {
+        continue;
+      }
+    }
+    else if (pos.block > anchor_block) {
+      continue;
+    }
+
+    TxEventLog event_log;
+    try {
+      x23::deserialize(&event_log,
+                       x23::BufView{reinterpret_cast<const uint8_t *>(
+                                        value.data() + sizeof(BlockHeight)),
+                                    value.size() - sizeof(BlockHeight)});
+    } catch (const x23::XdrBadInput &e) {
+      error("get_transactions: failed to deserialize TxEventLog: {}", e.what());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    if (query.address) {
+      const bool matched =
+          std::ranges::any_of(event_log.events, [&](TxEmittedEvent const &ev) {
+            return ev.contract_address == *query.address;
+          });
+      if (!matched) {
+        continue;
+      }
+    }
+
+    rows.push_back(TransactionRow{.pos = pos, .events = std::move(event_log)});
+  }
+
+  rocksdb::Status status = iter->status();
+  if (!status.ok()) {
+    error("get_transactions: tx_index iterator failed: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  std::ranges::sort(rows, [order](TransactionRow const &lhs,
+                                  TransactionRow const &rhs) {
+    return order == IterationOrder::IterationOrderAscending ? lhs.pos < rhs.pos
+                                                            : lhs.pos > rhs.pos;
+  });
+
+  page.transactions.reserve(std::min<std::size_t>(limit, rows.size()));
+  Position last_emitted{};
+  bool any_emitted = false;
+  for (TransactionRow &row : rows) {
+    if (page.transactions.size() >= limit) {
+      break;
+    }
+    TxInfo info{.height = row.pos.block, .events = std::move(row.events)};
+    page.transactions.push_back(std::move(info));
+    last_emitted = row.pos;
+    any_emitted = true;
+  }
+
+  if (any_emitted && page.transactions.size() < rows.size()) {
+    EventCursorPayload payload;
+    payload.order = order;
+    payload.block_height = last_emitted.block;
+    payload.tx_hash = last_emitted.tx;
+    payload.sequence_number = 0;
+    std::string encoded = cursor::encode(payload);
+    page.cursor.append_range(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+  }
+
+  return page;
+}
+
 } // namespace hogd

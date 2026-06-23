@@ -100,6 +100,13 @@ public:
   // up to `limit` events plus a continuation cursor.
   IndexerStatus<EventPage> get_events(EventQuery const &query) const;
 
+  // Paginated transactions query.  See protocol/indexer.x for full
+  // semantics.  The current tx_index is keyed by hash rather than by
+  // block height, so this walks the transaction index and sorts the
+  // visible rows before paginating.
+  IndexerStatus<TransactionPage>
+  get_transactions(TransactionQuery const &query) const;
+
   // Highest block height through which the index is CONTIGUOUS:
   // every block from the first-ever ingested height up to this value
   // is fully ingested.  Out-of-order blocks above a gap are ingested
