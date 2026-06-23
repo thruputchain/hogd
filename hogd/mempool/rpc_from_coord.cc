@@ -1033,7 +1033,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
-  info("DAG:\n{}", nomination_dag.dot());
+  // info("DAG:\n{}", nomination_dag.dot());
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
