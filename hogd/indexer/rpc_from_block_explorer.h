@@ -53,6 +53,17 @@ public:
     co_return std::move(*status);
   }
 
+  // MOCK: get_transactions is declared in the protocol (indexer.x proc 4)
+  // but not yet implemented.  Returning an empty TransactionPage (empty
+  // transactions + empty cursor) signals "stream exhausted", so callers
+  // pagination-loop cleanly to completion rather than breaking.  Replace
+  // with a real db_-backed walk once the indexer indexes transactions.
+  x23::Async<TransactionPage> get_transactions(TransactionQuery query)
+  {
+    (void)query;
+    co_return TransactionPage{};
+  }
+
 private:
   IndexDB &db_;
 };
