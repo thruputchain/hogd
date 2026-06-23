@@ -695,6 +695,13 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     x23::Vec<x23::DagNode<void>> propose_nodes;
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
+    ElapsedTimer summarize_timer;
+    size_t num_tx_outcomes_processed{0};
+    size_t tx_write_idx{0};
+    double clear_failed_tx_hashes_seconds{0.0};
+    double append_nomination_chunks_seconds{0.0};
+    double compact_txs_seconds{0.0};
+    double finalize_seconds{0.0};
     size_t num_scheduled{0};
     bool stopped{false};
   };
@@ -767,50 +774,92 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     previous_schedule_node = schedule_node;
   }
 
-  nodes.summarize = dag.async<void>(
-      "summarize nomination schedule",
-      dag_deps_from_nodes(state->propose_nodes),
-      [&, state]() -> x23::Async<void> {
-        cache.failed_tx_hashes.clear();
-        size_t num_tx_outcomes_processed = 0;
-        // We need to remove failed txs from [cache.txs], so we use
-        // [tx_write_idx] to track where to overwrite successful txs to in
-        // [cache.txs]. We do a single overwrite per tx, so removing the failed
-        // txs is efficient.
-        size_t tx_write_idx = 0;
-        CHECK(cache.result_tx_nominations.empty());
-        for (size_t handle_idx = 0; handle_idx < state->propose_nodes.size();
-             handle_idx++) {
-          if (!state->scheduled_chunks[handle_idx].active) {
-            continue;
-          }
-          cache.result_tx_nominations +=
-              cache.transaction_nomination_chunks[handle_idx];
+  x23::DagNode<void> previous_summary_node;
+  for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    x23::DagDeps summary_deps =
+        i == 0 ? dag.after(state->propose_nodes[i], previous_schedule_node)
+               : dag.after(state->propose_nodes[i], previous_summary_node);
+    auto summary_node =
+        dag.async<void>("summarize nomination schedule",
+                        std::move(summary_deps),
+                        [&, state, i]() -> x23::Async<void> {
+                          if (i == 0) {
+                            state->summarize_timer = ElapsedTimer();
+                            ElapsedTimer part_timer;
+                            cache.failed_tx_hashes.clear();
+                            state->clear_failed_tx_hashes_seconds =
+                                part_timer.elapsed();
+                            CHECK(cache.result_tx_nominations.empty());
+                          }
 
-          // TODO(jhumphri): Start adding the txs to the merkle trie here.
-          for (size_t tx_idx = num_tx_outcomes_processed;
-               tx_idx < state->handle_end_indices[handle_idx]; tx_idx++) {
-            if (cache.statuses[tx_idx]) {
-              cache.result_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
-              if (tx_write_idx != tx_idx) {
-                cache.txs[tx_write_idx] = std::move(cache.txs[tx_idx]);
-              }
-              tx_write_idx++;
-            }
-            else {
-              cache.failed_tx_hashes.push_back((cache.tx_hashes[tx_idx]));
-            }
-          }
-          num_tx_outcomes_processed = state->handle_end_indices[handle_idx];
-        }
-        cache.txs.resize(tx_write_idx);
-        CHECK_EQ(num_tx_outcomes_processed, cache.tx_hashes.size());
-        CHECK_EQ(cache.result_tx_hashes.size(),
-                 cache.result_tx_nominations.size());
+                          if (state->scheduled_chunks[i].active) {
+                            ElapsedTimer part_timer;
+                            x23::XdrVec<NondeterministicProposalData>
+                                &chunk_nominations =
+                                    cache.transaction_nomination_chunks[i];
+                            cache.result_tx_nominations.append(
+                                std::make_move_iterator(
+                                    chunk_nominations.begin()),
+                                std::make_move_iterator(
+                                    chunk_nominations.end()));
+                            state->append_nomination_chunks_seconds +=
+                                part_timer.elapsed();
 
-        state->schedule_guard.reset();
-        co_return;
-      });
+                            // We need to remove failed txs from [cache.txs],
+                            // so [tx_write_idx] tracks where to overwrite
+                            // successful txs to in [cache.txs].
+                            // TODO(jhumphri): Start adding the txs to the
+                            // merkle trie here.
+                            part_timer = ElapsedTimer();
+                            for (size_t tx_idx =
+                                     state->num_tx_outcomes_processed;
+                                 tx_idx < state->handle_end_indices[i];
+                                 tx_idx++) {
+                              if (cache.statuses[tx_idx]) {
+                                cache.result_tx_hashes.push_back(
+                                    cache.tx_hashes[tx_idx]);
+                                if (state->tx_write_idx != tx_idx) {
+                                  cache.txs[state->tx_write_idx] =
+                                      std::move(cache.txs[tx_idx]);
+                                }
+                                state->tx_write_idx++;
+                              }
+                              else {
+                                cache.failed_tx_hashes.push_back(
+                                    cache.tx_hashes[tx_idx]);
+                              }
+                            }
+                            state->compact_txs_seconds += part_timer.elapsed();
+                            state->num_tx_outcomes_processed =
+                                state->handle_end_indices[i];
+                          }
+
+                          if (i + 1 == kNumSchedulerIterations) {
+                            ElapsedTimer part_timer;
+                            cache.txs.resize(state->tx_write_idx);
+                            CHECK_EQ(state->num_tx_outcomes_processed,
+                                     cache.tx_hashes.size());
+                            CHECK_EQ(cache.result_tx_hashes.size(),
+                                     cache.result_tx_nominations.size());
+
+                            state->schedule_guard.reset();
+                            state->finalize_seconds = part_timer.elapsed();
+
+                            info("summarize nomination schedule took {:.6f}s: "
+                                 "clear failed tx hashes {:.6f}s, append "
+                                 "nomination chunks {:.6f}s, compact txs "
+                                 "{:.6f}s, finalize {:.6f}s",
+                                 state->summarize_timer.elapsed(),
+                                 state->clear_failed_tx_hashes_seconds,
+                                 state->append_nomination_chunks_seconds,
+                                 state->compact_txs_seconds,
+                                 state->finalize_seconds);
+                          }
+                          co_return;
+                        });
+    previous_summary_node = summary_node;
+  }
+  nodes.summarize = previous_summary_node;
   return nodes;
 }
 
