@@ -53,6 +53,15 @@ public:
     co_return std::move(*status);
   }
 
+  x23::Async<TransactionPage> get_transactions(TransactionQuery query)
+  {
+    auto status = db_.get_transactions(query);
+    if (!status) {
+      co_return TransactionPage{};
+    }
+    co_return std::move(*status);
+  }
+
 private:
   IndexDB &db_;
 };
