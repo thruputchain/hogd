@@ -8,6 +8,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/format.h"

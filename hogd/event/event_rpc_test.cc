@@ -17,6 +17,7 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 #include "x23/srpc.h"
 

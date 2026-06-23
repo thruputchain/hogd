@@ -5,6 +5,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/rpc_context.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 
 namespace hogd {
