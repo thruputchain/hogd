@@ -214,8 +214,8 @@ public:
   // alongside the event log (assembled in proposal mode, forwarded in
   // validation mode).  Defaults to an empty body for test/bench callers that
   // only exercise the event-log path.
-  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result,
-                                             ProposedTransaction proposed_tx = {});
+  x23::Async<SystemStatus<void>>
+  emit_events(ExecResult exec_result, ProposedTransaction proposed_tx = {});
 
   // Get the proposal data.
   // Can only be called after root_invoke()

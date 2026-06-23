@@ -55,8 +55,8 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
                                        TxEventLog event_log,
                                        ProposedTransaction /*proposed_tx*/)
 {
-  // TODO(gramseyer): persist the transaction body to the indexer.  For now the event
-  // server accepts and drops it; only the event log is processed.
+  // TODO(gramseyer): persist the transaction body to the indexer.  For now the
+  // event server accepts and drops it; only the event log is processed.
   auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     co_return RPCError::kRPCBadBlockID;

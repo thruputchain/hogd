@@ -62,8 +62,9 @@ public:
   PerTransactionEventServerProxy &
   operator=(PerTransactionEventServerProxy &&) = delete;
 
-  x23::Async<SystemStatus<void>> emit_events(TxEventLog const &tx_event_log,
-                                             ProposedTransaction const &proposed_tx);
+  x23::Async<SystemStatus<void>>
+  emit_events(TxEventLog const &tx_event_log,
+              ProposedTransaction const &proposed_tx);
 
 private:
   EventServerProxy &event_server_proxy_;

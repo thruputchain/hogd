@@ -55,8 +55,8 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorContext::propose_transaction_batch(SignedTransactionBatch const &signed_txs,
-                                           TransactionID first_tx_id)
+ExecutorContext::propose_transaction_batch(
+    SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeBatchResult> awaitable;
@@ -198,8 +198,8 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
     // pending_event_calls_ before this ExecutorContext is destroyed.
     //
     // Assemble the full transaction body forwarded to the event server: the
-    // SignedTransaction we executed plus the nondeterministic data this proposal
-    // produced.
+    // SignedTransaction we executed plus the nondeterministic data this
+    // proposal produced.
     ProposedTransaction proposed_tx{
         .signed_tx = signed_tx,
         .nondeterministic_proposal_data = syscall_handler.get_proposal_data(),

@@ -95,8 +95,8 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
 }
 
 x23::Async<SystemStatus<void>>
-PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log,
-                                            ProposedTransaction const &proposed_tx)
+PerTransactionEventServerProxy::emit_events(
+    TxEventLog const &tx_event_log, ProposedTransaction const &proposed_tx)
 {
   if (emitted_event_) {
     co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};

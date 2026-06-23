@@ -180,10 +180,10 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
           .executorsched_propose_transaction(
               test_block_id,
               SignedTransaction{
-                  .tx = Transaction{
-                      .uniquifier = {.block_expiry_height =
-                                         std::numeric_limits<BlockHeight>::max(),
-                                     .nonce = 1}}})
+                  .tx = Transaction{.uniquifier = {.block_expiry_height =
+                                                       std::numeric_limits<
+                                                           BlockHeight>::max(),
+                                                   .nonce = 1}}})
           .result(),
       ExecResult::ExecResultTxDeterministicError);
 
