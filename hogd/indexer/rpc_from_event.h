@@ -34,9 +34,9 @@ public:
                                const TxEventLogBatch &tx_events,
                                const ProposedTransactionBatch &tx_bodies)
   {
-    // Careful! If we change this function to use [co_await] *before*
-    // [tx_events] is accessed, be sure to copy the [tx_events] parameter above
-    // rather than keep it as a reference.
+    // Careful! [tx_events] and [tx_bodies] are both references. If we change
+    // this function to use [co_await] *before* they are accessed, be sure to
+    // copy those parameters above rather than keep them as references.
     CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_.consume_events(block_height, tx_events).has_value());
     co_await Health::instance().set_current_block_height(block_height);
