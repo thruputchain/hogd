@@ -118,7 +118,15 @@ TEST(TestBindingsTest, ConsoleLogInnerTraceLoggerThrowDoesNotTerminate)
   // The throwing inner trace must not terminate the process. Instead the
   // syscall surfaces the logging failure (treated as out-of-memory) as a
   // structured Unrecoverable host-function error.
-  EXPECT_EQ(result.panic, std::to_underlying(HostFnErrorCode::Unrecoverable));
+  //
+  // The ConsoleLog inner trace is emitted at kTrace, which is compiled out in
+  // release builds (kMaxLogLevel == kInfo). There the throwing logger is never
+  // invoked, so the syscall completes normally and reports no panic.
+  constexpr auto kExpectedPanic =
+      should_log(LogLevel::kTrace)
+          ? std::to_underlying(HostFnErrorCode::Unrecoverable)
+          : std::to_underlying(HostFnErrorCode::NoneOrRecoverable);
+  EXPECT_EQ(result.panic, kExpectedPanic);
 
   // Finish the mock frame so the handler closes cleanly during teardown; an
   // unfinished frame leaves the handler open and free_db() hangs on exit. The

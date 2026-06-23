@@ -1,7 +1,13 @@
 name = "sanitizer_ci"
 
+# The ASAN/UBSAN matrix is split across two hosts that run in parallel: one
+# clang job (asan Debug + asan Release + ubsan) and one gcc job (asan Debug +
+# asan Release). ubsan is clang-only (gcc doesn't support -fsanitize-ignorelist)
+# so it lives in the clang job. Each [[jobs]] block is dispatched to its own
+# host ("?" = any available runner).
+
 [[jobs]]
-name = "{{ .hog_schedule }}_{{ .hog_host }}"
+name = "{{ .hog_schedule }}_clang_{{ .hog_host }}"
 script = """
 
 set -x
@@ -15,42 +21,26 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# Google benchmark seems to add Werror in release builds, which for some reason interacts badly with asan 
-# (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
-# We disable it overall just to save build time, but it's required for the gcc release build with asan.
+# Google benchmark seems to add Werror in release builds, which for some reason
+# interacts badly with asan (some kind of uninitialized variable in stdlib), so
+# we disable benchmark builds. We disable it overall to save build time.
 
 export ASAN_OPTIONS=abort_on_error=1
-
-echo 'build gcc asan'
-./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
-
-echo 'run gcc tests'
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
-ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang asan'
 ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm tests'
-export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang asan release'
 ./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm asan tests release'
-export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
 
-# gcc release seems to be more likely broken than clang release?
-echo 'build gcc asan release'
-./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DBUILD_BENCHMARKS=OFF"
-
-echo 'run gcc tests release'
-export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
-ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
-
-# Gcc doesn't support ignorelist with ubsan
+# Gcc doesn't support ignorelist with ubsan, so the ubsan build is clang-only.
 echo 'build clang ubsan'
 ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
@@ -80,4 +70,63 @@ CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/c
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 
 [jobs.host]
-sanitizer_1 = "?"
+sanitizer_clang = "?"
+
+
+[[jobs]]
+name = "{{ .hog_schedule }}_gcc_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# Google benchmark seems to add Werror in release builds, which for some reason
+# interacts badly with asan (some kind of uninitialized variable in stdlib), so
+# we disable benchmark builds. It's required for the gcc release build with asan.
+
+export ASAN_OPTIONS=abort_on_error=1
+export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+
+echo 'build gcc asan'
+./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run gcc tests'
+ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
+
+# gcc release seems to be more likely broken than clang release?
+echo 'build gcc asan release'
+./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run gcc tests release'
+ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+
+[jobs.host]
+sanitizer_gcc = "?"
