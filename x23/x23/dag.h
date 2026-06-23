@@ -5,6 +5,7 @@
 #include <chrono>
 #include <concepts>
 #include <exception>
+#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -249,7 +250,78 @@ public:
     return ret;
   }
 
+  // Return a Graphviz DOT rendering of the graph structure. This is intended
+  // for diagnostics before or after run(); lifecycle state is available from
+  // stats().
+  std::string dot() const
+  {
+    std::lock_guard lock(mutex_);
+    std::string ret;
+    ret += "digraph ";
+    ret += dot_id(name_);
+    ret += " {\n";
+    ret += "  rankdir=LR;\n";
+    ret += "  node [shape=box];\n";
+    for (size_t id = 0; id < nodes_.size(); id++) {
+      ret += std::format("  n{} [label=\"{}: {}\"];\n", id, id,
+                         dot_escape(nodes_[id]->name));
+    }
+    for (size_t id = 0; id < nodes_.size(); id++) {
+      for (const size_t dep : nodes_[id]->deps)
+        ret += std::format("  n{} -> n{};\n", dep, id);
+    }
+    ret += "}\n";
+    return ret;
+  }
+
 private:
+  static std::string dot_escape(std::string_view s)
+  {
+    std::string ret;
+    ret.reserve(s.size());
+    for (const char c : s) {
+      switch (c) {
+      case '\\':
+        ret += "\\\\";
+        break;
+      case '"':
+        ret += "\\\"";
+        break;
+      case '\n':
+        ret += "\\n";
+        break;
+      case '\r':
+        ret += "\\r";
+        break;
+      case '\t':
+        ret += "\\t";
+        break;
+      default:
+        ret += c;
+        break;
+      }
+    }
+    return ret;
+  }
+
+  static std::string dot_id(std::string_view s)
+  {
+    std::string ret;
+    ret.reserve(s.size());
+    for (const char c : s) {
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_') {
+        ret += c;
+      }
+      else {
+        ret += '_';
+      }
+    }
+    if (ret.empty() || (ret[0] >= '0' && ret[0] <= '9'))
+      ret.insert(ret.begin(), '_');
+    return ret;
+  }
+
   // Internal lifecycle state for one node.
   enum class NodeState {
     Pending,

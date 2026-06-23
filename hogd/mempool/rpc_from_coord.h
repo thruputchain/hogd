@@ -499,7 +499,8 @@ private:
                                                   const PendingBlock &cache,
                                                   const x23::DagDeps &deps);
   ScheduleNodes add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
-                                   x23::DagDeps deps);
+                                   x23::DagDeps scheduling_deps,
+                                   x23::DagDeps proposal_deps);
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
       const x23::DagDeps &proposal_deps, const x23::DagDeps &summary_deps);

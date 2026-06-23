@@ -5,6 +5,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <future>
 #include <memory>
@@ -45,6 +46,7 @@
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
+#include "x23/fileio.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -88,7 +90,7 @@ tx_failed(const ExecResult &r)
 
 template<typename T>
 x23::DagDeps
-dag_after_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
+dag_deps_from_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
 {
   x23::DagDeps deps;
   deps.ids.reserve(nodes.size());
@@ -96,6 +98,15 @@ dag_after_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
     deps.ids.push_back(node.id());
   }
   return deps;
+}
+
+x23::DagDeps
+merge_dag_deps(x23::DagDeps a, const x23::DagDeps &b)
+{
+  a.ids.reserve(a.ids.size() + b.ids.size());
+  a.ids.insert(a.ids.end(), std::make_move_iterator(b.ids.begin()),
+               std::make_move_iterator(b.ids.end()));
+  return a;
 }
 
 // clang tidy complains if the body of [x23::Defer()] can throw an exception, so
@@ -666,7 +677,8 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
 
 MempoolCoordinatorRpc::ScheduleNodes
 MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
-                                          x23::DagDeps deps)
+                                          x23::DagDeps scheduling_deps,
+                                          x23::DagDeps proposal_deps)
 {
   ScheduleNodes nodes;
   cache.transaction_nomination_chunks.clear();
@@ -694,28 +706,27 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.propose_chunks.reserve(kNumSchedulerIterations);
 
   nodes.lock_scheduler =
-      dag.async<void>("lock scheduler nomination", std::move(deps),
+      dag.async<void>("lock scheduler nomination", std::move(scheduling_deps),
                       [&, state]() -> x23::Async<void> {
                         co_await state->schedule_guard(
                             scheduler_->global_lock_);
+                        scheduler_->start_pending_nomination(cache.block_id);
                         co_return;
                       });
 
   x23::DagNode<void> previous_schedule_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
-    x23::DagDeps schedule_deps = i == 0 ? dag.after(nodes.lock_scheduler)
-                                        : dag.after(previous_schedule_node);
+    x23::DagDeps deps = i == 0 ? dag.after(nodes.lock_scheduler)
+                               : dag.after(previous_schedule_node);
     auto schedule_node =
-        dag.async<void>("schedule nomination chunk", std::move(schedule_deps),
+        dag.async<void>("schedule nomination chunk", std::move(deps),
                         [&, state, i]() -> x23::Async<void> {
                           if (state->stopped) {
                             co_return;
                           }
-                          if (i > 0) {
-                            scheduler_->schedule(kMaxBlockSize /
-                                                     kNumSchedulerIterations,
-                                                 cache.tx_hashes, cache.txs);
-                          }
+                          scheduler_->schedule(kMaxBlockSize /
+                                                   kNumSchedulerIterations,
+                                               cache.tx_hashes, cache.txs);
                           const size_t start = state->num_scheduled;
                           const size_t end = cache.tx_hashes.size();
                           if (end == start) {
@@ -732,7 +743,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                         });
     nodes.schedule_chunks.push_back(schedule_node);
     auto propose_node = dag.async<void>(
-        "propose nomination chunk", dag.after(schedule_node),
+        "propose nomination chunk",
+        merge_dag_deps(proposal_deps, dag.after(schedule_node)),
         [&, state, i]() -> x23::Async<void> {
           if (!state->scheduled_chunks[i].active) {
             co_return;
@@ -756,7 +768,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   }
 
   nodes.summarize = dag.async<void>(
-      "summarize nomination schedule", dag_after_nodes(state->propose_nodes),
+      "summarize nomination schedule",
+      dag_deps_from_nodes(state->propose_nodes),
       [&, state]() -> x23::Async<void> {
         cache.failed_tx_hashes.clear();
         size_t num_tx_outcomes_processed = 0;
@@ -962,9 +975,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       });
 
   auto prepare_cache_node = nomination_dag.async<void>(
-      "prepare nomination cache",
-      nomination_dag.after(transfer_data_node, auth_data_node),
-      [&]() -> x23::Async<void> {
+      "prepare nomination cache", [&]() -> x23::Async<void> {
         nominated_block_cache_.block_id = generate_block_id();
         // We place the block txs and tx hashes into these vectors. We mark
         // these vectors static and clear them on each call to [nominate()] so
@@ -994,27 +1005,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
         co_return;
       });
 
-  // Block initialization work takes ~10ms, so overlap it with the first local
-  // scheduling batch. The DAG keeps that overlap explicit without making the
-  // source order carry scheduling policy.
   InitializeBlockNodes initialize_block_nodes =
       add_initialize_block_nodes(nomination_dag, nominated_block_cache_,
                                  nomination_dag.after(prepare_cache_node));
-  auto first_schedule_node = nomination_dag.async<void>(
-      "first schedule batch", nomination_dag.after(prepare_cache_node),
-      [&]() -> x23::Async<void> {
-        x23::CoroGuard cg;
-        co_await cg(scheduler_->global_lock_);
-        scheduler_->start_pending_nomination(nominated_block_cache_.block_id);
-        scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
-                             nominated_block_cache_.tx_hashes,
-                             nominated_block_cache_.txs);
-        co_return;
-      });
   auto check_initialize_block_node = nomination_dag.async<void>(
       "check initialize block",
-      nomination_dag.after(initialize_block_nodes.initialized,
-                           first_schedule_node),
+      nomination_dag.after(initialize_block_nodes.initialized),
       [&]() -> x23::Async<void> {
         if (!initialize_block_nodes.initialized.get()) {
           nomination_dag.fail(x23::DagFailureKind::Cancelled,
@@ -1024,12 +1020,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       });
   ScheduleNodes schedule_nodes =
       add_schedule_nodes(nomination_dag, nominated_block_cache_,
+                         nomination_dag.after(prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
-      dag_after_nodes(schedule_nodes.propose_chunks),
+      dag_deps_from_nodes(schedule_nodes.propose_chunks),
       nomination_dag.after(schedule_nodes.summarize));
 
+  info("DAG:\n{}", nomination_dag.dot());
   co_await nomination_dag.run();
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);

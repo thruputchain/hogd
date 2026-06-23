@@ -251,3 +251,18 @@ TEST(Dag, StatsRecordStartedAndFinishedNodes)
   EXPECT_LE(stats[0].started_at, stats[0].finished_at);
   EXPECT_LE(stats[1].started_at, stats[1].finished_at);
 }
+
+TEST(Dag, DotIncludesNodesAndEdges)
+{
+  Dag dag("test dag", pool);
+
+  auto root = dag.cpu<int>("root", [] { return 1; });
+  dag.cpu<void>("quote \"slash\\\"", dag.after(root), [] {});
+
+  const std::string dot = dag.dot();
+  EXPECT_NE(dot.find("digraph test_dag"), std::string::npos);
+  EXPECT_NE(dot.find("n0 [label=\"0: root\"]"), std::string::npos);
+  EXPECT_NE(dot.find("n1 [label=\"1: quote \\\"slash\\\\\\\"\"]"),
+            std::string::npos);
+  EXPECT_NE(dot.find("n0 -> n1"), std::string::npos);
+}
