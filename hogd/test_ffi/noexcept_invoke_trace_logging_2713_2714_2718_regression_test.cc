@@ -56,6 +56,16 @@ namespace {
 // diagnostics and not on the root's identical diagnostics.
 std::atomic<bool> g_in_child_invoke = false;
 
+// The #2713/#2718 child-Invoke diagnostics ("Invoking method ..." and "Invoke
+// result: ...") are emitted at kTrace, which is compiled out in release builds
+// (kMaxLogLevel == kInfo). When the trace site does not exist, the throwing
+// logger is never invoked, so the child Invoke completes normally and the
+// result is None instead of Unrecoverable. The #2714 null-runtime test is
+// unaffected: an undeployed child fails Unrecoverable regardless of the trace.
+constexpr enum TestFFIErrorCode kExpectedChildInvokeErrorCode =
+    should_log(LogLevel::kTrace) ? kTestFFIErrorCodeUnrecoverableError
+                                 : kTestFFIErrorCodeNone;
+
 // Issues a child Invoke syscall (mirrors test_bindings_test.cc's local helper).
 HostFnStatus<SyscallErrorCode>
 issue_child_invoke(const ContractAddress &address)
@@ -273,7 +283,7 @@ TEST(TestBindingsTest, ChildInvokeEntryTraceLoggerThrowDoesNotTerminate)
   x23::Defer d([&] { teardown(h); });
   x23::Defer fb([&] { free_result_buffers(result); });
 
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(result.ffi_error_code, kExpectedChildInvokeErrorCode);
 }
 
 // The child Runtime::invoke() result trace throwing must not terminate the
@@ -289,7 +299,7 @@ TEST(TestBindingsTest, ChildInvokeResultTraceLoggerThrowDoesNotTerminate)
   x23::Defer d([&] { teardown(h); });
   x23::Defer fb([&] { free_result_buffers(result); });
 
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(result.ffi_error_code, kExpectedChildInvokeErrorCode);
 }
 
 // SystemCallHandler::invoke()'s null-runtime trace throwing must not terminate
