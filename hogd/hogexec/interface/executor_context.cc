@@ -199,10 +199,11 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
     //
     // Assemble the full transaction body forwarded to the event server: the
     // SignedTransaction we executed plus the nondeterministic data this
-    // proposal produced.
+    // proposal produced (already captured into [out] above, so reuse it rather
+    // than calling get_proposal_data() a second time).
     ProposedTransaction proposed_tx{
         .signed_tx = signed_tx,
-        .nondeterministic_proposal_data = syscall_handler.get_proposal_data(),
+        .nondeterministic_proposal_data = out.proposal_data(),
     };
     syscall_handler.emit_events(exec_res, std::move(proposed_tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
