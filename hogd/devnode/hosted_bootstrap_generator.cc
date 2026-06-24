@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
@@ -16,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unistd.h>
 #include <utility>
 
 #include "built_contracts/dev_wallet.h"
@@ -46,7 +49,17 @@ namespace {
 constexpr std::string_view kStorageCostModelHashTag =
     "groundhog-storage-cost-model-v1";
 constexpr int kHostedBootstrapTempOpenFlags =
-    O_WRONLY | O_CREAT | O_TRUNC; // NOLINT(misc-include-cleaner)
+    O_WRONLY | O_CREAT | O_EXCL; // NOLINT(misc-include-cleaner)
+
+std::string
+unique_temp_filename(std::string_view filename)
+{
+  static std::atomic_uint64_t sequence{0};
+  const auto timestamp =
+      std::chrono::steady_clock::now().time_since_epoch().count();
+  return std::format(".{}.tmp.{}.{}.{}", filename, getpid(), timestamp,
+                     sequence.fetch_add(1, std::memory_order_relaxed));
+}
 
 std::string
 xdr_hex(std::span<const std::byte> bytes)
@@ -138,7 +151,7 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
 {
   w.field("base_data_item_cost", uint64_string(model.base_data_item_cost));
   w.field("bytestring_cost_per_byte",
-          static_cast<std::int64_t>(model.bytestring_cost_per_byte));
+          uint64_string(model.bytestring_cost_per_byte));
   w.field("base_contract_deployment_cost",
           uint64_string(model.base_contract_deployment_cost));
   w.field("contract_deployment_cost_per_byte",
@@ -265,12 +278,13 @@ std::optional<std::string>
 read_file_if_exists(std::filesystem::path const &path)
 {
   std::error_code ec;
-  if (!std::filesystem::exists(path, ec)) {
-    return std::nullopt;
-  }
+  const bool exists = std::filesystem::exists(path, ec);
   if (ec) {
     throw std::runtime_error(
         std::format("could not inspect '{}': {}", path.string(), ec.message()));
+  }
+  if (!exists) {
+    return std::nullopt;
   }
   std::ifstream input(path, std::ios::binary);
   if (!input) {
@@ -316,7 +330,7 @@ write_file_atomically(std::filesystem::path const &path,
   Directory dir = require_io(Directory::open(parent.string(), /*create=*/false),
                              "open hosted bootstrap output directory");
   const std::string filename = path.filename().string();
-  const std::string tmp_filename = std::format("{}.tmp", filename);
+  const std::string tmp_filename = unique_temp_filename(filename);
   Defer cleanup_tmp([&] { std::ignore = dir.unlink(tmp_filename); });
   File file =
       require_io(dir.openat(tmp_filename, kHostedBootstrapTempOpenFlags, 0644),
