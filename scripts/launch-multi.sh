@@ -33,7 +33,7 @@ elif test -r "$HOGD_PROJECT_DIR/hog.conf"; then
 fi
 
 export MEMPOOL_DAG_DOT_DIR="$logdir/mempool_dot"
-EXPORT_REGEX='^(X23|MEMPOOL_DAG_DOT_DIR)$'
+EXPORT_REGEX='^(X23|MEMPOOL_DAG_DOT_DIR)='
 
 # -------------------------------
 
