@@ -23,6 +23,7 @@
 #include "hogd/container/merkle/node.h"
 #include "indexer.hh"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -46,13 +47,15 @@ struct EventContext {
 struct ReusableEventBlockContextData {
   ReusableEventBlockContextData(std::unique_ptr<MerkleTriePrefix> trie,
                                 PerThread<TxEventLogBatch> event_log,
+                                PerThread<ProposedTransactionBatch> tx_bodies,
                                 PerThread<detail::EventContext> buffers)
     : trie(std::move(trie)), event_log(std::move(event_log)),
-      buffers(std::move(buffers))
+      tx_bodies(std::move(tx_bodies)), buffers(std::move(buffers))
   {}
 
   std::unique_ptr<MerkleTriePrefix> trie;
   PerThread<TxEventLogBatch> event_log;
+  PerThread<ProposedTransactionBatch> tx_bodies;
   PerThread<detail::EventContext> buffers;
 
   ReusableEventBlockContextData(
@@ -98,7 +101,11 @@ public:
   // Returns false if no executor handle is open (i.e. executor_open_block()
   // was not called). Events must only be emitted while an executor handle is
   // held.
-  x23::Async<bool> add_event(TxEventLog event);
+  //
+  // [body] is the full transaction body, accumulated separately from the event
+  // log (it is not hashed into the consensus event trie) and forwarded to the
+  // indexer at commit.
+  x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
@@ -179,6 +186,7 @@ private:
   BlockID block_id_;
 
   PerThread<TxEventLogBatch> event_log_;
+  PerThread<ProposedTransactionBatch> tx_bodies_;
   PerThread<detail::EventContext> buffers_;
 
   // State transitions:
