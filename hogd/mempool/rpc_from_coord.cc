@@ -471,9 +471,8 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 
 SHA256Hash
 MempoolCoordinatorRpc::get_txset_hash(
-    const x23::XdrVec<SignedTransactionHash> &hashes, bool log_timings)
+    const x23::XdrVec<SignedTransactionHash> &hashes)
 {
-  ElapsedTimer timer;
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
@@ -481,7 +480,6 @@ MempoolCoordinatorRpc::get_txset_hash(
   const std::vector<ChunkRange> chunks =
       make_chunks(hashes.size(), num_threads);
   futures.reserve(chunks.size());
-  const double setup_elapsed = timer.elapsed();
 
   for (const ChunkRange &chunk : chunks) {
     futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
@@ -492,28 +490,11 @@ MempoolCoordinatorRpc::get_txset_hash(
       }
     }));
   }
-  const double submit_elapsed = timer.elapsed() - setup_elapsed;
   for (std::future<void> &future : futures) {
     future.get();
   }
-  const double insert_elapsed =
-      timer.elapsed() - setup_elapsed - submit_elapsed;
   trie.generate_all_hashes(num_threads);
-  const double generate_elapsed =
-      timer.elapsed() - setup_elapsed - submit_elapsed - insert_elapsed;
-  SHA256Hash root_hash = trie.get_root_hash();
-  const double root_elapsed = timer.elapsed() - setup_elapsed - submit_elapsed -
-                              insert_elapsed - generate_elapsed;
-  const double total_elapsed = timer.elapsed();
-  if (log_timings) {
-    info("compute txset hash took {:.6f}s: setup={:.6f}s, submit={:.6f}s, "
-         "insert={:.6f}s, generate={:.6f}s, root={:.6f}s, txs={}, chunks={}, "
-         "threads={}",
-         total_elapsed, setup_elapsed, submit_elapsed, insert_elapsed,
-         generate_elapsed, root_elapsed, hashes.size(), chunks.size(),
-         num_threads);
-  }
-  return root_hash;
+  return trie.get_root_hash();
 }
 
 x23::Async<void>
@@ -991,16 +972,9 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                   });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
-        ElapsedTimer timer;
         const size_t num_threads = available_parallelism();
         txset_trie->generate_all_hashes(num_threads);
-        const double generate_elapsed = timer.elapsed();
-        SHA256Hash root_hash = txset_trie->get_root_hash();
-        const double root_elapsed = timer.elapsed() - generate_elapsed;
-        info("compute txset hash took {:.6f}s: generate={:.6f}s, root={:.6f}s, "
-             "threads={}",
-             timer.elapsed(), generate_elapsed, root_elapsed, num_threads);
-        return root_hash;
+        return txset_trie->get_root_hash();
       });
   nodes.serialize_nomination =
       dag.async<void>("serialize nomination batches", serialized_deps,
