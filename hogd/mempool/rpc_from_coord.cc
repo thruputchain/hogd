@@ -452,18 +452,19 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 }
 
 x23::Vec<x23::DagNode<void>>
-MempoolCoordinatorRpc::add_finish_all_executors_nodes(
-    x23::Dag &dag, BlockID block_id, const x23::DagDeps &deps)
+MempoolCoordinatorRpc::add_finish_all_executors_nodes(x23::Dag &dag,
+                                                      const PendingBlock &cache,
+                                                      const x23::DagDeps &deps)
 {
   x23::Vec<x23::DagNode<void>> nodes;
   nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     nodes.push_back(
-        dag.async<void>("finish executor", deps,
-                        [&, block_id, i]() -> x23::Async<void> {
-                          co_await finish_block(block_id, /*executor_idx=*/i);
-                          co_return;
-                        }));
+        dag.async<void>("finish executor", deps, [&, i]() -> x23::Async<void> {
+          co_await finish_block(cache.block_id,
+                                /*executor_idx=*/i);
+          co_return;
+        }));
   }
   return nodes;
 }
@@ -991,7 +992,7 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
-      add_finish_all_executors_nodes(dag, cache.block_id, proposal_deps);
+      add_finish_all_executors_nodes(dag, cache, proposal_deps);
   nodes.close_snapshot =
       dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
                                [&]() -> x23::Async<DbBlockResult> {
