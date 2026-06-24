@@ -455,8 +455,9 @@ private:
                                             SHA256Hash events_hash);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
-  x23::Vec<x23::DagNode<void>> add_finish_all_executors_nodes(
-      x23::Dag &dag, const PendingBlock &cache, const x23::DagDeps &deps);
+  x23::Vec<x23::DagNode<void>>
+  add_finish_all_executors_nodes(x23::Dag &dag, const PendingBlock &cache,
+                                 const x23::DagDeps &deps);
 
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,

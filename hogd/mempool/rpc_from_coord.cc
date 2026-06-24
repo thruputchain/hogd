@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <ios>
 #include <iterator>
 #include <memory>
 #include <span>
