@@ -7,10 +7,13 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iterator>
 #include <memory>
 #include <span>
+#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -450,15 +453,13 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 
 x23::Vec<x23::DagNode<void>>
 MempoolCoordinatorRpc::add_finish_all_executors_nodes(
-    x23::Dag &dag, BlockID block_id,
-    const x23::Vec<x23::DagNode<void>> &propose_chunks)
+    x23::Dag &dag, BlockID block_id, const x23::DagDeps &deps)
 {
-  CHECK_EQ(exec_clients_.size(), propose_chunks.size());
   x23::Vec<x23::DagNode<void>> nodes;
   nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     nodes.push_back(
-        dag.async<void>("finish executor", dag.after(propose_chunks[i]),
+        dag.async<void>("finish executor", deps,
                         [&, block_id, i]() -> x23::Async<void> {
                           co_await finish_block(block_id, /*executor_idx=*/i);
                           co_return;
@@ -985,13 +986,12 @@ MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
     const x23::DagDeps &proposal_deps,
-    const x23::Vec<x23::DagNode<void>> &propose_chunks,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps)
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
-      add_finish_all_executors_nodes(dag, cache.block_id, propose_chunks);
+      add_finish_all_executors_nodes(dag, cache.block_id, proposal_deps);
   nodes.close_snapshot =
       dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
                                [&]() -> x23::Async<DbBlockResult> {
@@ -1182,18 +1182,23 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
-      schedule_nodes.propose_chunks, schedule_nodes.txset_trie,
+      schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
 
   co_await nomination_dag.run();
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
-  // if (const char *home = std::getenv("HOME")) {
-  //   std::ofstream graph_dot(std::string(home) + "/graph.dot",
-  //                           std::ios::out | std::ios::trunc);
-  //   graph_dot << nomination_dag.dot();
-  // }
+  if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
+      dot_dir != nullptr && *dot_dir != '\0') {
+    static std::atomic<size_t> dot_counter{0};
+    const size_t dot_idx = dot_counter.fetch_add(1, std::memory_order_relaxed);
+    const std::filesystem::path dot_path =
+        std::filesystem::path(dot_dir) /
+        ("mempool_" + std::to_string(dot_idx) + ".dot");
+    std::ofstream graph_dot(dot_path, std::ios::out | std::ios::trunc);
+    graph_dot << nomination_dag.dot();
+  }
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {

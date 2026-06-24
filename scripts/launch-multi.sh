@@ -32,7 +32,8 @@ elif test -r "$HOGD_PROJECT_DIR/hog.conf"; then
   . "$HOGD_PROJECT_DIR/hog.conf"
 fi
 
-EXPORT_REGEX='^X23'
+export MEMPOOL_DAG_DOT_DIR="$logdir/mempool_dot"
+EXPORT_REGEX='^(X23|MEMPOOL_DAG_DOT_DIR)$'
 
 # -------------------------------
 
@@ -121,6 +122,7 @@ make_logdir() {
   for s in "${all_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" mkdir -p "$logdir"
   done
+  ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" mkdir -p "$MEMPOOL_DAG_DOT_DIR"
 }
 
 # Kills all of the processes on all of the servers.
@@ -236,7 +238,7 @@ check_binaries() {
 
 echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" --bind-ip "$(hog_ip "$loadgen_server")" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
-./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
 
 # Start hogexec.
 echo "Start hogexec..."
@@ -313,48 +315,48 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
 # Wait for loadgen.
 # We already waited on [$LOADGEN_PORT] above, so we only still need to wait on
 # [$LOADGEN_HTTP_PORT].
-./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_HTTP_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$loadgen_server")" $LOADGEN_HTTP_PORT
 
 # Wait for hogexec.
 for s in "${hogexec_servers[@]}"; do
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $EXECUTOR_MEMPOOL_PORT
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $EXECUTOR_HTTP_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $EXECUTOR_MEMPOOL_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $EXECUTOR_HTTP_PORT
 done
 
 # Wait for event.
-./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_EXECUTOR_PORT
-./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_MEMPOOL_PORT
-./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_INDEXER_PORT
-./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_HTTP_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$event_server")" $EVENT_EXECUTOR_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$event_server")" $EVENT_MEMPOOL_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$event_server")" $EVENT_INDEXER_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$event_server")" $EVENT_HTTP_PORT
 
 # Wait for indexer.
-./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
-./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
-./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
 
 # Wait for hogdb.
 for s in "${hogdb_servers[@]}"; do
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_EXECUTOR_PORT
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_MEMPOOL_PORT
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_AUTH_PORT
-  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_HTTP_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_EXECUTOR_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_MEMPOOL_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_AUTH_PORT
+  "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_HTTP_PORT
 done
 
 # Wait for auth.
-./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_DB_PORT
-./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_MEMPOOL_PORT
-./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_HTTP_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$auth_server")" $AUTH_DB_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$auth_server")" $AUTH_MEMPOOL_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$auth_server")" $AUTH_HTTP_PORT
 
 # Wait for chuckd.
-./scripts/wait-port.sh "$(hog_ip "$chuckd_server")" 7888
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$chuckd_server")" 7888
 
 # Wait for mempool.
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_COORDINATOR_PORT
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EXECUTOR_PORT
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_DB_PORT
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EVENT_PORT
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_AUTH_PORT
-./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_HTTP_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_COORDINATOR_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_EXECUTOR_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_DB_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_EVENT_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_AUTH_PORT
+"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$mempool_server")" $MEMPOOL_HTTP_PORT
 
 echo "Done with launch."
 
