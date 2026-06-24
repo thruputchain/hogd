@@ -99,14 +99,27 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     // proposal-mode ValidationFailure means an expired replay uniquifier
     // rejected before any frame ran (output is a Fault); try_commit_transaction
     // then returns ExecResultTxValidationFailure.
-    // If we then fail to serialize the result for the caller, it was never
-    // handed back; mark the handler so try_commit_transaction() refuses to
+    //
+    // If we then fail to hand the finalized result back to the caller, it was
+    // never received; poison the handler so try_commit_transaction() refuses to
     // commit a hidden result (issue #2508), mirroring
-    // finish_mock_invocation_frame().
-    auto serialization_handoff_failure = [this](TestFFIErrorCode code) {
-      if (handler_.last_frame_finished()) {
+    // finish_mock_invocation_frame(). The poison runs through this scope-exit
+    // guard rather than only at the structured-error return sites so it also
+    // fires when a by-value copy throws -- get_most_recent_frame_output() (the
+    // root output) or copy_last_frame_events() (the root event vector, #2699)
+    // -- not just on serialize_to_ffi_data_buffer() errors. It is gated on
+    // last_frame_finished() because a proposal-mode ValidationFailure rejects
+    // before any frame runs, so there is no finalized result to hide then.
+    bool result_handed_off = false;
+    x23::Defer poison_handler_on_handoff_failure([&]() {
+      if (!result_handed_off && handler_.last_frame_finished()) {
         mark_finish_result_handoff_failed();
       }
+    });
+
+    // The poison guard above owns marking the handler; this just builds the
+    // structured FFI error returned to the caller on serialization failure.
+    auto serialization_handoff_failure = [](TestFFIErrorCode code) {
       return kMakeFFIError(code);
     };
 
@@ -155,6 +168,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     }
 
     buffers_handed_off = true;
+    result_handed_off = true;
     return ForeignTracedInvokeResult{
         .serialized_output = serialized_output.value(),
         .gas_consumed = res.gas_consumed_,
@@ -289,6 +303,18 @@ SyscallHandlerContext::finish_mock_invocation_frame(
                                        ? InvokeStatus<void>{}
                                        : InvokeError{invoke_error_code};
 
+  // Snapshot events from the frame about to finish BEFORE mutating any wrapper
+  // state. copy_active_frame_events() returns the active frame's event vector
+  // by value and allocates when the frame has events, so it can throw on
+  // allocation failure. Taking the snapshot first keeps this finish
+  // failure-atomic: a throw here leaves the mock runtime stack and active
+  // invocation frame paired, so the caller can retry, instead of popping the
+  // mock runtime out from under a still-running handler frame (which left
+  // can_be_closed() lying about an empty stack while is_running() stayed true —
+  // issue #2658). finish_frame() below merges these into the parent (success)
+  // or discards them (failure).
+  auto frame_events = handler_.copy_active_frame_events();
+
   auto *runtime = pop_mock_runtime();
   CHECK(runtime != nullptr);
   auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
@@ -298,10 +324,6 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   auto result =
       InvokeResult{.result_ = status_code, .gas_consumed_ = consumed_gas};
-
-  // Snapshot events from the frame about to finish — finish_frame will
-  // merge them into the parent (success) or discard them (failure).
-  auto frame_events = handler_.copy_active_frame_events();
 
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (!invocation_frame_trace_stack_.empty()) {
@@ -363,17 +385,33 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     }
   }
 
-  auto frame_output = handler_.get_most_recent_frame_output();
-
-  // Once the root frame is finalized, the cumulative result is committable. If
-  // we then fail to serialize the result for the caller, the result was never
-  // handed back, so mark the handler so try_commit_transaction() refuses to
-  // commit a hidden result (issue #2508). Non-root frame failures aren't
-  // committable, so they don't set the flag.
-  auto serialization_handoff_failure = [this](TestFFIErrorCode code) {
-    if (handler_.last_frame_finished()) {
+  // The frame has been committed: finish_frame() merged a successful child into
+  // its parent, and (for the root frame) finalize_after_root_frame() above made
+  // the cumulative result committable. From here until the result buffers are
+  // handed back to the caller, ANY failure -- a structured serialization error
+  // OR a thrown copy/allocation failure -- means the caller never received the
+  // result it was told to expect, so the handler must be poisoned and
+  // try_commit_transaction() must refuse to commit it.
+  //
+  // The poison runs through this scope-exit guard rather than only at the
+  // structured-error return sites so it also fires when a by-value copy throws,
+  // e.g. get_most_recent_frame_output() copying a nonempty ReturnBuffer
+  // (#2730). It is unconditional -- not gated on last_frame_finished() -- so it
+  // also covers non-root frames, whose child output finish_frame() already
+  // merged into the parent before this point; a non-root handoff failure must
+  // block the later parent commit too (#2768), mirroring the root case (#2508).
+  bool result_handed_off = false;
+  x23::Defer poison_handler_on_handoff_failure([&]() {
+    if (!result_handed_off) {
       mark_finish_result_handoff_failed();
     }
+  });
+
+  auto frame_output = handler_.get_most_recent_frame_output();
+
+  // The poison guard above owns marking the handler; this just builds the
+  // structured FFI error returned to the caller on serialization failure.
+  auto serialization_handoff_failure = [](TestFFIErrorCode code) {
     return kMakeFFIError(code);
   };
 
@@ -418,6 +456,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
 
   buffers_handed_off = true;
+  result_handed_off = true;
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
       .gas_consumed = total_gas_consumed,
