@@ -305,8 +305,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
     handles.push_back([](const ChunkRange &chunk, size_t i,
-                         size_t segment_offset,
-                         ParallelBatch &parallel,
+                         size_t segment_offset, ParallelBatch &parallel,
                          x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
                          x23::span<T> &objs) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
@@ -325,7 +324,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   }
   // This is just an educated guess, but hopefully it lowers/eliminates the
   // resize overhead of the vector.
-  parallel.xdr.reserve(parallel.xdr.size() + objs.size() * sizeof(T) * 3);
+  parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await handles[i];
     parallel.xdr += xdrs[i];

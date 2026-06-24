@@ -109,7 +109,7 @@ TEST(ParallelBatchToTTest, AppendPreservesExistingDataAndOrder)
 
   append_to_parallel_batch(SignedTransactionBatch{tx1}, batch)();
 
-  EXPECT_GT(batch.segment_tokens.size(), initial_num_segments);
+  EXPECT_EQ(batch.segment_tokens.size(), initial_num_segments + 1);
   EXPECT_GT(batch.xdr.size(), initial_num_bytes);
 
   SignedTransactionBatch parsed;
