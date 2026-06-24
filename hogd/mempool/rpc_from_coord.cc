@@ -1178,11 +1178,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
-  if (const char *home = std::getenv("HOME")) {
-    std::ofstream graph_dot(std::string(home) + "/graph.dot",
-                            std::ios::out | std::ios::trunc);
-    graph_dot << nomination_dag.dot();
-  }
+  // if (const char *home = std::getenv("HOME")) {
+  //   std::ofstream graph_dot(std::string(home) + "/graph.dot",
+  //                           std::ios::out | std::ios::trunc);
+  //   graph_dot << nomination_dag.dot();
+  // }
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
