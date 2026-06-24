@@ -91,10 +91,10 @@ create_event_logs()
 // Bodies are forwarded index-aligned with the event logs; these tests only
 // exercise the event-log path, so empty bodies of matching length suffice.
 ProposedTransactionBatch
-create_tx_bodies(size_t n)
+create_tx_bodies(std::size_t n)
 {
   ProposedTransactionBatch bodies;
-  for (size_t i = 0; i < n; i++) {
+  for (std::size_t i = 0; i < n; i++) {
     bodies.emplace_back();
   }
   return bodies;
