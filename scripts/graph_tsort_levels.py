@@ -339,7 +339,7 @@ def compute_levels(node_labels, edges):
     return grouped, levels
 
 
-def write_ranked_dot(node_labels, edges, grouped, levels, output_path):
+def write_ranked_dot(node_labels, edges, grouped, levels, output_path, splines):
     colors = [
         "#dbeafe",
         "#fef3c7",
@@ -361,7 +361,7 @@ def write_ranked_dot(node_labels, edges, grouped, levels, output_path):
 
     lines = [
         "digraph schedulercoord_nominate_levels {",
-        '  graph [rankdir=TB, newrank=true, ranksep=0.75, nodesep=0.08, splines=ortho, pad=0.18, outputorder=edgesfirst];',
+        f'  graph [rankdir=TB, newrank=true, ranksep=0.75, nodesep=0.08, splines={splines}, pad=0.18, outputorder=edgesfirst];',
         '  node [shape=box, style="rounded,filled", fontname=Helvetica, fontsize=9, margin=0.05];',
         '  edge [color="#555555", arrowsize=0.7];',
         "",
@@ -496,12 +496,21 @@ def main():
         type=Path,
         help="Optional SVG output path. When set, runs dot and adds dotted level separators.",
     )
+    parser.add_argument(
+        "--splines",
+        choices=("line", "polyline", "ortho", "spline", "curved"),
+        default="polyline",
+        help=(
+            "Graphviz edge routing style for the generated DOT. "
+            "Default: polyline. Use ortho for slower right-angle edges."
+        ),
+    )
     args = parser.parse_args()
 
     output = args.output or args.input.with_name(f"{args.input.stem}.levels.dot")
     node_labels, edges = parse_dot(args.input)
     grouped, levels = compute_levels(node_labels, edges)
-    write_ranked_dot(node_labels, edges, grouped, levels, output)
+    write_ranked_dot(node_labels, edges, grouped, levels, output, args.splines)
     print(f"wrote {output} with {len(grouped)} levels and {len(node_labels)} nodes")
     if args.svg:
         render_svg(output, args.svg)
