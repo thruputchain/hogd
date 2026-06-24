@@ -763,14 +763,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     x23::Vec<ScheduledChunk> scheduled_chunks;
     x23::Vec<SummarizedChunk> summarized_chunks;
     x23::Vec<x23::XdrVec<SignedTransactionHash>> txset_hash_chunks;
-    ElapsedTimer summarize_timer;
     size_t num_tx_outcomes_processed{0};
     size_t tx_write_idx{0};
-    double clear_failed_tx_hashes_seconds{0.0};
-    double append_nomination_chunks_seconds{0.0};
-    double compact_txs_seconds{0.0};
-    double resize_txs_seconds{0.0};
-    double finalize_seconds{0.0};
     size_t num_scheduled{0};
     bool stopped{false};
   };
@@ -856,27 +850,21 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         "summarize nomination schedule", std::move(summary_deps),
         [&, state, i]() -> x23::Async<void> {
           if (i == 0) {
-            state->summarize_timer = ElapsedTimer();
-            ElapsedTimer part_timer;
             cache.failed_tx_hashes.clear();
-            state->clear_failed_tx_hashes_seconds = part_timer.elapsed();
             CHECK(cache.result_tx_nominations.empty());
           }
 
           if (state->scheduled_chunks[i].active) {
-            ElapsedTimer part_timer;
             const size_t result_start = cache.result_tx_hashes.size();
             x23::XdrVec<NondeterministicProposalData> &chunk_nominations =
                 cache.transaction_nomination_chunks[i];
             cache.result_tx_nominations.append(
                 std::make_move_iterator(chunk_nominations.begin()),
                 std::make_move_iterator(chunk_nominations.end()));
-            state->append_nomination_chunks_seconds += part_timer.elapsed();
 
             // We need to remove failed txs from [cache.txs],
             // so [tx_write_idx] tracks where to overwrite
             // successful txs to in [cache.txs].
-            part_timer = ElapsedTimer();
             for (size_t tx_idx = state->num_tx_outcomes_processed;
                  tx_idx < state->handle_end_indices[i]; tx_idx++) {
               if (cache.statuses[tx_idx]) {
@@ -892,7 +880,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                 cache.failed_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
               }
             }
-            state->compact_txs_seconds += part_timer.elapsed();
             state->num_tx_outcomes_processed = state->handle_end_indices[i];
             state->summarized_chunks[i] = SummarizedChunk{
                 .start = result_start,
@@ -902,27 +889,11 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           }
 
           if (i + 1 == kNumSchedulerIterations) {
-            ElapsedTimer part_timer;
-            cache.txs.resize(state->tx_write_idx);
-            state->resize_txs_seconds = part_timer.elapsed();
-
-            part_timer = ElapsedTimer();
             CHECK_EQ(state->num_tx_outcomes_processed, cache.tx_hashes.size());
             CHECK_EQ(cache.result_tx_hashes.size(),
                      cache.result_tx_nominations.size());
 
             state->schedule_guard.reset();
-            state->finalize_seconds = part_timer.elapsed();
-
-            info("summarize nomination schedule took {:.6f}s: "
-                 "clear failed tx hashes {:.6f}s, append "
-                 "nomination chunks {:.6f}s, compact txs "
-                 "{:.6f}s, resize txs {:.6f}s, finalize {:.6f}s",
-                 state->summarize_timer.elapsed(),
-                 state->clear_failed_tx_hashes_seconds,
-                 state->append_nomination_chunks_seconds,
-                 state->compact_txs_seconds, state->resize_txs_seconds,
-                 state->finalize_seconds);
           }
           co_return;
         });
@@ -1005,6 +976,12 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     nodes.serialize_chunks.push_back(serialize_node);
     previous_serialize_node = serialize_node;
   }
+  nodes.resize_txs =
+      dag.async<void>("resize nominated txs", dag.after(nodes.summarize),
+                      [&, state]() -> x23::Async<void> {
+                        cache.txs.resize(state->tx_write_idx);
+                        co_return;
+                      });
   return nodes;
 }
 

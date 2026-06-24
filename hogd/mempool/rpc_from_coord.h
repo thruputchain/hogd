@@ -489,6 +489,7 @@ private:
     x23::Vec<x23::DagNode<void>> serialize_chunks;
     std::shared_ptr<MerkleTriePrefix> txset_trie;
     x23::DagNode<void> summarize;
+    x23::DagNode<void> resize_txs;
   };
   struct FinishNominationNodes {
     x23::DagNode<void> finish_executors;
