@@ -7,13 +7,10 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
-#include <fstream>
 #include <future>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <span>
-#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -50,7 +47,6 @@
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -971,7 +967,7 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
     const x23::DagDeps &proposal_deps,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
-    const x23::DagDeps &txset_hash_deps, const x23::DagDeps &serialized_deps)
+    const x23::DagDeps &txset_hash_deps)
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
@@ -1171,8 +1167,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       nomination_dag, db_tip, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       schedule_nodes.txset_trie,
-      dag_deps_from_nodes(schedule_nodes.txset_insert_chunks),
-      dag_deps_from_nodes(schedule_nodes.serialize_chunks));
+      dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
 
   co_await nomination_dag.run();
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
