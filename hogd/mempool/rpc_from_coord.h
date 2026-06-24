@@ -484,14 +484,17 @@ private:
     x23::DagNode<void> lock_scheduler;
     x23::Vec<x23::DagNode<void>> schedule_chunks;
     x23::Vec<x23::DagNode<void>> propose_chunks;
+    x23::Vec<x23::DagNode<void>> txset_insert_chunks;
+    x23::Vec<x23::DagNode<void>> serialize_chunks;
+    std::shared_ptr<MerkleTriePrefix> txset_trie;
     x23::DagNode<void> summarize;
+    x23::DagNode<void> resize_txs;
   };
   struct FinishNominationNodes {
     x23::DagNode<void> finish_executors;
     x23::DagNode<DbBlockResult> close_snapshot;
     x23::DagNode<EventBlockResult> close_event;
     x23::DagNode<SHA256Hash> txset_hash;
-    x23::DagNode<void> serialize_nomination;
     x23::DagNode<void> build_header;
   };
 
@@ -503,7 +506,9 @@ private:
                                    const x23::DagDeps &proposal_deps);
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
-      const x23::DagDeps &proposal_deps, const x23::DagDeps &summary_deps);
+      const x23::DagDeps &proposal_deps,
+      const std::shared_ptr<MerkleTriePrefix> &txset_trie,
+      const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 

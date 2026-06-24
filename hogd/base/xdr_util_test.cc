@@ -85,6 +85,40 @@ TEST(ParallelBatchToTTest, RoundTripsSingleSignedTransaction)
   EXPECT_EQ(parsed[0], tx);
 }
 
+TEST(ParallelBatchToTTest, AppendToEmptyMatchesTToParallelBatch)
+{
+  const SignedTransaction tx = make_minimal_signed_transaction();
+  SignedTransactionBatch txs{tx};
+  ParallelSignedTransactionBatch appended;
+  append_to_parallel_batch(txs, appended)();
+  ParallelSignedTransactionBatch replaced = t_to_parallel_batch(txs)();
+
+  EXPECT_EQ(appended, replaced);
+}
+
+TEST(ParallelBatchToTTest, AppendPreservesExistingDataAndOrder)
+{
+  SignedTransaction tx0 = make_minimal_signed_transaction();
+  SignedTransaction tx1 = make_minimal_signed_transaction();
+  tx1.tx.uniquifier.nonce = 1;
+
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{tx0})();
+  const size_t initial_num_segments = batch.segment_tokens.size();
+  const size_t initial_num_bytes = batch.xdr.size();
+
+  append_to_parallel_batch(SignedTransactionBatch{tx1}, batch)();
+
+  EXPECT_EQ(batch.segment_tokens.size(), initial_num_segments + 1);
+  EXPECT_GT(batch.xdr.size(), initial_num_bytes);
+
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_EQ(parsed.size(), 2UL);
+  EXPECT_EQ(parsed[0], tx0);
+  EXPECT_EQ(parsed[1], tx1);
+}
+
 TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(
