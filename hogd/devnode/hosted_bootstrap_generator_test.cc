@@ -1,5 +1,5 @@
-#include <cstdint>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -37,10 +37,9 @@ std::filesystem::path
 unique_test_dir(std::string_view name)
 {
   return std::filesystem::temp_directory_path() /
-         std::format("hog-hosted-bootstrap-{}-{}-{}", name, getpid(),
-                     std::chrono::steady_clock::now()
-                         .time_since_epoch()
-                         .count());
+         std::format(
+             "hog-hosted-bootstrap-{}-{}-{}", name, getpid(),
+             std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
 std::string

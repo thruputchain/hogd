@@ -227,7 +227,8 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.object([&](json::Writer &w) {
           x23::Buf tx_xdr = x23::serialize(artifact.initialization_txs[i]);
           w.field("index", static_cast<std::int64_t>(i));
-          w.field("hash", hex_string(sha256(artifact.initialization_txs[i].tx)));
+          w.field("hash",
+                  hex_string(sha256(artifact.initialization_txs[i].tx)));
           w.field("xdr", xdr_hex(std::as_bytes(
                              std::span(tx_xdr.data(), tx_xdr.size()))));
         });
@@ -297,7 +298,8 @@ require_io(ErrnoStatus<void> status, std::string_view operation)
 }
 
 void
-write_file_atomically(std::filesystem::path const &path, std::string_view contents)
+write_file_atomically(std::filesystem::path const &path,
+                      std::string_view contents)
 {
   std::filesystem::path parent = path.parent_path();
   if (parent.empty()) {
@@ -309,9 +311,9 @@ write_file_atomically(std::filesystem::path const &path, std::string_view conten
   const std::string filename = path.filename().string();
   const std::string tmp_filename = std::format("{}.tmp", filename);
   Defer cleanup_tmp([&] { std::ignore = dir.unlink(tmp_filename); });
-  File file = require_io(
-      dir.openat(tmp_filename, kHostedBootstrapTempOpenFlags, 0644),
-      "open hosted bootstrap temp file");
+  File file =
+      require_io(dir.openat(tmp_filename, kHostedBootstrapTempOpenFlags, 0644),
+                 "open hosted bootstrap temp file");
 
   std::span<const std::byte> remaining =
       std::as_bytes(std::span(contents.data(), contents.size()));
@@ -319,13 +321,15 @@ write_file_atomically(std::filesystem::path const &path, std::string_view conten
     const std::size_t count =
         require_io(file.write(remaining), "write hosted bootstrap temp file");
     if (count == 0) {
-      throw std::runtime_error("write hosted bootstrap temp file wrote 0 bytes");
+      throw std::runtime_error(
+          "write hosted bootstrap temp file wrote 0 bytes");
     }
     remaining = remaining.subspan(count);
   }
   require_io(file.sync(), "fsync hosted bootstrap temp file");
   require_io(file.close(), "close hosted bootstrap temp file");
-  require_io(dir.rename(tmp_filename, filename), "rename hosted bootstrap file");
+  require_io(dir.rename(tmp_filename, filename),
+             "rename hosted bootstrap file");
   require_io(dir.sync(), "fsync hosted bootstrap output directory");
 }
 
