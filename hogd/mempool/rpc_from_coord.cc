@@ -129,29 +129,6 @@ append_serialized_segment(x23::span<const T> objs, ParallelBatch &parallel)
   parallel.xdr += xdr;
 }
 
-template<typename T>
-void
-append_selected_serialized_segment(x23::span<const T> objs,
-                                   x23::span<const bool> use,
-                                   ParallelBatch &parallel)
-{
-  CHECK_EQ(objs.size(), use.size());
-  x23::XdrVec<uint8_t> xdr;
-  xdr.reserve(objs.size() * sizeof(T) * 3);
-  size_t num_tokens = 0;
-  for (size_t i = 0; i < objs.size(); i++) {
-    if (use[i]) {
-      xdr += x23::serialize(objs[i]);
-      num_tokens++;
-    }
-  }
-  CHECK_LE(num_tokens, std::numeric_limits<unsigned int>::max());
-  CHECK_LE(xdr.size(), std::numeric_limits<unsigned int>::max());
-  parallel.segment_tokens.push_back(static_cast<unsigned int>(num_tokens));
-  parallel.segment_bytes.push_back(static_cast<unsigned int>(xdr.size()));
-  parallel.xdr += xdr;
-}
-
 // clang tidy complains if the body of [x23::Defer()] can throw an exception, so
 // we wrap the body in this try/catch block.
 template<typename F>
