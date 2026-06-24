@@ -283,12 +283,12 @@ public:
       requires (sizeof...(r) == kReturnValue)
   {
     do_return(std::forward<decltype(r)>(r)...);
-    non_null_caller().resume();
+    resume_coro(non_null_caller());
   }
   void set_exception(std::exception_ptr p)
   {
     do_exception(std::move(p));
-    non_null_caller().resume();
+    resume_coro(non_null_caller());
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
@@ -305,9 +305,13 @@ public:
     // await_suspend() being called.  Publishing kReturning earlier
     // lets the caller destroy the frame while that write is
     // in-flight.
-    auto await_suspend(std::coroutine_handle<>) const noexcept
+    std::coroutine_handle<>
+    await_suspend(std::coroutine_handle<>) const noexcept
     {
-      return self_->non_null_caller();
+      CoroHandle caller = self_->non_null_caller();
+      detail::switch_coro_cpu_account(
+          caller.base() == nullptr ? nullptr : caller.base()->cpu_account());
+      return caller;
     }
     void await_resume() const noexcept { std::unreachable(); }
   };
@@ -368,7 +372,7 @@ public:
     std::construct_at(&exception_, std::move(p));
     flags_.fetch_or(kException, std::memory_order_relaxed);
   }
-  std::coroutine_handle<> caller()
+  CoroHandle caller()
   {
     unsigned oldflags = flags_.fetch_or(kReturning, std::memory_order_acq_rel);
     x23assert(oldflags & (kResult | kException));
@@ -377,13 +381,13 @@ public:
     }
     // At this point no longer safe to touch this, as caller might
     // destroy coroutine.
-    return nullptr;
+    return {};
   }
 
 private:
   // Caller's handle after it decides to suspend itself (if the result
   // is not already ready).
-  std::coroutine_handle<> caller_;
+  CoroHandle caller_;
 
   // result_ has been constructed:
   static constexpr unsigned kResult = 1U << 0;
@@ -412,9 +416,9 @@ private:
     return flags_.load(std::memory_order_relaxed);
   }
 
-  std::coroutine_handle<> non_null_caller()
+  CoroHandle non_null_caller()
   {
-    if (std::coroutine_handle<> h = caller())
+    if (CoroHandle h = caller())
       return h;
     return std::noop_coroutine();
   }
@@ -473,7 +477,7 @@ template<typename R> struct CoroCB {
       requires requires { resume_->set_result(std::forward<T>(t)...); }
   {
     resume_->do_return(std::forward<T>(t)...);
-    if (std::coroutine_handle<> h = resume_->caller())
+    if (CoroHandle h = resume_->caller())
       return {h, resume_->waiter()};
     return {};
   }

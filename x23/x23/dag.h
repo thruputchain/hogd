@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <concepts>
 #include <exception>
@@ -45,6 +46,7 @@ struct DagNodeStats {
   std::chrono::steady_clock::time_point queued_at;
   std::chrono::steady_clock::time_point started_at;
   std::chrono::steady_clock::time_point finished_at;
+  std::chrono::nanoseconds cpu_time{0};
   bool started{false};
   bool finished{false};
 };
@@ -243,6 +245,8 @@ public:
           .queued_at = node->queued_at,
           .started_at = node->started_at,
           .finished_at = node->finished_at,
+          .cpu_time = std::chrono::nanoseconds(
+              node->cpu_account.ns.load(std::memory_order_relaxed)),
           .started = node->state != NodeState::Pending,
           .finished = node->state == NodeState::Done ||
                       node->state == NodeState::Failed,
@@ -286,7 +290,8 @@ public:
   }
 
 private:
-  static std::string format_duration(std::chrono::steady_clock::duration d)
+  template<typename Rep, typename Period>
+  static std::string format_duration(std::chrono::duration<Rep, Period> d)
   {
     using namespace std::chrono;
     const auto us = duration_cast<microseconds>(d).count();
@@ -395,6 +400,7 @@ private:
     std::chrono::steady_clock::time_point queued_at;
     std::chrono::steady_clock::time_point started_at;
     std::chrono::steady_clock::time_point finished_at;
+    CoroCpuAccount cpu_account;
   };
 
   // Wrap a synchronous callable as an Async<void> runner that first switches to
@@ -496,6 +502,10 @@ private:
                            format_duration(now - node.started_at));
       label += std::format("\ntotal: {} so far",
                            format_duration(now - node.queued_at));
+      label += std::format("\ncpu: {} so far",
+                           format_duration(std::chrono::nanoseconds(
+                               node.cpu_account.ns.load(
+                                   std::memory_order_relaxed))));
       break;
     case NodeState::Done:
     case NodeState::Failed:
@@ -505,6 +515,10 @@ private:
                            format_duration(node.finished_at - node.started_at));
       label += std::format("\ntotal: {}",
                            format_duration(node.finished_at - node.queued_at));
+      label +=
+          std::format("\ncpu: {}", format_duration(std::chrono::nanoseconds(
+                                       node.cpu_account.ns.load(
+                                           std::memory_order_relaxed))));
       break;
     }
     return label;
@@ -593,7 +607,11 @@ private:
   {
     bool failed = false;
     try {
-      co_await nodes_[id]->run(id);
+      Async<void> node_run = [&]() {
+        detail::ScopedCoroCpuAccount account(&nodes_[id]->cpu_account);
+        return nodes_[id]->run(id);
+      }();
+      co_await node_run;
     } catch (...) {
       failed = true;
       std::lock_guard lock(mutex_);

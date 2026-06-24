@@ -16,6 +16,12 @@ using namespace x23;
 ThreadPool pool(4);
 CoroPoll cp(pool);
 
+static void
+sleep_for_cpu_accounting_test()
+{
+  std::this_thread::sleep_for(40ms);
+}
+
 TEST(Dag, RunsDependenciesAndStoresTypedResults)
 {
   Dag dag("basic", pool);
@@ -250,6 +256,61 @@ TEST(Dag, StatsRecordStartedAndFinishedNodes)
   EXPECT_TRUE(stats[1].finished);
   EXPECT_LE(stats[0].started_at, stats[0].finished_at);
   EXPECT_LE(stats[1].started_at, stats[1].finished_at);
+  EXPECT_GE(stats[0].cpu_time.count(), 0);
+  EXPECT_GE(stats[1].cpu_time.count(), 0);
+}
+
+TEST(Dag, CpuTimeExcludesCpuNodeSleep)
+{
+  Dag dag("cpu sleep", pool);
+
+  dag.cpu<void>("sleep", [] { sleep_for_cpu_accounting_test(); });
+
+  dag.run()();
+
+  const std::vector<DagNodeStats> stats = dag.stats();
+  ASSERT_EQ(stats.size(), 1UL);
+  const auto wall_time = stats[0].finished_at - stats[0].started_at;
+  EXPECT_GE(wall_time, 20ms);
+  EXPECT_LT(stats[0].cpu_time, wall_time / 2);
+}
+
+TEST(Dag, CpuTimeExcludesAsyncSuspension)
+{
+  Dag dag("async wait", pool);
+  CoroCB<void> finish;
+  std::atomic_bool async_started{false};
+
+  dag.async<void>("wait", [&]() -> Async<void> {
+    auto pending_pair = make_async<void>();
+    Async<void> pending = std::move(pending_pair.first);
+    finish = pending_pair.second;
+    async_started.store(true, std::memory_order_release);
+    async_started.notify_all();
+    co_await pending;
+  });
+
+  std::atomic_bool done{false};
+  [](Dag &dag, std::atomic_bool &done) -> Detached {
+    co_await dag.run();
+    done.store(true, std::memory_order_release);
+    done.notify_all();
+  }(dag, done);
+
+  while (!async_started.load(std::memory_order_acquire))
+    async_started.wait(false);
+  std::this_thread::sleep_for(40ms);
+  ASSERT_TRUE(finish);
+  finish();
+
+  while (!done.load(std::memory_order_acquire))
+    done.wait(false);
+
+  const std::vector<DagNodeStats> stats = dag.stats();
+  ASSERT_EQ(stats.size(), 1UL);
+  const auto wall_time = stats[0].finished_at - stats[0].started_at;
+  EXPECT_GE(wall_time, 20ms);
+  EXPECT_LT(stats[0].cpu_time, wall_time / 2);
 }
 
 TEST(Dag, DotIncludesNodesAndEdges)
@@ -288,6 +349,7 @@ TEST(Dag, DotIncludesRuntimeStatsAfterRun)
             std::string::npos);
   EXPECT_NE(dot.find("\\nrun: "), std::string::npos);
   EXPECT_NE(dot.find("\\ntotal: "), std::string::npos);
+  EXPECT_NE(dot.find("\\ncpu: "), std::string::npos);
   EXPECT_NE(dot.find("n1 [label=\"1: child\\nstate: done\\nwait: "),
             std::string::npos);
   EXPECT_NE(dot.find("dag_start -> n0"), std::string::npos);

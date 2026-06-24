@@ -438,7 +438,7 @@ private:
 
     void lock_affinity_queue(QPtr &ptr) noexcept;
     QPtr getq() noexcept;
-    std::coroutine_handle<> qpop(QPtr &ptr) const;
+    CoroHandle qpop(QPtr &ptr) const;
   };
 
   struct alignas(hardware_destructive_interference_size) ThreadState {

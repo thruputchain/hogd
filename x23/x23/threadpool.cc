@@ -291,7 +291,7 @@ ThreadPool::Worker::getq() noexcept
   }
 }
 
-std::coroutine_handle<>
+CoroHandle
 ThreadPool::Worker::qpop(QPtr &ptr) const
 {
   x23assert(!ptr->q.empty());
@@ -348,7 +348,7 @@ ThreadPool::Worker::work()
     auto task = qpop(ptr);
     ts.count_ = count++;
     ptr.reset();
-    task();
+    resume_coro(task);
   }
 }
 
