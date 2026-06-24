@@ -289,47 +289,57 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 
 template<typename T>
 inline x23::Async<void>
-t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
+append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
-  // [ParallelBatch] is a struct, and the caller likely allocated it without
-  // zeroing it out. Thus, we zero it out here.
-  parallel = {};
   const std::vector<ChunkRange> chunks =
       make_chunks(objs.size(), kNumThreadsForParallelBatch);
+  const size_t segment_offset = parallel.segment_tokens.size();
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
   xdrs.resize(chunks.size(), {});
-  parallel.segment_bytes.resize(chunks.size(), 0);
-  parallel.segment_tokens.resize(chunks.size(), 0);
+  parallel.segment_bytes.resize(segment_offset + chunks.size(), 0);
+  parallel.segment_tokens.resize(segment_offset + chunks.size(), 0);
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
     handles.push_back([](const ChunkRange &chunk, size_t i,
-                         ParallelBatch &parallel,
+                         size_t segment_offset, ParallelBatch &parallel,
                          x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
                          x23::span<T> &objs) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
-      parallel.segment_tokens[i] = chunk.end - chunk.start;
+      const size_t segment_idx = segment_offset + i;
+      parallel.segment_tokens[segment_idx] = chunk.end - chunk.start;
       // This is just an educated guess, but hopefully it lowers/eliminates the
       // resize overhead of the vector.
-      xdrs[i].reserve(parallel.segment_tokens[i] * sizeof(T) * 3);
+      xdrs[i].reserve(parallel.segment_tokens[segment_idx] * sizeof(T) * 3);
       for (size_t j = chunk.start; j < chunk.end; j++) {
         xdrs[i] += x23::serialize(objs[j]);
       }
-      parallel.segment_bytes[i] = xdrs[i].size();
+      parallel.segment_bytes[segment_idx] = xdrs[i].size();
       co_return;
-    }(chunk, i, parallel, xdrs, objs));
+    }(chunk, i, segment_offset, parallel, xdrs, objs));
   }
   // This is just an educated guess, but hopefully it lowers/eliminates the
   // resize overhead of the vector.
-  parallel.xdr.reserve(objs.size() * sizeof(T) * 3);
+  parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await handles[i];
     parallel.xdr += xdrs[i];
   }
+  co_return;
+}
+
+template<typename T>
+inline x23::Async<void>
+t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
+{
+  // [ParallelBatch] is a struct, and the caller likely allocated it without
+  // zeroing it out. Thus, we zero it out here.
+  parallel = {};
+  co_await append_to_parallel_batch(objs, parallel);
   co_return;
 }
 
@@ -340,6 +350,14 @@ t_to_parallel_batch(x23::span<T> objs)
   ParallelBatch parallel;
   co_await t_to_parallel_batch(objs, parallel);
   co_return parallel;
+}
+
+template<typename T>
+inline x23::Async<void>
+append_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
+{
+  co_await append_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_return;
 }
 
 template<typename T>
