@@ -1893,6 +1893,49 @@ TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
   ASSERT_TRUE(r.has_value() && !r.value());
 }
 
+// A subtransaction whose delta batch would not fit the executor->HogDB RPC
+// message is rejected as a 2PC conflict (a clean `false`, not a system error),
+// so an oversized push can never reach serialization and become a node-
+// unrecoverable error. This is the general r/w-footprint bound; here it is
+// driven by spraying max-size bytestrings across many keys (the same check
+// covers many-keys and RCQ-observation overflow).
+TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+
+  // Positive control: a normal small batch commits.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    for (int i = 0; i < 10; ++i) {
+      tx.add_delta(make_addrkey(contract_addr, "k" + std::to_string(i)),
+                   make_bytestring_delta("value"),
+                   std::to_underlying(StorageDeltaFlags::None));
+    }
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value()) << "a small delta batch must commit";
+  }
+
+  // A batch of max-size (1 KiB) bytestrings across enough distinct keys to
+  // exceed the 16 MiB cap. Each delta is ~1104 bytes (key+framing+1028), so
+  // 16000 deltas ~= 16.8 MiB > cap. Rejected before any push is attempted.
+  {
+    const std::string max_value(1024, 'x'); // kBytestringMaxLen
+    auto tx = make_new_per_tx_db_proxy();
+    for (int i = 0; i < 16000; ++i) {
+      tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
+                   make_bytestring_delta(max_value),
+                   std::to_underlying(StorageDeltaFlags::None));
+    }
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value())
+        << "over-budget push must be a clean conflict, not a system error";
+    EXPECT_FALSE(r.value())
+        << "an over-cap delta batch must be rejected as a conflict";
+  }
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
