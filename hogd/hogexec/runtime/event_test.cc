@@ -183,18 +183,16 @@ TEST_F(EventTest, EventSuccess)
 
   EphemeralTxIdentifier tx_id;
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = addr_orchestrator,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_orchestrator,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -202,7 +200,8 @@ TEST_F(EventTest, EventSuccess)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -301,18 +300,16 @@ TEST_F(EventTest, BadEventInputs)
 
   EphemeralTxIdentifier tx_id;
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = contract_0_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -320,7 +317,8 @@ TEST_F(EventTest, BadEventInputs)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -387,18 +385,16 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
   EphemeralTxIdentifier tx_id;
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = contract_0_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -406,7 +402,8 @@ TEST_F(EventTest, EventLengthIncludesTopics)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -469,18 +466,16 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
 
   EphemeralTxIdentifier tx_id;
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = contract_0_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -488,7 +483,8 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -603,18 +599,16 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
 
   EphemeralTxIdentifier tx_id;
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = addr_parent,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_parent,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -622,7 +616,8 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -940,18 +935,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto context = make_context();
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = addr_orchestrator,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context, &tx_id_1);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_orchestrator,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, *context, &tx_id_1);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -959,30 +951,29 @@ TEST_F(EventTest, EventWithRevertingFrames)
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   // Part 2: manual-revert entry alone
   EphemeralTxIdentifier tx_id_2;
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = addr_manual_revert,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context, &tx_id_2);
+  auto handler2_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_manual_revert,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler2 = make_new_system_call_handler(handler2_tx, *context, &tx_id_2);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
-  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted,
-                                   ProposedTransaction{})());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted,
+                           ProposedTransaction{.signed_tx = handler2_tx})());
 
   advance_block();
 

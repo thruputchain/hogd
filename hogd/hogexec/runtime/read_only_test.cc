@@ -119,18 +119,15 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
 
   {
     // allowed in non-read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = native_contract_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler = make_new_system_call_handler(handler_tx, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -140,18 +137,15 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
 
   {
     // disallowed in non-read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = native_contract_addr,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler = make_new_system_call_handler(handler_tx, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -206,41 +200,36 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
 
   {
     // LogEvent allowed in non-read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = native_contract_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler = make_new_system_call_handler(handler_tx, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
   }
 
   {
     // LogEvent blocked in read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = native_contract_addr,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler = make_new_system_call_handler(handler_tx, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -341,18 +330,16 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   }
 
   {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = kAddressRoot,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = kAddressRoot,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -459,18 +446,16 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 
   {
     // get_balance_of succeeds in read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = kCallerAddr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -479,18 +464,16 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 
   {
     // transfer fails in read-only mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = kCallerAddr,
-                                   .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -499,24 +482,23 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 
   {
     // transfer succeeds in normal (non-read-only) mode
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = kCallerAddr,
-                                   .entrypoint = entrypoint_from_method_id(2),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(2),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
   }
 }
 
@@ -558,21 +540,21 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
 
   {
     // WASM contract read-only invokes get_balance_of — should succeed
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_addr_,
-                                   .entrypoint = meta::entrypoint<
-                                       "read_only_native_get_balance">(),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = meta::make_calldata<
-                                       "read_only_native_get_balance">(
-                                       kObserverAddr)},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation =
+                Invocation{
+                    .invoked_address = contract_addr_,
+                    .entrypoint =
+                        meta::entrypoint<"read_only_native_get_balance">(),
+                    .gas_limit = UINT64_MAX,
+                    .calldata =
+                        meta::make_calldata<"read_only_native_get_balance">(
+                            kObserverAddr)},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -582,21 +564,20 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
   {
     // WASM contract read-only invokes transfer — should fail (frame reverts),
     // but the WASM method handles the error and returns normally
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{
-                            .invoked_address = contract_addr_,
-                            .entrypoint =
-                                meta::entrypoint<"read_only_native_transfer">(),
-                            .gas_limit = UINT64_MAX,
-                            .calldata = meta::make_calldata<
-                                "read_only_native_transfer">(kReceiverAddr)},
-                    .uniquifier = make_new_uniquifier(),
-                }},
-        *multiplexed_context);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation =
+                Invocation{.invoked_address = contract_addr_,
+                           .entrypoint =
+                               meta::entrypoint<"read_only_native_transfer">(),
+                           .gas_limit = UINT64_MAX,
+                           .calldata =
+                               meta::make_calldata<"read_only_native_transfer">(
+                                   kReceiverAddr)},
+            .uniquifier = make_new_uniquifier(),
+        }};
+    auto handler =
+        make_new_system_call_handler(handler_tx, *multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -612,19 +593,18 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 
   auto context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_addr_,
-                                 .entrypoint = meta::entrypoint<
-                                     "read_only_deploy_output_preserved">(),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = contract_addr_,
+                  .entrypoint =
+                      meta::entrypoint<"read_only_deploy_output_preserved">(),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
   handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
@@ -639,20 +619,17 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 
   auto context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = contract_addr_,
-                          .entrypoint = meta::entrypoint<
-                              "read_only_aliasing_before_read_only_check">(),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation =
+              Invocation{.invoked_address = contract_addr_,
+                         .entrypoint = meta::entrypoint<
+                             "read_only_aliasing_before_read_only_check">(),
+                         .gas_limit = UINT64_MAX,
+                         .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
   handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();

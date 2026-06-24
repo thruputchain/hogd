@@ -225,21 +225,21 @@ protected:
   void run_tx(ContractAddress const &addr, Runtime::MethodID method_id,
               RuntimeContext &ctx)
   {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = addr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(
-                                                     method_id),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        ctx);
+    auto handler_tx = SignedTransaction{
+        .tx =
+            Transaction{.invocation =
+                            Invocation{.invoked_address = addr,
+                                       .entrypoint =
+                                           entrypoint_from_method_id(method_id),
+                                       .gas_limit = UINT64_MAX,
+                                       .calldata = {}},
+                        .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(handler_tx, ctx);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
     ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -255,23 +255,23 @@ protected:
                                 StorageKeyContractData const &result_key,
                                 RuntimeContext &ctx)
   {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = addr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        ctx);
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(handler_tx, ctx);
     EXPECT_TRUE(handler.root_invoke().is_root_success());
     ExecResult commit = handler.try_commit_transaction();
     CapturedRecord outcome;
     outcome.push_back(static_cast<uint8_t>(commit));
     if (commit == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{})());
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
       advance_block();
       auto rec = read_record(addr, result_key);
       outcome.insert(outcome.end(), rec.begin(), rec.end());

@@ -123,8 +123,8 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 
   advance_block();
@@ -143,8 +143,9 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(
+        ExecResult::ExecResultOK,
+        ProposedTransaction{.signed_tx = SignedTransaction{.tx = tx}})());
   }
 
   // check the storage
@@ -219,8 +220,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -236,8 +237,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 
   advance_block();
@@ -259,8 +260,9 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(
+        ExecResult::ExecResultOK,
+        ProposedTransaction{.signed_tx = SignedTransaction{.tx = tx}})());
   }
 }
 
@@ -326,8 +328,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 
   advance_block();
@@ -349,8 +351,9 @@ TEST_F(GenesisConfigurationUnfurlTest,
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(
+        ExecResult::ExecResultOK,
+        ProposedTransaction{.signed_tx = SignedTransaction{.tx = tx}})());
   }
 }
 
@@ -387,8 +390,8 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 
   advance_block();
@@ -462,7 +465,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = unfurl_txns[0]})());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

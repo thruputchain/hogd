@@ -278,8 +278,9 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   auto proposal = proposal_handler.get_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction(),
             ExecResult::ExecResultOK);
-  ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK,
-                                           ProposedTransaction{})());
+  ASSERT_TRUE(proposal_handler.emit_events(
+      ExecResult::ExecResultOK,
+      ProposedTransaction{.signed_tx = proposal_handler_tx})());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
   ASSERT_EQ(proposal.observed_queue_entry_sequence.size(), 0U);
@@ -302,7 +303,8 @@ TEST_F(TryInvokeAdmissionTrustedTest,
       << "the aggregate root batch is affordable: the transfer covers the "
          "child storage cost";
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -361,8 +363,9 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
   auto proposal = proposal_handler.get_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction(),
             ExecResult::ExecResultOK);
-  ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK,
-                                           ProposedTransaction{})());
+  ASSERT_TRUE(proposal_handler.emit_events(
+      ExecResult::ExecResultOK,
+      ProposedTransaction{.signed_tx = proposal_handler_tx})());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
   ASSERT_EQ(proposal.nondeterministic_bits[0] & uint8_t{1}, 0U)
@@ -379,7 +382,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
       << "create-then-delete nets to zero storage cost in the aggregate batch";
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -451,8 +455,9 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
   auto proposal = proposal_handler.get_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction(),
             ExecResult::ExecResultOK);
-  ASSERT_TRUE(proposal_handler.emit_events(ExecResult::ExecResultOK,
-                                           ProposedTransaction{})());
+  ASSERT_TRUE(proposal_handler.emit_events(
+      ExecResult::ExecResultOK,
+      ProposedTransaction{.signed_tx = proposal_handler_tx})());
 
   ASSERT_EQ(proposal.nondeterministic_bit_count, 1U);
   ASSERT_EQ(proposal.nondeterministic_bits[0] & uint8_t{1}, uint8_t{1})
@@ -472,7 +477,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
          "branch";
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 

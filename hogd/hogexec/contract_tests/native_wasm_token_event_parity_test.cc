@@ -210,19 +210,19 @@ protected:
   void run_setup(Runtime::MethodID method, ContractAddress invoked,
                  ContractAddress target)
   {
-    auto h = make_new_system_call_handler(
-        Transaction{.invocation =
-                        Invocation{.invoked_address = invoked,
-                                   .entrypoint =
-                                       entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = target_calldata(target)},
-                    .uniquifier = make_new_uniquifier()},
-        *multiplexed_context_);
+    SignedTransaction h_tx{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = invoked,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = target_calldata(target)},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx.tx, *multiplexed_context_);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(
-        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
     advance_block();
   }
 
@@ -232,21 +232,22 @@ protected:
                                        ContractAddress target)
   {
     EphemeralTxIdentifier tx_id;
-    auto h = make_new_system_call_handler(
-        Transaction{.invocation =
-                        Invocation{.invoked_address = invoked,
-                                   .entrypoint =
-                                       entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = target_calldata(target)},
-                    .uniquifier = make_new_uniquifier()},
-        *multiplexed_context_, &tx_id);
+    SignedTransaction h_tx{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = invoked,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = target_calldata(target)},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h =
+        make_new_system_call_handler(h_tx.tx, *multiplexed_context_, &tx_id);
     EXPECT_TRUE(h.root_invoke().is_root_success())
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
     EXPECT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK)
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
-    EXPECT_TRUE(
-        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    EXPECT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
     advance_block();
 
     auto log = get_tx_event_log(tx_id)();

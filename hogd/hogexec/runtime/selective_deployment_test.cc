@@ -139,20 +139,16 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   setup_grant_storage_token(deployed_addr_1, 1'000'000'000);
 
   // Setup the transaction with both contracts in contracts_to_deploy
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = deployer_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-                  .contracts_to_deploy = {contract_to_deploy_1,
-                                          contract_to_deploy_2},
-              }},
-      context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {contract_to_deploy_1, contract_to_deploy_2},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
 
   // Invoke the contract
   auto res = handler.root_invoke();
@@ -162,7 +158,8 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -240,18 +237,15 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
 
   // Setup the transaction - note we don't need the native token contract in
   // contracts_to_deploy since it already exists in the database
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = deployer_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   // Invoke the contract - it should succeed (contract caught the error)
   auto res = handler.root_invoke();
@@ -321,19 +315,16 @@ TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
   setup_grant_storage_token(deployer_addr, 1'000'000'000);
   setup_grant_storage_token(deployed_addr, 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = deployer_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-                  .contracts_to_deploy = {malformed_contract},
-              }},
-      context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {malformed_contract},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
 
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
@@ -478,25 +469,23 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   setup_grant_storage_token(deployer_addr, 1'000'000'000);
   setup_grant_storage_token(deployed_addr, 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = deployer_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-                  .contracts_to_deploy = {big_contract},
-              }},
-      context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {big_contract},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
   advance_block();
 
   auto lookup = lookup_contract_from_db(big_hash);
@@ -538,19 +527,16 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 
   setup_grant_storage_token(deployer_addr, 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = deployer_addr,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}},
-                  .uniquifier = make_new_uniquifier(),
-                  .contracts_to_deploy = {oversized},
-              }},
-      context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {oversized},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
 
   auto res = handler.root_invoke();
   EXPECT_FALSE(res.is_root_success());

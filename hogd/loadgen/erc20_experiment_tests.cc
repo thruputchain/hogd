@@ -80,8 +80,9 @@ protected:
         ASSERT_TRUE(invoke_res.is_root_success());
         auto res = handler.try_commit_transaction();
         ASSERT_TRUE(res == ExecResult::ExecResultOK);
-        ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                        ProposedTransaction{})());
+        ASSERT_TRUE(
+            handler.emit_events(ExecResult::ExecResultOK,
+                                ProposedTransaction{.signed_tx = tx})());
       }
 
       advance_block();
@@ -108,7 +109,7 @@ protected:
       }
       ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{})());
+                                      ProposedTransaction{.signed_tx = tx})());
     }
   }
 };
@@ -147,7 +148,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{})());
+                                      ProposedTransaction{.signed_tx = tx})());
     }
 
     advance_block();
@@ -173,8 +174,8 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 }
 
@@ -216,7 +217,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{})());
+                                      ProposedTransaction{.signed_tx = tx})());
     }
 
     advance_block();
@@ -241,8 +242,8 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-    ASSERT_TRUE(
-        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
+    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
   }
 }
 
