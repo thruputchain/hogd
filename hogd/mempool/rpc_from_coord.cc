@@ -448,6 +448,25 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
   }
 }
 
+x23::Vec<x23::DagNode<void>>
+MempoolCoordinatorRpc::add_finish_all_executors_nodes(
+    x23::Dag &dag, BlockID block_id,
+    const x23::Vec<x23::DagNode<void>> &propose_chunks)
+{
+  CHECK_EQ(exec_clients_.size(), propose_chunks.size());
+  x23::Vec<x23::DagNode<void>> nodes;
+  nodes.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    nodes.push_back(
+        dag.async<void>("finish executor", dag.after(propose_chunks[i]),
+                        [&, block_id, i]() -> x23::Async<void> {
+                          co_await finish_block(block_id, /*executor_idx=*/i);
+                          co_return;
+                        }));
+  }
+  return nodes;
+}
+
 SHA256Hash
 MempoolCoordinatorRpc::get_txset_hash(
     const x23::XdrVec<SignedTransactionHash> &hashes)
@@ -966,16 +985,13 @@ MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
     const x23::DagDeps &proposal_deps,
+    const x23::Vec<x23::DagNode<void>> &propose_chunks,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps)
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
-      dag.async<void>("finish executors", proposal_deps,
-                      [&]() -> x23::Async<void> {
-                        co_await finish_all_executors(cache.block_id);
-                        co_return;
-                      });
+      add_finish_all_executors_nodes(dag, cache.block_id, propose_chunks);
   nodes.close_snapshot =
       dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
                                [&]() -> x23::Async<DbBlockResult> {
@@ -1166,7 +1182,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
-      schedule_nodes.txset_trie,
+      schedule_nodes.propose_chunks, schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
 
   co_await nomination_dag.run();

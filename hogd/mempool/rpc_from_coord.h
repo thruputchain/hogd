@@ -455,6 +455,9 @@ private:
                                             SHA256Hash events_hash);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
+  x23::Vec<x23::DagNode<void>> add_finish_all_executors_nodes(
+      x23::Dag &dag, BlockID block_id,
+      const x23::Vec<x23::DagNode<void>> &propose_chunks);
 
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,
@@ -491,7 +494,7 @@ private:
     x23::DagNode<void> resize_txs;
   };
   struct FinishNominationNodes {
-    x23::DagNode<void> finish_executors;
+    x23::Vec<x23::DagNode<void>> finish_executors;
     x23::DagNode<DbBlockResult> close_snapshot;
     x23::DagNode<EventBlockResult> close_event;
     x23::DagNode<SHA256Hash> txset_hash;
@@ -507,6 +510,7 @@ private:
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
       const x23::DagDeps &proposal_deps,
+      const x23::Vec<x23::DagNode<void>> &propose_chunks,
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
