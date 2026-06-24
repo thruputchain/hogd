@@ -934,7 +934,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     auto txset_insert_node = dag.cpu<void>(
         "insert txset hash batch", dag.after(summary_nodes[i]),
-        [&, state, i, txset_trie = nodes.txset_trie]() -> x23::Async<void> {
+        [&, state, i, txset_trie = nodes.txset_trie]() {
           if (!state->scheduled_chunks[i].active) {
             return;
           }
