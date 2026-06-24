@@ -1,21 +1,23 @@
 #include <chrono>
-#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <ios>
 #include <iterator>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unistd.h>
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/init.h"
@@ -31,6 +33,16 @@ require_field(json::Value const &parent, std::string_view key)
     throw std::runtime_error(std::format("missing field {}", key));
   }
   return *field;
+}
+
+std::string_view
+require_string(json::Value const &value)
+{
+  std::optional<std::string_view> string = value.as_string();
+  if (!string.has_value()) {
+    throw std::runtime_error("expected JSON string");
+  }
+  return *string;
 }
 
 std::filesystem::path
@@ -80,36 +92,28 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
       require_field(require_field(*genesis, "initial_config").as_array()[0],
                     "config"),
       "contract_hash");
-  ASSERT_TRUE(first_config.as_string().has_value());
-  EXPECT_EQ(first_config.as_string()->size(), 64UL);
-  EXPECT_FALSE(first_config.as_string()->starts_with("0x"));
+  std::string_view first_config_string = require_string(first_config);
+  EXPECT_EQ(first_config_string.size(), 64UL);
+  EXPECT_FALSE(first_config_string.starts_with("0x"));
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);
   ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
-  ASSERT_TRUE(require_field(*metadata, "kind").as_string().has_value());
-  EXPECT_EQ(*require_field(*metadata, "kind").as_string(),
+  EXPECT_EQ(require_string(require_field(*metadata, "kind")),
             "hog-hosted-bootstrap");
-  ASSERT_TRUE(require_field(*metadata, "networkId").as_string().has_value());
-  EXPECT_EQ(*require_field(*metadata, "networkId").as_string(), "devnet-test");
-  ASSERT_TRUE(require_field(*metadata, "genesisHash").as_string().has_value());
-  EXPECT_EQ(*require_field(*metadata, "genesisHash").as_string(),
+  EXPECT_EQ(require_string(require_field(*metadata, "networkId")),
+            "devnet-test");
+  EXPECT_EQ(require_string(require_field(*metadata, "genesisHash")),
             hex_string(artifact.genesis_hash));
   EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
             2UL);
   std::span<const json::Value> initialization_txs =
       require_field(*metadata, "initializationTransactions").as_array();
   ASSERT_EQ(initialization_txs.size(), 2UL);
-  ASSERT_TRUE(
-      require_field(initialization_txs[0], "hash").as_string().has_value());
-  ASSERT_TRUE(
-      require_field(initialization_txs[0], "xdr").as_string().has_value());
-  EXPECT_TRUE(require_field(initialization_txs[0], "hash")
-                  .as_string()
-                  ->starts_with("0x"));
-  EXPECT_FALSE(require_field(initialization_txs[0], "xdr")
-                   .as_string()
-                   ->starts_with("0x"));
+  EXPECT_TRUE(require_string(require_field(initialization_txs[0], "hash"))
+                  .starts_with("0x"));
+  EXPECT_FALSE(require_string(require_field(initialization_txs[0], "xdr"))
+                   .starts_with("0x"));
 }
 
 TEST(HostedBootstrapGenerator, AllowsZeroBootstrapAccounts)
