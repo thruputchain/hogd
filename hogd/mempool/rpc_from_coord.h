@@ -495,7 +495,6 @@ private:
     x23::DagNode<DbBlockResult> close_snapshot;
     x23::DagNode<EventBlockResult> close_event;
     x23::DagNode<SHA256Hash> txset_hash;
-    x23::DagNode<void> serialize_nomination;
     x23::DagNode<void> build_header;
   };
 

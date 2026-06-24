@@ -907,9 +907,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     previous_hash_serialize_node = hash_serialize_node;
 
     x23::DagDeps nomination_serialize_deps =
-        i == 0 ? dag.after(summary_nodes[i])
-               : dag.after(summary_nodes[i],
-                           previous_nomination_serialize_node);
+        i == 0
+            ? dag.after(summary_nodes[i])
+            : dag.after(summary_nodes[i], previous_nomination_serialize_node);
     auto nomination_serialize_node = dag.async<void>(
         "serialize nomination nondeterministic data",
         std::move(nomination_serialize_deps),
@@ -998,9 +998,6 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         txset_trie->generate_all_hashes(num_threads);
         return txset_trie->get_root_hash();
       });
-  nodes.serialize_nomination =
-      dag.async<void>("serialize nomination batches", serialized_deps,
-                      [&]() -> x23::Async<void> { co_return; });
   nodes.build_header = dag.async<void>(
       "build nomination header",
       dag.after(nodes.close_snapshot, nodes.close_event, nodes.txset_hash),
