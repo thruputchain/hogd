@@ -123,7 +123,8 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -142,7 +143,8 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   // check the storage
@@ -217,7 +219,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -233,7 +236,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -255,7 +259,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 
@@ -321,7 +326,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -343,7 +349,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 
@@ -380,7 +387,8 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -453,7 +461,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

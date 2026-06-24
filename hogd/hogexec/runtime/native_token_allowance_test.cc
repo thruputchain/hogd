@@ -125,7 +125,8 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // 2. First positive adjust_allowance on a fresh pair succeeds, and the
@@ -193,7 +194,8 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // 3. transfer_from on a fresh (owner, spender) pair with zero allowance must
@@ -315,7 +317,8 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // 5. transfer_from consumes allowance: owner grants 100, spender transfers 50,
@@ -430,7 +433,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -449,7 +453,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -468,7 +473,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -597,7 +603,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -734,7 +741,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -755,7 +763,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -775,7 +784,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 
@@ -833,7 +843,8 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // 9. transfer_from where owner == caller skips allowance: no allowance
@@ -903,7 +914,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -1065,7 +1077,8 @@ TEST_F(NativeTokenAllowanceTest,
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -1085,7 +1098,8 @@ TEST_F(NativeTokenAllowanceTest,
         *runtime_context, &spend_tx_id);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 
   advance_block();
@@ -1140,7 +1154,8 @@ TEST_F(NativeTokenAllowanceTest,
         *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 

@@ -238,7 +238,8 @@ protected:
         ctx);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
   }
 
@@ -269,7 +270,8 @@ protected:
     CapturedRecord outcome;
     outcome.push_back(static_cast<uint8_t>(commit));
     if (commit == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
       advance_block();
       auto rec = read_record(addr, result_key);
       outcome.insert(outcome.end(), rec.begin(), rec.end());

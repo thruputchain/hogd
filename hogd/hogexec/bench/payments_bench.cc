@@ -143,7 +143,7 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
           if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
             throw std::runtime_error("failed to perform commit operation");
           }
-          handler.emit_events(ExecResult::ExecResultOK)(
+          handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})(
               [&pending_events,
                &events_done](this auto,
                              SystemStatus<void> res) -> x23::Detached {

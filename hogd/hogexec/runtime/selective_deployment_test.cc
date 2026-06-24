@@ -161,7 +161,8 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Commit the transaction
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -494,7 +495,8 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   advance_block();
 
   auto lookup = lookup_contract_from_db(big_hash);

@@ -145,7 +145,8 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // Advance block to commit the transaction
   advance_block();
@@ -248,7 +249,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   auto commit_res1 = handler1.try_commit_transaction();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler1.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler1.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // Second transaction in the same block: transfer to same receiver
   auto handler2 = make_new_system_call_handler(
@@ -267,7 +269,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   auto commit_res2 = handler2.try_commit_transaction();
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // Advance block to commit both transactions
   advance_block();
@@ -439,7 +442,8 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // Advance block to commit the transaction
   advance_block();
@@ -768,7 +772,8 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 // Regression test for #1807: in-transaction get_balance_of on a fresh receiver
@@ -859,7 +864,8 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -960,7 +966,8 @@ TEST_F(BalanceCostTrackingTest,
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -1044,7 +1051,8 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // The block in which the transfer was committed is the current block; capture
   // it before advancing so we can query the deltas forwarded to the scheduler.
@@ -1162,7 +1170,8 @@ TEST_F(BalanceCostTrackingTest,
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 

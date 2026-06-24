@@ -201,7 +201,8 @@ TEST_F(EventTest, EventSuccess)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -318,7 +319,8 @@ TEST_F(EventTest, BadEventInputs)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -403,7 +405,8 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -484,7 +487,8 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -617,7 +621,8 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -953,7 +958,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   // Part 2: manual-revert entry alone
   EphemeralTxIdentifier tx_id_2;
@@ -975,8 +981,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
-  ASSERT_TRUE(
-      handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted)());
+  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted,
+                                   ProposedTransaction{})());
 
   advance_block();
 

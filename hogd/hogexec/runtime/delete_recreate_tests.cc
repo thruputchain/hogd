@@ -221,7 +221,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -402,7 +403,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -583,7 +585,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 

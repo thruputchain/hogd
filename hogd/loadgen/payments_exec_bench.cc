@@ -73,7 +73,10 @@ public:
           }
           // mint/initialize emit events; drain them so the committed handler
           // isn't destroyed with events still pending.
-          if (!handler.emit_events(ExecResult::ExecResultOK)().has_value()) {
+          if (!handler
+                   .emit_events(ExecResult::ExecResultOK,
+                                ProposedTransaction{})()
+                   .has_value()) {
             throw std::runtime_error("failed to emit init events");
           }
         }

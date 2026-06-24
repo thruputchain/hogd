@@ -219,7 +219,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -240,7 +241,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_TRUE(r2 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
@@ -334,7 +336,8 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
 
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   advance_block();
 
   auto read_res = lookup_storage_item_from_db(
@@ -553,7 +556,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   advance_block();
   // Check that the last write was "world"
   auto read_res = lookup_storage_item_from_db(
@@ -650,7 +654,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   advance_block();
   // Storage should be updated to "world"
   auto read_res = lookup_storage_item_from_db(
@@ -1640,7 +1645,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler3.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{})());
   }
 
   advance_block();
@@ -1678,7 +1684,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler1.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{})());
   }
 
   // Step 3 & 4: Invoke orchestrator method 0 ({false, true}) and commit.
@@ -1699,7 +1706,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{})());
   }
 
   advance_block();
@@ -1860,7 +1868,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -2065,7 +2074,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -2283,7 +2293,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -2438,7 +2449,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -2647,7 +2659,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -2848,7 +2861,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 
@@ -3127,7 +3141,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
       ASSERT_TRUE(res.is_root_success());
       auto commit_res = handler.try_commit_transaction();
       ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
 
     advance_block();
@@ -3345,7 +3360,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 }
 
 TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
@@ -3526,7 +3542,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
 
   advance_block();
 

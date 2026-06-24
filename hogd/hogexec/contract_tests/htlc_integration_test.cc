@@ -158,7 +158,8 @@ protected:
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
   }
 
@@ -190,7 +191,8 @@ protected:
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
   }
 
@@ -225,7 +227,8 @@ protected:
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
   }
 
@@ -250,7 +253,8 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
     if (advance_after) {
       advance_block();
@@ -279,7 +283,8 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
     if (advance_after) {
       advance_block();
@@ -460,7 +465,8 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 

@@ -1314,9 +1314,11 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
   const auto rv32_events = rv32_handler.get_most_recent_frame_events();
 
   ASSERT_EQ(wasm_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK,
+                                       ProposedTransaction{})());
   ASSERT_EQ(rv32_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK,
+                                       ProposedTransaction{})());
 
   EXPECT_EQ(wasm_trace->status.status_code(), rv32_trace->status.status_code());
   EXPECT_TRUE(wasm_trace->status.return_buffer().empty());

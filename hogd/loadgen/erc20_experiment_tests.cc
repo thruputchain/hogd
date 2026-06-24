@@ -80,7 +80,8 @@ protected:
         ASSERT_TRUE(invoke_res.is_root_success());
         auto res = handler.try_commit_transaction();
         ASSERT_TRUE(res == ExecResult::ExecResultOK);
-        ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+        ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                        ProposedTransaction{})());
       }
 
       advance_block();
@@ -106,7 +107,8 @@ protected:
         gas_used = invoke_res.gas_consumed_;
       }
       ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
   }
 };
@@ -144,7 +146,8 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
 
     advance_block();
@@ -170,7 +173,8 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 
@@ -211,7 +215,8 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{})());
     }
 
     advance_block();
@@ -236,7 +241,8 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
-    ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
   }
 }
 

@@ -221,7 +221,8 @@ protected:
         *multiplexed_context_);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
   }
 
@@ -244,7 +245,8 @@ protected:
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
     EXPECT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK)
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
-    EXPECT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        h.emit_events(ExecResult::ExecResultOK, ProposedTransaction{})());
     advance_block();
 
     auto log = get_tx_event_log(tx_id)();
