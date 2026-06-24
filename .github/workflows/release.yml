@@ -125,7 +125,7 @@ jobs:
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
             -x "-DRUST_BUILD_CPU=x86-64-v2" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode
+            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
 
       - name: Prepare artifacts
         run: ./scripts/package_hogd_validator_release.sh build/release artifacts
