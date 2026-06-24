@@ -9,6 +9,7 @@
 #include <exception>
 #include <fstream>
 #include <future>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -117,7 +118,7 @@ void
 append_serialized_segment(x23::span<const T> objs, ParallelBatch &parallel)
 {
   CHECK_LE(objs.size(), std::numeric_limits<unsigned int>::max());
-  x23::XdrVec<std::uint8_t> xdr;
+  x23::XdrVec<uint8_t> xdr;
   xdr.reserve(objs.size() * sizeof(T) * 3);
   for (const T &obj : objs) {
     xdr += x23::serialize(obj);
@@ -135,7 +136,7 @@ append_selected_serialized_segment(x23::span<const T> objs,
                                    ParallelBatch &parallel)
 {
   CHECK_EQ(objs.size(), use.size());
-  x23::XdrVec<std::uint8_t> xdr;
+  x23::XdrVec<uint8_t> xdr;
   xdr.reserve(objs.size() * sizeof(T) * 3);
   size_t num_tokens = 0;
   for (size_t i = 0; i < objs.size(); i++) {
@@ -989,7 +990,7 @@ MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
     const x23::DagDeps &proposal_deps,
-    std::shared_ptr<MerkleTriePrefix> txset_trie,
+    const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps, const x23::DagDeps &serialized_deps)
 {
   FinishNominationNodes nodes;
