@@ -350,6 +350,7 @@ TEST(Dag, DotIncludesRuntimeStatsAfterRun)
   EXPECT_NE(dot.find("\\nrun: "), std::string::npos);
   EXPECT_NE(dot.find("\\ntotal: "), std::string::npos);
   EXPECT_NE(dot.find("\\ncpu: "), std::string::npos);
+  EXPECT_NE(dot.find("%)"), std::string::npos);
   EXPECT_NE(dot.find("n1 [label=\"1: child\\nstate: done\\nwait: "),
             std::string::npos);
   EXPECT_NE(dot.find("dag_start -> n0"), std::string::npos);

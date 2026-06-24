@@ -305,6 +305,16 @@ private:
     return std::format("{:.3f}s", duration<double>(d).count());
   }
 
+  template<typename Rep, typename Period>
+  static std::string format_cpu_duration(std::chrono::nanoseconds cpu,
+                                         std::chrono::duration<Rep, Period> run)
+  {
+    const double run_ns = std::chrono::duration<double, std::nano>(run).count();
+    const double pct =
+        run_ns > 0.0 ? 100.0 * double(cpu.count()) / run_ns : 0.0;
+    return std::format("{} ({:.1f}%)", format_duration(cpu), pct);
+  }
+
   static std::string dot_escape(std::string_view s)
   {
     std::string ret;
@@ -502,10 +512,12 @@ private:
                            format_duration(now - node.started_at));
       label += std::format("\ntotal: {} so far",
                            format_duration(now - node.queued_at));
-      label += std::format("\ncpu: {} so far",
-                           format_duration(std::chrono::nanoseconds(
-                               node.cpu_account.ns.load(
-                                   std::memory_order_relaxed))));
+      label +=
+          std::format("\ncpu: {} so far",
+                      format_cpu_duration(std::chrono::nanoseconds(
+                                              node.cpu_account.ns.load(
+                                                  std::memory_order_relaxed)),
+                                          now - node.started_at));
       break;
     case NodeState::Done:
     case NodeState::Failed:
@@ -516,9 +528,11 @@ private:
       label += std::format("\ntotal: {}",
                            format_duration(node.finished_at - node.queued_at));
       label +=
-          std::format("\ncpu: {}", format_duration(std::chrono::nanoseconds(
-                                       node.cpu_account.ns.load(
-                                           std::memory_order_relaxed))));
+          std::format("\ncpu: {}",
+                      format_cpu_duration(std::chrono::nanoseconds(
+                                              node.cpu_account.ns.load(
+                                                  std::memory_order_relaxed)),
+                                          node.finished_at - node.started_at));
       break;
     }
     return label;
