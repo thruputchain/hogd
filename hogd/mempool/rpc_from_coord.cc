@@ -493,8 +493,9 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 
 SHA256Hash
 MempoolCoordinatorRpc::get_txset_hash(
-    const x23::XdrVec<SignedTransactionHash> &hashes)
+    const x23::XdrVec<SignedTransactionHash> &hashes, bool log_timings)
 {
+  ElapsedTimer timer;
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
@@ -502,6 +503,7 @@ MempoolCoordinatorRpc::get_txset_hash(
   const std::vector<ChunkRange> chunks =
       make_chunks(hashes.size(), num_threads);
   futures.reserve(chunks.size());
+  const double setup_elapsed = timer.elapsed();
 
   for (const ChunkRange &chunk : chunks) {
     futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
@@ -512,11 +514,28 @@ MempoolCoordinatorRpc::get_txset_hash(
       }
     }));
   }
+  const double submit_elapsed = timer.elapsed() - setup_elapsed;
   for (std::future<void> &future : futures) {
     future.get();
   }
+  const double insert_elapsed =
+      timer.elapsed() - setup_elapsed - submit_elapsed;
   trie.generate_all_hashes(num_threads);
-  return trie.get_root_hash();
+  const double generate_elapsed =
+      timer.elapsed() - setup_elapsed - submit_elapsed - insert_elapsed;
+  SHA256Hash root_hash = trie.get_root_hash();
+  const double root_elapsed = timer.elapsed() - setup_elapsed - submit_elapsed -
+                              insert_elapsed - generate_elapsed;
+  const double total_elapsed = timer.elapsed();
+  if (log_timings) {
+    info("compute txset hash took {:.6f}s: setup={:.6f}s, submit={:.6f}s, "
+         "insert={:.6f}s, generate={:.6f}s, root={:.6f}s, txs={}, chunks={}, "
+         "threads={}",
+         total_elapsed, setup_elapsed, submit_elapsed, insert_elapsed,
+         generate_elapsed, root_elapsed, hashes.size(), chunks.size(),
+         num_threads);
+  }
+  return root_hash;
 }
 
 x23::Async<void>
@@ -721,6 +740,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                           const x23::DagDeps &proposal_deps)
 {
   ScheduleNodes nodes;
+  nodes.txset_trie =
+      std::make_shared<MerkleTriePrefix>(Allocator<Node>::Type::kBump);
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
 
@@ -741,12 +762,14 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
     x23::Vec<SummarizedChunk> summarized_chunks;
+    x23::Vec<x23::XdrVec<SignedTransactionHash>> txset_hash_chunks;
     ElapsedTimer summarize_timer;
     size_t num_tx_outcomes_processed{0};
     size_t tx_write_idx{0};
     double clear_failed_tx_hashes_seconds{0.0};
     double append_nomination_chunks_seconds{0.0};
     double compact_txs_seconds{0.0};
+    double resize_txs_seconds{0.0};
     double finalize_seconds{0.0};
     size_t num_scheduled{0};
     bool stopped{false};
@@ -755,8 +778,10 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   state->handle_end_indices.reserve(kNumSchedulerIterations);
   state->scheduled_chunks.resize(kNumSchedulerIterations, {});
   state->summarized_chunks.resize(kNumSchedulerIterations, {});
+  state->txset_hash_chunks.resize(kNumSchedulerIterations, {});
   nodes.schedule_chunks.reserve(kNumSchedulerIterations);
   nodes.propose_chunks.reserve(kNumSchedulerIterations);
+  nodes.txset_insert_chunks.reserve(kNumSchedulerIterations);
   nodes.serialize_chunks.reserve(kNumSchedulerIterations);
 
   nodes.lock_scheduler =
@@ -827,95 +852,116 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     x23::DagDeps summary_deps =
         i == 0 ? dag.after(nodes.propose_chunks[i])
                : dag.after(nodes.propose_chunks[i], previous_summary_node);
-    auto summary_node =
-        dag.async<void>("summarize nomination schedule",
-                        std::move(summary_deps),
-                        [&, state, i]() -> x23::Async<void> {
-                          if (i == 0) {
-                            state->summarize_timer = ElapsedTimer();
-                            ElapsedTimer part_timer;
-                            cache.failed_tx_hashes.clear();
-                            state->clear_failed_tx_hashes_seconds =
-                                part_timer.elapsed();
-                            CHECK(cache.result_tx_nominations.empty());
-                          }
+    auto summary_node = dag.async<void>(
+        "summarize nomination schedule", std::move(summary_deps),
+        [&, state, i]() -> x23::Async<void> {
+          if (i == 0) {
+            state->summarize_timer = ElapsedTimer();
+            ElapsedTimer part_timer;
+            cache.failed_tx_hashes.clear();
+            state->clear_failed_tx_hashes_seconds = part_timer.elapsed();
+            CHECK(cache.result_tx_nominations.empty());
+          }
 
-                          if (state->scheduled_chunks[i].active) {
-                            ElapsedTimer part_timer;
-                            const size_t result_start =
-                                cache.result_tx_hashes.size();
-                            x23::XdrVec<NondeterministicProposalData>
-                                &chunk_nominations =
-                                    cache.transaction_nomination_chunks[i];
-                            cache.result_tx_nominations.append(
-                                std::make_move_iterator(
-                                    chunk_nominations.begin()),
-                                std::make_move_iterator(
-                                    chunk_nominations.end()));
-                            state->append_nomination_chunks_seconds +=
-                                part_timer.elapsed();
+          if (state->scheduled_chunks[i].active) {
+            ElapsedTimer part_timer;
+            const size_t result_start = cache.result_tx_hashes.size();
+            x23::XdrVec<NondeterministicProposalData> &chunk_nominations =
+                cache.transaction_nomination_chunks[i];
+            cache.result_tx_nominations.append(
+                std::make_move_iterator(chunk_nominations.begin()),
+                std::make_move_iterator(chunk_nominations.end()));
+            state->append_nomination_chunks_seconds += part_timer.elapsed();
 
-                            // We need to remove failed txs from [cache.txs],
-                            // so [tx_write_idx] tracks where to overwrite
-                            // successful txs to in [cache.txs].
-                            // TODO(jhumphri): Start adding the txs to the
-                            // merkle trie here.
-                            part_timer = ElapsedTimer();
-                            for (size_t tx_idx =
-                                     state->num_tx_outcomes_processed;
-                                 tx_idx < state->handle_end_indices[i];
-                                 tx_idx++) {
-                              if (cache.statuses[tx_idx]) {
-                                cache.result_tx_hashes.push_back(
-                                    cache.tx_hashes[tx_idx]);
-                                if (state->tx_write_idx != tx_idx) {
-                                  cache.txs[state->tx_write_idx] =
-                                      std::move(cache.txs[tx_idx]);
-                                }
-                                state->tx_write_idx++;
-                              }
-                              else {
-                                cache.failed_tx_hashes.push_back(
-                                    cache.tx_hashes[tx_idx]);
-                              }
-                            }
-                            state->compact_txs_seconds += part_timer.elapsed();
-                            state->num_tx_outcomes_processed =
-                                state->handle_end_indices[i];
-                            state->summarized_chunks[i] = SummarizedChunk{
-                                .start = result_start,
-                                .end = cache.result_tx_hashes.size(),
-                                .active = true,
-                            };
-                          }
+            // We need to remove failed txs from [cache.txs],
+            // so [tx_write_idx] tracks where to overwrite
+            // successful txs to in [cache.txs].
+            part_timer = ElapsedTimer();
+            for (size_t tx_idx = state->num_tx_outcomes_processed;
+                 tx_idx < state->handle_end_indices[i]; tx_idx++) {
+              if (cache.statuses[tx_idx]) {
+                const SignedTransactionHash &tx_hash = cache.tx_hashes[tx_idx];
+                cache.result_tx_hashes.push_back(tx_hash);
+                state->txset_hash_chunks[i].push_back(tx_hash);
+                if (state->tx_write_idx != tx_idx) {
+                  cache.txs[state->tx_write_idx] = std::move(cache.txs[tx_idx]);
+                }
+                state->tx_write_idx++;
+              }
+              else {
+                cache.failed_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
+              }
+            }
+            state->compact_txs_seconds += part_timer.elapsed();
+            state->num_tx_outcomes_processed = state->handle_end_indices[i];
+            state->summarized_chunks[i] = SummarizedChunk{
+                .start = result_start,
+                .end = cache.result_tx_hashes.size(),
+                .active = true,
+            };
+          }
 
-                          if (i + 1 == kNumSchedulerIterations) {
-                            ElapsedTimer part_timer;
-                            cache.txs.resize(state->tx_write_idx);
-                            CHECK_EQ(state->num_tx_outcomes_processed,
-                                     cache.tx_hashes.size());
-                            CHECK_EQ(cache.result_tx_hashes.size(),
-                                     cache.result_tx_nominations.size());
+          if (i + 1 == kNumSchedulerIterations) {
+            ElapsedTimer part_timer;
+            cache.txs.resize(state->tx_write_idx);
+            state->resize_txs_seconds = part_timer.elapsed();
 
-                            state->schedule_guard.reset();
-                            state->finalize_seconds = part_timer.elapsed();
+            part_timer = ElapsedTimer();
+            CHECK_EQ(state->num_tx_outcomes_processed, cache.tx_hashes.size());
+            CHECK_EQ(cache.result_tx_hashes.size(),
+                     cache.result_tx_nominations.size());
 
-                            info("summarize nomination schedule took {:.6f}s: "
-                                 "clear failed tx hashes {:.6f}s, append "
-                                 "nomination chunks {:.6f}s, compact txs "
-                                 "{:.6f}s, finalize {:.6f}s",
-                                 state->summarize_timer.elapsed(),
-                                 state->clear_failed_tx_hashes_seconds,
-                                 state->append_nomination_chunks_seconds,
-                                 state->compact_txs_seconds,
-                                 state->finalize_seconds);
-                          }
-                          co_return;
-                        });
+            state->schedule_guard.reset();
+            state->finalize_seconds = part_timer.elapsed();
+
+            info("summarize nomination schedule took {:.6f}s: "
+                 "clear failed tx hashes {:.6f}s, append "
+                 "nomination chunks {:.6f}s, compact txs "
+                 "{:.6f}s, resize txs {:.6f}s, finalize {:.6f}s",
+                 state->summarize_timer.elapsed(),
+                 state->clear_failed_tx_hashes_seconds,
+                 state->append_nomination_chunks_seconds,
+                 state->compact_txs_seconds, state->resize_txs_seconds,
+                 state->finalize_seconds);
+          }
+          co_return;
+        });
     summary_nodes.push_back(summary_node);
     previous_summary_node = summary_node;
   }
   nodes.summarize = previous_summary_node;
+
+  for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    auto txset_insert_node = dag.cpu<void>(
+        "insert txset hash batch", dag.after(summary_nodes[i]),
+        [&, state, i, txset_trie = nodes.txset_trie]() -> x23::Async<void> {
+          if (!state->scheduled_chunks[i].active) {
+            return;
+          }
+          const x23::XdrVec<SignedTransactionHash> &tx_hashes =
+              state->txset_hash_chunks[i];
+          WorkerPool &worker_pool = WorkerPool::get_default_pool();
+          const size_t num_threads = std::max(available_parallelism() / 2, 1UL);
+          const std::vector<ChunkRange> chunks =
+              make_chunks(tx_hashes.size(), num_threads);
+          std::vector<std::future<void>> futures;
+          futures.reserve(chunks.size());
+          for (const ChunkRange &chunk : chunks) {
+            futures.push_back(
+                worker_pool.submit([chunk, &tx_hashes, txset_trie] {
+                  for (size_t j = chunk.start; j < chunk.end; j++) {
+                    CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
+                                             std::span<const std::byte>()));
+                  }
+                }));
+          }
+          for (std::future<void> &future : futures) {
+            future.get();
+          }
+          return;
+        });
+    nodes.txset_insert_chunks.push_back(txset_insert_node);
+  }
 
   x23::DagNode<void> previous_serialize_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
@@ -951,8 +997,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           append_serialized_segment(tx_hashes_span,
                                     nomination.transactions_hash);
           append_serialized_segment(
-              nominations_span,
-              nomination.transactions_nondeterministic_data);
+              nominations_span, nomination.transactions_nondeterministic_data);
           append_serialized_segment(
               txs_span, cache.nomination_result.nominated_block().txs);
           co_return;
@@ -966,8 +1011,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
 MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
-    const x23::DagDeps &proposal_deps, const x23::DagDeps &summary_deps,
-    const x23::DagDeps &serialized_deps)
+    const x23::DagDeps &proposal_deps,
+    std::shared_ptr<MerkleTriePrefix> txset_trie,
+    const x23::DagDeps &txset_hash_deps, const x23::DagDeps &serialized_deps)
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
@@ -989,14 +1035,21 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                         cache.block_id, db_tip.height + 1);
                                   });
   nodes.txset_hash =
-      dag.cpu<SHA256Hash>("compute txset hash", summary_deps, [&] {
-        return get_txset_hash(cache.result_tx_hashes);
+      dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
+        ElapsedTimer timer;
+        const size_t num_threads = available_parallelism();
+        txset_trie->generate_all_hashes(num_threads);
+        const double generate_elapsed = timer.elapsed();
+        SHA256Hash root_hash = txset_trie->get_root_hash();
+        const double root_elapsed = timer.elapsed() - generate_elapsed;
+        info("compute txset hash took {:.6f}s: generate={:.6f}s, root={:.6f}s, "
+             "threads={}",
+             timer.elapsed(), generate_elapsed, root_elapsed, num_threads);
+        return root_hash;
       });
-  nodes.serialize_nomination = dag.async<void>(
-      "serialize nomination batches", serialized_deps,
-      [&]() -> x23::Async<void> {
-        co_return;
-      });
+  nodes.serialize_nomination =
+      dag.async<void>("serialize nomination batches", serialized_deps,
+                      [&]() -> x23::Async<void> { co_return; });
   nodes.build_header = dag.async<void>(
       "build nomination header",
       dag.after(nodes.close_snapshot, nodes.close_event, nodes.txset_hash),
@@ -1169,7 +1222,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
-      nomination_dag.after(schedule_nodes.summarize),
+      schedule_nodes.txset_trie,
+      dag_deps_from_nodes(schedule_nodes.txset_insert_chunks),
       dag_deps_from_nodes(schedule_nodes.serialize_chunks));
 
   co_await nomination_dag.run();
