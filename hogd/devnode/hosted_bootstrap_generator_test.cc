@@ -95,6 +95,10 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   std::string_view first_config_string = require_string(first_config);
   EXPECT_EQ(first_config_string.size(), 64UL);
   EXPECT_FALSE(first_config_string.starts_with("0x"));
+  EXPECT_EQ(require_string(
+                require_field(require_field(*genesis, "storage_cost_model"),
+                              "bytestring_cost_per_byte")),
+            "10");
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);
@@ -176,6 +180,26 @@ TEST(HostedBootstrapGenerator, WriteArtifactRejectsExistingEmptyFile)
 
   EXPECT_THROW(write_hosted_bootstrap_artifact(config, genesis, metadata),
                std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, WriteArtifactDoesNotClobberTmpLikeOutputPath)
+{
+  std::filesystem::path dir = unique_test_dir("tmp-collision");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  std::filesystem::path genesis = dir / "metadata.json.tmp";
+  std::filesystem::path metadata = dir / "metadata.json";
+
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+
+  write_hosted_bootstrap_artifact(config, genesis, metadata);
+
+  EXPECT_TRUE(std::filesystem::exists(genesis));
+  EXPECT_TRUE(std::filesystem::exists(metadata));
+  EXPECT_NE(read_text_file(genesis), read_text_file(metadata));
 }
 
 } // namespace
