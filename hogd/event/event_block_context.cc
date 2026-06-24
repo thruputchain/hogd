@@ -31,6 +31,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -67,7 +68,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
                                      ReusableEventBlockContextData data)
   : trie_(std::move(data.trie)), work_directory_(work_directory),
     block_id_(block_id), event_log_(std::move(data.event_log)),
-    buffers_(std::move(data.buffers))
+    tx_bodies_(std::move(data.tx_bodies)), buffers_(std::move(data.buffers))
 {
   trie_->clear();
   {
@@ -81,6 +82,11 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     auto ul = event_log_.lock_threads();
     event_log_.for_each(ul, [](TxEventLogBatch &batch) { batch.clear(); });
   }
+  {
+    auto ul = tx_bodies_.lock_threads();
+    tx_bodies_.for_each(ul,
+                        [](ProposedTransactionBatch &batch) { batch.clear(); });
+  }
   open_events_file();
 }
 
@@ -88,11 +94,12 @@ ReusableEventBlockContextData
 EventBlockContext::extract_data()
 {
   return ReusableEventBlockContextData(std::move(trie_), std::move(event_log_),
+                                       std::move(tx_bodies_),
                                        std::move(buffers_));
 }
 
 x23::Async<bool>
-EventBlockContext::add_event(TxEventLog event)
+EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
 {
   if (open_executor_handles_.load(std::memory_order_acquire) == 0) {
     co_return false;
@@ -127,9 +134,12 @@ EventBlockContext::add_event(TxEventLog event)
                    std::suspend_never>);
   co_await write_event(std::span(*serialize_buf));
 
-  // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
-  // without holding a lock.
+  // [event_log_] and [tx_bodies_] are [PerThread<>] objects, so it is safe to
+  // insert into them without holding a lock.  The body is accumulated for
+  // forwarding to the indexer at commit; it is deliberately not added to the
+  // trie (it is not part of the consensus event commitment).
   event_log_->emplace_back(std::move(event));
+  tx_bodies_->emplace_back(std::move(body));
   co_return true;
 }
 
@@ -423,15 +433,28 @@ EventBlockContext::send_events_to_indexers(
     BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
 {
   TxEventLogBatch full_event_log;
+  ProposedTransactionBatch full_tx_bodies;
   try {
-    std::unique_lock ul = event_log_.lock_threads();
-    event_log_.for_each(ul, [&full_event_log](
-                                TxEventLogBatch &per_thread_event_log) {
-      full_event_log.append(
-          std::make_move_iterator(per_thread_event_log.begin()),
-          std::make_move_iterator(per_thread_event_log.end()));
-      per_thread_event_log.clear();
-    });
+    {
+      std::unique_lock ul = event_log_.lock_threads();
+      event_log_.for_each(ul, [&full_event_log](
+                                  TxEventLogBatch &per_thread_event_log) {
+        full_event_log.append(
+            std::make_move_iterator(per_thread_event_log.begin()),
+            std::make_move_iterator(per_thread_event_log.end()));
+        per_thread_event_log.clear();
+      });
+    }
+    {
+      std::unique_lock ul = tx_bodies_.lock_threads();
+      tx_bodies_.for_each(ul, [&full_tx_bodies](
+                                  ProposedTransactionBatch &per_thread_bodies) {
+        full_tx_bodies.append(std::make_move_iterator(
+                                  per_thread_bodies.begin()),
+                              std::make_move_iterator(per_thread_bodies.end()));
+        per_thread_bodies.clear();
+      });
+    }
 
     // CI tests triggered an std::bad_alloc error here; logging the specifics of
     // the error in case it occurs again
@@ -440,12 +463,19 @@ EventBlockContext::send_events_to_indexers(
     throw;
   }
 
+  // [full_event_log] and [full_tx_bodies] are index-aligned (add_event appends
+  // to both in lockstep): the body at position i belongs to the event log at
+  // position i.  They are forwarded together so the indexer never re-matches
+  // bodies to events.
+  CHECK(full_event_log.size() == full_tx_bodies.size());
+
   std::vector<x23::Async<void>> handles;
   handles.reserve(indexers.size());
 
   for (indexer_event_client_t &indexer : indexers) {
-    handles.push_back(
-        indexer.indexer_event_process_events(block_height, full_event_log));
+    handles.push_back(indexer.indexer_event_process_events(block_height,
+                                                           full_event_log,
+                                                           full_tx_bodies));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

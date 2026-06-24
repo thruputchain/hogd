@@ -4,6 +4,7 @@
 #include "hogd/indexer/db.h"
 #include "hogd/metrics/health.h"
 #include "indexer.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include <atomic>
@@ -22,13 +23,21 @@ public:
     co_return;
   }
 
+  // [tx_events] and [tx_bodies] are index-aligned: [tx_bodies][i] is the body
+  // of the transaction whose event log is [tx_events][i].
+  //
+  // TODO(gramseyer): persist [tx_bodies] to the flat-file body store, keyed by
+  // [tx_events][i].proposed_tx_hash.  For now only the event log is processed;
+  // the bodies are accepted and dropped until the store lands in a follow-up.
   x23::Async<void>
   indexer_event_process_events(BlockHeight block_height,
-                               const TxEventLogBatch &tx_events)
+                               const TxEventLogBatch &tx_events,
+                               const ProposedTransactionBatch &tx_bodies)
   {
-    // Careful! If we change this function to use [co_await] *before*
-    // [tx_events] is accessed, be sure to copy the [tx_events] parameter above
-    // rather than keep it as a reference.
+    // Careful! [tx_events] and [tx_bodies] are both references. If we change
+    // this function to use [co_await] *before* they are accessed, be sure to
+    // copy those parameters above rather than keep them as references.
+    CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_.consume_events(block_height, tx_events).has_value());
     co_await Health::instance().set_current_block_height(block_height);
     co_return;

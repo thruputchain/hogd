@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -86,15 +88,28 @@ create_event_logs()
   return TxEventLogBatch{event_log0, event_log1};
 }
 
+// Bodies are forwarded index-aligned with the event logs; these tests only
+// exercise the event-log path, so empty bodies of matching length suffice.
+ProposedTransactionBatch
+create_tx_bodies(std::size_t n)
+{
+  ProposedTransactionBatch bodies;
+  for (std::size_t i = 0; i < n; i++) {
+    bodies.emplace_back();
+  }
+  return bodies;
+}
+
 } // namespace
 
 TEST_F(IndexerTest, FindTx)
 {
   BlockHeight block_height = 100;
   TxEventLogBatch events = create_event_logs();
+  ProposedTransactionBatch bodies = create_tx_bodies(events.size());
 
   // Consume events.
-  event_->indexer_event_process_events(block_height, events)();
+  event_->indexer_event_process_events(block_height, events, bodies)();
 
   // Look up the first tx.
   TxInfoResult result0 =
@@ -121,9 +136,10 @@ TEST_F(IndexerTest, FindNonExistentTx)
 {
   BlockHeight block_height = 100;
   TxEventLogBatch events = create_event_logs();
+  ProposedTransactionBatch bodies = create_tx_bodies(events.size());
 
   // Consume events.
-  event_->indexer_event_process_events(block_height, events)();
+  event_->indexer_event_process_events(block_height, events, bodies)();
 
   // Look up a non-existent tx.
   SHA256Hash tx_hash;
