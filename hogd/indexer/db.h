@@ -17,6 +17,7 @@
 #include "hogd/indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 // Forward declare RocksDB types to avoid including headers here
@@ -81,9 +82,23 @@ public:
   is_compression_supported(rocksdb::CompressionType compression_algorithm);
 
   // Consume a batch of events directly
-  // Indexes the provided events for the given block_height
-  IndexerStatus<void> consume_events(BlockHeight block_height,
-                                     std::span<const TxEventLog> events);
+  // Indexes the provided events for the given block_height.
+  // [bodies] are the full transaction bodies, index-aligned with [events]
+  // (stored in the tx_index value alongside each event log).  May be empty
+  // for callers that only exercise the event-log path.
+  IndexerStatus<void>
+  consume_events(BlockHeight block_height, std::span<const TxEventLog> events,
+                 std::span<const ProposedTransaction> bodies);
+
+  // Everything stored in the tx_index for one transaction.
+  struct TxRecord {
+    BlockHeight height;
+    ProposedTransaction tx; // the full transaction body
+    TxEventLog events;
+  };
+
+  // Look up the full record (height, body, events) for a transaction.
+  IndexerStatus<TxRecord> get_tx_record(SHA256Hash const &tx_hash) const;
 
   // Look up the block height and events for a specific transaction.
   // Returns the block height and TxEventLog if found, or an error if not found.

@@ -201,46 +201,46 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
   // now invoke the contract
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = addr_orchestrator,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {0, 1, 2, 3, 4, 5}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  SignedTransaction signed_tx{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_orchestrator,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {0, 1, 2, 3, 4, 5}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(signed_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = signed_tx})());
 
   advance_block();
 
   // Now runs the same transaction again, with an empty string for the
   // bytestring/calldata.
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = addr_orchestrator,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  SignedTransaction signed_tx2{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = addr_orchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler2 = make_new_system_call_handler(signed_tx2, *context);
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_TRUE(r2 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultOK,
+                           ProposedTransaction{.signed_tx = signed_tx2})());
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
@@ -318,23 +318,24 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
 
   // now invoke the contract
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kAddressCaller,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressCaller,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
   advance_block();
 
   auto read_res = lookup_storage_item_from_db(
@@ -539,21 +540,21 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
   write_deployment(make_contract_address(1), orchestrator_xdr);
   setup_grant_storage_token(make_contract_address(1), 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = make_contract_address(1),
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = make_contract_address(1),
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
   advance_block();
   // Check that the last write was "world"
   auto read_res = lookup_storage_item_from_db(
@@ -588,16 +589,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
   write_deployment(make_contract_address(2), orchestrator_xdr);
   setup_grant_storage_token(make_contract_address(2), 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = make_contract_address(2),
-                                    .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = make_contract_address(2),
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.result_); // Should return error
   auto commit_res = handler.try_commit_transaction();
@@ -636,21 +635,21 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
   write_deployment(make_contract_address(3), bridge_xdr);
   setup_grant_storage_token(make_contract_address(3), 1'000'000'000);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = make_contract_address(3),
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = make_contract_address(3),
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
   advance_block();
   // Storage should be updated to "world"
   auto read_res = lookup_storage_item_from_db(
@@ -771,16 +770,15 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
     setup_grant_storage_token(addrs[i], 1'000'000'000);
   }
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kAddressCaller,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressCaller,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   // The transaction should fail because the caller returns a deterministic
@@ -950,16 +948,15 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
   // First transaction: invoke orchestrator method 0 (should succeed and acquire
   // exclusive lock on writer storage)
-  auto handler1 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler1_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -967,16 +964,15 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
   // Second transaction: invoke orchestrator method 1 (should fail due to
   // exclusive lock)
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler2_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1127,16 +1123,15 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
   // First transaction: invoke orchestrator method 0 (should succeed and acquire
   // exclusive lock on writer storage)
-  auto handler1 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler1_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -1144,16 +1139,15 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
   // Second transaction: invoke orchestrator method 1 (should fail due to
   // exclusive lock)
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler2_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1323,32 +1317,30 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
   // First transaction: invoke orchestrator method 1 (should succeed; writes
   // nnint on writer)
-  auto handler1 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler1_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet
 
   // Second transaction: invoke orchestrator method 0 (should fail)
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler2_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1573,18 +1565,16 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   // TC1.1: First, invoke orchestrator method 0 with parameters [true, true].
   // This should succeed. This should leave, in the database, an exclusive lock
   // on the item.
-  SystemCallHandler tc1_handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchTc1,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {1, 1}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto tc1_handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kOrchTc1,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {1, 1}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  SystemCallHandler tc1_handler =
+      make_new_system_call_handler(tc1_handler_tx, *context);
   {
     auto res = tc1_handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1595,18 +1585,16 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   // parameter [false].
   // This should succeed (the try invoke fails, because the first tx still holds
   // the exclusive lock).
-  SystemCallHandler tc1_handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchTc1,
-                                 .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {0}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto tc1_handler2_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kOrchTc1,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {0}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  SystemCallHandler tc1_handler2 =
+      make_new_system_call_handler(tc1_handler2_tx, *context);
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1623,24 +1611,24 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
   // TC1.4: Then invoke orchestrator method 1 again, with parameter [true]. This
   // should succeed.
-  SystemCallHandler tc1_handler3 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchTc1,
-                                 .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {1}},
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto tc1_handler3_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kOrchTc1,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {1}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  SystemCallHandler tc1_handler3 =
+      make_new_system_call_handler(tc1_handler3_tx, *context);
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler3.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{
+                                             .signed_tx = tc1_handler3_tx})());
   }
 
   advance_block();
@@ -1661,45 +1649,45 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   setup_grant_storage_token(kOrchTc2, 1'000'000'000);
 
   // Step 1 & 2: Invoke orchestrator method 1 ({true}) and commit.
-  SystemCallHandler tc2_handler1 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchTc2,
-                                 .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {1}}, // true
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto tc2_handler1_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kOrchTc2,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {1}}, // true
+          .uniquifier = make_new_uniquifier(),
+      }};
+  SystemCallHandler tc2_handler1 =
+      make_new_system_call_handler(tc2_handler1_tx, *context);
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler1.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{
+                                             .signed_tx = tc2_handler1_tx})());
   }
 
   // Step 3 & 4: Invoke orchestrator method 0 ({false, true}) and commit.
-  SystemCallHandler tc2_handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = kOrchTc2,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {0, 1}}, // {false, true}
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *context);
+  auto tc2_handler2_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kOrchTc2,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {0, 1}}, // {false, true}
+          .uniquifier = make_new_uniquifier(),
+      }};
+  SystemCallHandler tc2_handler2 =
+      make_new_system_call_handler(tc2_handler2_tx, *context);
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK,
+                                         ProposedTransaction{
+                                             .signed_tx = tc2_handler2_tx})());
   }
 
   advance_block();
@@ -1846,21 +1834,22 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   setup_grant_storage_token(kAddressOrchestrator, replay_cache_cost_charged(1));
 
   // Single transaction: invoke orchestrator method 0 (root)
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -2051,21 +2040,22 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   setup_grant_storage_token(kAddressOrchestrator, replay_cache_cost_charged(1));
 
   // Single transaction: invoke orchestrator method 0 (root)
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -2269,21 +2259,22 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   setup_grant_storage_token(kAddressOrchestrator, replay_cache_cost_charged(1));
 
   // Single transaction: invoke orchestrator method 0 (root)
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -2424,21 +2415,22 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   setup_grant_storage_token(kAddressOrchestrator, replay_cache_cost_charged(1));
 
   // Single transaction: invoke orchestrator method 0 (root)
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -2633,21 +2625,22 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   setup_grant_storage_token(kAddressOrchestrator, replay_cache_cost_charged(1));
 
   // Single transaction: invoke orchestrator method 0 (root)
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -2832,23 +2825,24 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   setup_grant_storage_token(receiver_addr, 0);
 
   // Invoke the sender contract
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = sender_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = sender_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -3045,18 +3039,18 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         [](model::RunnableActionSet &set, auto self) -> model::Async {
           co_await set.bg();
 
-          auto handler = self->make_new_system_call_handler(
-              SignedTransaction{
-                  .tx = Transaction{.invocation =
-                                        Invocation{
-                                            .invoked_address =
-                                                kNNIntInterleavingOrchestrator,
-                                            .entrypoint =
-                                                entrypoint_from_method_id(0),
-                                            .gas_limit = UINT64_MAX,
-                                            .calldata = {}},
-                                    .uniquifier = self->make_new_uniquifier()}},
-              *context);
+          auto handler_tx = SignedTransaction{
+              .tx =
+                  Transaction{.invocation =
+                                  Invocation{.invoked_address =
+                                                 kNNIntInterleavingOrchestrator,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}},
+                              .uniquifier = self->make_new_uniquifier()}};
+          auto handler =
+              self->make_new_system_call_handler(handler_tx, *context);
           handler.hack_dont_use_test_bypass_allow_reentrance();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
@@ -3083,18 +3077,16 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<int64_t, int64_t>(100, 100)
                       .value();
-          auto handler = self->make_new_system_call_handler(
-              SignedTransaction{
-                  .tx = Transaction{.invocation =
-                                        Invocation{
-                                            .invoked_address =
-                                                kNNIntInterleavingWriter,
-                                            .entrypoint =
-                                                entrypoint_from_method_id(0),
-                                            .gas_limit = UINT64_MAX,
-                                            .calldata = calldata},
-                                    .uniquifier = self->make_new_uniquifier()}},
-              *context);
+          auto handler_tx = SignedTransaction{
+              .tx = Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kNNIntInterleavingWriter,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = calldata},
+                  .uniquifier = self->make_new_uniquifier()}};
+          auto handler =
+              self->make_new_system_call_handler(handler_tx, *context);
           auto res = handler.root_invoke();
           co_await set.bg();
           if (!res.is_root_success()) {
@@ -3111,23 +3103,23 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         this);
 
     {
-      auto handler = make_new_system_call_handler(
-          SignedTransaction{
-              .tx = Transaction{.invocation =
-                                    Invocation{.invoked_address =
-                                                   kNNIntInterleavingWriter,
-                                               .entrypoint =
-                                                   entrypoint_from_method_id(3),
-                                               .gas_limit = UINT64_MAX,
-                                               .calldata = {}},
-                                .uniquifier = make_new_uniquifier()}},
-          *context);
+      auto handler_tx = SignedTransaction{
+          .tx = Transaction{
+              .invocation =
+                  Invocation{.invoked_address = kNNIntInterleavingWriter,
+                             .entrypoint = entrypoint_from_method_id(3),
+                             .gas_limit = UINT64_MAX,
+                             .calldata = {}},
+              .uniquifier = make_new_uniquifier()}};
+      auto handler = make_new_system_call_handler(handler_tx, *context);
 
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
       auto commit_res = handler.try_commit_transaction();
       ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      ASSERT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
     }
 
     advance_block();
@@ -3330,22 +3322,23 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   setup_grant_storage_token(caller_contract_addr, 1'000'000'000);
 
   // Now invoke the caller contract
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = caller_contract_addr,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = caller_contract_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
@@ -3512,21 +3505,22 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   setup_grant_storage_token(kAddressEntry, replay_cache_cost_charged(1));
 
   // Invoke entry method 0
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kAddressEntry,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressEntry,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -3638,16 +3632,15 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
     setup_grant_storage_token(addrs[i], 1'000'000'000);
   }
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())
@@ -3746,16 +3739,15 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
     setup_grant_storage_token(addrs[i], 1'000'000'000);
   }
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kAddressOrchestrator,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())
@@ -3831,16 +3823,15 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
     setup_grant_storage_token(addrs[i], 1'000'000'000);
   }
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kAddressLooper,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressLooper,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -3919,16 +3910,15 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
     setup_grant_storage_token(addrs[i], 1'000'000'000);
   }
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kAddressLooper,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressLooper,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

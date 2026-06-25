@@ -381,7 +381,7 @@ TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
   // Every instruction costs 1 gas, so the run (body + barrier) costs 2. With a
   // budget of 1 the body alone would fit, but the barrier's gas is folded into
   // the run-head charge, so enter_run aborts the whole run at its head: OOG at
-  // pc=0, nothing charged, and the body never executes.
+  // pc=0 and the body never executes.
   const std::vector<uint32_t> words = {addi(5, 0, 1), branch(0, 0, 0, 8),
                                        addi(6, 0, 99), addi(7, 0, 42)};
   auto program = threaded_from_words(words);
@@ -391,8 +391,61 @@ TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
   EXPECT_EQ(machine.pc(), 0U); // aborted at the run head, not the beq
   EXPECT_EQ(machine.gas_remaining(),
-            1U);                 // the run did not fit -> nothing debited
+            0U); // unaffordable run is fully debited (saturates to 0), matching
+                 // per-instruction draining
   EXPECT_EQ(machine.reg(5), 0U); // body did not execute
+}
+
+TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
+{
+  using test_program::branch;
+  // The block-granular charger bills a whole run at its head in one check. For
+  // a run of 1-gas instructions, that must be indistinguishable from debiting
+  // one gas per instruction: under every budget, the gas left at termination --
+  // including the out-of-gas case -- must agree with per-instruction metering.
+  //
+  // Two programs do the same kWork units of 1-gas work, then fall off the end:
+  //   fused:     kWork back-to-back addi nops -> ONE run of run_gas == kWork.
+  //   per_instr: (kWork-1) always-taken beq(+4), each landing on the next, then
+  //              a trailing addi nop -> kWork single-instruction runs (run_gas
+  //              1 each). beq and addi both cost kBaseInstructionGas (1), so
+  //              this is literal one-gas-at-a-time accounting -- the ground
+  //              truth.
+  // Block metering must match it for all budgets, so on OOG the fused run head
+  // debits the whole (unaffordable) run -- saturating gas_remaining to 0 --
+  // exactly as the per-instruction program drains to 0 before it traps.
+  constexpr uint32_t kWork = 6;
+
+  std::vector<uint32_t> fused_words;
+  fused_words.reserve(kWork);
+  for (uint32_t i = 0; i < kWork; ++i) {
+    fused_words.push_back(addi(0, 0, 0)); // nop: x0 = x0 + 0
+  }
+  auto fused_program = threaded_from_words(fused_words);
+
+  std::vector<uint32_t> per_instr_words;
+  per_instr_words.reserve(kWork);
+  for (uint32_t i = 0; i + 1 < kWork; ++i) {
+    per_instr_words.push_back(branch(0, 0, 0, 4)); // beq x0,x0,+4 -> next instr
+  }
+  per_instr_words.push_back(
+      addi(0, 0, 0)); // trailing nop the last branch lands on
+  auto per_instr_program = threaded_from_words(per_instr_words);
+
+  // Sweep every budget from starved through comfortably past the work.
+  for (uint64_t gas = 0; gas <= kWork + 2; ++gas) {
+    ThreadedMachine fused_machine(*fused_program, gas);
+    ThreadedMachine per_instr_machine(*per_instr_program, gas);
+    RecordingHost host;
+    const StepResult fused_result = fused_machine.run(host);
+    const StepResult per_instr_result = per_instr_machine.run(host);
+
+    EXPECT_EQ(fused_machine.gas_remaining(), per_instr_machine.gas_remaining())
+        << "gas budget " << gas;
+    EXPECT_EQ(fused_result, per_instr_result) << "gas budget " << gas;
+    EXPECT_EQ(fused_machine.trap(), per_instr_machine.trap())
+        << "gas budget " << gas;
+  }
 }
 
 TEST(Rv32Threaded, tightSelfLoopRunsOutOfGas)
@@ -916,25 +969,35 @@ TEST(Rv32ThreadedYieldApi, startYieldsEcallThenResumeContinues)
   EXPECT_EQ(machine.reg(11), 5U);
 }
 
-TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltAndTrapAreTerminal)
+TEST(Rv32ThreadedYieldApi, resumeFromEcallHaltIsTerminal)
 {
-  {
-    const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
-    auto program = threaded_from_words(words);
-    ThreadedMachine machine(*program, 100);
-    EXPECT_EQ(machine.start(), StepResult::kEcall);
-    EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
-              StepResult::kHalted);
-    EXPECT_EQ(machine.halt_code(), 7U);
-  }
-  {
-    const std::vector<uint32_t> words = {0x00000073U};
-    auto program = threaded_from_words(words);
-    ThreadedMachine machine(*program, 100);
-    EXPECT_EQ(machine.start(), StepResult::kEcall);
-    EXPECT_EQ(machine.resume_from_ecall(HostResult::trap()), StepResult::kTrap);
-    EXPECT_EQ(machine.trap(), Trap::kHostTrap);
-  }
+  const std::vector<uint32_t> words = {addi(10, 0, 7), 0x00000073U};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
+  EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(7)),
+            StepResult::kHalted);
+  EXPECT_EQ(machine.halt_code(), 7U);
+}
+
+TEST(Rv32ThreadedYieldApi, resumeFromEcallRejectsHostTrap)
+{
+  // The threaded ecall seam does not support host traps: unlike baseline
+  // Machine it has no host_trap_payload_ to carry the deterministic-vs-fatal
+  // kind/code that runtime_context relies on, and its only production driver
+  // (rv32_contract.cc) resolves host errors itself and never feeds a kTrap
+  // HostResult back in. So a kTrap result is a contract violation and aborts
+  // rather than silently collapsing to a payload-less kHostTrap.
+  const std::vector<uint32_t> words = {0x00000073U};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, 100);
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
+  EXPECT_DEATH(
+      {
+        [[maybe_unused]] const StepResult ignored =
+            machine.resume_from_ecall(HostResult::trap());
+      },
+      "");
 }
 
 TEST(Rv32ThreadedYieldApi, startResumeMatchesRunForSameHost)

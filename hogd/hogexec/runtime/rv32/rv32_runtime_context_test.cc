@@ -986,16 +986,16 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
 
   ContractTraitClient<no_syscall_test::NoSyscallTest> wasm_client(
       kWasmContractAddress);
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{.invocation = wasm_client.make_invocation<"run_test">(
-                      kEnoughGas, static_cast<uint64_t>(kSyscallCount)),
-                  .uniquifier =
-                      Uniquifier{
-                          .block_expiry_height =
-                              std::numeric_limits<BlockHeight>::max(),
-                          .nonce = 1,
-                      }},
-      *wasm_context);
+  SignedTransaction wasm_handler_tx{
+      .tx = Transaction{.invocation = wasm_client.make_invocation<"run_test">(
+                            kEnoughGas, static_cast<uint64_t>(kSyscallCount)),
+                        .uniquifier = Uniquifier{
+                            .block_expiry_height =
+                                std::numeric_limits<BlockHeight>::max(),
+                            .nonce = 1,
+                        }}};
+  auto wasm_handler =
+      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
   wasm_handler.enable_tracing();
   wasm_handler.enable_transaction_stats();
 
@@ -1055,16 +1055,16 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
 
   ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
       kWasmContractAddress);
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      wasm_client.make_invocation<"sha256">(kParityGas, input),
-                  .uniquifier =
-                      Uniquifier{
-                          .block_expiry_height =
-                              std::numeric_limits<BlockHeight>::max(),
-                          .nonce = 2,
-                      }},
-      *wasm_context);
+  SignedTransaction wasm_handler_tx{
+      .tx = Transaction{
+          .invocation =
+              wasm_client.make_invocation<"sha256">(kParityGas, input),
+          .uniquifier = Uniquifier{
+              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
+              .nonce = 2,
+          }}};
+  auto wasm_handler =
+      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
   wasm_handler.enable_tracing();
   wasm_handler.enable_transaction_stats();
 
@@ -1131,16 +1131,16 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnMatchesWasmTraceAndOutput)
 
   ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
       kWasmContractAddress);
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      wasm_client.make_invocation<"sha256">(kParityGas, input),
-                  .uniquifier =
-                      Uniquifier{
-                          .block_expiry_height =
-                              std::numeric_limits<BlockHeight>::max(),
-                          .nonce = 4,
-                      }},
-      *wasm_context);
+  SignedTransaction wasm_handler_tx{
+      .tx = Transaction{
+          .invocation =
+              wasm_client.make_invocation<"sha256">(kParityGas, input),
+          .uniquifier = Uniquifier{
+              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
+              .nonce = 4,
+          }}};
+  auto wasm_handler =
+      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
   wasm_handler.enable_tracing();
   wasm_handler.enable_transaction_stats();
 
@@ -1204,16 +1204,17 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchMatchesWasm)
 
   ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
       kWasmContractAddress);
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{.invocation = wasm_client.make_invocation<"sha256_repeated">(
-                      kParityGas, uint32_t{1}, input),
-                  .uniquifier =
-                      Uniquifier{
-                          .block_expiry_height =
-                              std::numeric_limits<BlockHeight>::max(),
-                          .nonce = 40,
-                      }},
-      *wasm_context);
+  SignedTransaction wasm_handler_tx{
+      .tx = Transaction{.invocation =
+                            wasm_client.make_invocation<"sha256_repeated">(
+                                kParityGas, uint32_t{1}, input),
+                        .uniquifier = Uniquifier{
+                            .block_expiry_height =
+                                std::numeric_limits<BlockHeight>::max(),
+                            .nonce = 40,
+                        }}};
+  auto wasm_handler =
+      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
   wasm_handler.enable_tracing();
   wasm_handler.enable_transaction_stats();
 
@@ -1272,24 +1273,23 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
 
   ContractTraitClient<read_only_test::ReadOnlyTest> wasm_client(
       kWasmContractAddress);
-  auto wasm_handler = make_new_system_call_handler(
-      Transaction{
+  SignedTransaction wasm_handler_tx{
+      .tx = Transaction{
           .invocation =
               wasm_client.make_invocation<"write_storage_and_log_event">(
                   kParityGas),
-          .uniquifier =
-              Uniquifier{
-                  .block_expiry_height =
-                      std::numeric_limits<BlockHeight>::max(),
-                  .nonce = 3,
-              }},
-      *wasm_context);
+          .uniquifier = Uniquifier{
+              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
+              .nonce = 3,
+          }}};
+  auto wasm_handler =
+      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
   wasm_handler.enable_tracing();
   wasm_handler.enable_transaction_stats();
 
+  SignedTransaction rv32_handler_tx{.tx = make_root_transaction(kParityGas)};
   auto rv32_handler =
-      make_new_system_call_handler(make_root_transaction(kParityGas),
-                                   rv32_context);
+      make_new_system_call_handler(rv32_handler_tx.tx, rv32_context);
   rv32_handler.enable_tracing();
   rv32_handler.enable_transaction_stats();
 
@@ -1314,9 +1314,13 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
   const auto rv32_events = rv32_handler.get_most_recent_frame_events();
 
   ASSERT_EQ(wasm_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK,
+                                       ProposedTransaction{
+                                           .signed_tx = wasm_handler_tx})());
   ASSERT_EQ(rv32_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK,
+                                       ProposedTransaction{
+                                           .signed_tx = rv32_handler_tx})());
 
   EXPECT_EQ(wasm_trace->status.status_code(), rv32_trace->status.status_code());
   EXPECT_TRUE(wasm_trace->status.return_buffer().empty());

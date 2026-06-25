@@ -236,19 +236,24 @@ protected:
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_client.make_invocation<"do_action">(
-                        UINT64_MAX, mint_sig, mint_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                wallet_client.make_invocation<"do_action">(UINT64_MAX, mint_sig,
+                                                           mint_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -273,19 +278,23 @@ protected:
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_client.make_invocation<"do_action">(
-                        UINT64_MAX, approve_sig, approve_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_client.make_invocation<"do_action">(
+                UINT64_MAX, approve_sig, approve_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -303,19 +312,23 @@ protected:
     Ed25519Signature open_sig =
         ed25519_sign(party_a_secret_, open_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, open_sig, open_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, open_sig, open_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     EXPECT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
 
     // Compute and return the channel ID (same algorithm as the contract)
@@ -336,21 +349,25 @@ protected:
     Ed25519Signature join_sig =
         ed25519_sign(party_b_secret_, join_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_b_client_.make_invocation<"do_action">(
-                        UINT64_MAX, join_sig, join_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_b_client_.make_invocation<"do_action">(
+                UINT64_MAX, join_sig, join_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
     }
     if (advance_after) {
       advance_block();
@@ -366,22 +383,26 @@ protected:
     auto [sig_a, sig_b] =
         sign_state(channel_id, balance_a, balance_b, state_nonce);
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = pc_client_.make_invocation<"close_channel">(
-                        UINT64_MAX, channel_id, make_difference(balance_a),
-                        make_difference(balance_b), state_nonce, sig_a, sig_b),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = pc_client_.make_invocation<"close_channel">(
+                UINT64_MAX, channel_id, make_difference(balance_a),
+                make_difference(balance_b), state_nonce, sig_a, sig_b),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
     }
     if (advance_after) {
       advance_block();
@@ -397,22 +418,26 @@ protected:
     auto [sig_a, sig_b] =
         sign_state(channel_id, balance_a, balance_b, state_nonce);
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = pc_client_.make_invocation<"dispute">(
-                        UINT64_MAX, channel_id, make_difference(balance_a),
-                        make_difference(balance_b), state_nonce, sig_a, sig_b),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = pc_client_.make_invocation<"dispute">(
+                UINT64_MAX, channel_id, make_difference(balance_a),
+                make_difference(balance_b), state_nonce, sig_a, sig_b),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
     }
     if (advance_after) {
       advance_block();
@@ -423,22 +448,25 @@ protected:
   // Finalize a channel after dispute period
   ExecResult finalize(uint64_t channel_id, bool advance_after = true)
   {
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation =
-                        pc_client_.make_invocation<"finalize">(UINT64_MAX,
-                                                               channel_id),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                pc_client_.make_invocation<"finalize">(UINT64_MAX, channel_id),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
     }
     if (advance_after) {
       advance_block();
@@ -456,14 +484,17 @@ protected:
 
   void initialize_payment_channel()
   {
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = pc_client_.make_invocation<"initialize">(
-                        UINT64_MAX, kTestDisputePeriod),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                pc_client_.make_invocation<"initialize">(UINT64_MAX,
+                                                         kTestDisputePeriod),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -475,14 +506,17 @@ protected:
   {
     // Wallet A is set as owner of ERC20 (has minting privileges)
     // Both wallets can mint for testing purposes
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = erc20_client_.make_invocation<"initialize">(
-                        UINT64_MAX, kWalletAAddress),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                erc20_client_.make_invocation<"initialize">(UINT64_MAX,
+                                                            kWalletAAddress),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -492,15 +526,17 @@ protected:
 
   void initialize_wallet_a()
   {
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation =
-                        wallet_a_client_.make_invocation<"initialize">(
-                            UINT64_MAX, party_a_pubkey_),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                wallet_a_client_.make_invocation<"initialize">(UINT64_MAX,
+                                                               party_a_pubkey_),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -510,15 +546,17 @@ protected:
 
   void initialize_wallet_b()
   {
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation =
-                        wallet_b_client_.make_invocation<"initialize">(
-                            UINT64_MAX, party_b_pubkey_),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation =
+                wallet_b_client_.make_invocation<"initialize">(UINT64_MAX,
+                                                               party_b_pubkey_),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -551,19 +589,23 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -608,19 +650,23 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -666,19 +712,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -714,19 +764,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -763,19 +817,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -815,19 +873,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -871,19 +933,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
@@ -920,20 +986,23 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
-    auto handler = make_new_system_call_handler(
-
-        Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-        *wasm_runtime_context_);
+    SignedTransaction handler_tx{
+        .tx = Transaction{
+            .invocation = wallet_a_client_.make_invocation<"do_action">(
+                UINT64_MAX, transfer_sig, transfer_calldata),
+            .uniquifier =
+                Uniquifier{.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = nonce_++}}};
+    auto handler =
+        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+    EXPECT_TRUE(
+        handler.emit_events(ExecResult::ExecResultOK,
+                            ProposedTransaction{.signed_tx = handler_tx})());
     advance_block();
   }
 
