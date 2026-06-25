@@ -212,10 +212,10 @@ public:
   //
   // [proposed_tx] is the full transaction body forwarded to the event server
   // alongside the event log (assembled in proposal mode, forwarded in
-  // validation mode).  Defaults to an empty body for test/bench callers that
-  // only exercise the event-log path.
-  x23::Async<SystemStatus<void>>
-  emit_events(ExecResult exec_result, ProposedTransaction proposed_tx = {});
+  // validation mode).  Tests that only exercise the event-log path pass an
+  // empty ProposedTransaction{} explicitly.
+  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result,
+                                             ProposedTransaction proposed_tx);
 
   // Get the proposal data.
   // Can only be called after root_invoke()
