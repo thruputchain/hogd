@@ -213,6 +213,28 @@ create_contract_index_sst_chunk(
   return true;
 }
 
+// Parse a tx_index value: block_height || ProposedTransaction || TxEventLog.
+// The caller must ensure [value] is at least sizeof(BlockHeight) bytes.
+// Throws x23::XdrBadInput if the body or event log is malformed.
+IndexDB::TxRecord
+parse_tx_value(std::string_view value)
+{
+  // TODO(jhumphri): Support different endianness.
+  static_assert(std::endian::native == std::endian::little);
+  CHECK_GE(value.size(), sizeof(BlockHeight));
+  IndexDB::TxRecord record;
+  // value.data() is not guaranteed to be 8-byte aligned, so we memcpy.
+  std::memcpy(&record.height, value.data(), sizeof(BlockHeight));
+  const auto *payload =
+      reinterpret_cast<const uint8_t *>(value.data() + sizeof(BlockHeight));
+  const size_t payload_len = value.size() - sizeof(BlockHeight);
+  const size_t body_len =
+      x23::deserialize_from(&record.tx, x23::BufView{payload, payload_len});
+  x23::deserialize(&record.events,
+                   x23::BufView{payload + body_len, payload_len - body_len});
+  return record;
+}
+
 } // namespace
 
 void
@@ -916,29 +938,12 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  // TODO(jhumphri): Support different endianness.
-  static_assert(std::endian::native == std::endian::little);
-  CHECK_GE(value.size(), sizeof(BlockHeight));
-  TxRecord record;
-  // value.data() is not guaranteed to be 8-byte aligned
-  // hence we use std::memcpy instead of
-  // *reinterpret_cast<BlockHeight*>(value.data())
-  std::memcpy(&record.height, value.data(), sizeof(BlockHeight));
-  const auto *payload =
-      reinterpret_cast<const uint8_t *>(value.data() + sizeof(BlockHeight));
-  const size_t payload_len = value.size() - sizeof(BlockHeight);
   try {
-    // Value layout: block_height || ProposedTransaction (body) || TxEventLog.
-    const size_t body_len =
-        x23::deserialize_from(&record.tx, x23::BufView{payload, payload_len});
-    x23::deserialize(&record.events,
-                     x23::BufView{payload + body_len, payload_len - body_len});
+    return parse_tx_value(value);
   } catch (const x23::XdrBadInput &e) {
     error("Failed to deserialize tx_index value: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
   }
-
-  return record;
 }
 
 IndexerStatus<std::pair<BlockHeight, TxEventLog>>
@@ -1515,17 +1520,9 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       continue;
     }
 
-    TxEventLog event_log;
-    ProposedTransaction body;
+    TxRecord record;
     try {
-      // Value layout: block_height || ProposedTransaction (body) || TxEventLog.
-      const auto *payload =
-          reinterpret_cast<const uint8_t *>(value.data() + sizeof(BlockHeight));
-      const size_t payload_len = value.size() - sizeof(BlockHeight);
-      const size_t body_len =
-          x23::deserialize_from(&body, x23::BufView{payload, payload_len});
-      x23::deserialize(&event_log, x23::BufView{payload + body_len,
-                                                payload_len - body_len});
+      record = parse_tx_value(std::string_view{value.data(), value.size()});
     } catch (const x23::XdrBadInput &e) {
       error("get_transactions: failed to deserialize tx_index value: {}",
             e.what());
@@ -1534,17 +1531,18 @@ IndexDB::get_transactions(TransactionQuery const &query) const
 
     if (query.address) {
       const bool matched =
-          std::ranges::any_of(event_log.events, [&](TxEmittedEvent const &ev) {
-            return ev.contract_address == *query.address;
-          });
+          std::ranges::any_of(record.events.events,
+                              [&](TxEmittedEvent const &ev) {
+                                return ev.contract_address == *query.address;
+                              });
       if (!matched) {
         continue;
       }
     }
 
     rows.push_back(TransactionRow{.pos = pos,
-                                  .tx = std::move(body),
-                                  .events = std::move(event_log)});
+                                  .tx = std::move(record.tx),
+                                  .events = std::move(record.events)});
   }
 
   rocksdb::Status status = iter->status();
