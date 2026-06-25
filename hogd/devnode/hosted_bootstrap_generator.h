@@ -17,7 +17,7 @@ struct HostedBootstrapGeneratorConfig {
   std::string network_id = std::string(kDefaultHostedDevnetNetworkId);
   BootstrapAccountConfig bootstrap_config{
       .count = 10,
-      .seed = "groundhog-devnet",
+      .seed = "groundhog-dev-accounts",
       .storage_tokens = 1'000'000'000,
       .dev_wallet_profile = std::string(kDefaultDevWalletProfile),
   };

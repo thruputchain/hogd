@@ -43,7 +43,7 @@ Options:
   --dev-accounts <count>         Deterministic dev accounts to bootstrap
                                  [default: 10]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
-                                 [default: groundhog-devnet]
+                                 [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
   --genesis-out <path>           Output JSON-XDR genesis configuration
