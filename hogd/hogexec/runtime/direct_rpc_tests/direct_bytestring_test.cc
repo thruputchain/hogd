@@ -1894,10 +1894,10 @@ TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
 }
 
 // A subtransaction whose delta batch would not fit the executor->HogDB RPC
-// message is rejected as a 2PC conflict (a clean `false`, not a system error),
-// so an oversized push can never reach serialization and become a node-
-// unrecoverable error. This is the general r/w-footprint bound; here it is
-// driven by spraying max-size bytestrings across many keys (the same check
+// message is rejected as a concurrency-control conflict (a clean `false`, not a
+// system error), so an oversized push can never reach serialization and become
+// a node-unrecoverable error. This is the general r/w-footprint bound; here it
+// is driven by spraying max-size bytestrings across many keys (the same check
 // covers many-keys and RCQ-observation overflow).
 TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
 {

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -76,7 +77,8 @@ public:
   constexpr static auto make_rcq_consume_delta(
       uint32_t max_fully_consumed_block_number,
       uint32_t partial_consumed_number,
-      x23::Vec<QueueEntry, 0xffffffff> const &current_block_consumed)
+      x23::Vec<QueueEntry, kRetrocausalQueueBlockEntriesMaxLen> const
+          &current_block_consumed)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     RetrocausalQueuePastBlockConsumeDelta consume_delta = {
@@ -92,7 +94,8 @@ public:
   constexpr static auto make_rcq_consume_insert_delta(
       uint32_t max_fully_consumed_block_number,
       uint32_t partial_consumed_number,
-      x23::Vec<QueueEntry, 0xffffffff> const &current_block_consumed,
+      x23::Vec<QueueEntry, kRetrocausalQueueBlockEntriesMaxLen> const
+          &current_block_consumed,
       std::vector<QueueEntry> const &inserted_entries)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
@@ -132,7 +135,8 @@ public:
   constexpr static auto make_rcq_consume_observed_delta(
       uint32_t max_fully_consumed_block_number,
       uint32_t partial_consumed_number,
-      x23::Vec<QueueEntry, 0xffffffff> const &current_block_consumed,
+      x23::Vec<QueueEntry, kRetrocausalQueueBlockEntriesMaxLen> const
+          &current_block_consumed,
       std::vector<QueueEntry> const &observed_entries)
   {
     auto delta =
@@ -1983,47 +1987,6 @@ TEST_F(DirectRCQTests,
 
   ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
-}
-
-// StressExclusiveFlagInsertOverMaxEntriesPerBlock
-//
-// Target: item_lock.cc:130 CHECK(r.has_value())
-//
-// ExclusiveLock::try_atomic_change_lock does NOT enforce
-// kRetrocausalQueueBlockEntriesMaxLen. It just returns cost(entries).
-// But at commit time, the exclusive downgrade creates a fresh
-// RetrocausalQueueLock and calls try_atomic_change_lock(nullptr, inner, ctx).
-// Inserting > kRetrocausalQueueBlockEntriesMaxLen entries is invalid executor
-// behavior regardless of lock mode. request_retrocausal_queue rejects the
-// delta before constructing RetrocausalQueueIt to prevent uint16_t truncation.
-TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
-{
-  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
-  auto key = make_contract_data_addrkey(kContractAddress, "rcq_excl_over_max");
-
-  // Block 1: Create a small RCQ
-  auto tx_setup = make_new_per_tx_db_proxy();
-  tx_setup.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
-                     std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
-  advance_block();
-
-  // Block 2: Insert 1001 entries with exclusive flag.
-  // request_retrocausal_queue rejects > kRetrocausalQueueBlockEntriesMaxLen
-  // as kInvalidExecutorBehavior before the uint16_t cast.
-  std::vector<QueueEntry> entries;
-  entries.reserve(1001);
-  for (int i = 0; i < 1001; ++i) {
-    entries.push_back(make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
-                                      static_cast<uint8_t>((i >> 8) & 0xFF)}));
-  }
-  auto tx = make_new_per_tx_db_proxy();
-  tx.add_delta(key, make_rcq_insert_delta(entries),
-               std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
-  ASSERT_FALSE(r.has_value());
 }
 
 // StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch
@@ -4906,7 +4869,7 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
 
   // kMaxLen distinct entries to fill a block, plus one extra survivor entry.
   std::vector<QueueEntry> full_block;
-  x23::Vec<QueueEntry, 0xffffffff> consume_all;
+  x23::Vec<QueueEntry, kRetrocausalQueueBlockEntriesMaxLen> consume_all;
   full_block.reserve(kMaxLen);
   for (size_t i = 0; i < kMaxLen; ++i) {
     auto entry = make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
@@ -4977,8 +4940,10 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
 // could stay under the old 1000-entry cap yet serialize past 64 KiB; it closed
 // successfully and failed only at commit, when ScalableMap::put rejected the
 // oversized item with kTooBig — a DbSchedResultError that the production commit
-// path turns into a node panic. Entries past the cap must instead be rejected
-// at admission, so an un-committable block is never produced.
+// path turns into a node panic. The added_entries array is now bounded at the
+// cap in the protocol, so an over-cap block cannot be constructed or
+// deserialized; this test verifies the boundary: a full block at the cap
+// commits cleanly.
 //
 // Sizing: a block of N 256-byte entries serializes to 12 + 260×N value bytes
 // (4-byte array length + N×(4-byte length + 256-byte value) + 8-byte block
@@ -5005,25 +4970,14 @@ TEST_F(DirectRCQTests, RCQBlockEntryCapFitsRamdbItemLimit)
         << "a full block (at the cap) is admitted";
     ASSERT_TRUE(tx.commit_transaction().has_value());
   }
-  advance_block();
 
-  // One entry past the cap is rejected at admission, so it can never reach
-  // commit and panic the node.
-  {
-    auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(key,
-                 make_rcq_insert_delta(
-                     make_entries(kRetrocausalQueueBlockEntriesMaxLen + 1,
-                                  256)),
-                 std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
-    // The over-cap insert is rejected at admission, so no block is ever staged
-    // and commit never reaches the ramdb size guard that previously panicked
-    // the node. Rejection surfaces as a failed push -- either a failed status
-    // or a false result, depending on which admission layer trips first.
-    ASSERT_FALSE(r.has_value() && r.value())
-        << "a block exceeding the entry cap must be rejected before commit";
-  }
+  // One past the cap is not constructable: added_entries is wire-bounded at
+  // kRetrocausalQueueBlockEntriesMaxLen, so building an over-cap delta throws.
+  // This is the same type-level enforcement that makes a Byzantine executor's
+  // over-cap push fail to deserialize at HogDB rather than reach commit.
+  EXPECT_THROW(make_rcq_insert_delta(
+                   make_entries(kRetrocausalQueueBlockEntriesMaxLen + 1, 256)),
+               std::exception);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
