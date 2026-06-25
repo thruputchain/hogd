@@ -1917,7 +1917,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
         IndexDB::open_or_make_new(indexer_db_path);
     ASSERT_TRUE(indexer_status.has_value()) << indexer_status.error();
     TxEventLogBatch no_events;
-    ASSERT_TRUE(indexer_status->consume_events(1, no_events).has_value());
+    ASSERT_TRUE(indexer_status->consume_events(1, no_events, {}).has_value());
   }
 
   {
