@@ -15,6 +15,7 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "pagination.hh"
 #include "transaction.hh"
 #include "types.hh"
 
