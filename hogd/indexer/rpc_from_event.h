@@ -38,7 +38,7 @@ public:
     // this function to use [co_await] *before* they are accessed, be sure to
     // copy those parameters above rather than keep them as references.
     CHECK(tx_events.size() == tx_bodies.size());
-    CHECK(db_.consume_events(block_height, tx_events).has_value());
+    CHECK(db_.consume_events(block_height, tx_events, tx_bodies).has_value());
     co_await Health::instance().set_current_block_height(block_height);
     co_return;
   }

@@ -48,6 +48,7 @@
 #include "hogd/indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/fastclock.h"
 #include "x23/serialize.h"
@@ -62,6 +63,7 @@ IndexerStatus<bool>
 create_tx_index_sst_chunk(
     rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *tx_cf_handle,
     BlockHeight block_height, std::span<const TxEventLog> events_chunk,
+    std::span<const ProposedTransaction> bodies_chunk,
     const std::string &sst_path, const rocksdb::Options &sst_options,
     const rocksdb::EnvOptions &env_options, size_t chunk_idx)
 {
@@ -77,13 +79,29 @@ create_tx_index_sst_chunk(
 
   static_assert(std::endian::native == std::endian::little);
 
-  for (const auto &event_log : events_chunk) {
-    // Serialize the TxEventLog for storage
-    auto serialized = x23::serialize(event_log);
+  // [events_chunk] and [bodies_chunk] are index-aligned.  When no body is
+  // available (e.g. tests that only exercise the event-log path) an empty
+  // ProposedTransaction is stored.
+  const ProposedTransaction empty_body{};
+
+  for (size_t i = 0; i < events_chunk.size(); i++) {
+    const TxEventLog &event_log = events_chunk[i];
+    const ProposedTransaction &body =
+        i < bodies_chunk.size() ? bodies_chunk[i] : empty_body;
+
+    // Value layout: block_height || serialized ProposedTransaction (the tx
+    // body) || serialized TxEventLog.  The body precedes the event log;
+    // get_tx_events() skips it with deserialize_from().
     std::string value(reinterpret_cast<const char *>(&block_height),
                       sizeof(block_height));
-    value.append(std::string(reinterpret_cast<const char *>(serialized.data()),
-                             serialized.size()));
+
+    auto body_serialized = x23::serialize(body);
+    value.append(reinterpret_cast<const char *>(body_serialized.data()),
+                 body_serialized.size());
+
+    auto serialized = x23::serialize(event_log);
+    value.append(reinterpret_cast<const char *>(serialized.data()),
+                 serialized.size());
 
     // Index by transaction (in tx_index column family)
     IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
@@ -193,6 +211,28 @@ create_contract_index_sst_chunk(
   }
 
   return true;
+}
+
+// Parse a tx_index value: block_height || ProposedTransaction || TxEventLog.
+// The caller must ensure [value] is at least sizeof(BlockHeight) bytes.
+// Throws x23::XdrBadInput if the body or event log is malformed.
+IndexDB::TxRecord
+parse_tx_value(std::string_view value)
+{
+  // TODO(jhumphri): Support different endianness.
+  static_assert(std::endian::native == std::endian::little);
+  CHECK_GE(value.size(), sizeof(BlockHeight));
+  IndexDB::TxRecord record;
+  // value.data() is not guaranteed to be 8-byte aligned, so we memcpy.
+  std::memcpy(&record.height, value.data(), sizeof(BlockHeight));
+  const auto *payload =
+      reinterpret_cast<const uint8_t *>(value.data() + sizeof(BlockHeight));
+  const size_t payload_len = value.size() - sizeof(BlockHeight);
+  const size_t body_len =
+      x23::deserialize_from(&record.tx, x23::BufView{payload, payload_len});
+  x23::deserialize(&record.events,
+                   x23::BufView{payload + body_len, payload_len - body_len});
+  return record;
 }
 
 } // namespace
@@ -477,7 +517,8 @@ IndexDB::is_compression_supported(
 
 IndexerStatus<void>
 IndexDB::consume_events(BlockHeight block_height,
-                        std::span<const TxEventLog> events)
+                        std::span<const TxEventLog> events,
+                        std::span<const ProposedTransaction> bodies)
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
@@ -569,17 +610,25 @@ IndexDB::consume_events(BlockHeight block_height,
     const size_t end_idx =
         std::min(start_idx + tx_events_chunk_size, events.size());
     const auto events_chunk = events.subspan(start_idx, end_idx - start_idx);
+    // Bodies are index-aligned with events; clamp to whatever bodies were
+    // supplied (empty for callers that pass none).
+    const auto bodies_chunk =
+        start_idx < bodies.size()
+            ? bodies.subspan(start_idx,
+                             std::min(end_idx, bodies.size()) - start_idx)
+            : std::span<const ProposedTransaction>{};
     const std::string &chunk_sst_path = tx_sst_paths[i];
 
     auto *db_ptr = db_.get();
     CHECK_PTR(db_ptr);
 
     auto future = pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
-                               events_chunk, &chunk_sst_path, &tx_sst_options,
-                               &env_options, i]() -> IndexerStatus<bool> {
+                               events_chunk, bodies_chunk, &chunk_sst_path,
+                               &tx_sst_options, &env_options,
+                               i]() -> IndexerStatus<bool> {
       return create_tx_index_sst_chunk(db, tx_cf, block_height, events_chunk,
-                                       chunk_sst_path, tx_sst_options,
-                                       env_options, i);
+                                       bodies_chunk, chunk_sst_path,
+                                       tx_sst_options, env_options, i);
     });
 
     tx_futures.push_back(std::move(future));
@@ -865,8 +914,8 @@ IndexDB::log_stats() const
   }
 }
 
-IndexerStatus<std::pair<BlockHeight, TxEventLog>>
-IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
+IndexerStatus<IndexDB::TxRecord>
+IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
@@ -889,26 +938,22 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  // TODO(jhumphri): Support different endianness.
-  static_assert(std::endian::native == std::endian::little);
-  CHECK_GE(value.size(), sizeof(BlockHeight));
-  BlockHeight block_height;
-  // value.data() is not guaranteed to be 8-byte aligned
-  // hence we use std::memcpy instead of
-  // *reinterpret_cast<BlockHeight*>(value.data())
-  std::memcpy(&block_height, value.data(), sizeof(BlockHeight));
-  TxEventLog event_log;
   try {
-    x23::deserialize(&event_log,
-                     x23::BufView{reinterpret_cast<const uint8_t *>(
-                                      value.data() + sizeof(BlockHeight)),
-                                  value.size() - sizeof(BlockHeight)});
+    return parse_tx_value(value);
   } catch (const x23::XdrBadInput &e) {
-    error("Failed to deserialize TxEventLog: {}", e.what());
+    error("Failed to deserialize tx_index value: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
   }
+}
 
-  return std::make_pair(block_height, event_log);
+IndexerStatus<std::pair<BlockHeight, TxEventLog>>
+IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
+{
+  auto record = get_tx_record(tx_hash);
+  if (!record) {
+    return record.error();
+  }
+  return std::make_pair(record->height, std::move(record->events));
 }
 
 void
@@ -1425,6 +1470,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
 
   struct TransactionRow {
     Position pos;
+    ProposedTransaction tx;
     TxEventLog events;
   };
   std::vector<TransactionRow> rows;
@@ -1474,28 +1520,29 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       continue;
     }
 
-    TxEventLog event_log;
+    TxRecord record;
     try {
-      x23::deserialize(&event_log,
-                       x23::BufView{reinterpret_cast<const uint8_t *>(
-                                        value.data() + sizeof(BlockHeight)),
-                                    value.size() - sizeof(BlockHeight)});
+      record = parse_tx_value(std::string_view{value.data(), value.size()});
     } catch (const x23::XdrBadInput &e) {
-      error("get_transactions: failed to deserialize TxEventLog: {}", e.what());
+      error("get_transactions: failed to deserialize tx_index value: {}",
+            e.what());
       return IndexerError(IndexerErrorCode::kInternal);
     }
 
     if (query.address) {
       const bool matched =
-          std::ranges::any_of(event_log.events, [&](TxEmittedEvent const &ev) {
-            return ev.contract_address == *query.address;
-          });
+          std::ranges::any_of(record.events.events,
+                              [&](TxEmittedEvent const &ev) {
+                                return ev.contract_address == *query.address;
+                              });
       if (!matched) {
         continue;
       }
     }
 
-    rows.push_back(TransactionRow{.pos = pos, .events = std::move(event_log)});
+    rows.push_back(TransactionRow{.pos = pos,
+                                  .tx = std::move(record.tx),
+                                  .events = std::move(record.events)});
   }
 
   rocksdb::Status status = iter->status();
@@ -1517,7 +1564,9 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     if (page.transactions.size() >= limit) {
       break;
     }
-    TxInfo info{.height = row.pos.block, .events = std::move(row.events)};
+    TxInfo info{.height = row.pos.block,
+                .tx = std::move(row.tx),
+                .events = std::move(row.events)};
     page.transactions.push_back(std::move(info));
     last_emitted = row.pos;
     any_emitted = true;
