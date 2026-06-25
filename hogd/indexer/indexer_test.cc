@@ -15,6 +15,7 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "pagination.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -88,14 +89,17 @@ create_event_logs()
   return TxEventLogBatch{event_log0, event_log1};
 }
 
-// Bodies are forwarded index-aligned with the event logs; these tests only
-// exercise the event-log path, so empty bodies of matching length suffice.
+// Bodies are forwarded index-aligned with the event logs.  Each body is given
+// a distinct uniquifier nonce so tests can assert it round-trips through
+// storage and the RPCs.
 ProposedTransactionBatch
 create_tx_bodies(std::size_t n)
 {
   ProposedTransactionBatch bodies;
   for (std::size_t i = 0; i < n; i++) {
-    bodies.emplace_back();
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    bodies.emplace_back(std::move(body));
   }
   return bodies;
 }
@@ -116,6 +120,7 @@ TEST_F(IndexerTest, FindTx)
       block_explorer_->get_transaction_info(events[0].proposed_tx_hash)();
   EXPECT_EQ(result0.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result0.info().height, block_height);
+  EXPECT_EQ(result0.info().tx, bodies[0]);
   EXPECT_EQ(result0.info().events.proposed_tx_hash, events[0].proposed_tx_hash);
   EXPECT_EQ(result0.info().events.events.size(), 1);
   EXPECT_EQ(result0.info().events.events[0].contract_address,
@@ -146,6 +151,39 @@ TEST_F(IndexerTest, FindNonExistentTx)
   std::ranges::fill(tx_hash, 0x03);
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
+}
+
+// get_transactions returns each matched transaction with its full body, event
+// log, and height -- i.e. the data the indexer now stores in the tx_index
+// value (block_height || ProposedTransaction || TxEventLog).
+TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
+{
+  BlockHeight block_height = 100;
+  TxEventLogBatch events = create_event_logs(); // tx hashes 0x01, 0x02
+  ProposedTransactionBatch bodies =
+      create_tx_bodies(events.size()); // nonces 0, 1
+
+  event_->indexer_event_process_events(block_height, events, bodies)();
+
+  TransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0; // server default
+
+  TransactionPage page = block_explorer_->get_transactions(query)();
+
+  // Both txs are at block 100; ascending order is by (block, tx_hash), so
+  // 0x01 (index 0) precedes 0x02 (index 1) -- aligned with events/bodies.
+  ASSERT_EQ(page.transactions.size(), 2);
+  for (std::size_t i = 0; i < page.transactions.size(); i++) {
+    EXPECT_EQ(page.transactions[i].height, block_height);
+    EXPECT_EQ(page.transactions[i].tx, bodies[i]);
+    EXPECT_EQ(page.transactions[i].events.proposed_tx_hash,
+              events[i].proposed_tx_hash);
+    ASSERT_EQ(page.transactions[i].events.events.size(), 1);
+    EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
+              events[i].events[0].contract_address);
+  }
 }
 
 } // namespace hogd

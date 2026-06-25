@@ -664,7 +664,11 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
       EventBlockContext::final_events_filename(event_dir_.directory(),
                                                tip.events_hash);
   TxEventLogBatch events = read_event_log_file(event_path);
-  IndexerStatus<void> status = indexer_db_->consume_events(tip.height, events);
+  // The on-disk event log file holds only event logs (transaction bodies are
+  // forwarded out of band and are not part of the event trie), so this
+  // recovery replay supplies no bodies.
+  IndexerStatus<void> status =
+      indexer_db_->consume_events(tip.height, events, {});
   if (!status.has_value()) {
     throw std::runtime_error(
         std::format("failed to replay recovered event log into indexer: {}",

@@ -112,20 +112,21 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // 2. First positive adjust_allowance on a fresh pair succeeds, and the
@@ -180,20 +181,21 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // 3. transfer_from on a fresh (owner, spender) pair with zero allowance must
@@ -234,16 +236,15 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
   write_contract(spender_xdr);
   write_deployment(kSpenderAddr, spender_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSpenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSpenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -302,20 +303,21 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // 5. transfer_from consumes allowance: owner grants 100, spender transfers 50,
@@ -418,73 +420,72 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
 
   // Tx 1: owner grants +100000.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
 
   // Tx 2: spender transfers 50000.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kSpenderAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kSpenderAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
 
   // Tx 3: owner asserts allowance == 50000.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(1),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
 
   // Tx 4: spender tries transfer_from(60000), must fail at commit.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kSpenderAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kSpenderAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(1),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
   }
@@ -527,16 +528,15 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -584,20 +584,21 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   write_deployment(kOwnerAddr, owner_xdr);
 
   const BlockHeight committed_block = get_block_number();
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -722,19 +723,19 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
 
   // Tx 1: owner grants allowance to spender: INT128_MAX - 5.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
@@ -743,19 +744,19 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   // (would overflow the committed INT128_MAX - 5); the owner method swallows
   // the abort and commits with the allowance unchanged.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(1),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
@@ -763,19 +764,19 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   // Tx 3: spender transfer_from(10000) against the intact INT128_MAX - 5
   // allowance succeeds.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kSpenderAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kSpenderAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 }
 
@@ -820,20 +821,21 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // 9. transfer_from where owner == caller skips allowance: no allowance
@@ -890,20 +892,21 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   write_contract(owner_xdr);
   write_deployment(kOwnerAddr, owner_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kOwnerAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -1053,19 +1056,19 @@ TEST_F(NativeTokenAllowanceTest,
 
   // Tx 1: owner grants the spender an allowance.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
@@ -1073,19 +1076,19 @@ TEST_F(NativeTokenAllowanceTest,
   // Tx 2: spender executes transfer_from(owner, zero, amount).
   EphemeralTxIdentifier spend_tx_id;
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kSpenderAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context, &spend_tx_id);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kSpenderAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context, &spend_tx_id);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 
   advance_block();
@@ -1128,19 +1131,19 @@ TEST_F(NativeTokenAllowanceTest,
   // Tx 3: confirm via the precompile views that the allowance is consumed and
   // native total_supply() is unchanged.
   {
-    auto h = make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address = kOwnerAddr,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        *runtime_context);
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(1),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
     ASSERT_TRUE(h.root_invoke().is_root_success());
     ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
-    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK)());
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
   }
 }
 

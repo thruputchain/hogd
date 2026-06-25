@@ -7,10 +7,14 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <future>
+#include <ios>
 #include <iterator>
 #include <memory>
 #include <span>
+#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -446,6 +450,24 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
+}
+
+x23::Vec<x23::DagNode<void>>
+MempoolCoordinatorRpc::add_finish_all_executors_nodes(x23::Dag &dag,
+                                                      const PendingBlock &cache,
+                                                      const x23::DagDeps &deps)
+{
+  x23::Vec<x23::DagNode<void>> nodes;
+  nodes.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    nodes.push_back(
+        dag.async<void>("finish executor", deps, [&, i]() -> x23::Async<void> {
+          co_await finish_block(cache.block_id,
+                                /*executor_idx=*/i);
+          co_return;
+        }));
+  }
+  return nodes;
 }
 
 SHA256Hash
@@ -971,11 +993,7 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
-      dag.async<void>("finish executors", proposal_deps,
-                      [&]() -> x23::Async<void> {
-                        co_await finish_all_executors(cache.block_id);
-                        co_return;
-                      });
+      add_finish_all_executors_nodes(dag, cache, proposal_deps);
   nodes.close_snapshot =
       dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
                                [&]() -> x23::Async<DbBlockResult> {
@@ -1173,11 +1191,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
-  // if (const char *home = std::getenv("HOME")) {
-  //   std::ofstream graph_dot(std::string(home) + "/graph.dot",
-  //                           std::ios::out | std::ios::trunc);
-  //   graph_dot << nomination_dag.dot();
-  // }
+  if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
+      dot_dir != nullptr && *dot_dir != '\0') {
+    static std::atomic<size_t> dot_counter{0};
+    const size_t dot_idx = dot_counter.fetch_add(1, std::memory_order_relaxed);
+    const std::filesystem::path dot_path =
+        std::filesystem::path(dot_dir) /
+        ("mempool_" + std::to_string(dot_idx) + ".dot");
+    std::ofstream graph_dot(dot_path, std::ios::out | std::ios::trunc);
+    graph_dot << nomination_dag.dot();
+  }
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {

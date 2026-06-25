@@ -11,8 +11,9 @@ done
 
 : ${EXPORT_REGEX:=$^}
 rm -f remote-exec.env
-export -p | sed -e 's/^declare -x //' | grep -e "$EXPORT_REGEX" || : |
-  sed -e 's/^/export /' >remote-exec.env
+{
+  export -p | sed -e 's/^declare -x //' | grep -E -e "$EXPORT_REGEX" || :
+} | sed -e 's/^/export /' >remote-exec.env
 
 # remote_exec [user@]host /local/exe [--copy-file /local/file ...] [--] [args...]
 remote_exec() {

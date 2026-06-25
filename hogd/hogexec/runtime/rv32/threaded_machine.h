@@ -33,9 +33,11 @@
 // instructions (branches/jal/jalr/ecall/ebreak/unimp) are barriers and
 // self-charge.
 // Loads/stores stay in straight-line runs for performance; if they trap, the
-// run has already been charged. On out-of-gas, the run is aborted at its head.
-// The exact instruction and intermediate gas_remaining can therefore differ
-// from the per-instruction Machine at trap boundaries.
+// run has already been charged. On out-of-gas, the run is aborted at its head
+// with gas_remaining saturated to 0, so the gas left never exceeds what
+// per-instruction metering would leave (and is exactly equal for 1-gas runs).
+// The trap pc still points at the run head, so the exact instruction and the
+// intermediate gas_remaining can differ from the per-instruction Machine.
 //
 // Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
 // the executable Slot array is built (once, cached across reset()) with either
@@ -464,8 +466,13 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // including its terminating barrier -- then dispatch to it. Called at every run
 // head: program start, every jump/branch target, and the instruction after each
 // barrier. This is the only place gas is charged; no instruction self-charges.
-// Block-granular OOG: if the run does not fit, abort at its head with nothing
-// debited (total gas to the next barrier is what persists).
+// Block-granular OOG: if the run does not fit, abort at its head with gas
+// saturated to 0 (the whole unaffordable run is debited). Zeroing keeps
+// block-granular OOG indistinguishable from debiting one gas per instruction --
+// a run of 1-gas instructions drains to exactly 0 before it would trap -- and
+// matches consume_gas()/apply_ecall(), which also zero on overdraft. No
+// leftover ever survives an OOG, so the gas left never exceeds what
+// per-instruction metering would leave.
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -473,7 +480,7 @@ enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   const uint32_t run_gas = ip->gas_to_run;
   if (gas < run_gas) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
-                                                         gas);
+                                                         /*gas=*/0);
   }
   gas -= run_gas;
   HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, gas);
@@ -1828,6 +1835,20 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   assert(pending_ecall_.has_value());
   pending_ecall_.reset();
 
+  // The threaded ecall seam does not handle host traps. The production driver
+  // (rv32_contract.cc) resolves host errors before resuming and asserts the
+  // machine never traps kHostTrap, and -- unlike baseline Machine -- this
+  // engine has no host_trap_payload_ to carry the deterministic-vs-fatal
+  // kind/code that runtime_context relies on. So a kTrap HostResult is a
+  // contract violation: forbid it outright rather than collapse it to a
+  // payload-less kHostTrap. Checked before the gas debit so an over-budget
+  // kTrap is not masked as OOG.
+  if (result.status == HostStatus::kTrap) {
+    assert(false && "ThreadedMachine::apply_ecall: HostStatus::kTrap is not "
+                    "supported on the threaded ecall path");
+    std::abort();
+  }
+
   // pc_ is already pc_after (set in op_ecall); rebuild Ctx/next for trap_at and
   // capture(). next's pc == pc_after, matching the inline trap_at(..., next).
   Ctx c{.m = this, .base = exec_.data()};
@@ -1864,8 +1885,10 @@ ThreadedMachine::apply_ecall(const HostResult &result)
                                            gas_remaining_);
   case HostStatus::kTrap:
   default:
-    return trap_at<Trace, Trap::kHostTrap>(c, next, mem, memsize,
-                                           gas_remaining_);
+    // kTrap is forbidden above; any status reaching here is a contract
+    // violation (e.g. an unknown enumerator), never a silent payload drop.
+    assert(false && "ThreadedMachine::apply_ecall: unsupported HostStatus");
+    std::abort();
   }
 }
 

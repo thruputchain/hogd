@@ -127,7 +127,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   std::vector<TxEventLog> events = {event_log1, event_log2};
 
   // Consume events
-  auto result = db->consume_events(block_height, events);
+  auto result = db->consume_events(block_height, events, {});
   ASSERT_TRUE(result.has_value());
 
   // Lookup first transaction
@@ -254,8 +254,8 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   event_log2.events.push_back(make_event(addr, 0, 0));
   event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
-  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}, {}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -294,8 +294,8 @@ TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
   event_log2.proposed_tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
-  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{event_log2}, {}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -324,7 +324,7 @@ TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
     TxEventLog log;
     log.proposed_tx_hash = tx;
     log.events.push_back(make_event(addr, 0, 0));
-    ASSERT_TRUE(db->consume_events(10 + i, std::vector{log}));
+    ASSERT_TRUE(db->consume_events(10 + i, std::vector{log}, {}));
   }
 
   EventFilterList filters1;
@@ -390,7 +390,7 @@ TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
   log.proposed_tx_hash = tx;
   log.events.push_back(make_event(addr, 1, 0x10));
   log.events.push_back(make_event(addr, 3, 0x20));
-  ASSERT_TRUE(db->consume_events(5, std::vector{log}));
+  ASSERT_TRUE(db->consume_events(5, std::vector{log}, {}));
 
   EventFilter f;
   f.contract_addresses.push_back(addr);
@@ -448,7 +448,7 @@ TEST_F(IndexDBTest, GetEventsOrAcrossFilters)
   log.events.push_back(make_event_manual(2, {0x55, 0x42}));       // ev[0]
   log.events.push_back(make_event_manual(3, {0x10, 0x42, 0x99})); // ev[1]
   log.events.push_back(make_event_manual(3, {0x10, 0x99, 0x42})); // ev[2]
-  ASSERT_TRUE(db->consume_events(5, std::vector{log}));
+  ASSERT_TRUE(db->consume_events(5, std::vector{log}, {}));
 
   // Transfer-topic value 0x10, me 0x42.
   Topic transfer_topic = topic_filled(0x10);
@@ -493,7 +493,7 @@ TEST_F(IndexDBTest, GetEventsDedupContractAcrossFilters)
   TxEventLog log;
   log.proposed_tx_hash = tx;
   log.events.push_back(make_event(addr, 0, 0));
-  ASSERT_TRUE(db->consume_events(1, std::vector{log}));
+  ASSERT_TRUE(db->consume_events(1, std::vector{log}, {}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -554,7 +554,7 @@ TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
     TxEventLog log;
     log.proposed_tx_hash = tx;
     log.events.push_back(make_event(addr, 0, 0));
-    ASSERT_TRUE(db->consume_events(h, std::vector{log}));
+    ASSERT_TRUE(db->consume_events(h, std::vector{log}, {}));
   }
 
   EventFilterList filters;
@@ -601,8 +601,8 @@ TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
   event_log2.events.push_back(make_event(contract_addr1, 1, 0));
   event_log2.events.push_back(make_event(contract_addr2, 0, 0));
 
-  ASSERT_TRUE(
-      db->consume_events(block_height, std::vector{event_log1, event_log2}));
+  ASSERT_TRUE(db->consume_events(block_height,
+                                 std::vector{event_log1, event_log2}, {}));
 
   // Query contract1: expect 3 events (tx1 seq 0, tx1 seq 1, tx2 seq 0).
   {
@@ -670,7 +670,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   log.proposed_tx_hash = tx;
   log.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(42, std::vector{log}));
+  ASSERT_TRUE(db->consume_events(42, std::vector{log}, {}));
   EXPECT_EQ(db->latest_block(), 42);
 
   // A height at or below the watermark is treated as already seen
@@ -680,7 +680,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   TxEventLog event_log2;
   event_log2.proposed_tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
-  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
   EXPECT_EQ(db->latest_block(), 42);
 }
 
@@ -711,8 +711,8 @@ TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
   {
     auto db = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(db.has_value());
-    ASSERT_TRUE(db->consume_events(100, std::vector{log_high}));
-    ASSERT_TRUE(db->consume_events(101, std::vector{log_low}));
+    ASSERT_TRUE(db->consume_events(100, std::vector{log_high}, {}));
+    ASSERT_TRUE(db->consume_events(101, std::vector{log_low}, {}));
     EXPECT_EQ(db->latest_block(), 101);
   }
 
@@ -757,8 +757,8 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
   event_log2.proposed_tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}));
-  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}));
+  ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}, {}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
 
   EventCursorPayload payload;
   payload.schema_version = cursor::kCursorVersion;
@@ -796,7 +796,7 @@ TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
   event_log.proposed_tx_hash = tx1;
   event_log.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{event_log}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log}, {}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -833,15 +833,15 @@ TEST_F(IndexDBTest, OutOfOrderIngestHoldsWatermarkUntilGapFills)
   std::ranges::fill(addr, 0xAA);
 
   // First block defines the base — no need to start at 0.
-  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}));
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}, {}));
   EXPECT_EQ(db->latest_block(), 7);
 
   // Block 9 arrives before block 8: ingested but the watermark holds.
-  ASSERT_TRUE(db->consume_events(9, std::vector{log_with_tx(addr, 0x03)}));
+  ASSERT_TRUE(db->consume_events(9, std::vector{log_with_tx(addr, 0x03)}, {}));
   EXPECT_EQ(db->latest_block(), 7);
 
   // The gap fills; the watermark drains through the buffered height.
-  ASSERT_TRUE(db->consume_events(8, std::vector{log_with_tx(addr, 0x02)}));
+  ASSERT_TRUE(db->consume_events(8, std::vector{log_with_tx(addr, 0x02)}, {}));
   EXPECT_EQ(db->latest_block(), 9);
 }
 
@@ -853,19 +853,19 @@ TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
 
-  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}));
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}, {}));
 
   // Same height again with different content: ignored, success
   // returned, and the conflicting rows are NOT ingested (served
   // history is immutable).
-  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x02)}));
+  ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x02)}, {}));
   EXPECT_EQ(db->latest_block(), 7);
   SHA256Hash tx2;
   std::ranges::fill(tx2, 0x02);
   EXPECT_FALSE(db->get_tx_events(tx2).has_value());
 
   // Below the base: also treated as already-seen.
-  ASSERT_TRUE(db->consume_events(3, std::vector{log_with_tx(addr, 0x04)}));
+  ASSERT_TRUE(db->consume_events(3, std::vector{log_with_tx(addr, 0x04)}, {}));
   EXPECT_EQ(db->latest_block(), 7);
   SHA256Hash tx4;
   std::ranges::fill(tx4, 0x04);
@@ -880,9 +880,9 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{log_with_tx(addr, 0x01)}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{log_with_tx(addr, 0x01)}, {}));
   // Out-of-order: block 12 lands before block 11.
-  ASSERT_TRUE(db->consume_events(12, std::vector{log_with_tx(addr, 0x03)}));
+  ASSERT_TRUE(db->consume_events(12, std::vector{log_with_tx(addr, 0x03)}, {}));
   ASSERT_EQ(db->latest_block(), 10);
 
   // Ascending full scan stops at the watermark: block 12's rows are
@@ -915,7 +915,7 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   }
 
   // Once the gap fills, everything becomes servable.
-  ASSERT_TRUE(db->consume_events(11, std::vector{log_with_tx(addr, 0x02)}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{log_with_tx(addr, 0x02)}, {}));
   ASSERT_EQ(db->latest_block(), 12);
   {
     EventFilterList filters;
@@ -938,7 +938,7 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
 
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
-  ASSERT_TRUE(db->consume_events(5, std::vector{log_with_tx(addr, 0x01)}));
+  ASSERT_TRUE(db->consume_events(5, std::vector{log_with_tx(addr, 0x01)}, {}));
 
   // Descending from below the retained range: empty page — the
   // anchor must NOT wrap to the top of the key range and return the

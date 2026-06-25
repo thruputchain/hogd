@@ -129,23 +129,25 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   write_deployment(kSenderAddr, sender_contract_xdr);
 
   // Invoke the transfer
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *test_runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *test_runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   // Advance block to commit the transaction
   advance_block();
@@ -232,42 +234,46 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   write_deployment(kSenderAddr, sender_contract_xdr);
 
   // First transaction: transfer to receiver (new address)
-  auto handler1 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *test_runtime_context);
+  auto handler1_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler1 =
+      make_new_system_call_handler(handler1_tx, *test_runtime_context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
 
   auto commit_res1 = handler1.try_commit_transaction();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler1.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler1.emit_events(ExecResult::ExecResultOK,
+                           ProposedTransaction{.signed_tx = handler1_tx})());
 
   // Second transaction in the same block: transfer to same receiver
-  auto handler2 = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(1),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *test_runtime_context);
+  auto handler2_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler2 =
+      make_new_system_call_handler(handler2_tx, *test_runtime_context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
 
   auto commit_res2 = handler2.try_commit_transaction();
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultOK,
+                           ProposedTransaction{.signed_tx = handler2_tx})());
 
   // Advance block to commit both transactions
   advance_block();
@@ -423,23 +429,25 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   write_deployment(kSenderAddr, sender_contract_xdr);
 
   // Invoke the contract
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *test_runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *test_runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   // Advance block to commit the transaction
   advance_block();
@@ -546,16 +554,15 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -649,16 +656,15 @@ TEST_F(BalanceCostTrackingTest,
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -752,23 +758,24 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // Regression test for #1807: in-transaction get_balance_of on a fresh receiver
@@ -841,16 +848,15 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -859,7 +865,9 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -942,16 +950,15 @@ TEST_F(BalanceCostTrackingTest,
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -960,7 +967,9 @@ TEST_F(BalanceCostTrackingTest,
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 
@@ -1028,23 +1037,25 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   write_contract(sender_contract_xdr);
   write_deployment(kSenderAddr, sender_contract_xdr);
 
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *test_runtime_context);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *test_runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   // The block in which the transfer was committed is the current block; capture
   // it before advancing so we can query the deltas forwarded to the scheduler.
@@ -1146,23 +1157,25 @@ TEST_F(BalanceCostTrackingTest,
   write_deployment(kSenderAddr, sender_contract_xdr);
 
   EphemeralTxIdentifier tx_id;
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kSenderAddr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *runtime_context, &tx_id);
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 
   advance_block();
 

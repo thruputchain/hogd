@@ -200,7 +200,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   auto insert_start = x23::fastclock::get_ns();
 
   for (hogd::BlockHeight block = 0; block < num_blocks; block++) {
-    auto result = db.consume_events(block, blocks[block]);
+    auto result = db.consume_events(block, blocks[block], {});
     if (!result.has_value()) {
       std::println(stderr, "Failed to consume events for block {}", block);
       return 1;
