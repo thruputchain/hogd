@@ -49,6 +49,8 @@ copy_exec "$build_dir/hogd/auth/auth_exec" "$validator_dir/hog-auth"
 copy_exec "$build_dir/hogd/event/event_exec" "$validator_dir/hog-event"
 copy_exec "$build_dir/hogd/indexer/indexer_exec" "$validator_dir/hog-indexer"
 copy_exec "$build_dir/hogd/devnode/hog-devnode" "$validator_dir/hog-devnode"
+copy_exec "$build_dir/hogd/devnode/hog-hosted-bootstrap" \
+  "$validator_dir/hog-hosted-bootstrap"
 copy_exec "$build_dir/hogd/devnode/hog-devnode" "$hog_devnode_dir/hog-devnode"
 copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
   "$validator_dir/contracts/dev_wallet.rv32a"
@@ -62,6 +64,7 @@ tar -C "$validator_dir" -czf "$output_dir/hogd-validator-linux-x86_64.tar.gz" \
   hog-devnode \
   hog-event \
   hog-exec \
+  hog-hosted-bootstrap \
   hog-indexer \
   hog-mempool
 

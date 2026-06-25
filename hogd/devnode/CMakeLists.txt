@@ -5,6 +5,7 @@ add_library(
   dev_wallet_profile.cc
   hog_devnode_node.cc
   hog_devnode_tmp_dir.cc
+  hosted_bootstrap_generator.cc
   manifest_parse.cc
   runtime_manifest.cc
 )
@@ -49,6 +50,18 @@ target_link_libraries(
 )
 
 add_custom_target(hog-devnode DEPENDS hog_devnode_exec)
+
+add_executable(
+  hog_hosted_bootstrap_exec
+  hosted_bootstrap.cc
+)
+set_property(TARGET hog_hosted_bootstrap_exec PROPERTY OUTPUT_NAME hog-hosted-bootstrap)
+target_link_libraries(
+  hog_hosted_bootstrap_exec
+  hog_devnode
+)
+
+add_custom_target(hog-hosted-bootstrap DEPENDS hog_hosted_bootstrap_exec)
 
 add_executable(
   hog_devnode_test
@@ -108,6 +121,30 @@ add_dependencies(
   all_wasm_headers
 )
 gtest_discover_tests(bootstrap_manifest_test)
+
+add_executable(
+  hosted_bootstrap_generator_test
+  hosted_bootstrap_generator_test.cc
+)
+target_include_directories(
+  hosted_bootstrap_generator_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  hosted_bootstrap_generator_test
+  contract_loader
+  crypto
+  hog_devnode
+  GTest::gtest
+)
+add_dependencies(
+  hosted_bootstrap_generator_test
+  all_riscv_contracts
+  all_wasm_contracts
+  all_wasm_headers
+)
+gtest_discover_tests(hosted_bootstrap_generator_test)
 
 add_executable(
   hog_devnode_fresh_launch_test
