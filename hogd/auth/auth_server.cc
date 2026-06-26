@@ -286,13 +286,12 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
   co_await serialize_transaction_payloads(
       std::span<const SignedTransaction>(txs.begin(), txs.end()),
       serialized_txs);
-  co_return co_await verify_batch(
-      height, std::move(txs), std::move(serialized_txs));
+  co_return co_await verify_batch(height, std::move(txs),
+                                  std::move(serialized_txs));
 }
 
 x23::Async<AuthErrorCode>
-AuthServer::verify_batch(BlockHeight height,
-                         SignedTransactionBatch txs,
+AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs,
                          SerializedTransactionBatch serialized_txs)
 {
   CHECK_EQ(txs.size(), serialized_txs.size());

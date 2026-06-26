@@ -47,16 +47,13 @@ public:
   verify_transactions(BlockHeight height,
                       std::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
-  x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height,
-                      std::span<const SignedTransaction> txs,
-                      std::span<const x23::Buf> serialized_txs,
-                      size_t max_parallelism = 1);
+  x23::Async<AuthErrorCodeBatch> verify_transactions(
+      BlockHeight height, std::span<const SignedTransaction> txs,
+      std::span<const x23::Buf> serialized_txs, size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
   x23::Async<AuthErrorCode>
-  verify_batch(BlockHeight height,
-               SignedTransactionBatch txs,
+  verify_batch(BlockHeight height, SignedTransactionBatch txs,
                SerializedTransactionBatch serialized_txs);
 
   x23::Async<AuthStatus<AuthCacheEntry>>
@@ -172,8 +169,9 @@ public:
         /*max_parallelism=*/available_parallelism());
   }
 
-  x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
-                                                     ParallelSignedTransactionBatch batch)
+  x23::Async<AuthErrorCode>
+  authmempool_verify_batch(BlockHeight height,
+                           ParallelSignedTransactionBatch batch)
   {
     CHECK_PTR(auth_server_);
 
@@ -185,8 +183,8 @@ public:
     co_await serialize_transaction_payloads(
         std::span<const SignedTransaction>(txs.begin(), txs.end()),
         serialized_txs);
-    co_return co_await auth_server_->verify_batch(
-        height, std::move(txs), std::move(serialized_txs));
+    co_return co_await auth_server_->verify_batch(height, std::move(txs),
+                                                  std::move(serialized_txs));
   }
 
 private:

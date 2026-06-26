@@ -30,20 +30,21 @@ serialize_transaction_payloads(std::span<const SignedTransaction> txs,
   serialized_txs.clear();
   serialized_txs.resize(txs.size());
 
-  const std::vector<ChunkRange> chunks = make_chunks(txs.size(), max_parallelism);
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), max_parallelism);
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back(
-        [](ChunkRange chunk, std::span<const SignedTransaction> txs,
-           SerializedTransactionBatch &serialized_txs) noexcept
-        -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-          for (size_t i = chunk.start; i < chunk.end; i++) {
-            serialize_transaction_payload_to(txs[i], serialized_txs[i]);
-          }
-          co_return;
-        }(chunk, txs, serialized_txs));
+    handles.push_back([](ChunkRange chunk,
+                         std::span<const SignedTransaction> txs,
+                         SerializedTransactionBatch &serialized_txs) noexcept
+                          -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        serialize_transaction_payload_to(txs[i], serialized_txs[i]);
+      }
+      co_return;
+    }(chunk, txs, serialized_txs));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

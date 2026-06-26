@@ -292,8 +292,7 @@ verify_auth(const SignedTransaction &stx,
 }
 
 AuthVerifyStatus<void>
-verify_auth(const SignedTransaction &stx,
-            x23::BufView serialized_tx,
+verify_auth(const SignedTransaction &stx, x23::BufView serialized_tx,
             const AddressAuthData &source_auth_data,
             Ed25519SignatureVerifier *signature_verifier)
 {

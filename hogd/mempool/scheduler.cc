@@ -450,13 +450,11 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // added to the scheduler, then the tx was removed during nomination by
     // [schedule()], then a validated block was committed rather than the
     // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(
-            tx_hash,
-            std::make_shared<TxValue>(TxValue{
-                .tx = tx,
-                .serialized_tx =
-                    x23::Buf(serialized_tx.begin(), serialized_tx.end())}));
+    const auto [tx_ptr, lock] = txs_.find_or_insert(
+        tx_hash, std::make_shared<TxValue>(
+                     TxValue{.tx = tx,
+                             .serialized_tx = x23::Buf(serialized_tx.begin(),
+                                                       serialized_tx.end())}));
     CHECK_PTR(tx_ptr);
     value = *tx_ptr;
   }
@@ -471,9 +469,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   co_await serialize_transaction_payloads(
       std::span<const SignedTransaction>(txs.begin(), txs.end()),
       serialized_txs);
-  co_return co_await add_txs(
-      txs, std::span<const x23::Buf>(serialized_txs.begin(),
-                                     serialized_txs.end()));
+  co_return co_await add_txs(txs,
+                             std::span<const x23::Buf>(serialized_txs.begin(),
+                                                       serialized_txs.end()));
 }
 
 x23::Async<void>
@@ -510,8 +508,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               continue;
             }
-            if (scheduler.add_txs_helper(txs[tx_idx],
-                                         serialized_txs[tx_idx])) {
+            if (scheduler.add_txs_helper(txs[tx_idx], serialized_txs[tx_idx])) {
               num_added++;
             }
           }

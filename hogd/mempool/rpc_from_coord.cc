@@ -30,8 +30,8 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
-#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/time.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
@@ -306,10 +306,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   }
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-  [](MempoolCoordinatorRpc &coord,
-     std::shared_ptr<SignedTransactionBatch> txs,
-     std::shared_ptr<ParallelSignedTransactionBatch>
-         reusable_batch) -> x23::Detached {
+  [](MempoolCoordinatorRpc &coord, std::shared_ptr<SignedTransactionBatch> txs,
+     std::shared_ptr<ParallelSignedTransactionBatch> reusable_batch)
+      -> x23::Detached {
     // We serialize and send the response in a detached coroutine so that we can
     // release [commit_lock_] as soon as [add_txs()] is finished below.
     // Serializing and sending the response takes longer than [add_txs()] and
@@ -332,9 +331,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // (and then after remove any unverified txs from the scheduler). But this
   // would make the txs visible to nominate() and validate() before the txs have
   // been verified.
-  co_await scheduler_->add_txs(
-      *txs, std::span<const x23::Buf>(serialized_txs.begin(),
-                                      serialized_txs.end()));
+  co_await scheduler_->add_txs(*txs,
+                               std::span<const x23::Buf>(serialized_txs.begin(),
+                                                         serialized_txs.end()));
   MempoolMetrics::instance().accepted_unvetted_tx_count.increment(txs->size());
   co_return;
 }
@@ -413,9 +412,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                    /*indices=*/to_remove_indices);
   }
 
-  co_await scheduler_->add_txs(
-      txs, std::span<const x23::Buf>(serialized_txs.begin(),
-                                     serialized_txs.end()));
+  co_await scheduler_->add_txs(txs,
+                               std::span<const x23::Buf>(serialized_txs.begin(),
+                                                         serialized_txs.end()));
   MempoolMetrics::instance().accepted_vetted_tx_count.increment(txs.size());
   co_return;
 }
