@@ -5,12 +5,14 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
@@ -50,6 +52,9 @@ public:
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<void>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+          std::span<const x23::Buf> serialized_txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
@@ -194,6 +199,7 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    x23::Buf serialized_tx;
   };
 
   struct AccountState {
@@ -248,7 +254,7 @@ private:
   // single tx.
   bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
                                const std::shared_ptr<TxValue> &tx_value);
-  bool add_txs_helper(const SignedTransaction &tx);
+  bool add_txs_helper(const SignedTransaction &tx, x23::BufView serialized_tx);
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(

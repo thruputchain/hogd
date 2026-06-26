@@ -15,6 +15,7 @@
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "parallel.hh"
@@ -46,8 +47,17 @@ public:
   verify_transactions(BlockHeight height,
                       std::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
+  x23::Async<AuthErrorCodeBatch>
+  verify_transactions(BlockHeight height,
+                      std::span<const SignedTransaction> txs,
+                      std::span<const x23::Buf> serialized_txs,
+                      size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
+  x23::Async<AuthErrorCode>
+  verify_batch(BlockHeight height,
+               SignedTransactionBatch txs,
+               SerializedTransactionBatch serialized_txs);
 
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
@@ -148,12 +158,17 @@ public:
     if (!(co_await parallel_batch_to_t(batch, txs))) {
       co_return AuthErrorCodeBatch{};
     }
+    SerializedTransactionBatch serialized_txs;
+    co_await serialize_transaction_payloads(
+        std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        serialized_txs);
 
     // The txs object is valid until the end of the coroutine.
     // Because auth_server_->verify_transactions does not hold onto the txs
     // input after verify_transactions returns, it is safe to pass a span to it.
     co_return co_await auth_server_->verify_transactions(
         height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        std::span<const x23::Buf>(serialized_txs.begin(), serialized_txs.end()),
         /*max_parallelism=*/available_parallelism());
   }
 
@@ -166,7 +181,12 @@ public:
     if (!(co_await parallel_batch_to_t(batch, txs))) {
       co_return AuthErrorCode::kAuthInternal;
     }
-    co_return co_await auth_server_->verify_batch(height, std::move(txs));
+    SerializedTransactionBatch serialized_txs;
+    co_await serialize_transaction_payloads(
+        std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        serialized_txs);
+    co_return co_await auth_server_->verify_batch(
+        height, std::move(txs), std::move(serialized_txs));
   }
 
 private:

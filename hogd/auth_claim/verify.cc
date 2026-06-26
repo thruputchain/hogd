@@ -212,6 +212,7 @@ verify_auth_claim_internal(AuthClaim const &claim,
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claims_internal(const SignedTransaction &stx,
+                            x23::BufView serialized_tx,
                             const AddressAuthData *source_auth_data,
                             Ed25519SignatureVerifier *signature_verifier)
 {
@@ -225,8 +226,6 @@ verify_auth_claims_internal(const SignedTransaction &stx,
   if constexpr (VerfType != VerificationType::kSignaturesValid) {
     assert(signature_verifier == nullptr);
   }
-
-  x23::Buf serialized_tx = x23::serialize(stx.tx);
 
   const AuthClaim &auth_claim = stx.tx.auth_claim;
 
@@ -288,8 +287,18 @@ verify_auth(const SignedTransaction &stx,
             const AddressAuthData &source_auth_data,
             Ed25519SignatureVerifier *signature_verifier)
 {
+  x23::Buf serialized_tx = x23::serialize(stx.tx);
+  return verify_auth(stx, serialized_tx, source_auth_data, signature_verifier);
+}
+
+AuthVerifyStatus<void>
+verify_auth(const SignedTransaction &stx,
+            x23::BufView serialized_tx,
+            const AddressAuthData &source_auth_data,
+            Ed25519SignatureVerifier *signature_verifier)
+{
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
-      stx, &source_auth_data, signature_verifier);
+      stx, serialized_tx, &source_auth_data, signature_verifier);
 }
 
 AuthVerifyStatus<void>
@@ -297,14 +306,14 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
                                  const AddressAuthData &source_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
-      stx, &source_auth_data, nullptr);
+      stx, x23::serialize(stx.tx), &source_auth_data, nullptr);
 }
 
 AuthVerifyStatus<void>
 auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
-      stx, nullptr, nullptr);
+      stx, x23::serialize(stx.tx), nullptr, nullptr);
 }
 
 } // namespace hogd

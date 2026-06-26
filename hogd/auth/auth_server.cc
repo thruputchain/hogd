@@ -197,7 +197,22 @@ AuthServer::verify_transactions(BlockHeight height,
                                 std::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
+  SerializedTransactionBatch serialized_txs;
+  co_await serialize_transaction_payloads(txs, serialized_txs, max_parallelism);
+  co_return co_await verify_transactions(
+      height, txs,
+      std::span<const x23::Buf>(serialized_txs.begin(), serialized_txs.end()),
+      max_parallelism);
+}
+
+x23::Async<AuthErrorCodeBatch>
+AuthServer::verify_transactions(BlockHeight height,
+                                std::span<const SignedTransaction> txs,
+                                std::span<const x23::Buf> serialized_txs,
+                                size_t max_parallelism)
+{
   CHECK_GT(max_parallelism, 0UL);
+  CHECK_EQ(txs.size(), serialized_txs.size());
   co_await default_coropoll().pool_.bg();
 
   AuthErrorCodeBatch results;
@@ -227,6 +242,7 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
+           std::span<const x23::Buf> serialized_txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
@@ -245,7 +261,7 @@ AuthServer::verify_transactions(BlockHeight height,
                 account_it->second->second.value();
 
             AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data);
+                verify_auth(tx, serialized_txs[i], source_auth_data);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -255,7 +271,7 @@ AuthServer::verify_transactions(BlockHeight height,
             // write this result to [results] again.
           }
           co_return;
-        }(chunk, txs, auth_data, results));
+        }(chunk, txs, serialized_txs, auth_data, results));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -266,8 +282,23 @@ AuthServer::verify_transactions(BlockHeight height,
 x23::Async<AuthErrorCode>
 AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
+  SerializedTransactionBatch serialized_txs;
+  co_await serialize_transaction_payloads(
+      std::span<const SignedTransaction>(txs.begin(), txs.end()),
+      serialized_txs);
+  co_return co_await verify_batch(
+      height, std::move(txs), std::move(serialized_txs));
+}
+
+x23::Async<AuthErrorCode>
+AuthServer::verify_batch(BlockHeight height,
+                         SignedTransactionBatch txs,
+                         SerializedTransactionBatch serialized_txs)
+{
+  CHECK_EQ(txs.size(), serialized_txs.size());
   Ed25519SignatureVerifier signature_verifier;
-  for (const auto &tx : txs) {
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
     auto source_addr =
         co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
     if (!source_addr.has_value()) {
@@ -280,7 +311,7 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     const AddressAuthData *source_auth_data =
         &(source_addr.value()->second.value());
 
-    auto verify_result = verify_auth(tx, *source_auth_data);
+    auto verify_result = verify_auth(tx, serialized_txs[i], *source_auth_data);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }

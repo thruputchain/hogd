@@ -30,6 +30,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -59,9 +60,9 @@ namespace {
 
 enum class CommitMetricsOutcome { kOk, kBlockNotFound };
 
-template<typename T>
+template<typename Vec>
 void
-remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
+remove_indices(Vec &remove_from, const x23::Vec<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
@@ -282,11 +283,16 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     co_return;
   }
 
+  SerializedTransactionBatch serialized_txs;
+  co_await serialize_transaction_payloads(
+      std::span<const SignedTransaction>(txs->begin(), txs->end()),
+      serialized_txs);
+
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      mark_tx_failed_authentication(sha256((*txs)[i].tx));
+      mark_tx_failed_authentication(sha256(serialized_txs[i]));
       to_remove_indices.push_back(i);
     }
   }
@@ -295,6 +301,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   if (!to_remove_indices.empty()) {
     can_reuse_original_batch = false;
     remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+    remove_indices(/*remove_from=*/serialized_txs,
+                   /*indices=*/to_remove_indices);
   }
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
@@ -324,7 +332,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // (and then after remove any unverified txs from the scheduler). But this
   // would make the txs visible to nominate() and validate() before the txs have
   // been verified.
-  co_await scheduler_->add_txs(*txs);
+  co_await scheduler_->add_txs(
+      *txs, std::span<const x23::Buf>(serialized_txs.begin(),
+                                      serialized_txs.end()));
   MempoolMetrics::instance().accepted_unvetted_tx_count.increment(txs->size());
   co_return;
 }
@@ -382,11 +392,16 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     co_return;
   }
 
+  SerializedTransactionBatch serialized_txs;
+  co_await serialize_transaction_payloads(
+      std::span<const SignedTransaction>(txs.begin(), txs.end()),
+      serialized_txs);
+
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      mark_tx_failed_authentication(sha256(txs[i].tx));
+      mark_tx_failed_authentication(sha256(serialized_txs[i]));
       to_remove_indices.push_back(i);
     }
   }
@@ -394,9 +409,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
       to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
+    remove_indices(/*remove_from=*/serialized_txs,
+                   /*indices=*/to_remove_indices);
   }
 
-  co_await scheduler_->add_txs(txs);
+  co_await scheduler_->add_txs(
+      txs, std::span<const x23::Buf>(serialized_txs.begin(),
+                                     serialized_txs.end()));
   MempoolMetrics::instance().accepted_vetted_tx_count.increment(txs.size());
   co_return;
 }

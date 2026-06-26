@@ -439,9 +439,10 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx)
+Scheduler::add_txs_helper(const SignedTransaction &tx,
+                          x23::BufView serialized_tx)
 {
-  const SignedTransactionHash &tx_hash = sha256(tx.tx);
+  const SignedTransactionHash tx_hash = sha256(serialized_tx);
   std::shared_ptr<TxValue> value;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
@@ -450,8 +451,12 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
     // [schedule()], then a validated block was committed rather than the
     // nominated block, and then the tx was added back to the scheduler.
     const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
+        txs_.find_or_insert(
+            tx_hash,
+            std::make_shared<TxValue>(TxValue{
+                .tx = tx,
+                .serialized_tx =
+                    x23::Buf(serialized_tx.begin(), serialized_tx.end())}));
     CHECK_PTR(tx_ptr);
     value = *tx_ptr;
   }
@@ -462,6 +467,21 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
 x23::Async<void>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
+  SerializedTransactionBatch serialized_txs;
+  co_await serialize_transaction_payloads(
+      std::span<const SignedTransaction>(txs.begin(), txs.end()),
+      serialized_txs);
+  co_return co_await add_txs(
+      txs, std::span<const x23::Buf>(serialized_txs.begin(),
+                                     serialized_txs.end()));
+}
+
+x23::Async<void>
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   std::span<const x23::Buf> serialized_txs)
+{
+  CHECK_EQ(txs.size(), serialized_txs.size());
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
@@ -476,6 +496,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     handles.push_back(
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
+           std::span<const x23::Buf> serialized_txs,
            const std::unordered_set<ContractAddress, ByteArrayHasher> &missing,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
@@ -489,13 +510,14 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               continue;
             }
-            if (scheduler.add_txs_helper(txs[tx_idx])) {
+            if (scheduler.add_txs_helper(txs[tx_idx],
+                                         serialized_txs[tx_idx])) {
               num_added++;
             }
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, missing, *this));
+        }(&chunk, txs, serialized_txs, missing, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
