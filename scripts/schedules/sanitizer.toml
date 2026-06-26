@@ -102,8 +102,11 @@ echo 'run gcc tests'
 ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 # gcc release seems to be more likely broken than clang release?
+# Cap build parallelism at 64: the gcc asan Release TUs can each peak around
+# 5GB in cc1plus, so fanning out to all 128 hyperthreads OOMs the host (the
+# OOM killer took out the login session's sd-pam, dropping the SSH job).
 echo 'build gcc asan release'
-./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run gcc tests release'
 ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
