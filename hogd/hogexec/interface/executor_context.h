@@ -47,9 +47,10 @@ public:
   x23::Async<ExecProposeBatchResult>
   propose_transaction_batch(SignedTransactionBatch const &signed_txs,
                             TransactionID first_tx_id);
-  x23::Async<ExecValidateBatchResult>
-  validate_transaction_batch(ProposedTransactionBatch const &proposed_txs,
-                             TransactionID first_tx_id);
+  x23::Async<ExecValidateBatchResult> validate_transaction_batch(
+      SignedTransactionBatch const &signed_txs,
+      x23::XdrVec<NondeterministicProposalData> const &proposal_data,
+      TransactionID first_tx_id);
 
   x23::Async<ExecProposeResult>
   propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
@@ -79,6 +80,10 @@ private:
                                             TransactionID tx_id);
   ExecResult run_validate_transaction(ProposedTransaction const &tx,
                                       TransactionID tx_id);
+  ExecResult
+  run_validate_transaction(SignedTransaction const &signed_tx,
+                           NondeterministicProposalData const &proposal_data,
+                           TransactionID tx_id);
 
   ExpectedViewResult run_view_transaction(TransactionViewQuery const &query);
 

@@ -19,6 +19,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
@@ -369,7 +370,11 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
 
   // Empty batch should return an empty result, not crash
   SignedTransactionBatch empty_batch;
-  auto result = client_.executorsched_propose_batch(block_id, empty_batch);
+  auto result_batch =
+      client_.executorsched_propose_batch(block_id,
+                                          t_to_parallel_batch(empty_batch)());
+  ExecProposeBatchResult result;
+  ASSERT_TRUE(parallel_batch_to_t(result_batch, result)());
   EXPECT_EQ(result.size(), 0);
 
   client_.executorsched_finish_block(block_id);
@@ -392,23 +397,21 @@ TEST_F(RpcNegativeTest,
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
-  ProposedTransactionBatch batch;
-  batch.push_back(ProposedTransaction{
-      .signed_tx =
-          SignedTransaction{
-              .tx =
-                  make_stalled_syscall_misc_transaction(setup.contract_address),
-          },
-      .nondeterministic_proposal_data = {},
+  SignedTransactionBatch batch;
+  batch.push_back(SignedTransaction{
+      .tx = make_stalled_syscall_misc_transaction(setup.contract_address),
   });
+  x23::XdrVec<NondeterministicProposalData> proposal_data;
+  proposal_data.push_back({});
 
   auto validate_client = make_srpc_multiclient<ExecutorSched1>(
       x23::HostPort{"localhost", server_port_}, false);
-  std::promise<ExecValidateBatchResult> validate_promise;
+  std::promise<ParallelExecResultBatch> validate_promise;
   auto validate_future = validate_promise.get_future();
   std::thread validate_thread([&] {
-    validate_promise.set_value(
-        validate_client.executorsched_validate_batch(block_id, batch));
+    validate_promise.set_value(validate_client.executorsched_validate_batch(
+        block_id, t_to_parallel_batch(batch)(),
+        t_to_parallel_batch(proposal_data)()));
   });
 
   snapshot_server->impl()->wait_for_stalled_item(setup.stalled_addrkey);
@@ -426,7 +429,8 @@ TEST_F(RpcNegativeTest,
   open_event_block(recycle_probe_block_id);
 
   snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
-  auto result = validate_future.get();
+  ExecValidateBatchResult result;
+  ASSERT_TRUE(parallel_batch_to_t(validate_future.get(), result)());
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
@@ -463,11 +467,11 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
 
   auto propose_client = make_srpc_multiclient<ExecutorSched1>(
       x23::HostPort{"localhost", server_port_}, false);
-  std::promise<ExecProposeBatchResult> propose_promise;
+  std::promise<ParallelExecProposeResultBatch> propose_promise;
   auto propose_future = propose_promise.get_future();
   std::thread propose_thread([&] {
-    propose_promise.set_value(
-        propose_client.executorsched_propose_batch(block_id, batch));
+    propose_promise.set_value(propose_client.executorsched_propose_batch(
+        block_id, t_to_parallel_batch(batch)()));
   });
 
   snapshot_server->impl()->wait_for_stalled_item(setup.stalled_addrkey);
@@ -485,7 +489,8 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   open_event_block(recycle_probe_block_id);
 
   snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
-  auto result = propose_future.get();
+  ExecProposeBatchResult result;
+  ASSERT_TRUE(parallel_batch_to_t(propose_future.get(), result)());
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),

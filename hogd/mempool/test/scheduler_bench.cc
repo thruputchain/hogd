@@ -2,8 +2,8 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <span>
 #include <tuple>
@@ -96,24 +96,6 @@ make_propose_batch_result(size_t num_txs, size_t nondeterministic_bytes,
     result.push_back(std::move(tx_result));
   }
   return result;
-}
-
-ProposedTransactionBatch
-make_proposed_transaction_batch(const SignedTransactionBatch &txs,
-                                size_t nondeterministic_bytes,
-                                size_t queue_entries)
-{
-  const NondeterministicProposalData data =
-      make_proposal_data(nondeterministic_bytes, queue_entries);
-
-  ProposedTransactionBatch proposed_txs;
-  proposed_txs.reserve(txs.size());
-  for (const SignedTransaction &tx : txs) {
-    proposed_txs.push_back(
-        ProposedTransaction{.signed_tx = tx,
-                            .nondeterministic_proposal_data = data});
-  }
-  return proposed_txs;
 }
 
 SignedTransactionBatch
@@ -237,7 +219,9 @@ bm_execsched_propose_batch_args_serialize(benchmark::State &state)
 {
   const size_t num_txs = static_cast<size_t>(state.range(0));
   const auto txs = make_signed_transaction_batch(num_txs);
-  const ExecutorSched1::proc_meta<11>::arg_type args{kBenchmarkBlockID, txs};
+  const ParallelBatch tx_batch = t_to_parallel_batch(txs)();
+  const ExecutorSched1::proc_meta<11>::arg_type args{kBenchmarkBlockID,
+                                                     tx_batch};
   bm_xdr_serialize(state, args, num_txs);
 }
 BENCHMARK(bm_execsched_propose_batch_args_serialize)
@@ -253,7 +237,9 @@ bm_execsched_propose_batch_args_deserialize(benchmark::State &state)
 {
   const size_t num_txs = static_cast<size_t>(state.range(0));
   const auto txs = make_signed_transaction_batch(num_txs);
-  const ExecutorSched1::proc_meta<11>::arg_type args{kBenchmarkBlockID, txs};
+  const ParallelBatch tx_batch = t_to_parallel_batch(txs)();
+  const ExecutorSched1::proc_meta<11>::arg_type args{kBenchmarkBlockID,
+                                                     tx_batch};
   bm_xdr_deserialize(state, args, num_txs);
 }
 BENCHMARK(bm_execsched_propose_batch_args_deserialize)
@@ -272,7 +258,8 @@ bm_execsched_propose_batch_result_serialize(benchmark::State &state)
   const size_t queue_entries = static_cast<size_t>(state.range(2));
   const ExecProposeBatchResult result =
       make_propose_batch_result(num_txs, nondeterministic_bytes, queue_entries);
-  bm_xdr_serialize(state, result, num_txs);
+  const ParallelBatch result_batch = t_to_parallel_batch(result)();
+  bm_xdr_serialize(state, result_batch, num_txs);
 }
 BENCHMARK(bm_execsched_propose_batch_result_serialize)
     ->Args({1, 1, 0})
@@ -292,7 +279,8 @@ bm_execsched_propose_batch_result_deserialize(benchmark::State &state)
   const size_t queue_entries = static_cast<size_t>(state.range(2));
   const ExecProposeBatchResult result =
       make_propose_batch_result(num_txs, nondeterministic_bytes, queue_entries);
-  bm_xdr_deserialize(state, result, num_txs);
+  const ParallelBatch result_batch = t_to_parallel_batch(result)();
+  bm_xdr_deserialize(state, result_batch, num_txs);
 }
 BENCHMARK(bm_execsched_propose_batch_result_deserialize)
     ->Args({1, 1, 0})
@@ -311,11 +299,16 @@ bm_execsched_validate_batch_args_serialize(benchmark::State &state)
   const size_t nondeterministic_bytes = static_cast<size_t>(state.range(1));
   const size_t queue_entries = static_cast<size_t>(state.range(2));
   const auto txs = make_signed_transaction_batch(num_txs);
-  const ProposedTransactionBatch proposed_txs =
-      make_proposed_transaction_batch(txs, nondeterministic_bytes,
-                                      queue_entries);
+  const ParallelBatch tx_batch = t_to_parallel_batch(txs)();
+  const NondeterministicProposalData data =
+      make_proposal_data(nondeterministic_bytes, queue_entries);
+  x23::XdrVec<NondeterministicProposalData> tx_nominations;
+  tx_nominations.resize(num_txs, data);
+  const ParallelBatch tx_nominations_batch =
+      t_to_parallel_batch(tx_nominations)();
   const ExecutorSched1::proc_meta<21>::arg_type args{kBenchmarkBlockID,
-                                                     proposed_txs};
+                                                     tx_batch,
+                                                     tx_nominations_batch};
   bm_xdr_serialize(state, args, num_txs);
 }
 BENCHMARK(bm_execsched_validate_batch_args_serialize)
@@ -335,11 +328,16 @@ bm_execsched_validate_batch_args_deserialize(benchmark::State &state)
   const size_t nondeterministic_bytes = static_cast<size_t>(state.range(1));
   const size_t queue_entries = static_cast<size_t>(state.range(2));
   const auto txs = make_signed_transaction_batch(num_txs);
-  const ProposedTransactionBatch proposed_txs =
-      make_proposed_transaction_batch(txs, nondeterministic_bytes,
-                                      queue_entries);
+  const ParallelBatch tx_batch = t_to_parallel_batch(txs)();
+  const NondeterministicProposalData data =
+      make_proposal_data(nondeterministic_bytes, queue_entries);
+  x23::XdrVec<NondeterministicProposalData> tx_nominations;
+  tx_nominations.resize(num_txs, data);
+  const ParallelBatch tx_nominations_batch =
+      t_to_parallel_batch(tx_nominations)();
   const ExecutorSched1::proc_meta<21>::arg_type args{kBenchmarkBlockID,
-                                                     proposed_txs};
+                                                     tx_batch,
+                                                     tx_nominations_batch};
   bm_xdr_deserialize(state, args, num_txs);
 }
 BENCHMARK(bm_execsched_validate_batch_args_deserialize)

@@ -15,6 +15,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -228,7 +229,11 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
 
   SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{},
                                 SignedTransaction{}};
-  auto result = client_.executorsched_propose_batch(test_block_id, txs);
+  ParallelBatch tx_batch = t_to_parallel_batch(txs)();
+  auto result_batch =
+      client_.executorsched_propose_batch(test_block_id, std::move(tx_batch));
+  ExecProposeBatchResult result;
+  ASSERT_TRUE(parallel_batch_to_t(result_batch, result)());
   ASSERT_EQ(result.size(), 3);
   for (auto &res : result) {
     ASSERT_NE(res.result(), ExecResult::ExecResultOK);

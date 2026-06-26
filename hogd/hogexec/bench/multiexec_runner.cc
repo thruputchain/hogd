@@ -296,8 +296,12 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
         co_return;
       }
 
-      auto r =
-          co_await exec_client.executorsched_propose_batch(block_number, batch);
+      auto result_batch = co_await exec_client.executorsched_propose_batch(
+          block_number, co_await t_to_parallel_batch(batch));
+      ExecProposeBatchResult r;
+      if (!(co_await parallel_batch_to_t(result_batch, r))) {
+        throw std::runtime_error("Failed to deserialize propose batch result");
+      }
       assert(r.size() == batch.size());
       for (auto const &result : r) {
         if (result.result() != ExecResult::ExecResultOK) {

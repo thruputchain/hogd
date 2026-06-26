@@ -165,6 +165,7 @@ xdr_cpu_to_be(T value)
 // The number of coroutines to use (one coroutine per thread) when converting
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
+constexpr size_t kParallelBatchSerialTokenThreshold = 128;
 
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
@@ -222,6 +223,45 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     co_return false;
   }
   objs.resize(total_segment_tokens, {});
+
+  if (total_segment_tokens < kParallelBatchSerialTokenThreshold) {
+    for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
+      const unsigned int num_segment_tokens = parallel.segment_tokens[i];
+      const unsigned int num_segment_bytes = parallel.segment_bytes[i];
+
+      size_t inner_obj_offset = 0;
+      size_t inner_xdr_offset = 0;
+      for (size_t j = 0; j < num_segment_tokens; j++) {
+        if (inner_xdr_offset >= num_segment_bytes) {
+          info("failed to deserialize: segment {} claims {} tokens but "
+               "byte offset {} reached segment size {}",
+               i, num_segment_tokens, inner_xdr_offset, num_segment_bytes);
+          co_return false;
+        }
+
+        try {
+          const size_t obj_idx = obj_offsets[i] + inner_obj_offset;
+          size_t num_consumed = x23::deserialize_from(
+              &objs[obj_idx],
+              x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
+                           num_segment_bytes - inner_xdr_offset));
+          inner_obj_offset++;
+          inner_xdr_offset += num_consumed;
+          CHECK_LE(inner_xdr_offset, num_segment_bytes);
+        } catch (const x23::XdrException &e) {
+          info("failed to deserialize: {}", e.what());
+          co_return false;
+        }
+      }
+
+      if (inner_xdr_offset != num_segment_bytes) {
+        info("failed to deserialize: segment {} left {} trailing bytes", i,
+             num_segment_bytes - inner_xdr_offset);
+        co_return false;
+      }
+    }
+    co_return true;
+  }
 
   const std::vector<ChunkRange> chunks =
       make_chunks(parallel.segment_tokens.size(), kNumThreadsForParallelBatch);
@@ -293,6 +333,23 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
+  if (objs.empty()) {
+    co_return;
+  }
+  if (objs.size() < kParallelBatchSerialTokenThreshold) {
+    parallel.segment_tokens.push_back(objs.size());
+    const size_t segment_bytes_idx = parallel.segment_bytes.size();
+    parallel.segment_bytes.push_back(0);
+    const size_t segment_start = parallel.xdr.size();
+    parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
+    for (size_t i = 0; i < objs.size(); i++) {
+      parallel.xdr += x23::serialize(objs[i]);
+    }
+    parallel.segment_bytes[segment_bytes_idx] =
+        parallel.xdr.size() - segment_start;
+    co_return;
+  }
+
   const std::vector<ChunkRange> chunks =
       make_chunks(objs.size(), kNumThreadsForParallelBatch);
   const size_t segment_offset = parallel.segment_tokens.size();

@@ -91,22 +91,26 @@ ExecutorContext::view_transaction(TransactionViewQuery const &query)
 
 x23::Async<ExecValidateBatchResult>
 ExecutorContext::validate_transaction_batch(
-    ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
+    SignedTransactionBatch const &signed_txs,
+    x23::XdrVec<NondeterministicProposalData> const &proposal_data,
+    TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
+  CHECK_EQ(signed_txs.size(), proposal_data.size());
   x23::Awaitable<ExecValidateBatchResult> awaitable;
   x23::CoroCB<ExecValidateBatchResult> cb(awaitable);
-  worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &signed_txs, &proposal_data, first_tx_id, cb]() {
     ExecValidateBatchResult batch_res;
-    batch_res.reserve(proposed_txs.size());
-    for (size_t i = 0; i < proposed_txs.size(); i++) {
-      batch_res.push_back(
-          run_validate_transaction(proposed_txs[i], first_tx_id + i));
+    batch_res.reserve(signed_txs.size());
+    for (size_t i = 0; i < signed_txs.size(); i++) {
+      batch_res.push_back(run_validate_transaction(signed_txs[i],
+                                                   proposal_data[i],
+                                                   first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
   auto r = co_await awaitable;
-  assert(r.size() == proposed_txs.size());
+  assert(r.size() == signed_txs.size());
   co_return std::move(r);
 }
 
@@ -219,13 +223,21 @@ ExecResult
 ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                           TransactionID tx_id)
 {
+  return run_validate_transaction(tx.signed_tx,
+                                  tx.nondeterministic_proposal_data, tx_id);
+}
+
+ExecResult
+ExecutorContext::run_validate_transaction(
+    SignedTransaction const &signed_tx,
+    NondeterministicProposalData const &proposal_data, TransactionID tx_id)
+{
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx.signed_tx.tx, *snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(signed_tx.tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
-                                    ValidationModeCtor{
-                                        tx.nondeterministic_proposal_data},
+                                    ValidationModeCtor{proposal_data},
                                     *context);
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
@@ -236,8 +248,11 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
-    // In validation mode the full body was given to us; forward it as-is.
-    syscall_handler.emit_events(exec_res, tx)(
+    ProposedTransaction proposed_tx{
+        .signed_tx = signed_tx,
+        .nondeterministic_proposal_data = proposal_data,
+    };
+    syscall_handler.emit_events(exec_res, std::move(proposed_tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();

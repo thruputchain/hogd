@@ -1,5 +1,6 @@
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
@@ -9,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -17,6 +19,18 @@
 #include "x23/async.h"
 
 namespace hogd {
+namespace {
+
+template<typename T>
+x23::Async<ParallelBatch>
+to_parallel_result_batch(const x23::XdrVec<T> &results)
+{
+  ParallelBatch batch;
+  co_await t_to_parallel_batch(results, batch);
+  co_return batch;
+}
+
+} // namespace
 
 x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
 ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
@@ -90,22 +104,30 @@ ExecutorMempoolRpc::executorsched_validate_transaction(
   co_return r;
 }
 
-x23::Async<ExecProposeBatchResult>
+x23::Async<ParallelExecProposeResultBatch>
 ExecutorMempoolRpc::executorsched_propose_batch(
-    BlockID block_id, SignedTransactionBatch signed_txs)
+    BlockID block_id, ParallelSignedTransactionBatch signed_txs_batch)
 {
+  SignedTransactionBatch signed_txs;
+  if (!(co_await parallel_batch_to_t(signed_txs_batch, signed_txs)))
+      [[unlikely]] {
+    co_return co_await to_parallel_result_batch(ExecProposeBatchResult(
+        std::max<size_t>(signed_txs.size(), 1),
+        ExecProposeResult(ExecResult::ExecResultUnrecoverable)));
+  }
+
   auto ctx_status =
       co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx_status.has_value()) [[unlikely]] {
-    co_return ExecProposeBatchResult(signed_txs.size(),
-                                     ExecProposeResult(
-                                         ExecResult::ExecResultUnrecoverable));
+    co_return co_await to_parallel_result_batch(ExecProposeBatchResult(
+        signed_txs.size(),
+        ExecProposeResult(ExecResult::ExecResultUnrecoverable)));
   }
   auto *ctx = *ctx_status;
   if (!ctx) {
-    co_return ExecProposeBatchResult(signed_txs.size(),
-                                     ExecProposeResult(
-                                         ExecResult::ExecResultSystemError));
+    co_return co_await to_parallel_result_batch(ExecProposeBatchResult(
+        signed_txs.size(),
+        ExecProposeResult(ExecResult::ExecResultSystemError)));
   }
 
   CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
@@ -114,38 +136,55 @@ ExecutorMempoolRpc::executorsched_propose_batch(
       co_await ctx->get().propose_transaction_batch(signed_txs, first_tx_id);
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecProposeBatchResult(signed_txs.size(),
-                                     ExecProposeResult(
-                                         ExecResult::ExecResultUnrecoverable));
+    co_return co_await to_parallel_result_batch(ExecProposeBatchResult(
+        signed_txs.size(),
+        ExecProposeResult(ExecResult::ExecResultUnrecoverable)));
   }
-  co_return r;
+  co_return co_await to_parallel_result_batch(r);
 }
 
-x23::Async<ExecValidateBatchResult>
+x23::Async<ParallelExecResultBatch>
 ExecutorMempoolRpc::executorsched_validate_batch(
-    BlockID block_id, ProposedTransactionBatch proposed_txs)
+    BlockID block_id, ParallelSignedTransactionBatch signed_txs_batch,
+    ParallelNondeterministicProposalDataBatch proposal_data_batch)
 {
+  SignedTransactionBatch signed_txs;
+  x23::XdrVec<NondeterministicProposalData> proposal_data;
+  const bool decoded_signed_txs =
+      co_await parallel_batch_to_t(signed_txs_batch, signed_txs);
+  const bool decoded_proposal_data =
+      co_await parallel_batch_to_t(proposal_data_batch, proposal_data);
+  if (!decoded_signed_txs || !decoded_proposal_data ||
+      signed_txs.size() != proposal_data.size()) [[unlikely]] {
+    co_return co_await to_parallel_result_batch(ExecValidateBatchResult(
+        std::max<size_t>({signed_txs.size(), proposal_data.size(), 1}),
+        ExecResult::ExecResultUnrecoverable));
+  }
+
   auto ctx_status =
       co_await try_get_context(block_id, ExecutionMode::kValidating);
   if (!ctx_status.has_value()) [[unlikely]] {
-    co_return ExecValidateBatchResult(proposed_txs.size(),
-                                      ExecResult::ExecResultUnrecoverable);
+    co_return co_await to_parallel_result_batch(
+        ExecValidateBatchResult(signed_txs.size(),
+                                ExecResult::ExecResultUnrecoverable));
   }
   auto *ctx = *ctx_status;
   if (!ctx) {
-    co_return ExecValidateBatchResult(proposed_txs.size(),
-                                      ExecResult::ExecResultSystemError);
+    co_return co_await to_parallel_result_batch(
+        ExecValidateBatchResult(signed_txs.size(),
+                                ExecResult::ExecResultSystemError));
   }
 
-  CHECK(proposed_txs.size() <= std::numeric_limits<uint32_t>::max());
+  CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
   auto r = co_await ctx->get().validate_transaction_batch(
-      proposed_txs, allocate_tx_ids(proposed_txs.size()));
+      signed_txs, proposal_data, allocate_tx_ids(signed_txs.size()));
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecValidateBatchResult(proposed_txs.size(),
-                                      ExecResult::ExecResultUnrecoverable);
+    co_return co_await to_parallel_result_batch(
+        ExecValidateBatchResult(signed_txs.size(),
+                                ExecResult::ExecResultUnrecoverable));
   }
-  co_return r;
+  co_return co_await to_parallel_result_batch(r);
 }
 
 x23::Async<ExecResult>

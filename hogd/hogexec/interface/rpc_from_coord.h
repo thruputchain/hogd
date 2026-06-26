@@ -14,6 +14,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -77,12 +78,12 @@ public:
   executorsched_validate_transaction(BlockID block_id,
                                      ProposedTransaction proposed_tx);
 
-  x23::Async<ExecProposeBatchResult>
+  x23::Async<ParallelExecProposeResultBatch>
   executorsched_propose_batch(BlockID block_id,
-                              SignedTransactionBatch signed_txs);
-  x23::Async<ExecValidateBatchResult>
-  executorsched_validate_batch(BlockID block_id,
-                               ProposedTransactionBatch proposed_txs);
+                              ParallelSignedTransactionBatch signed_txs);
+  x23::Async<ParallelExecResultBatch> executorsched_validate_batch(
+      BlockID block_id, ParallelSignedTransactionBatch signed_txs,
+      ParallelNondeterministicProposalDataBatch proposal_data);
 
   x23::Async<ExecResult> executorsched_open_proposal_block(BlockID id);
   x23::Async<ExecResult> executorsched_open_validation_block(BlockID id);

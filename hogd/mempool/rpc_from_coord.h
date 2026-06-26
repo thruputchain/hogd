@@ -67,7 +67,7 @@ public:
   static constexpr size_t kNumTxsPerNominationChunk =
       kMaxBlockSize / kNumSchedulerIterations;
 
-  static constexpr size_t kChunkSize = 10;
+  static constexpr size_t kExecutorRpcChunkSize = 4096;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
   static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
@@ -363,7 +363,7 @@ private:
   };
 
   struct PreparedValidationChunk {
-    x23::Vec<ProposedTransaction> proposed_txs;
+    x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   };
 
@@ -515,10 +515,10 @@ private:
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
-  x23::Async<bool>
-  validate_batch_chunk(BlockID block_id,
-                       x23::span<const ProposedTransaction> txs,
-                       size_t executor_idx);
+  x23::Async<bool> validate_batch_chunk(
+      BlockID block_id, x23::span<const SignedTransaction> txs,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      size_t executor_idx);
 
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
       x23::span<const SignedTransactionHash> tx_hashes,
@@ -529,10 +529,12 @@ private:
       x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
-      BlockID block_id, x23::span<const ProposedTransaction> txs);
+      BlockID block_id, x23::span<const SignedTransaction> txs,
+      x23::span<const NondeterministicProposalData> tx_nominations);
 
-  x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<bool>
+  validate_batch(BlockID block_id, const x23::XdrVec<SignedTransaction> &txs,
+                 x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);

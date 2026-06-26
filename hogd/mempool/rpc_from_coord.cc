@@ -504,9 +504,17 @@ MempoolCoordinatorRpc::propose_batch(
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
     x23::span<bool> ret_chunk, size_t executor_idx)
 {
-  ExecProposeBatchResult res =
-      co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
-                                                                       txs);
+  ParallelBatch tx_batch;
+  co_await t_to_parallel_batch(txs, tx_batch);
+  ParallelExecProposeResultBatch result_batch =
+      co_await exec_clients_[executor_idx].executorsched_propose_batch(
+          block_id, std::move(tx_batch));
+  ExecProposeBatchResult res = {};
+  if (!(co_await parallel_batch_to_t(result_batch, res)) ||
+      res.size() != txs.size()) {
+    std::ranges::fill(ret_chunk, false);
+    co_return;
+  }
   // Record nomination metadata for txs that succeeded on the executor and mark
   // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
@@ -531,7 +539,7 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
   co_await default_coropoll().pool_.bg();
 
   const std::vector<ChunkRange> chunks =
-      make_chunks_for_max_size(txs.size(), kChunkSize);
+      make_chunks_for_max_size(txs.size(), kExecutorRpcChunkSize);
 
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
@@ -1249,12 +1257,22 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch_chunk(
-    BlockID block_id, x23::span<const ProposedTransaction> txs,
+    BlockID block_id, x23::span<const SignedTransaction> txs,
+    x23::span<const NondeterministicProposalData> tx_nominations,
     size_t executor_idx)
 {
-  ExecValidateBatchResult res =
+  ParallelBatch tx_batch;
+  ParallelBatch tx_nominations_batch;
+  co_await t_to_parallel_batch(txs, tx_batch);
+  co_await t_to_parallel_batch(tx_nominations, tx_nominations_batch);
+  ParallelExecResultBatch result_batch =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
-          block_id, txs);
+          block_id, std::move(tx_batch), std::move(tx_nominations_batch));
+  ExecValidateBatchResult res;
+  if (!(co_await parallel_batch_to_t(result_batch, res)) ||
+      res.size() != txs.size()) {
+    co_return false;
+  }
   // Validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
   // System errors are nondeterministic and cause validation to fail.
@@ -1267,7 +1285,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
   PreparedValidationChunk prepared;
-  prepared.proposed_txs.resize(tx_hashes.size());
+  prepared.txs.resize(tx_hashes.size());
   x23::Vec<bool> tx_found(tx_hashes.size(), false);
 
   const std::vector<ChunkRange> lookup_chunks =
@@ -1279,9 +1297,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
     lookup_handles.push_back(
         [](const ChunkRange *lookup_chunk,
            x23::span<const SignedTransactionHash> tx_hashes,
-           x23::span<const NondeterministicProposalData> tx_nominations,
-           x23::Vec<ProposedTransaction> &proposed_txs,
-           x23::Vec<bool> &tx_found,
+           x23::XdrVec<SignedTransaction> &txs, x23::Vec<bool> &tx_found,
            std::shared_ptr<Scheduler> scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -1291,15 +1307,11 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
             if (!found_tx) {
               continue;
             }
-            proposed_txs[i] = {.signed_tx = *found_tx,
-                               .nondeterministic_proposal_data =
-                                   tx_nominations[i]};
+            txs[i] = *found_tx;
             tx_found[i] = true;
           }
           co_return;
-        }(&lookup_chunk, tx_hashes, tx_nominations, prepared.proposed_txs,
-                                                          tx_found,
-                                                          scheduler_));
+        }(&lookup_chunk, tx_hashes, prepared.txs, tx_found, scheduler_));
   }
   for (x23::Async<void> &handle : lookup_handles) {
     co_await handle;
@@ -1312,7 +1324,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
   }
 
   if (!prepared.missing_tx_hashes.empty()) {
-    prepared.proposed_txs.clear();
+    prepared.txs.clear();
   }
 
   co_return prepared;
@@ -1336,18 +1348,18 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
     co_return ret;
   }
 
-  ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
-  ret.txs.reserve(prepared.proposed_txs.size());
-  for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
-    ret.txs.push_back(std::move(proposed_tx.signed_tx));
-  }
+  ret.validated =
+      co_await validate_batch(block_id, prepared.txs, tx_nominations);
+  ret.txs = std::move(prepared.txs);
   co_return ret;
 }
 
 x23::Async<bool>
-MempoolCoordinatorRpc::validate_batch(BlockID block_id,
-                                      const x23::Vec<ProposedTransaction> &txs)
+MempoolCoordinatorRpc::validate_batch(
+    BlockID block_id, const x23::XdrVec<SignedTransaction> &txs,
+    x23::span<const NondeterministicProposalData> tx_nominations)
 {
+  CHECK_EQ(txs.size(), tx_nominations.size());
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
   // into smaller RPC-sized chunks and stripes those requests across executors.
@@ -1359,10 +1371,13 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   handles.reserve(large_chunks.size());
 
   for (const ChunkRange &chunk : large_chunks) {
-    x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
-                                                  txs.begin() + chunk.end);
-    handles.push_back(
-        multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
+    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                txs.begin() + chunk.end);
+    x23::span<const NondeterministicProposalData> tx_nominations_chunk(
+        tx_nominations.begin() + chunk.start,
+        tx_nominations.begin() + chunk.end);
+    handles.push_back(multiplex_large_validation_chunk_across_executors(
+        block_id, tx_chunk, tx_nominations_chunk));
   }
 
   bool validated = true;
@@ -1374,22 +1389,27 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
 
 x23::Async<bool>
 MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
-    BlockID block_id, x23::span<const ProposedTransaction> txs)
+    BlockID block_id, x23::span<const SignedTransaction> txs,
+    x23::span<const NondeterministicProposalData> tx_nominations)
 {
   co_await default_coropoll().pool_.bg();
+  CHECK_EQ(txs.size(), tx_nominations.size());
 
   const std::vector<ChunkRange> chunks =
-      make_chunks_for_max_size(txs.size(), kChunkSize);
+      make_chunks_for_max_size(txs.size(), kExecutorRpcChunkSize);
 
   x23::Vec<x23::Async<bool>> handles;
   handles.reserve(chunks.size());
 
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
-    x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
-                                                  txs.begin() + chunk.end);
+    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                txs.begin() + chunk.end);
+    x23::span<const NondeterministicProposalData> tx_nominations_chunk(
+        tx_nominations.begin() + chunk.start,
+        tx_nominations.begin() + chunk.end);
     handles.push_back(
-        validate_batch_chunk(block_id, tx_chunk,
+        validate_batch_chunk(block_id, tx_chunk, tx_nominations_chunk,
                              /*executor_idx=*/i % exec_clients_.size()));
   }
 

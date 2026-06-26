@@ -213,7 +213,11 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose the batch (signatures included; the executor uses .tx).
-  auto batch_result = client_.executorsched_propose_batch(test_block_id, txs);
+  auto result_batch =
+      client_.executorsched_propose_batch(test_block_id,
+                                          t_to_parallel_batch(txs)());
+  ExecProposeBatchResult batch_result;
+  ASSERT_TRUE(parallel_batch_to_t(result_batch, batch_result)());
   ASSERT_EQ(batch_result.size(), kNumTxs);
 
   // Check that all transactions were processed (may succeed or fail, but not
