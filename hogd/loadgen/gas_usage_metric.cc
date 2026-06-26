@@ -12,6 +12,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
@@ -120,6 +121,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   auto ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
+
+  // The commit path (HogexecMetrics::mark_tx_success) increments the executor
+  // metric counters unconditionally, so they must be registered first.
+  hogd::init_hogexec_metrics();
 
   uint32_t num_accounts = 2; // default
 
