@@ -298,7 +298,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   const size_t segment_offset = parallel.segment_tokens.size();
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
-  x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
+  x23::Vec<x23::Buf> xdrs;
   xdrs.resize(chunks.size(), {});
   parallel.segment_bytes.resize(segment_offset + chunks.size(), 0);
   parallel.segment_tokens.resize(segment_offset + chunks.size(), 0);
@@ -306,7 +306,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
     const ChunkRange &chunk = chunks[i];
     handles.push_back([](const ChunkRange &chunk, size_t i,
                          size_t segment_offset, ParallelBatch &parallel,
-                         x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
+                         x23::Vec<x23::Buf> &xdrs,
                          x23::span<T> &objs) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
@@ -316,7 +316,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
       // resize overhead of the vector.
       xdrs[i].reserve(parallel.segment_tokens[segment_idx] * sizeof(T) * 3);
       for (size_t j = chunk.start; j < chunk.end; j++) {
-        xdrs[i] += x23::serialize(objs[j]);
+        x23::serialize_to(&xdrs[i], objs[j]);
       }
       parallel.segment_bytes[segment_idx] = xdrs[i].size();
       co_return;

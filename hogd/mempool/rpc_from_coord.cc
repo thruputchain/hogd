@@ -217,8 +217,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     co_return;
   }
 
+  auto original_batch =
+      std::make_shared<ParallelSignedTransactionBatch>(std::move(batch));
   auto txs = std::make_shared<SignedTransactionBatch>();
-  if (!(co_await parallel_batch_to_t(batch, *txs))) {
+  if (!(co_await parallel_batch_to_t(*original_batch, *txs))) {
     MempoolMetrics::instance()
         .rejected_malformed_unvetted_rpc_count.increment();
     info("submit_unvetted rejected malformed transaction batch");
@@ -230,6 +232,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
+  bool can_reuse_original_batch = true;
   {
     // [scheduler_->size()] may have changed since we last checked it above, so
     // we read it again here. Importantly, we do this while holding
@@ -256,13 +259,28 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       MempoolMetrics::instance().discarded_capacity_tx_count.increment(
           num_discarded);
       txs->resize(resize_to);
+      can_reuse_original_batch = false;
     }
   }
 
   const BlockHeight verify_height = scheduler_->current_block();
+  ParallelSignedTransactionBatch trimmed_auth_batch;
+  const ParallelSignedTransactionBatch *auth_batch = original_batch.get();
+  if (!can_reuse_original_batch) {
+    co_await t_to_parallel_batch(*txs, trimmed_auth_batch);
+    auth_batch = &trimmed_auth_batch;
+  }
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             *txs);
+                                                             *auth_batch);
+  if (auth_ret.size() != txs->size()) {
+    MempoolMetrics::instance()
+        .rejected_malformed_unvetted_rpc_count.increment();
+    info("submit_unvetted rejected txs because auth returned {} results for "
+         "{} txs",
+         auth_ret.size(), txs->size());
+    co_return;
+  }
 
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -275,25 +293,31 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   MempoolMetrics::instance().auth_failed_tx_count.increment(
       to_remove_indices.size());
   if (!to_remove_indices.empty()) {
+    can_reuse_original_batch = false;
     remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
   }
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   [](MempoolCoordinatorRpc &coord,
-     std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+     std::shared_ptr<SignedTransactionBatch> txs,
+     std::shared_ptr<ParallelSignedTransactionBatch>
+         reusable_batch) -> x23::Detached {
     // We serialize and send the response in a detached coroutine so that we can
     // release [commit_lock_] as soon as [add_txs()] is finished below.
     // Serializing and sending the response takes longer than [add_txs()] and
     // does not require holding [commit_lock_].
 
-    // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we
-    // do not remove any txs above. I am not sure this is the common case
-    // though.
-    ParallelBatch response;
-    co_await t_to_parallel_batch(*txs, response);
-    co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+    if (reusable_batch) {
+      co_await coord.coord_client_->coordscheduler_notify_vetted(
+          *reusable_batch);
+    }
+    else {
+      ParallelBatch response;
+      co_await t_to_parallel_batch(*txs, response);
+      co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+    }
     coord.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
-  }(*this, txs);
+  }(*this, txs, can_reuse_original_batch ? original_batch : nullptr);
 
   // Careful: it is tempting to overlap the overhead of
   // [authmempool_verify_transactions()] with that of [scheduler_->add_txs()]
@@ -349,7 +373,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   const BlockHeight verify_height = scheduler_->current_block();
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             txs);
+                                                             batch);
+  if (auth_ret.size() != txs.size()) {
+    MempoolMetrics::instance().rejected_malformed_vetted_rpc_count.increment();
+    info("submit_vetted rejected txs because auth returned {} results for {} "
+         "txs",
+         auth_ret.size(), txs.size());
+    co_return;
+  }
 
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -1980,9 +2011,18 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     tx_hashes += change_tx_hashes;
     txs += change_txs;
   }
+  ParallelSignedTransactionBatch auth_batch;
+  co_await t_to_parallel_batch(txs, auth_batch);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+          scheduler_->current_block(), auth_batch);
+  if (auth_ret.size() != txs.size()) {
+    MempoolMetrics::instance().rejected_malformed_vetted_rpc_count.increment();
+    info("auth_data_changed rejected txs because auth returned {} results for "
+         "{} txs",
+         auth_ret.size(), txs.size());
+    co_return;
+  }
   x23::Vec<SignedTransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];

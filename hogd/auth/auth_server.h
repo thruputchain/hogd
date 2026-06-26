@@ -16,6 +16,8 @@
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "parallel.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -138,9 +140,14 @@ public:
 
   x23::Async<AuthErrorCodeBatch>
   authmempool_verify_transactions(BlockHeight height,
-                                  SignedTransactionBatch txs)
+                                  ParallelSignedTransactionBatch batch)
   {
     CHECK_PTR(auth_server_);
+
+    SignedTransactionBatch txs;
+    if (!(co_await parallel_batch_to_t(batch, txs))) {
+      co_return AuthErrorCodeBatch{};
+    }
 
     // The txs object is valid until the end of the coroutine.
     // Because auth_server_->verify_transactions does not hold onto the txs
@@ -151,11 +158,15 @@ public:
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
-                                                     SignedTransactionBatch txs)
+                                                     ParallelSignedTransactionBatch batch)
   {
     CHECK_PTR(auth_server_);
 
-    return auth_server_->verify_batch(height, std::move(txs));
+    SignedTransactionBatch txs;
+    if (!(co_await parallel_batch_to_t(batch, txs))) {
+      co_return AuthErrorCode::kAuthInternal;
+    }
+    co_return co_await auth_server_->verify_batch(height, std::move(txs));
   }
 
 private:
