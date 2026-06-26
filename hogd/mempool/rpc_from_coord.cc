@@ -504,6 +504,7 @@ MempoolCoordinatorRpc::propose_batch(
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
     x23::span<bool> ret_chunk, size_t executor_idx)
 {
+  co_await default_coropoll().pool_.bg();
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
                                                                        txs);
