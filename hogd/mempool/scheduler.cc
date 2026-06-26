@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -20,6 +21,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"

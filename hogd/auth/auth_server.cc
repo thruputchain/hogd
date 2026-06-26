@@ -15,6 +15,7 @@
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/transaction_serialization.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/metrics/health.h"
