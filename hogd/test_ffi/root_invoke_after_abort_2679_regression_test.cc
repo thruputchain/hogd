@@ -1,10 +1,11 @@
-// Regression test for issue #2679: test_ffi root_invoke() re-enters after abort.
+// Regression test for issue #2679: test_ffi root_invoke() re-enters after
+// abort.
 //
 // After exported abort_transaction() makes a handler terminal, a later
-// root_invoke() on the same still-live handle must be rejected with a structured
-// FFI error rather than running a fresh event-emitting root frame whose pending
-// events make exported close_syscall_handler() terminate the process in debug
-// builds.
+// root_invoke() on the same still-live handle must be rejected with a
+// structured FFI error rather than running a fresh event-emitting root frame
+// whose pending events make exported close_syscall_handler() terminate the
+// process in debug builds.
 
 #include <cstdint>
 

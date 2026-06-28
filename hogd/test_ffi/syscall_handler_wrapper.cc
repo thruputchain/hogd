@@ -66,13 +66,13 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
-  // root_invoke() is one-shot: a successful first call consumes root_invocation_
-  // and finishes the root frame (last_frame_finished()). A first call that threw
-  // during pre-frame setup also consumes root_invocation_ but leaves
-  // last_frame_finished() false, so root_invoke_attempted_ catches that retry
-  // too. Either way a second call would hit the internal
-  // CHECK(root_invocation_.has_value()) and abort the process, so reject it with
-  // a structured FFI error instead (issues #2435, #2643).
+  // root_invoke() is one-shot: a successful first call consumes
+  // root_invocation_ and finishes the root frame (last_frame_finished()). A
+  // first call that threw during pre-frame setup also consumes root_invocation_
+  // but leaves last_frame_finished() false, so root_invoke_attempted_ catches
+  // that retry too. Either way a second call would hit the internal
+  // CHECK(root_invocation_.has_value()) and abort the process, so reject it
+  // with a structured FFI error instead (issues #2435, #2643).
   if (handler_.last_frame_finished() || root_invoke_attempted_) {
     error("root_invoke called more than once on the same handler");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
@@ -102,9 +102,9 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     handler_.enable_tracing();
   }
 
-  // Mark the attempt before entering the core call: root_invocation_ is consumed
-  // early in SystemCallHandler::root_invoke(), so even a pre-frame throw must
-  // block a later retry (issue #2643).
+  // Mark the attempt before entering the core call: root_invocation_ is
+  // consumed early in SystemCallHandler::root_invoke(), so even a pre-frame
+  // throw must block a later retry (issue #2643).
   root_invoke_attempted_ = true;
   auto res = handler_.root_invoke();
 
@@ -232,10 +232,11 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Reject opening a mock frame after the transaction was committed or aborted.
-  // abort_transaction() drains only the events present at abort time, so a frame
-  // opened afterward (and later finished) would publish a fresh successful root
-  // result whose events the one-time cleanup never drains, making a later close
-  // trip the debug destructor's "destroyed with events to emit" panic (#2680).
+  // abort_transaction() drains only the events present at abort time, so a
+  // frame opened afterward (and later finished) would publish a fresh
+  // successful root result whose events the one-time cleanup never drains,
+  // making a later close trip the debug destructor's "destroyed with events to
+  // emit" panic (#2680).
   if (is_committed_or_aborted()) {
     error("unrecoverable: start_mock_invocation_frame called on an already "
           "committed/aborted transaction");

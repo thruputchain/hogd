@@ -1,10 +1,10 @@
-// Regression test for issue #2643: test_ffi root runtime-resolution error then a
-// second root_invoke re-enters the consumed root invocation.
+// Regression test for issue #2643: test_ffi root runtime-resolution error then
+// a second root_invoke re-enters the consumed root invocation.
 //
 // SystemCallHandler::root_invoke() moves the root invocation out of
 // root_invocation_ before resolving the target runtime. If runtime creation
-// throws after that point but before any frame starts, the FFI wrapper returns a
-// structured error while leaving the handler live and last_frame_finished_
+// throws after that point but before any frame starts, the FFI wrapper returns
+// a structured error while leaving the handler live and last_frame_finished_
 // false. A second root_invoke() must also be rejected with a structured error
 // rather than reaching the core CHECK(root_invocation_.has_value()).
 
@@ -134,8 +134,8 @@ TEST(TestBindingsTest,
   EXPECT_EQ(first.serialized_output.data, nullptr);
 
   // The faulted handler is still live; a second root_invoke() must be rejected
-  // with a structured error rather than re-entering the consumed root invocation
-  // and tripping the core CHECK.
+  // with a structured error rather than re-entering the consumed root
+  // invocation and tripping the core CHECK.
   auto second = root_invoke(syscall_handler, 0);
   EXPECT_EQ(second.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
   EXPECT_EQ(second.serialized_output.data, nullptr);

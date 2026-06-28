@@ -1,5 +1,5 @@
-// Regression test for issue #2705: test_ffi traced reentrant root_invoke asserts
-// before the reentry guard.
+// Regression test for issue #2705: test_ffi traced reentrant root_invoke
+// asserts before the reentry guard.
 //
 // A mock contract callback that reenters root_invoke() on its own still-running
 // handler must be rejected with a structured FFI error -- the same as the
@@ -65,8 +65,9 @@ run_reentrant_root_invoke_from_mock_callback(ReentrantRootInvokeState &state,
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
   state.enable_tracing = nested_enable_tracing;
-  ContractAddress deployment_addr = deploy_mock_contract(
-      db, rc, 1, mock_contract_reentrant_root_invoke, &state);
+  ContractAddress deployment_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_reentrant_root_invoke,
+                           &state);
 
   SignedTransaction stx{
       .tx = {.invocation =

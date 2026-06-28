@@ -79,8 +79,8 @@ public:
   // applied inside root_invoke(), after push_context() has accepted the call,
   // so that SystemCallHandler::enable_tracing()'s empty-frame-stack assertion
   // can never fire ahead of a structured rejection -- neither for a mocked
-  // handler with a frame open (issue #2601) nor for a reentrant call from a mock
-  // contract callback while the outer root frame is active (issue #2705).
+  // handler with a frame open (issue #2601) nor for a reentrant call from a
+  // mock contract callback while the outer root frame is active (issue #2705).
   ForeignTracedInvokeResult root_invoke(bool enable_tracing);
 
   TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
@@ -266,9 +266,10 @@ private:
   // Set immediately before SystemCallHandler::root_invoke() is entered.
   // root_invoke() consumes root_invocation_ early (before any frame starts), so
   // a pre-frame setup throw -- e.g. a runtime-resolution allocation failure --
-  // leaves the handler live with last_frame_finished_ still false. A retry would
-  // then re-enter the core CHECK(root_invocation_.has_value()); this flag lets
-  // the wrapper reject the retry with a structured error instead (issue #2643).
+  // leaves the handler live with last_frame_finished_ still false. A retry
+  // would then re-enter the core CHECK(root_invocation_.has_value()); this flag
+  // lets the wrapper reject the retry with a structured error instead (issue
+  // #2643).
   bool root_invoke_attempted_ = false;
 };
 

@@ -2,8 +2,8 @@
 // open_mock_invocation_frame) finalize after abort.
 //
 // After exported abort_transaction() makes a mocked handler terminal, the mock
-// frame open/finish paths must reject the terminal handler with a structured FFI
-// error instead of starting/finishing a fresh root mock frame whose pending
+// frame open/finish paths must reject the terminal handler with a structured
+// FFI error instead of starting/finishing a fresh root mock frame whose pending
 // events make exported close_syscall_handler() terminate the process in debug
 // builds.
 
