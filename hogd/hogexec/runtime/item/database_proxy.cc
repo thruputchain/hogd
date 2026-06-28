@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <format>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -229,10 +230,18 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
   try {
     auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
     return to_system_error_code<VoidMarker{}>(res, [] {});
-  } catch (x23::XdrBadInput const &e) {
-    error("Unrecoverable: commit_transaction threw XdrBadInput "
-          "(oversized new contract batch?): {}",
+  } catch (x23::XdrException const &e) {
+    // Contain transport/serialization failures so they cannot escape this
+    // detached executor worker and terminate hogexec. This covers both
+    // XdrBadInput (client-side: oversized new contract batch) and XdrCallFailed
+    // (server-side SYSTEM_ERR, e.g. HogDB's contract rehash throwing while
+    // re-serializing the Contract). Both subclass XdrException.
+    error("Unrecoverable: commit_transaction threw XdrException "
+          "(oversized new contract batch or server-side commit failure?): {}",
           e.what());
+    return SystemError{SystemErrorCode::Unrecoverable};
+  } catch (std::bad_alloc const &e) {
+    error("Unrecoverable: commit_transaction threw bad_alloc: {}", e.what());
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
@@ -258,9 +267,16 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     auto res =
         client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
     return to_system_error_code<false>(res, [] { return true; });
-  } catch (x23::XdrBadInput const &e) {
-    error("Unrecoverable: try_push_new_subtransaction threw XdrBadInput "
-          "(oversized delta batch?): {}",
+  } catch (x23::XdrException const &e) {
+    // Same containment as commit_transaction: XdrBadInput (oversized delta
+    // batch) and XdrCallFailed (server-side SYSTEM_ERR) both escape as
+    // XdrException and must not terminate the detached executor worker.
+    error("Unrecoverable: try_push_new_subtransaction threw XdrException "
+          "(oversized delta batch or server-side push failure?): {}",
+          e.what());
+    return SystemError{SystemErrorCode::Unrecoverable};
+  } catch (std::bad_alloc const &e) {
+    error("Unrecoverable: try_push_new_subtransaction threw bad_alloc: {}",
           e.what());
     return SystemError{SystemErrorCode::Unrecoverable};
   }
