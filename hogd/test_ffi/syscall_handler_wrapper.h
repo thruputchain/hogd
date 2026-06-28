@@ -63,8 +63,8 @@ public:
     // slot would leave current_context_ dangling, so the next pop_context()
     // would dereference freed storage (issue #2784). close_syscall_handler()
     // rejects that close up front; this CHECK turns any other path that reaches
-    // destruction while still installed into a deterministic abort rather than a
-    // latent use-after-free.
+    // destruction while still installed into a deterministic abort rather than
+    // a latent use-after-free.
     CHECK(get_context() != this);
     // The open-handler guard is released by open_handler_guard_'s destructor
     // (declared before handler_, destroyed after it), not here -- see #2572.
