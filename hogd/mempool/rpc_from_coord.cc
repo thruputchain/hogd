@@ -697,7 +697,8 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
 MempoolCoordinatorRpc::ScheduleNodes
 MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                           x23::DagDeps scheduling_deps,
-                                          const x23::DagDeps &proposal_deps)
+                                          const x23::DagDeps &proposal_deps,
+                                          x23::CoroGuard &schedule_guard)
 {
   ScheduleNodes nodes;
   nodes.txset_trie =
@@ -718,7 +719,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   };
 
   struct ScheduleState {
-    x23::CoroGuard schedule_guard;
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
     x23::Vec<SummarizedChunk> summarized_chunks;
@@ -741,8 +741,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.lock_scheduler =
       dag.async<void>("lock scheduler nomination", std::move(scheduling_deps),
                       [&, state]() -> x23::Async<void> {
-                        co_await state->schedule_guard(
-                            scheduler_->global_lock_);
+                        co_await schedule_guard(scheduler_->global_lock_);
                         scheduler_->start_pending_nomination(cache.block_id);
                         co_return;
                       });
@@ -853,7 +852,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             CHECK_EQ(cache.result_tx_hashes.size(),
                      cache.result_tx_nominations.size());
 
-            state->schedule_guard.reset();
+            schedule_guard.reset();
           }
           co_return;
         });
@@ -1114,6 +1113,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  // Holds [scheduler_->global_lock_] across the scheduling critical section.
+  // Owned here (rather than inside the DAG state) so that the failure path
+  // below can release it; see [add_schedule_nodes]. Declared before
+  // [nomination_dag] so it outlives the DAG nodes that capture it by reference.
+  x23::CoroGuard schedule_guard;
+
   x23::Dag nomination_dag("schedulercoord_nominate", default_threadpool());
 
   // HOG transfers and auth changes from the previous block both affect the
@@ -1180,7 +1185,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
                          nomination_dag.after(transfer_data_node,
                                               auth_data_node,
                                               prepare_cache_node),
-                         nomination_dag.after(check_initialize_block_node));
+                         nomination_dag.after(check_initialize_block_node),
+                         schedule_guard);
   add_finish_nominating_block_nodes(
       nomination_dag, db_tip, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
@@ -1204,6 +1210,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
+    // On the success path, the final "summarize" node releases the scheduler's
+    // [global_lock_] (held across the scheduling critical section via
+    // [schedule_guard]). On this failure path that node was cancelled by
+    // [nomination_dag.fail()], so we must release the lock here; otherwise the
+    // [add_txs()]/[abandon_pending_nomination()] calls below (which re-acquire
+    // [global_lock_]) would deadlock. The reset is a no-op if the lock was
+    // never acquired (e.g. the "lock scheduler" node itself was cancelled).
+    schedule_guard.reset();
     // Add the txs from the first call to [schedule()] above back to the
     // scheduler.
     // We do not reset the hog ages since failure is rare and one failure will
@@ -1217,6 +1231,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       co_await cg(scheduler_->global_lock_);
       scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
     }
+    // Clear the nomination so this node can nominate again, and so a later
+    // commit of a (different) validated block does not re-abandon this
+    // snapshot/event block (already abandoned by initialize_block), which would
+    // trip a CHECK. On the success path [block_id] is cleared by
+    // [schedulercoord_commit_block].
+    nominated_block_cache_.block_id = 0;
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);

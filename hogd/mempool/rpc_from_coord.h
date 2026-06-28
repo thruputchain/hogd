@@ -504,9 +504,15 @@ private:
   InitializeBlockNodes add_initialize_block_nodes(x23::Dag &dag,
                                                   const PendingBlock &cache,
                                                   const x23::DagDeps &deps);
+  // [schedule_guard] holds [scheduler_->global_lock_] across the scheduling
+  // critical section. It is owned by the caller ([schedulercoord_nominate]):
+  // acquired by the "lock scheduler" node, released by the final "summarize"
+  // node on success, and released by the caller on the nomination failure path
+  // (where the "summarize" node is cancelled and never runs).
   ScheduleNodes add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                    x23::DagDeps scheduling_deps,
-                                   const x23::DagDeps &proposal_deps);
+                                   const x23::DagDeps &proposal_deps,
+                                   x23::CoroGuard &schedule_guard);
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
       const x23::DagDeps &proposal_deps,

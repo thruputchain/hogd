@@ -367,6 +367,53 @@ TEST(Mempool, Nominate)
   }
 }
 
+// Regression test: a failed [initialize_block] during [schedulercoord_nominate]
+// must not leave [nominated_block_cache_.block_id] set. The bug left it set,
+// which (1) made the guard at the top of [schedulercoord_nominate] reject every
+// later nomination ("a block was nominated and not yet committed or
+// abandoned"), permanently wedging this node, and (2) later double-abandoned
+// the same snapshot/event-block on commit of a validated block, tripping a
+// CHECK. Here we inject a one-shot event-server [open_block] failure to drive
+// nominate down its failure path, then assert the node can still nominate
+// afterwards.
+TEST(Mempool, NominateRecoversAfterInitializeBlockFailure)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+
+  // Force [initialize_block]'s event-block open to fail, sending nominate down
+  // its failure/cleanup path.
+  server.event_aggregator().fail_next_open_block();
+  auto res_fail = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res_fail.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationError);
+
+  // The fault is one-shot, so this nomination initializes cleanly. It must
+  // succeed: if the failed attempt left [block_id] set, this returns
+  // SchedulerNominationError instead (the wedge this test guards against).
+  auto res_ok = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res_ok.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  // The tx returned to the scheduler on the failed attempt is still
+  // schedulable.
+  SignedTransactionBatch parsed_txs;
+  EXPECT_TRUE(parallel_batch_to_t(res_ok.nominated_block().txs, parsed_txs)());
+  EXPECT_EQ(parsed_txs.size(), 1UL);
+  EXPECT_EQ(parsed_txs[0], txs[0]);
+}
+
 TEST(Mempool, NominateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <optional>
 
@@ -59,6 +60,12 @@ public:
     should_block_futex_.broadcast(pool);
   }
 
+  // Test control: make the next (and only the next) [open_block] call fail with
+  // [kRPCUnrecoverable], simulating an event-server failure during block
+  // initialization. The flag is consumed on use, so subsequent [open_block]
+  // calls succeed normally.
+  void fail_next_open_block() { fail_next_open_block_.store(true); }
+
 private:
   // Per-block lifecycle state (from sched side), mirroring EventBlockContext's
   // active/closed distinction:
@@ -73,6 +80,8 @@ private:
 
   x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
+  // One-shot: when set, the next [open_block] fails and clears the flag.
+  std::atomic<bool> fail_next_open_block_{false};
   // Track block lifecycle state (from sched side)
   std::map<BlockID, BlockState> block_states_;
   // Track executor handles per block (from exec side)

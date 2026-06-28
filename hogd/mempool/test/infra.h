@@ -220,6 +220,8 @@ public:
     return *event_sched_server_->impl();
   }
 
+  TestEventAggregator &event_aggregator() { return event_server_; }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;

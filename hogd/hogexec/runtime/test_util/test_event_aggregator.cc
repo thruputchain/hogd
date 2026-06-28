@@ -19,6 +19,10 @@ x23::Async<RPCError>
 TestEventAggregator::open_block(BlockID block_id)
 {
   info("Opening block {}", block_id);
+  if (fail_next_open_block_.exchange(false)) {
+    info("Failing open_block {} (test fault injection)", block_id);
+    co_return RPCError::kRPCUnrecoverable;
+  }
   x23::CoroGuard guard;
   co_await guard(lock_);
   block_states_[block_id] = BlockState::kActive;
