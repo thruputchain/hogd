@@ -14,6 +14,7 @@
 #include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread.h"
@@ -30,6 +31,7 @@
 #include "hogd/hogdb/mock_authdb_rpc.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -90,7 +92,77 @@ protected:
     ASSERT_TRUE(ret) << "grant_storage_token: write_address_balance failed";
   }
 
+  // Reproduces the scheduler commit window from issue #1725: an auth-data
+  // change is applied to the live DAO by BlockTX::commit() at height
+  // kNextHeight, but the committed tip is deliberately NOT advanced (no
+  // update_dbtip), so current_committed_height_ stays at kAcceptedHeight. After
+  // this returns, ctx_opt_ holds a context whose DAO already has the
+  // kNextHeight auth row for raced_addr_ while reporting kAcceptedHeight as the
+  // committed height.
+  static constexpr BlockHeight kAcceptedHeight = 0;
+  static constexpr BlockHeight kNextHeight = kAcceptedHeight + 1;
+
+  void commit_raced_auth_change()
+  {
+    constexpr BlockTXID kBlockId = 1;
+    constexpr InvokeTXID kInvokeId = 1;
+    raced_addr_.emplace(make_address(0x6666));
+    const Address &addr = *raced_addr_;
+
+    AddressAuthData old_auth_data{};
+    old_auth_data.public_keys[0] = make_test_pk_config(1);
+    old_auth_data.required_weight = Weight{1};
+    old_auth_data.last_written_height = kAcceptedHeight;
+    ASSERT_TRUE(db_.write_address_auth_data(addr, old_auth_data));
+    grant_storage_token(addr, 1'000'000);
+
+    DbTip tip{.height = kAcceptedHeight, .id = 0};
+    ASSERT_TRUE(db_.write_dbtip(tip));
+
+    ctx_opt_.emplace(std::move(db_), nullptr);
+    RPCContext &ctx = *ctx_opt_;
+    ctx.initialize_cost_model(kTestCostModel);
+    ASSERT_EQ(ctx.get_height_threadsafe(), kAcceptedHeight);
+
+    ASSERT_TRUE(
+        ctx.open_block_tx(kBlockId,
+                          BlockExecutionMode::kBlockExecutionModeProposal));
+    InvokeTX *invoke_tx = ctx.get_invoke_tx(kBlockId, kInvokeId);
+    ASSERT_NE(invoke_tx, nullptr);
+
+    AuthDataChangeArgs auth_change{};
+    auth_change.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0,
+                             .public_key = make_test_pk_config(2)});
+    auth_change.new_required_weight = Weight{7};
+
+    ASSERT_TRUE(
+        invoke_tx
+            ->request_auth_data(addr, auth_change,
+                                std::to_underlying(StorageDeltaFlags::None))
+            .has_value());
+    ASSERT_TRUE(invoke_tx->sync_balance_locks().has_value());
+    ASSERT_TRUE(invoke_tx->commit().has_value());
+    ctx.close_invoke_tx(kBlockId, kInvokeId, invoke_tx);
+
+    PerThreadARC<BlockTX> *block_tx = ctx.get_block_tx(kBlockId, false);
+    ASSERT_NE(block_tx, nullptr);
+    ASSERT_EQ(block_tx->get().get_height(), kNextHeight);
+    HogDBStatus<DbHash> db_hash = block_tx->get().close(ctx.get_tip().db_hash);
+    ASSERT_TRUE(db_hash.has_value());
+    ASSERT_TRUE(block_tx->get().commit().has_value());
+
+    // Tip intentionally NOT advanced: the DAO now holds the kNextHeight auth
+    // row while the committed height is still kAcceptedHeight.
+    ASSERT_EQ(ctx.get_height_threadsafe(), kAcceptedHeight);
+
+    ASSERT_TRUE(block_tx->initiate_shutdown());
+    ctx.remove_shutdown_block_tx(kBlockId);
+  }
+
   HogDBDAO db_;
+  std::optional<RPCContext> ctx_opt_;
+  std::optional<Address> raced_addr_;
   std::optional<MockAuthDBServer> mock_auth_server_;
   AuthCard auth_card_;
   AuthChangeSubscriptionManager subscription_manager_;
@@ -582,5 +654,67 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
 }
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// Regression test for issue #1725. A committed auth row must carry the height
+// of the block that wrote it (write-side stamp), and authdb_get_auth_data must
+// not leak a row written by a height newer than the accepted query height.
+TEST_F(AuthSubscriptionTest, AuthRpcRejectsFutureAuthRowBeforeTipUpdate)
+{
+  commit_raced_auth_change();
+  RPCContext &ctx = *ctx_opt_;
+
+  // Write-side: the committed row is stamped with the height that wrote it.
+  HogDBStatus<AddressAuthData> committed =
+      ctx.get_db().read_address_auth_data(*raced_addr_);
+  ASSERT_TRUE(committed.has_value());
+  ASSERT_EQ(committed->required_weight, Weight{7});
+  EXPECT_EQ(committed->last_written_height, kNextHeight);
+
+  // Read-side: the query is accepted for kAcceptedHeight, but the live row was
+  // written by kNextHeight. It must reject as stale rather than return the
+  // not-yet-published row.
+  HogDBAuthRpc auth_rpc(ctx);
+  DBAuthResult result =
+      auth_rpc.authdb_get_auth_data(kAcceptedHeight, raced_addr_->get_raw())();
+  EXPECT_EQ(result.error(), DBAuthError::kDBAuthStaleBlockHeight);
+}
+
+// Batch variant of the #1725 regression test.
+TEST_F(AuthSubscriptionTest, AuthRpcBatchRejectsFutureAuthRowBeforeTipUpdate)
+{
+  commit_raced_auth_change();
+  RPCContext &ctx = *ctx_opt_;
+
+  HogDBAuthRpc auth_rpc(ctx);
+  ContractAddressBatch addresses;
+  addresses.push_back(raced_addr_->get_raw());
+  DBAuthResultBatch result =
+      auth_rpc.authdb_get_auth_data_batch(kAcceptedHeight, addresses)();
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(result[0].error(), DBAuthError::kDBAuthStaleBlockHeight);
+}
+
+// The scheduler's dbsched_get_address_auth_data validates against the committed
+// block id, but read_dbtip lags the DAO apply the same way the height check
+// does. It must also reject a row written by a height newer than the committed
+// tip.
+TEST_F(AuthSubscriptionTest, SchedRpcRejectsFutureAuthRowBeforeTipUpdate)
+{
+  commit_raced_auth_change();
+  RPCContext &ctx = *ctx_opt_;
+
+  HogDBSchedRpc sched_rpc(ctx);
+  ContractAddressBatch addresses;
+  addresses.push_back(raced_addr_->get_raw());
+  // block_id 0 is still the committed tip, so the id guard passes, but the auth
+  // row was written by height 1.
+  DbAddressAuthDataBatchResult result =
+      sched_rpc.dbsched_get_address_auth_data(0, addresses)();
+  EXPECT_EQ(result.result(), DbSchedResult::DbSchedResultError);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

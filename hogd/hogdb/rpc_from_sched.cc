@@ -100,15 +100,15 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
                                              ContractAddressBatch accounts)
 {
   HogDBDAO &db = ctx_.get_db();
-  {
-    // Check that [block_id] is the last committed block observed by hogdb. We
-    // do this check to ensure that the scheduler and hogdb are in sync with
-    // each other.
-    HogDBStatus<DbTip> ret = db.read_dbtip();
-    if (!ret || ret->id != block_id) {
-      co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
-    }
+
+  // Check that [block_id] is the last committed block observed by hogdb. We do
+  // this check to ensure that the scheduler and hogdb are in sync with each
+  // other.
+  HogDBStatus<DbTip> tip = db.read_dbtip();
+  if (!tip || tip->id != block_id) {
+    co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
   }
+  const BlockHeight committed_height = tip->height;
 
   DbAddressAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
   ret.address_auth_data_batch().reserve(accounts.size());
@@ -116,6 +116,15 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
   for (const ContractAddress &account : accounts) {
     HogDBStatus<AddressAuthData> status = db.read_address_auth_data(account);
     if (!status) {
+      co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+    }
+    // The dbtip id guard above has the same commit-window race as the AuthDB
+    // height check: BlockTX::commit() applies the block to the live DAO before
+    // update_dbtip() writes the new tip, so a row already written by the next
+    // block can be read here while read_dbtip() still reports [block_id].
+    // Reject if the row is newer than the committed tip we validated against
+    // (issue #1725).
+    if (status.value().last_written_height > committed_height) {
       co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }
     ret.address_auth_data_batch().push_back(status.value());

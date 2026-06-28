@@ -38,6 +38,15 @@ HogDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
     co_return DBAuthResult(DBAuthError::kDBAuthInternal);
   }
 
+  // The height check above is against current_committed_height_, which the
+  // scheduler advances only after BlockTX::commit() has applied the block to
+  // the live DAO. In that window the row read here can already belong to
+  // height+1, even though the query was accepted for [height]. Reject rather
+  // than return a not-yet-published auth row (issue #1725).
+  if (status.value().last_written_height > height) {
+    co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
+  }
+
   DBAuthResult result(DBAuthError::kDBAuthSuccess);
   result.auth_data() = status.value();
   co_return result;
@@ -67,6 +76,12 @@ HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
         continue;
       }
       result.back().error(DBAuthError::kDBAuthInternal);
+      continue;
+    }
+    // Reject any row already written by a height newer than the accepted query
+    // height; see authdb_get_auth_data above and issue #1725.
+    if (status.value().last_written_height > height) {
+      result.back().error(DBAuthError::kDBAuthStaleBlockHeight);
       continue;
     }
     result.back().auth_data() = status.value();

@@ -5,6 +5,8 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "types.hh"
+
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
@@ -20,7 +22,7 @@
 namespace hogd {
 
 AddressAuthData
-AuthLock::build_result() const
+AuthLock::build_result(BlockHeight block_height) const
 {
   AddressAuthData result = base_auth_data_;
   for (size_t i = 0; i < kMaxSigners; ++i) {
@@ -32,6 +34,15 @@ AuthLock::build_result() const
   if (required_weight_change_.has_value()) {
     result.required_weight = required_weight_change_.value();
   }
+  // Stamp the row with the height of the committing block so readers can detect
+  // a row written by a block newer than the height their query was accepted
+  // for: during scheduler commit the new auth row is applied to the live DAO
+  // before the committed tip advances, so an unprotected read can return
+  // next-height auth data (issue #1725). build_result is the single point that
+  // both the DB-write path (stage_committed_changes) and the auth-subscriber
+  // notification path (BlockTX::commit) flow through, so stamping here keeps
+  // the two copies consistent.
+  result.last_written_height = block_height;
   return result;
 }
 
@@ -136,7 +147,7 @@ AuthLock::stage_committed_changes(const LockContext &ctx,
                                   ChangeSet &changes) const
 {
   CHECK(ctx.key.is_address_auth_data());
-  auto auth = build_result();
+  auto auth = build_result(ctx.block_height);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);
   changes.put(key, 0, serialized);

@@ -274,17 +274,17 @@ BlockTX::commit(WorkerPool &pool)
   PerThread<KeyChangeBatch> key_changes;
 
   item_locks_.for_each_parallel_destructive_among_workers(
-      [&key_changes](std::pair<const ItemKey &, const ItemLock &> v) {
+      [&key_changes, this](std::pair<const ItemKey &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
         }
 
         if (v.first.is_address_auth_data()) {
           if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
-            key_changes->emplace_back(v.first.to_contract_address(),
-                                      x23::Ptr<AddressAuthData>(
-                                          new AddressAuthData(
-                                              inner->get()->build_result())));
+            key_changes->emplace_back(
+                v.first.to_contract_address(),
+                x23::Ptr<AddressAuthData>(new AddressAuthData(
+                    inner->get()->build_result(block_height_))));
           }
           else if (v.second.get_inner<DeletionLock>()) {
             key_changes->emplace_back(v.first.to_contract_address(), nullptr);
