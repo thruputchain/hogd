@@ -595,6 +595,19 @@ close_syscall_handler(void *syscall_handler) noexcept
   if (!context->can_be_closed()) {
     return kTestFFIErrorCodeUnrecoverableError;
   }
+  // Reject closing a handler that is still installed in this thread's
+  // thread-local context slot by push_context(). Destroying it here would leave
+  // current_context_ pointing at freed storage, so the next pop_context() on
+  // this thread would dereference a dangling SyscallHandlerContext (issue
+  // #2784). Returning a structured error -- rather than silently clearing TLS
+  // -- preserves balanced push/pop ownership: the caller must pop_context()
+  // before closing, which also catches caller sequencing mistakes
+  // deterministically.
+  if (SyscallHandlerContext::get_context() == context) {
+    error("close_syscall_handler error: handler is still installed as the "
+          "thread-local context; pop_context() before closing");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   // Reference the borrowed DB before taking ownership: if the implicit abort
   // below fails (or throws), the handler -- and with it its open-handler guard

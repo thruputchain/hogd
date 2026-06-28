@@ -59,6 +59,13 @@ public:
     // so reaching this point uncommitted is a programming error.
     CHECK(transaction_committed_or_aborted_);
     CHECK(mock_runtime_stack_.empty());
+    // Destroying a handler that is still published in this thread's TLS context
+    // slot would leave current_context_ dangling, so the next pop_context()
+    // would dereference freed storage (issue #2784). close_syscall_handler()
+    // rejects that close up front; this CHECK turns any other path that reaches
+    // destruction while still installed into a deterministic abort rather than
+    // a latent use-after-free.
+    CHECK(get_context() != this);
     // The open-handler guard is released by open_handler_guard_'s destructor
     // (declared before handler_, destroyed after it), not here -- see #2572.
   }
