@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <concepts>
+#include <exception>
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -26,7 +27,6 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
-#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
@@ -229,10 +229,25 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
   try {
     auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
     return to_system_error_code<VoidMarker{}>(res, [] {});
-  } catch (x23::XdrBadInput const &e) {
-    error("Unrecoverable: commit_transaction threw XdrBadInput "
-          "(oversized new contract batch?): {}",
-          e.what());
+  } catch (std::exception const &e) {
+    // commit_transaction runs on a detached executor worker; any escaping
+    // exception terminates hogexec. Contain every failure here and return a
+    // structured Unrecoverable result instead. This covers:
+    //   - x23::XdrBadInput   -- client-side, oversized new contract batch
+    //   - x23::XdrCallFailed -- server-side SYSTEM_ERR (e.g. HogDB's contract
+    //                           rehash throwing while re-serializing a
+    //                           Contract)
+    //   - std::bad_alloc     -- local OOM, e.g. while serializing the request
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter before returning (cf. syscall_invoke.cc, #2719).
+    try {
+      error("Unrecoverable: commit_transaction failed "
+            "(transport/serialization/allocation failure): {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("commit_transaction failure diagnostic");
+    }
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
@@ -258,10 +273,20 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     auto res =
         client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
     return to_system_error_code<false>(res, [] { return true; });
-  } catch (x23::XdrBadInput const &e) {
-    error("Unrecoverable: try_push_new_subtransaction threw XdrBadInput "
-          "(oversized delta batch?): {}",
-          e.what());
+  } catch (std::exception const &e) {
+    // Same containment as commit_transaction: this runs on a detached executor
+    // worker, so contain every failure -- XdrBadInput (oversized delta batch),
+    // XdrCallFailed (server-side SYSTEM_ERR), and std::bad_alloc (local OOM) --
+    // and return a structured result. The diagnostic allocates and can throw
+    // again under memory pressure, so guard it with the no-allocation reporter
+    // before returning (cf. syscall_invoke.cc, #2719).
+    try {
+      error("Unrecoverable: try_push_new_subtransaction failed "
+            "(transport/serialization/allocation failure): {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("try_push_new_subtransaction failure diagnostic");
+    }
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
