@@ -2,5 +2,10 @@
 
 const char hogd_version[] = "@HOGD_RELEASE_VERSION@";
 const char hogd_commit[] = "@GIT_HOGD_COMMIT@";
-const char protocol_commit[] = "@GIT_PROTOCOL_COMMIT@";
+/* protocol_commit is part of the network protocol token (see
+ * hogd/version.h:kHogdProtocol) that peers compare byte-for-byte at the mempool
+ * intro RPC boundary. Pin it to a u8"..." literal (char[] in C, with the
+ * standard-mandated UTF-8 == ASCII encoding) so its bytes do not depend on the
+ * ordinary execution character set (-fexec-charset). See hogd issue #2728. */
+const char protocol_commit[] = u8"@GIT_PROTOCOL_COMMIT@";
 const char cmake_repro[] = "@CMAKE_REPRO_COMMAND@";

@@ -4,8 +4,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <format>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -184,11 +184,13 @@ WasmiRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
-  uint8_t method_name[16];
-  std::format_to(method_name, "{:016X}", method_id);
+  // invoke_name() emits canonical UTF-8/ASCII export-name bytes independent of
+  // the ordinary execution charset (see hogd issue #2722).
+  std::string const method_name = invoke_name(method_id);
 
-  WasmiInvokeResult res =
-      wasmi_invoke(wasmi_runtime_ptr_, &method_name[0], 16, gas_limit);
+  WasmiInvokeResult res = wasmi_invoke(
+      wasmi_runtime_ptr_, reinterpret_cast<uint8_t const *>(method_name.data()),
+      static_cast<uint32_t>(method_name.size()), gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
   trace("Wasmi Invoke Result: {}",

@@ -3,7 +3,6 @@
 #include <charconv>
 #include <cstddef>
 #include <cstring>
-#include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -212,11 +211,25 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
-  // Turns a method ID (uint32) into a method name string that
-  // can be invoked within wasm.
+  // Turns a method ID into the 16-byte method name string that is invoked
+  // within wasm.
+  //
+  // The hex digits are emitted from a `u8"..."` literal so the bytes are the
+  // standard-mandated UTF-8 (== ASCII) encoding regardless of the ordinary
+  // execution character set (`-fexec-charset`). Rust decodes this name as UTF-8
+  // before the Wasm export lookup, and the resulting dispatch feeds the
+  // consensus event root, so an ordinary `std::format("{:016X}", ...)` would
+  // make protocol-visible dispatch depend on implementation-defined literal
+  // bytes that can diverge across honest builds. See hogd issue #2722.
   constexpr static std::string invoke_name(MethodID method)
   {
-    return std::format("{:016X}", method);
+    constexpr std::u8string_view kHexDigits = u8"0123456789ABCDEF";
+    std::string name(16, '\0');
+    for (size_t i = 0; i < 16; ++i) {
+      auto const nibble = (method >> ((15 - i) * 4)) & 0xFU;
+      name[i] = static_cast<char>(kHexDigits[nibble]);
+    }
+    return name;
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>
