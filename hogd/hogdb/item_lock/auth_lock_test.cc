@@ -678,7 +678,7 @@ TEST(AuthLockTest, SetRequiredWeight)
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
   // Verify the required weight was set
-  AddressAuthData result = lock.build_result();
+  AddressAuthData result = lock.build_result(/*block_height=*/0);
   EXPECT_EQ(result.required_weight, Weight{2});
 }
 
@@ -718,7 +718,7 @@ TEST(AuthLockTest, RequiredWeightRollback)
   lock.commit_change(false, snapshot_cost, item2, make_dummy_context());
 
   // Verify final state matches item2 (the middle state)
-  AddressAuthData result = lock.build_result();
+  AddressAuthData result = lock.build_result(/*block_height=*/0);
   EXPECT_EQ(result.required_weight, Weight{2});
 }
 

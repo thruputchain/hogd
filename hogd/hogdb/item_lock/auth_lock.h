@@ -44,7 +44,7 @@ public:
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
-  AddressAuthData build_result() const;
+  AddressAuthData build_result(BlockHeight block_height) const;
 
 private:
   size_t count_active_keys() const;

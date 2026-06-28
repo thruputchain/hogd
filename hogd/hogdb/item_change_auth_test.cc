@@ -132,7 +132,7 @@ TEST_F(ItemChangeAuthTest, Narrow)
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
   ASSERT_TRUE(inner != nullptr);
-  auto res = inner->get()->build_result();
+  auto res = inner->get()->build_result(/*block_height=*/0);
 
   EXPECT_FALSE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
@@ -166,7 +166,7 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
   ASSERT_TRUE(inner != nullptr);
-  auto res = inner->get()->build_result();
+  auto res = inner->get()->build_result(/*block_height=*/0);
 
   EXPECT_TRUE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
@@ -231,7 +231,7 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
   ASSERT_TRUE(inner != nullptr);
-  auto res = inner->get()->build_result();
+  auto res = inner->get()->build_result(/*block_height=*/0);
 
   EXPECT_EQ(res.public_keys[0], pk_1);
   EXPECT_EQ(res.public_keys[1], nullptr);
@@ -255,7 +255,7 @@ TEST_F(ItemChangeAuthTest, DeleteKey)
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
   ASSERT_TRUE(inner != nullptr);
-  auto res = inner->get()->build_result();
+  auto res = inner->get()->build_result(/*block_height=*/0);
 
   EXPECT_EQ(res.public_keys[3], nullptr);
 }
