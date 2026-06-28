@@ -240,7 +240,18 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
           e.what());
     return SystemError{SystemErrorCode::Unrecoverable};
   } catch (std::bad_alloc const &e) {
-    error("Unrecoverable: commit_transaction threw bad_alloc: {}", e.what());
+    // A client-side allocation failure (e.g. while serializing the request) is
+    // local OOM. commit_transaction runs on a detached executor worker, so the
+    // exception must not escape -- but the error() diagnostic itself allocates
+    // while formatting and can throw bad_alloc again under the same memory
+    // pressure. Swallow any throw from it and fall back to the no-allocation
+    // reporter before returning the structured result (cf. syscall_invoke.cc,
+    // #2719).
+    try {
+      error("Unrecoverable: commit_transaction threw bad_alloc: {}", e.what());
+    } catch (...) {
+      report_dropped_log("commit_transaction bad_alloc diagnostic");
+    }
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
@@ -275,8 +286,16 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
           e.what());
     return SystemError{SystemErrorCode::Unrecoverable};
   } catch (std::bad_alloc const &e) {
-    error("Unrecoverable: try_push_new_subtransaction threw bad_alloc: {}",
-          e.what());
+    // Local OOM on a detached executor worker; same handling as
+    // commit_transaction: the error() diagnostic allocates and can throw again
+    // under memory pressure, so guard it with the no-allocation reporter before
+    // returning the structured result (cf. syscall_invoke.cc, #2719).
+    try {
+      error("Unrecoverable: try_push_new_subtransaction threw bad_alloc: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("try_push_new_subtransaction bad_alloc diagnostic");
+    }
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
