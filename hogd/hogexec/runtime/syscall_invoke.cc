@@ -6,7 +6,6 @@
 #include <cstring>
 #include <exception>
 #include <span>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -31,24 +30,27 @@ namespace hogd {
 namespace {
 
 // Returns whether the span contains duplicate ids, or a SystemError with
-// SystemErrorCode::Unrecoverable if the duplicate-detection set could not be
+// SystemErrorCode::Unrecoverable if the duplicate-detection buffer could not be
 // allocated. Both call sites run inside noexcept syscall bodies, so a
-// std::bad_alloc from the unordered_set must be caught here rather than
-// escaping to std::terminate (issue #2698).
+// std::bad_alloc from the copy must be caught here rather than escaping to
+// std::terminate (issue #2698).
+//
+// The ids are contract-controlled, so we copy and sort them and scan adjacent
+// values instead of inserting into a std::unordered_set: the default integer
+// hasher lets a contract pick distinct ids that collapse into one bucket,
+// forcing quadratic duplicate-scan work before the syscall is rejected and
+// before any gas is charged. Sorting gives deterministic O(n log n) work
+// regardless of the id values (issue #2788).
 SystemStatus<bool>
 has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids) noexcept
 {
   try {
-    std::unordered_set<uint32_t> seen;
-    seen.reserve(auth_token_ids.size());
-    for (uint32_t auth_token_id : auth_token_ids) {
-      if (!seen.insert(auth_token_id).second) {
-        return true;
-      }
-    }
-    return false;
+    std::vector<uint32_t> sorted_ids(auth_token_ids.begin(),
+                                     auth_token_ids.end());
+    std::ranges::sort(sorted_ids);
+    return std::ranges::adjacent_find(sorted_ids) != sorted_ids.end();
   } catch (std::exception const &e) {
-    error("unrecoverable: failed to allocate auth token duplicate set: {}",
+    error("unrecoverable: failed to allocate auth token duplicate buffer: {}",
           e.what());
     return SystemError{SystemErrorCode::Unrecoverable};
   }
