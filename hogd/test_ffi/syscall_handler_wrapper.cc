@@ -56,23 +56,26 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
-  // root_invoke() is one-shot: a successful first call consumes
-  // root_invocation_ and finishes the root frame. A second call would hit the
-  // internal CHECK(root_invocation_.has_value()) and abort the process, so
-  // reject it with a structured FFI error instead (issue #2435).
-  if (handler_.last_frame_finished()) {
-    error("root_invoke called more than once on the same handler");
+  // Reject root_invoke() after the transaction was committed or aborted.
+  // SystemCallHandler::root_invoke() does not consult transaction_committed_or_
+  // aborted_, so a post-abort call would run a fresh root frame whose pending
+  // events the one-time abort cleanup never drains, making a later close trip
+  // the debug destructor's "destroyed with events to emit" panic (issue #2679).
+  if (is_committed_or_aborted()) {
+    error("root_invoke called on an already committed/aborted transaction");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
-  // Enable tracing only after the guards above: enable_tracing() asserts the
-  // invocation-frame stack is empty, so it must run after the mocked-handler
-  // and re-invocation rejections (which can be reached with a frame already
-  // open on a mocked handler) rather than before them (issue #2601). A genuine
-  // non-mocked root invocation starts from an empty frame stack, so the assert
-  // still holds here.
-  if (enable_tracing) {
-    handler_.enable_tracing();
+  // root_invoke() is one-shot: a successful first call consumes root_invocation_
+  // and finishes the root frame (last_frame_finished()). A first call that threw
+  // during pre-frame setup also consumes root_invocation_ but leaves
+  // last_frame_finished() false, so root_invoke_attempted_ catches that retry
+  // too. Either way a second call would hit the internal
+  // CHECK(root_invocation_.has_value()) and abort the process, so reject it with
+  // a structured FFI error instead (issues #2435, #2643).
+  if (handler_.last_frame_finished() || root_invoke_attempted_) {
+    error("root_invoke called more than once on the same handler");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   if (!push_context()) {
@@ -87,6 +90,22 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     pop_context();
   });
 
+  // Enable tracing only after push_context() has accepted this root call.
+  // enable_tracing() asserts the invocation-frame stack is empty; a reentrant
+  // root_invoke() from a mock contract callback runs while the outer root frame
+  // is still active, so applying tracing before push_context() would trip that
+  // assert ahead of the structured reentry rejection that push_context() (and
+  // the root_invoke_attempted_ guard above) provide (issues #2601, #2705). The
+  // Defer above is already installed, so a throwing enable_tracing() still pops
+  // the context.
+  if (enable_tracing) {
+    handler_.enable_tracing();
+  }
+
+  // Mark the attempt before entering the core call: root_invocation_ is consumed
+  // early in SystemCallHandler::root_invoke(), so even a pre-frame throw must
+  // block a later retry (issue #2643).
+  root_invoke_attempted_ = true;
   auto res = handler_.root_invoke();
 
   if (res.result_.has_value() ||
@@ -212,6 +231,17 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // Reject opening a mock frame after the transaction was committed or aborted.
+  // abort_transaction() drains only the events present at abort time, so a frame
+  // opened afterward (and later finished) would publish a fresh successful root
+  // result whose events the one-time cleanup never drains, making a later close
+  // trip the debug destructor's "destroyed with events to emit" panic (#2680).
+  if (is_committed_or_aborted()) {
+    error("unrecoverable: start_mock_invocation_frame called on an already "
+          "committed/aborted transaction");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
   if (handler_.last_frame_finished()) {
     error("unrecoverable: start_mock_invocation_frame called after last frame "
           "finished");
@@ -276,6 +306,15 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   if (!is_mocked_handler_) {
     error("unrecoverable: finish_mock_invocation_frame called on non-mocked "
           "handler");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  // Reject finishing a mock frame after the transaction was committed or
+  // aborted: finalizing a root frame here would publish a post-terminal root
+  // result and its undrained events, mirroring the open-frame guard (#2680).
+  if (is_committed_or_aborted()) {
+    error("unrecoverable: finish_mock_invocation_frame called on an already "
+          "committed/aborted transaction");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
