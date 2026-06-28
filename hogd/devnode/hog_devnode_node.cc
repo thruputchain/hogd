@@ -604,6 +604,20 @@ void
 HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
+    // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
+    // the coordinator registered the scheduler (e.g. the post-genesis failure
+    // injection), the scheduler is running a detached coroutine that sends RPCs
+    // to [db_scheduler_server_]. The member destructors that run after we
+    // rethrow will tear down [db_scheduler_server_], so shut the scheduler down
+    // first or the detached coroutine may send on an invalid file descriptor.
+    // The scheduler is only registered once register_coordinator_with_mempool()
+    // has run, so skip this when construction failed before then.
+    std::shared_ptr<Scheduler> scheduler =
+        mempool_coord_server_.impl()->scheduler();
+    if (scheduler != nullptr) {
+      sched_db_server_.impl()->reset_scheduler()();
+      scheduler->shut_down()();
+    }
     executor_.shut_down();
     if (view_gateway_server_ != nullptr) {
       view_gateway_server_->impl()->shut_down();

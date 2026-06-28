@@ -2170,10 +2170,10 @@ TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
       return;
     }
     const int exit_status = *status;
-    ASSERT_TRUE(WIFEXITED(exit_status));
-    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
-    EXPECT_TRUE(process.read_remaining_stdout().empty());
     std::string stderr_output = process.read_remaining_stderr();
+    ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE) << stderr_output;
+    EXPECT_TRUE(process.read_remaining_stdout().empty());
     EXPECT_NE(stderr_output.find("injected hog-devnode post-genesis failure"),
               std::string::npos)
         << stderr_output;
