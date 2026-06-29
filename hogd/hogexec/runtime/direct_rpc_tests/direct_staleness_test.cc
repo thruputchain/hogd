@@ -334,6 +334,41 @@ TEST_F(DirectStalenessTest, CommitInvalidatedBlockReturnsError)
   EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
 }
 
+// A failed commit must not advance the debug block-id tracker. Previously
+// dbsched_commit_snapshot() recorded log_block_commit() before commit_block()
+// ran, so a rejected commit (here, an invalidated sibling) left the tracker's
+// last_committed_block_id_ pointing at block_b while the real DbTip stayed at
+// block_a. Opening the next block on the real tip then tripped the tracker's
+// parent-mismatch check, which throws under the test framework's
+// throw_on_error_. In release builds the tracker is a no-op and this just
+// exercises normal forward progress.
+TEST_F(DirectStalenessTest, FailedCommitDoesNotAdvanceBlockIdTracker)
+{
+  advance_block();
+
+  auto [block_a, block_b] = create_sibling();
+  close_and_commit_block(block_a);
+
+  auto close_b = get_coord_client().dbsched_close_snapshot(block_b);
+  EXPECT_EQ(close_b.result(), DbSchedResult::DbSchedResultOK);
+
+  auto commit_b = get_coord_client().dbsched_commit_snapshot(
+      block_b,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+  EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
+
+  // The real tip is still block_a; opening a child on it must not trip the
+  // debug tracker (which would throw because it thinks block_b committed).
+  BlockID block_c = block_b + 1;
+  DbSchedResult create_c = DbSchedResult::DbSchedResultError;
+  EXPECT_NO_THROW(
+      create_c = get_coord_client().dbsched_create_snapshot(
+          block_a, block_c, BlockExecutionMode::kBlockExecutionModeProposal));
+  EXPECT_EQ(create_c, DbSchedResult::DbSchedResultOK);
+  close_and_commit_block(block_c);
+}
+
 // Viewing-snapshot refresh tests.
 //
 // These verify that opening a fresh viewing snapshot after a commit

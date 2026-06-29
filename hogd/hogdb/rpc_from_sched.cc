@@ -223,7 +223,6 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
                                        SHA256Hash events_hash)
 {
   if constexpr (is_debug_build()) {
-    block_id_state_manager_.log_block_commit(id);
     ctx_.get_db().enable_debug_invariants(ctx_.get_cost_model());
   }
   x23::Defer _d([&] { ctx_.get_db().clear_invariants(); });
@@ -242,6 +241,15 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
       commit_block(id, block_hash, events_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+
+  // Only advance the debug block-id tracker once commit_block has actually
+  // moved the DbTip. Recording it earlier would diverge the tracker from the
+  // real tip if commit failed (e.g. an invalidated sibling, outstanding refs,
+  // or an invariant failure), tripping the parent-mismatch check on the next
+  // open.
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_commit(id);
+  }
 
   co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
 
@@ -432,10 +440,6 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  if constexpr (is_debug_build()) {
-    block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
-  }
-
   if (auto r = itx->sync_balance_locks(); !r) {
     error("failed to sync balance locks: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;
@@ -465,6 +469,11 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
       to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
                                 events_hash, r.value(), db_hash));
   if (ret == DbSchedResult::DbSchedResultOK) {
+    // Seed the debug block-id tracker with the genesis tip only after the
+    // commit has actually landed, mirroring dbsched_commit_snapshot.
+    if constexpr (is_debug_build()) {
+      block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
+    }
     co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
   }
   // Just to be safe, we recompute the db hash from scratch and ensure that
