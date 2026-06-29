@@ -282,7 +282,19 @@ target_include_directories(
 # can optimize across the interpreter/translation/syscall-bridge boundary.
 # Without this, only rv32_vm_bench measured the interpreter under LTO while the
 # node ran it without -- benchmark numbers didn't reflect production codegen.
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+#
+# Gate on every optimized single-config build type, not the exact string
+# "Release": RelWithDebInfo and MinSizeRel are optimized too, so the old
+# exact-match silently dropped LTO for them (the very "production codegen" the
+# comment above promises). check_ipo_supported() at the top level already
+# guarantees IPO is available. Multi-config generators (Xcode/VS) leave
+# CMAKE_BUILD_TYPE empty and are not covered here -- the benchmarks use
+# single-config Make/Ninja.
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+  set(HOGD_RV32_ENABLE_LTO TRUE)
+endif()
+
+if(HOGD_RV32_ENABLE_LTO)
   set_property(
     TARGET rv32_isa_core rv32_vm rv32_syscall_bridge rv32_runtime_objects
     PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE
@@ -328,7 +340,7 @@ if(BUILD_BENCHMARKS)
     RV32_VM_BENCH_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
   )
 
-  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  if(HOGD_RV32_ENABLE_LTO)
     set_property(TARGET rv32_vm_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
 endif()

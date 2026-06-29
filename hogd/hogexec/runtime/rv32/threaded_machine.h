@@ -713,6 +713,46 @@ le_store(uint8_t *mem, uint32_t addr, uint32_t v)
   std::memcpy(mem + addr, &v, Width);
 }
 
+// Consensus-relevant load/store core, factored out of the nine handler bodies
+// (plain + fused) that used to repeat it inline. Compute addr = base + imm,
+// bounds-check it for Width, and on success perform the access; return false
+// (touching nothing) on an out-of-bounds address so the handler can
+// HOGD_MUSTTAIL into trap_at at the *faulting slot's* pc. always_inline: this
+// is the hot memory path, so the helper folds into the handler and the trap
+// tail-call stays in the handler body (no frame growth). try_load yields the
+// loaded (sign-extended if requested) value via `out` rather than writing a
+// register, so the fused load handlers can feed it straight into the next op
+// without a regs_ round trip; the plain handlers write regs_[rd] = out.
+template<uint32_t Width, bool SignExtend>
+[[gnu::always_inline]] inline bool
+try_load(const uint8_t *mem, uint32_t memsize, uint32_t base, int32_t imm,
+         uint32_t &out)
+{
+  const uint32_t addr = base + bits_from_i32(imm);
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    return false;
+  }
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  out = v;
+  return true;
+}
+
+template<uint32_t Width>
+[[gnu::always_inline]] inline bool
+try_store(uint8_t *mem, uint32_t memsize, uint32_t base, int32_t imm,
+          uint32_t value)
+{
+  const uint32_t addr = base + bits_from_i32(imm);
+  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+    return false;
+  }
+  le_store<Width>(mem, addr, value);
+  return true;
+}
+
 // Loads/stores are non-barriers: no self-charge (their gas is in the run total
 // pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
 // still fault (oob), which is terminal.
@@ -720,14 +760,11 @@ template<bool Trace, uint32_t Width, bool SignExtend>
 StepResult
 op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  uint32_t v;
+  if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
+                                   v)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
-  }
-  uint32_t v = le_load<Width>(mem, addr);
-  if constexpr (SignExtend) {
-    v = sign_extend<Width * 8>(v);
   }
   c.m->regs_[ip->rd] = v;
   HOGD_THREAD_NEXT(c, ip + 1);
@@ -737,12 +774,11 @@ template<bool Trace, uint32_t Width>
 StepResult
 op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  if (!try_store<Width>(mem, memsize, c.m->regs_[ip->rs1], ip->rb.imm16,
+                        c.m->regs_[ip->rb.rs2])) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
   }
-  le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
   HOGD_THREAD_NEXT(c, ip + 1);
 }
 
@@ -767,27 +803,35 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 // load-use dependency chain. (rd is still written for architectural visibility
 // / the trace step.) When both sources alias the load dest, LoadedIsRs1 wins
 // and the rs2 read happens to reload the same value -- still correct.
+// Spill gas + retire op1 (a non-faulting head: alu/load-ok) as a kContinue step
+// landing at op2's pc, matching the unfused trace. Defined here so the four
+// hand-fused handlers below (op_load_rr/op_load_ri/op_lui_addi/op_auipc_jalr)
+// share it with the generic two-op handlers further down, instead of repeating
+// the three-statement retire sequence -- which must stay byte-identical to the
+// unfused trace -- by hand.
+#define HOGD_RETIRE_OP1(c, ip)                                                 \
+  do {                                                                         \
+    (c).m->gas_remaining_ = gas;                                               \
+    (c).m->pc_ = pc_of((c), (ip) + 1);                                         \
+    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
+  } while (0)
+
 template<bool Trace, uint32_t Width, bool SignExtend, bool LoadedIsRs1,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
 op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  uint32_t v;
+  if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
+                                   v)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
-  }
-  uint32_t v = le_load<Width>(mem, addr);
-  if constexpr (SignExtend) {
-    v = sign_extend<Width * 8>(v);
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
     // Retire the load as its own step (mirrors op_load's HOGD_THREAD_NEXT) so
     // the rr observes the same pre-state, and pc/regs, that it would unfused.
-    c.m->gas_remaining_ = gas;
-    c.m->pc_ = pc_of(c, ip + 1);
-    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+    HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *rr = ip + 1;
   if constexpr (LoadedIsRs1) {
@@ -810,20 +854,15 @@ template<bool Trace, uint32_t Width, bool SignExtend,
 StepResult
 op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  uint32_t v;
+  if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
+                                   v)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
   }
-  uint32_t v = le_load<Width>(mem, addr);
-  if constexpr (SignExtend) {
-    v = sign_extend<Width * 8>(v);
-  }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
-    c.m->gas_remaining_ = gas;
-    c.m->pc_ = pc_of(c, ip + 1);
-    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+    HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *ri = ip + 1;
   c.m->regs_[ri->rd] = Fn(v, bits_from_i32(ri->imm));
@@ -845,9 +884,7 @@ op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     // unfused pair: lui writes the upper immediate (the full constant minus the
     // addi's, recovered from the preserved addi slot at ip+1).
     c.m->regs_[ip->rd] = bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm);
-    c.m->gas_remaining_ = gas;
-    c.m->pc_ = pc_of(c, ip + 1);
-    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+    HOGD_RETIRE_OP1(c, ip);
   }
   c.m->regs_[ip->rd] = bits_from_i32(ip->imm); // full 32-bit constant
   HOGD_THREAD_NEXT(c, ip + 2);
@@ -875,9 +912,7 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   // auipc dest == jalr base; visible to the callee, so write it.
   c.m->regs_[ip->rs1] = auipc_val;
   if constexpr (Trace) {
-    c.m->gas_remaining_ = gas;
-    c.m->pc_ = pc_of(c, ip + 1);
-    c.m->obs_->on_retire(capture(c), StepResult::kContinue);
+    HOGD_RETIRE_OP1(c, ip);
   }
   const uint32_t target =
       (auipc_val + bits_from_i32((ip + 1)->imm)) & ~uint32_t{1};
@@ -899,15 +934,6 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 // `imm`, an R-type the {imm16, rs2} arm. Memory ops trap at their own pc
 // (op1 -> ip, op2 -> ip+1); op1's load/store fault check runs before op1
 // retires, op2's after.
-
-// Spill gas + retire op1 (a non-faulting head: alu/load-ok) as a kContinue step
-// landing at op2's pc, matching the unfused trace.
-#define HOGD_RETIRE_OP1(c, ip)                                                 \
-  do {                                                                         \
-    (c).m->gas_remaining_ = gas;                                               \
-    (c).m->pc_ = pc_of((c), (ip) + 1);                                         \
-    (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
-  } while (0)
 
 // alu ; alu  (e.g. sll;or, addi;addi, addi;sll, srl;addi)
 template<bool Trace, uint32_t (*Fn1)(uint32_t, uint32_t), bool Imm1,
@@ -940,12 +966,11 @@ op_alu_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *st = ip + 1;
-  const uint32_t addr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  if (!try_store<Width>(mem, memsize, c.m->regs_[st->rs1], st->rb.imm16,
+                        c.m->regs_[st->rb.rs2])) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
                                                           gas);
   }
-  le_store<Width>(mem, addr, c.m->regs_[st->rb.rs2]);
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -962,14 +987,11 @@ op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *ld = ip + 1;
-  const uint32_t addr = c.m->regs_[ld->rs1] + bits_from_i32(ld->imm);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  uint32_t v;
+  if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ld->rs1], ld->imm,
+                                   v)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ld, mem, memsize,
                                                           gas);
-  }
-  uint32_t v = le_load<Width>(mem, addr);
-  if constexpr (SignExtend) {
-    v = sign_extend<Width * 8>(v);
   }
   c.m->regs_[ld->rd] = v;
   HOGD_THREAD_NEXT(c, ip + 2);
@@ -983,12 +1005,11 @@ StepResult
 op_store_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
              uint64_t gas)
 {
-  const uint32_t addr = c.m->regs_[ip->rs1] + bits_from_i32(ip->rb.imm16);
-  if (!memory_range_in_bounds<Width>(memsize, addr)) {
+  if (!try_store<Width>(mem, memsize, c.m->regs_[ip->rs1], ip->rb.imm16,
+                        c.m->regs_[ip->rb.rs2])) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
   }
-  le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
@@ -1006,26 +1027,22 @@ StepResult
 op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
               uint64_t gas)
 {
-  const uint32_t laddr = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
-  if (!memory_range_in_bounds<LWidth>(memsize, laddr)) {
+  uint32_t v;
+  if (!try_load<LWidth, LSignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
+                                     v)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
                                                           gas);
-  }
-  uint32_t v = le_load<LWidth>(mem, laddr);
-  if constexpr (LSignExtend) {
-    v = sign_extend<LWidth * 8>(v);
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *st = ip + 1;
-  const uint32_t saddr = c.m->regs_[st->rs1] + bits_from_i32(st->rb.imm16);
-  if (!memory_range_in_bounds<SWidth>(memsize, saddr)) {
+  if (!try_store<SWidth>(mem, memsize, c.m->regs_[st->rs1], st->rb.imm16,
+                         c.m->regs_[st->rb.rs2])) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
                                                           gas);
   }
-  le_store<SWidth>(mem, saddr, c.m->regs_[st->rb.rs2]);
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
