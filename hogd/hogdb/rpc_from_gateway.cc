@@ -157,23 +157,49 @@ HogDBGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
   HogDBDAO &db = ctx_.get_db();
 
-  // Capture the committed height once up-front so every item in the
-  // response is labeled as coming from the same snapshot.  Any commits
-  // that land between now and the individual reads would bump the tip,
-  // but the reads below still see the pre-commit state (ramdb applies
-  // committed state atomically per block).
-  BlockHeight height = ctx_.get_height_threadsafe();
+  // Snapshot the committed tip once up-front so every item in the response
+  // is labeled with the same height.  This is a TOCTOU: a block that
+  // commits between this snapshot and the reads below applies its data to
+  // ramdb (BlockTX::commit) *before* it advances the tip (update_dbtip), so
+  // the reads can observe height-(H+1) state while `tip.height` still names
+  // H.  After the reads, re-check the snapshot: if a commit landed (or is
+  // mid-publication) the height label is stale, and we retry against a fresh
+  // snapshot rather than surface the race.  Mirrors the staleness check in
+  // HogDBExecutorRpc::get_snapshot_item.
+  //
+  // A commit landing inside the read window is rare and discrete, so a fresh
+  // snapshot effectively always succeeds on the next attempt — more than one
+  // retry should never happen in practice.  The bounded cap is purely a
+  // backstop against pathological commit churn; exhausting it is reported as
+  // an internal error rather than looping forever.
+  constexpr int kMaxAttempts = 5;
+  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    // If a commit is mid-publication, wait it out so the tip and ramdb data
+    // are consistent before reading (rather than burning a retry attempt).
+    ctx_.wait_for_no_commit_publishing();
 
-  DbGatewayPayload payload;
-  payload.block_height = height;
-  payload.items.reserve(batch.size());
-  for (AddressAndKey const &k : batch)
-    payload.items.push_back(read_one_item(db, k));
+    DbTip tip = ctx_.get_tip();
 
-  DbGatewayResult ret;
-  ret.error(RPCError::kRPCNone);
-  ret.payload() = std::move(payload);
-  return ret;
+    DbGatewayPayload payload;
+    payload.block_height = tip.height;
+    payload.items.reserve(batch.size());
+    for (AddressAndKey const &k : batch)
+      payload.items.push_back(read_one_item(db, k));
+
+    if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
+      continue;
+    }
+
+    DbGatewayResult ret;
+    ret.error(RPCError::kRPCNone);
+    ret.payload() = std::move(payload);
+    return ret;
+  }
+
+  error("dbgateway_get_items: committed snapshot kept moving across {} "
+        "attempts; giving up",
+        kMaxAttempts);
+  return DbGatewayResult(RPCError::kRPCUnrecoverable);
 }
 
 } // namespace hogd
