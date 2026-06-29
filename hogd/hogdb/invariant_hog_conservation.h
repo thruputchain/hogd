@@ -31,7 +31,8 @@ private:
                                            HogDBStatus<DBItem> const &after);
   void handle_address_auth_data_item_change(HogDBStatus<DBItem> const &before,
                                             HogDBStatus<DBItem> const &after);
-  void handle_replay_cache_item_change(HogDBStatus<DBItem> const &before,
+  void handle_replay_cache_item_change(std::span<const std::byte> key,
+                                       HogDBStatus<DBItem> const &before,
                                        HogDBStatus<DBItem> const &after);
 
   void update_total_supply(int128_t change);

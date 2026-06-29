@@ -27,6 +27,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -748,20 +749,38 @@ HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
           return;
         }
         for (const auto &change : vec) {
+          auto key = change.key();
+
+          // Feed the debug invariants the before/after state for every
+          // committed item change, mirroring the typed write_* methods. The
+          // whole feed is debug-only (invariants are only enabled under
+          // is_debug_build()), so it compiles out of release and leaves the
+          // parallel apply hot path untouched. Keys are partitioned
+          // one-per-lock across the per-thread vectors, so no other worker
+          // mutates this key concurrently and the before/after reads are
+          // consistent.
+          [[maybe_unused]] std::optional<HogDBStatus<DBItem>> before;
+          if constexpr (is_debug_build()) {
+            before = get_before_item(key);
+          }
+
           switch (change.op) {
           case MaterializedChange::Op::kPut:
-            if (auto r = db_.put(change.key(), change.type, change.value());
-                !r) {
+            if (auto r = db_.put(key, change.type, change.value()); !r) {
               had_error.store(true, std::memory_order_relaxed);
               return;
             }
             break;
           case MaterializedChange::Op::kRemove:
-            if (auto r = db_.remove(change.key()); !r) {
+            if (auto r = db_.remove(key); !r) {
               had_error.store(true, std::memory_order_relaxed);
               return;
             }
             break;
+          }
+
+          if constexpr (is_debug_build()) {
+            update_invariants_post(key, before);
           }
         }
       },

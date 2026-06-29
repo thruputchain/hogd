@@ -25,6 +25,7 @@
 #include "types.hh"
 
 #include "hogd/base/bits.h"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -46,6 +47,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
@@ -1225,6 +1227,44 @@ TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
   ASSERT_TRUE(block_tx.get().commit());
 
   EXPECT_TRUE(db_.check_invariants());
+}
+
+TEST_F(HogDBTest, ApplyFeedsDebugInvariants)
+{
+  // Regression guard against the debug invariants being silently disconnected
+  // from the commit path. Block finalization flushes committed item changes
+  // through HogDBDAO::apply, which must feed the invariants the before/after
+  // state of every change. When that feed is severed (as it was after
+  // finalization moved to ChangeSet/apply and stopped routing through the
+  // typed write_* methods), the invariants observe nothing and
+  // check_invariants() trivially returns true regardless of the state.
+  //
+  // We stage a balance creation with no offsetting transfer -- a deliberate
+  // conservation violation -- and flush it through apply(), the exact path
+  // block commit uses. The invariant must observe it and report the violation.
+  // If the feed is ever disconnected, total_supply_change_ stays zero and this
+  // EXPECT_FALSE fails.
+  //
+  // The invariants are only fed in debug builds (the feed is gated on
+  // is_debug_build()), so the violation is only observable there.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "debug invariants are only fed in debug builds";
+  }
+
+  db_.enable_debug_invariants(cost_model_);
+
+  Address addr = make_address(kAddress + 71);
+  auto balance_key = make_address_key(addr, Prefix::kBalance);
+  auto balance_bytes = int128_to_xdr_bytes(1000);
+  std::span<const std::byte> key_span = std::as_bytes(std::span(balance_key));
+  std::span<const std::byte> value_span =
+      std::as_bytes(std::span(balance_bytes));
+
+  auto changeset = db_.create_changeset();
+  changeset.put(key_span, kNNInt128, value_span);
+  ASSERT_TRUE(db_.apply(changeset));
+
+  EXPECT_FALSE(db_.check_invariants());
 }
 
 TEST_F(HogDBTest, DbHashDeltaBytestringLockMatchesFullStateHash)

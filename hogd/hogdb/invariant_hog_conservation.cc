@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
@@ -58,7 +59,7 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
     handle_contract_data_item_change(before, after);
     return;
   case Prefix::kReplayCache:
-    handle_replay_cache_item_change(before, after);
+    handle_replay_cache_item_change(key, before, after);
     return;
   case Prefix::kRetrocausalQueueBlock:
     // The cost of queue blocks is handled by the metadata recorded in
@@ -192,22 +193,33 @@ HogConservationInvariant::handle_address_auth_data_item_change(
 
 void
 HogConservationInvariant::handle_replay_cache_item_change(
-    HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
+    std::span<const std::byte> key, HogDBStatus<DBItem> const &before,
+    HogDBStatus<DBItem> const &after)
 {
+  // Two distinct items share the kReplayCache prefix: the per-address metadata
+  // item (key = prefix + address) and the per-height data items (key = prefix
+  // + address + height). A replay cache's locked storage cost is a single
+  // charge derived from the metadata's total nonce count (see
+  // ReplayCacheLock::commit_change), so the whole cost is attributed to the
+  // metadata item; the data items carry no independent locked cost.
+  if (key.size() != kAddressSize + 1) {
+    return;
+  }
+
   auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
       return 0;
     }
     assert(item.value().type == 0);
-    ReplayCacheData cache_data;
+    ReplayCacheMetadata meta;
     try {
-      x23::deserialize(&cache_data, x23::BufViewEnd(item.value().value));
+      x23::deserialize(&meta, x23::BufViewEnd(item.value().value));
     } catch (x23::XdrException &e) {
-      warn("failed to deserialize relay cache data: {}", e.what());
+      warn("failed to deserialize replay cache metadata: {}", e.what());
       assert(false);
       return 0;
     }
-    return cost_model_.get_replay_cache_cost(cache_data.nonces.size());
+    return cost_model_.get_replay_cache_cost(static_cast<size_t>(meta.size));
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
