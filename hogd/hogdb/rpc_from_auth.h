@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -32,12 +34,20 @@ public:
         std::string_view(version::kHogdProtocol())) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
-    if (!co_await ctx_.get_auth_change_subscription_manager()
-             .add_full_auth_change_subscriber(std::move(card))) {
+    std::optional<BlockHeight> last_published =
+        co_await ctx_.get_auth_change_subscription_manager()
+            .add_full_auth_change_subscriber(std::move(card));
+    if (!last_published) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
     DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
-    ret.current_height() = get_expected_query_height();
+    // Report at least the highest height already published to other
+    // subscribers when this one was inserted. If the new subscriber missed that
+    // height's publish (it was dispatched before the insert), reporting the
+    // bare committed height would leave its auth server parked on the missing
+    // height forever (issue #2814). Covering it makes the missed height stale.
+    ret.current_height() =
+        std::max(get_expected_query_height(), *last_published);
     co_return ret;
   }
 

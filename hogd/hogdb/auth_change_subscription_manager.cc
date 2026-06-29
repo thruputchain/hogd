@@ -1,5 +1,6 @@
 #include "auth_change_subscription_manager.h"
 
+#include <algorithm>
 #include <cassert>
 #include <exception>
 #include <optional>
@@ -83,7 +84,7 @@ AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
   }
 }
 
-x23::Async<bool>
+x23::Async<std::optional<BlockHeight>>
 AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
 {
 
@@ -91,7 +92,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   if (!helper.parse(card.address_for_db)) {
     error("AuthChangeSubscriptionManager: Failed to parse address {}",
           card.address_for_db);
-    co_return false;
+    co_return std::nullopt;
   }
 
   auto addr = helper.to_addr(/*dns=*/true);
@@ -99,7 +100,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
     error("AuthChangeSubscriptionManager: Failed to convert address {} to "
           "sockaddr_storage",
           card.address_for_db);
-    co_return false;
+    co_return std::nullopt;
   }
 
   std::optional<auth_db_client_t> client = co_await create_client(*addr, card);
@@ -107,11 +108,10 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
     error("AuthChangeSubscriptionManager: Failed to create client for {} on "
           "address {}",
           card.address_for_db, x23::show_ipaddr(*addr));
-    co_return false;
+    co_return std::nullopt;
   }
 
-  co_await insert_client(std::move(card), std::move(*client));
-  co_return true;
+  co_return co_await insert_client(std::move(card), std::move(*client));
 }
 
 x23::Async<std::vector<AuthChangeSubscriptionManager::PendingPublish>>
@@ -122,6 +122,13 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
 
   x23::CoroGuard guard;
   co_await guard(lock_);
+
+  // Record the watermark under lock_, in the same critical section that
+  // captures the subscriber set. A subscriber inserted after this point has
+  // missed height [height]; insert_client reports this watermark so the intro
+  // height can cover it rather than parking on it forever (issue #2814).
+  // Detached publishes can run out of order, so take the max, not the last.
+  last_published_height_ = std::max(last_published_height_, height);
 
   pending.reserve(auth_db_clients_.size());
   for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
@@ -153,7 +160,7 @@ AuthChangeSubscriptionManager::erase_client_if_stale(
   }
 }
 
-x23::Async<void>
+x23::Async<BlockHeight>
 AuthChangeSubscriptionManager::insert_client(AuthCard card,
                                              auth_db_client_t client)
 {
@@ -163,7 +170,7 @@ AuthChangeSubscriptionManager::insert_client(AuthCard card,
   [[maybe_unused]] auto [_, inserted] =
       auth_db_clients_.emplace(std::move(card), std::move(client));
   assert(inserted);
-  co_return;
+  co_return last_published_height_;
 }
 
 } // namespace hogd
