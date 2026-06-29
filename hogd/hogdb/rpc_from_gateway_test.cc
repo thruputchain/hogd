@@ -174,12 +174,18 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
   EXPECT_EQ(gateway_value, int128_t{1});
 }
 
-// A block commit applies its data to ramdb before it advances the tip, and
-// holds commit_publishing_ across that window. A batch read overlapping a
-// commit publication must not surface the race to the caller: the gateway
-// waits the publication out / retries and ultimately returns a consistent
-// snapshot with kRPCNone.
-TEST(HogDBGatewayRpcTest, GetItemsRetriesPastCommitPublication)
+// Exercises the wait-out-publication path. While a commit is mid-publication
+// (commit_publishing_ held), a committed-tip read blocks in
+// wait_for_no_commit_publishing() instead of reading a tip that is
+// inconsistent with the just-applied ramdb data; once the publication
+// finishes the read proceeds and returns kRPCNone.
+//
+// Note: releasing the guard here does NOT advance the tip, so after the wait
+// the post-read staleness check passes on the first attempt and the retry
+// (`continue`) branch is not taken in this test. The staleness decision that
+// drives that branch is covered directly by
+// CommittedReadStaleDetectsTipAdvance.
+TEST(HogDBGatewayRpcTest, GetItemsWaitsOutCommitPublication)
 {
   HogDBDAO dao = make_dao();
 
@@ -196,7 +202,7 @@ TEST(HogDBGatewayRpcTest, GetItemsRetriesPastCommitPublication)
   HogDBGatewayRpc gateway(ctx);
 
   // Hold a commit publication open, then release it from another thread once
-  // the gateway has had a chance to observe it and start waiting/retrying.
+  // the gateway has had a chance to observe it and block in the wait.
   auto publication_guard =
       std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{1});
 
