@@ -220,15 +220,19 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   else if (new_entries_count < previous_entries_count) {
     // Rollback case: unreserve entries that are no longer needed.
     //
-    // CRITICAL: the consume validation block below has fallible returns
-    // (kInvalidExecutorBehavior checks and DAO reads). If any fired after
-    // this fetch_sub, ScopedUndo would fetch_add the entries back,
-    // potentially pushing reserved_entry_count_ above
-    // kRetrocausalQueueBlockEntriesMaxLen and causing a spurious kConflict
-    // for a concurrent transaction. This fetch_sub is only safe because
-    // this shrink branch is only reachable via rollback_to_savepoint, which
-    // restores a previously-validated change — so the consume checks below
-    // cannot fail again.
+    // This shrink branch is only reachable via rollback_to_savepoint, which
+    // restores a previously-validated change. The consume validation block
+    // below re-reads block sizes from the live DAO, so it CAN still fail here:
+    // a committed sibling block may have pruned those blocks out from under us.
+    // But that same sibling commit invalidates this BlockTX first, so such a
+    // failure only ever happens on a block that is already doomed and will be
+    // discarded. When it does, ScopedUndo's fetch_add may transiently push
+    // reserved_entry_count_ back above kRetrocausalQueueBlockEntriesMaxLen and
+    // cause a spurious kConflict for a concurrent transaction sharing this lock
+    // — but that sibling transaction is in the same invalidated block and is
+    // itself about to observe kStaleBlock, so the inflation is harmless. The
+    // failure is surfaced to the caller by BlockTX::modify_lock (translating it
+    // to kStaleBlock) and handled in InvokeTX::rollback_to_savepoint.
     const size_t entries_to_unreserve =
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,

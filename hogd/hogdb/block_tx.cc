@@ -150,7 +150,20 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  return do_modify_lock(*lock, old_change, new_change, ctx);
+  auto r = do_modify_lock(*lock, old_change, new_change, ctx);
+  if (!r && is_invalidated()) [[unlikely]] {
+    // A modify of an already-locked item only re-derives cost; its sole
+    // fresh-error source is re-reading the live DAO for an RCQ consume's
+    // past-block sizes. A committed sibling block can prune those blocks --
+    // and invalidates us as it does so. Surface that as kStaleBlock so callers
+    // can tell a doomed block apart from a real error. The post-failure
+    // is_invalidated() re-check also closes the race where the sibling's block
+    // removal becomes visible before its invalidate store: observing the
+    // removal happens-after the invalidate, so this load sees it. Any failure
+    // on a non-invalidated block propagates unchanged.
+    return HogDBError(HogDBCode::kStaleBlock);
+  }
+  return r;
 }
 
 void

@@ -3747,6 +3747,98 @@ TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   ASSERT_TRUE(block_tx.get().commit());
 }
 
+// Regression: rollback_to_savepoint must not crash or leave inconsistent state
+// when restoring an RCQ consume whose past block was pruned by a committed
+// sibling block. modify_lock re-derives the consume's past-block cost from the
+// live DAO; a sibling that deletes the queue and commits removes that block
+// (and invalidates this block, as invalidate_siblings would). The restore's
+// re-read then returns kNotFound. rollback_to_savepoint must surface that as a
+// stale block rather than assert(ret)-crash / desync the lock from changes_.
+TEST_F(HogDBTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+
+  Address queue_addr = make_address(kAddress + 31);
+  Address other_addr = make_address(kAddress + 32);
+  ItemKey queue_key = make_key(kAddress + 31, 1);
+  ItemKey other_key = make_key(kAddress + 32, 1);
+  setup_contract_address(queue_addr);
+  setup_contract_address(other_addr);
+
+  // A delta that consumes `partial` entries from past block 1 and inserts
+  // `inserts`. The past-block consume forces try_atomic_change_lock to read
+  // block 1's size from the DAO.
+  auto make_consume_insert_delta = [](uint64_t partial,
+                                      const std::vector<uint8_t> &inserts) {
+    RetrocausalQueueDelta delta;
+    for (uint8_t b : inserts) {
+      delta.insert.added_entries.push_back(QueueEntry{b});
+    }
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
+    delta.consume->past_block_consume.partial_consumed_number = partial;
+    return delta;
+  };
+
+  // Block 1: seed the queue with one entry, producing block 1 in the DAO.
+  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+    RetrocausalQueueDelta seed;
+    seed.insert.added_entries.push_back(QueueEntry{uint8_t{0x11}});
+    ASSERT_TRUE(itx.request_retrocausal_queue(queue_key, seed, kNoFlags));
+  });
+  ASSERT_TRUE(db_.read_retrocausal_queue_block(queue_key, 1));
+
+  // Block 2 (the to-be-stale block): a consume that reads past block 1, then a
+  // savepoint and a second consume that grows the insert high-water mark so the
+  // restore takes the shrink branch.
+  PerThreadARC<BlockTX> stale_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX stale_tx(stale_block_tx);
+
+  auto depth0 = make_consume_insert_delta(/*partial=*/1, {0xAA});
+  ASSERT_TRUE(stale_tx.request_retrocausal_queue(queue_key, depth0, kNoFlags));
+
+  int savepoint = stale_tx.create_savepoint();
+  auto depth1 = make_consume_insert_delta(/*partial=*/1, {0xAA, 0xBB});
+  ASSERT_TRUE(stale_tx.request_retrocausal_queue(queue_key, depth1, kNoFlags));
+
+  // A sibling block-2 deletes the same queue and commits, pruning block 1 from
+  // the live DAO and invalidating the stale block (as invalidate_siblings
+  // would during commit publication).
+  PerThreadARC<BlockTX> sibling_block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
+  {
+    InvokeTX sibling_tx(sibling_block_tx);
+    ASSERT_TRUE(sibling_tx.request_deletion(queue_key, kNoFlags));
+    ASSERT_TRUE(sibling_tx.sync_balance_locks());
+    ASSERT_TRUE(sibling_tx.commit());
+    sibling_tx.release_blocktx_reference();
+  }
+  ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
+  stale_block_tx.get().invalidate();
+  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_FALSE(db_.read_retrocausal_queue_block(queue_key, 1));
+
+  // Roll back the savepoint. The restore re-derives the depth-0 consume cost by
+  // reading the now-deleted block 1. Before the fix this asserted(ret) and
+  // crashed; now it must return cleanly.
+  stale_tx.rollback_to_savepoint(savepoint - 1);
+
+  // The block stays invalidated and the caller observes kStaleBlock on its next
+  // locked operation.
+  EXPECT_TRUE(stale_block_tx.get().is_invalidated());
+  std::array<std::byte, 1> follow_up_buf{std::byte{0x01}};
+  auto follow_up = stale_tx.request_bytes(other_key, follow_up_buf, kNoFlags);
+  ASSERT_FALSE(follow_up.has_value());
+  EXPECT_EQ(follow_up.error().code(), HogDBCode::kStaleBlock);
+
+  stale_tx.release_blocktx_reference();
+}
+
 } // namespace hogd
 
 int
