@@ -60,6 +60,20 @@ TEST_F(HttpTest, MalformedRequestLineReturns400)
   EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"), std::string::npos);
 }
 
+TEST_F(HttpTest, RequestSplitAcrossReadsIsParsedCorrectly)
+{
+  server_.add_route("/hello", [] {
+    return HttpResponse{.status = 200,
+                        .content_type = "application/test",
+                        .body = "hello"};
+  });
+
+  std::string response = request_chunked(
+      start(), {"GET /hel", "lo HTTP/1.1\r\nHost: localhost\r\n\r\n"});
+  EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_TRUE(response.ends_with("\r\n\r\nhello"));
+}
+
 TEST_F(HttpTest, MultipleRoutesDispatchIndependently)
 {
   server_.add_route("/a", [] {

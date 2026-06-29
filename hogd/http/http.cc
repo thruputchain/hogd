@@ -220,6 +220,10 @@ HttpServer::handle_connection(x23::UniqueFd fd)
   std::string request;
   while (request.size() < kMaxRequestHeaderBytes &&
          !has_complete_headers(request)) {
+    // cp_.read appends to buf rather than overwriting it, so clear it each
+    // iteration; otherwise a request arriving across multiple reads would
+    // re-append every previously read chunk and corrupt the request.
+    buf.clear();
     auto read_result = co_await cp_.read(fd, &buf, 4096, /*full=*/false);
     if (!read_result || *read_result == 0) {
       co_return;
