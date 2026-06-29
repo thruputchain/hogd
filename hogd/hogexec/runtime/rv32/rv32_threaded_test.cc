@@ -290,6 +290,37 @@ TEST(Rv32Threaded, movedFromMachineDoesNotReleaseItsSlot)
   EXPECT_EQ(target.reg(3), 17U);
 }
 
+// Regression for issue #2824: MemorySlot release is gated on an explicit
+// ownership bit, never on whether the moved-from std::vector happens to be
+// empty(). The standard only guarantees a moved-from library object is "valid
+// but unspecified", so a conforming std::vector may leave the source
+// non-empty. This models that state and proves the moved-from slot still
+// releases nothing while the move target retains sole ownership.
+TEST(Rv32Threaded, memorySlotMovedFromDoesNotReleaseEvenWhenNonEmpty)
+{
+  memory_slot_pool() = MemorySlotPool{};
+  {
+    std::optional<MemorySlot> source(std::in_place);
+    std::optional<MemorySlot> target(std::in_place, std::move(*source));
+
+    // Simulate a conforming std::vector whose moved-from source stays
+    // non-empty; ownership tracking must ignore the vector's value.
+    source->bytes().resize(1);
+    ASSERT_FALSE(source->bytes().empty());
+
+    // The moved-from slot owns nothing now, so destroying it releases nothing.
+    ASSERT_EQ(memory_slot_pool().count, 0U);
+    source.reset();
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+
+    // The move target is the sole owner; destroying it returns exactly one
+    // slot to the pool.
+    target.reset();
+    EXPECT_EQ(memory_slot_pool().count, 1U);
+  }
+  memory_slot_pool() = MemorySlotPool{};
+}
+
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
 {
   using test_program::branch;

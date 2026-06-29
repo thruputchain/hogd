@@ -166,6 +166,45 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
   }
 }
 
+// RAII owner of a single guest-memory pool slot. Acquires a buffer from the
+// thread-local pool on construction and returns it on destruction; moving a
+// slot transfers the buffer to the target and marks the source as no longer
+// owning, so a moved-from slot releases nothing. Keeping ownership in this one
+// type means the owning machine needs no destructor or custom move of its own,
+// and the release decision rides on an explicit ownership bit rather than on
+// the moved-from std::vector value -- the standard only guarantees a moved-from
+// library object is "valid but unspecified", so a moved-from vector is not
+// guaranteed empty(). The pool is thread_local, so a slot must be destroyed on
+// its constructing thread while that thread is alive (true for the
+// per-invocation stack machines); do not give one static storage duration.
+class MemorySlot {
+public:
+  MemorySlot() : buf_(acquire_memory_slot()) {}
+  ~MemorySlot()
+  {
+    if (owns_) {
+      release_memory_slot(std::move(buf_));
+    }
+  }
+  MemorySlot(MemorySlot &&other) noexcept : buf_(std::move(other.buf_))
+  {
+    other.owns_ = false;
+  }
+  MemorySlot &operator=(MemorySlot &&) = delete;
+  MemorySlot(const MemorySlot &) = delete;
+  MemorySlot &operator=(const MemorySlot &) = delete;
+
+  [[nodiscard]] std::vector<uint8_t> &bytes() noexcept { return buf_; }
+  [[nodiscard]] const std::vector<uint8_t> &bytes() const noexcept
+  {
+    return buf_;
+  }
+
+private:
+  std::vector<uint8_t> buf_;
+  bool owns_ = true;
+};
+
 // alignas(64): pin the base to a cache-line boundary so member offsets map
 // deterministically to cache lines. This is load-bearing for *consistent*
 // benchmarking (without it base-mod-64 varies per allocation and the same
@@ -182,40 +221,27 @@ public:
   {
     const auto &image = pre_instantiation.initial_memory_image_;
     assert(image.size() <= kMaxMemoryBytes);
-    // The recycled slot is dirty, but the image is full-size (zero-padded to
+    // memory_ acquired its slot from the pool on construction. The recycled
+    // slot is dirty, but the image is full-size (zero-padded to
     // total_memory_size), so this assign fully overwrites it -- and the
     // reserved capacity means no allocation on a pool hit.
-    memory_ = acquire_memory_slot();
-    memory_.assign(image.begin(), image.end());
+    memory_.bytes().assign(image.begin(), image.end());
 
     regs_.fill(0);
     // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
     // matches canonical Machine::reset and the old reset() path.
-    regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
 
     exec_ = std::span(pre_instantiation.exec_);
     max_pc_ = (exec_.size() - 1) * kInstructionBytes;
     gas_remaining_ = gas;
   }
 
+  // Defaulted move construction (and implicit destruction): the memory_ slot is
+  // a MemorySlot, which transfers ownership on move and returns the buffer to
+  // the pool on destruction, so the machine itself needs no special-member code
+  // and the cleanup never depends on the moved-from std::vector value.
   ThreadedMachine(ThreadedMachine &&) noexcept = default;
-
-  // An empty memory_ means this machine was moved from, so the buffer is
-  // owned -- and later released -- by the move target, not here. The
-  // standard guarantees vector move *construction* leaves the source empty()
-  // (post-move capacity() would be unspecified), and move construction is
-  // the only move op here (assignment is suppressed by the const members);
-  // real machines always have non-empty memory_ (zero memory_bytes is
-  // rejected at artifact validation). The pool is thread_local, so a machine
-  // must be destroyed on its constructing thread while that thread is alive
-  // -- true for the per-invocation stack machines; do not give a machine
-  // static storage duration.
-  ~ThreadedMachine()
-  {
-    if (!memory_.empty()) {
-      release_memory_slot(std::move(memory_));
-    }
-  }
 
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
   // pre-instantiation must outlive the machine. Reject binding a temporary,
@@ -228,14 +254,14 @@ public:
     // memory_ is sized to the (already zero-padded) image, so restoring it is a
     // straight copy -- no separate tail zero-fill needed.
     std::ranges::copy(pre_instantiation_->initial_memory_image_,
-                      memory_.begin());
+                      memory_.bytes().begin());
     pc_ = 0;
     gas_remaining_ = gas;
     trap_ = Trap::kNone;
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    regs_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
   }
@@ -275,7 +301,7 @@ public:
   [[nodiscard]] Trap trap() const { return trap_; }
   [[nodiscard]] bool halted() const { return halted_; }
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
-  [[nodiscard]] std::span<uint8_t> memory() { return memory_; }
+  [[nodiscard]] std::span<uint8_t> memory() { return memory_.bytes(); }
 
   [[nodiscard]] bool consume_gas(uint64_t amount)
   {
@@ -320,7 +346,7 @@ public:
   // per-run-head store doesn't disturb this read-mostly region.
   uint32_t max_pc_ = 0; // program size in bytes; op_jalr bounds-check
                         // (PreInstantiation::create)
-  std::vector<uint8_t> memory_;
+  MemorySlot memory_; // owns this machine's guest-memory pool slot (see above)
   std::span<const Slot> exec_;   // size n+1; [n] is the bad-pc sentinel
   TraceObserver *obs_ = nullptr; // set on the traced run(); cold
   ThreadedMachinePreInstantiation const *pre_instantiation_ = nullptr;
@@ -361,7 +387,7 @@ capture(const Ctx c)
   s.pc = c.m->pc_;
   std::copy_n(c.m->regs_.begin(), kRegisterCount, s.regs.begin());
   s.regs[0] = 0; // regs_[0] is the trash sink; architectural x0 is 0
-  s.memory.assign(c.m->memory_.begin(), c.m->memory_.end());
+  s.memory.assign(c.m->memory_.bytes().begin(), c.m->memory_.bytes().end());
   s.gas_remaining = c.m->gas_remaining_;
   s.trap = c.m->trap_;
   s.halted = c.m->halted_;
@@ -1822,7 +1848,7 @@ ThreadedMachine::view()
   return MachineView(pc_, gas_remaining_,
                      std::span<const uint32_t, kRegisterCount>(regs_.data(),
                                                                kRegisterCount),
-                     memory_);
+                     memory_.bytes());
 }
 
 template<bool Trace>
@@ -1831,8 +1857,8 @@ ThreadedMachine::drive()
 {
   Ctx c{.m = this, .base = exec_.data()};
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
-  uint8_t *mem = memory_.data();
-  const auto memsize = static_cast<uint32_t>(memory_.size());
+  uint8_t *mem = memory_.bytes().data();
+  const auto memsize = static_cast<uint32_t>(memory_.bytes().size());
   // Plain call+return, not a musttail: a non-static member function cannot
   // tail-call the free function enter_run (musttail needs matching signatures,
   // and the implicit `this` differs). enter_run begins the musttail chain,
@@ -1870,8 +1896,8 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   // capture(). next's pc == pc_after, matching the inline trap_at(..., next).
   Ctx c{.m = this, .base = exec_.data()};
   const Slot *next = c.base + (pc_ / kInstructionBytes);
-  uint8_t *mem = memory_.data();
-  const auto memsize = static_cast<uint32_t>(memory_.size());
+  uint8_t *mem = memory_.bytes().data();
+  const auto memsize = static_cast<uint32_t>(memory_.bytes().size());
 
   // Debit host gas before committing; over-budget host cannot mutate state.
   // Host memory writes persist on OOG (no per-ecall rollback).
