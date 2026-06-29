@@ -35,8 +35,8 @@ make_runtime_context(RuntimeEngine engine)
 namespace {
 // The Wasm host import names form the contract-visible `marmot::syscall` ABI.
 // link_fn() forwards these bytes to Rust, which decodes them as UTF-8 and
-// compares them exactly against the canonical SDK Wasm import names. Pin them to
-// `u8"..."` literals so the bytes are the standard-mandated UTF-8 (== ASCII)
+// compares them exactly against the canonical SDK Wasm import names. Pin them
+// to `u8"..."` literals so the bytes are the standard-mandated UTF-8 (== ASCII)
 // encoding rather than implementation-defined ordinary-literal bytes that
 // depend on `-fexec-charset`; an alternate execution charset could otherwise
 // fail Rust UTF-8 decoding or register a manifest that does not match canonical
