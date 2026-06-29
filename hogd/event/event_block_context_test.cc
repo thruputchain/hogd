@@ -14,11 +14,10 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/base/perthread.h"
-
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -26,10 +25,12 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
+#include "indexer.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fileio.h"
+#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
