@@ -1869,6 +1869,37 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
             InvokeErrorCode::Deterministic);
 }
 
+// memory_bytes == 0 is an explicitly allowed (degenerate) image: a zero-memory
+// contract. initial_memory must then be empty, which the size check enforces.
+TEST_F(Rv32RuntimeContextTest, VerifyAcceptsZeroMemoryBytesImage)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, rv32::RuntimeContractImage{
+                             .program = make_program({addi(1, 0, 1)}),
+                             .initial_memory = {},
+                             .memory_bytes = 0,
+                         }}});
+  auto contract = make_rv32_contract_xdr();
+
+  EXPECT_EQ(rv32_context.verify_contract(*contract), InvokeErrorCode::None);
+}
+
+// The other half of the bound: memory_bytes above kMaxMemoryBytes is rejected
+// at validation rather than deferred to a per-invocation construction trap.
+TEST_F(Rv32RuntimeContextTest, VerifyRejectsOversizedMemoryBytesImage)
+{
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, rv32::RuntimeContractImage{
+                             .program = make_program({addi(1, 0, 1)}),
+                             .initial_memory = {},
+                             .memory_bytes = rv32::kMaxMemoryBytes + 1,
+                         }}});
+  auto contract = make_rv32_contract_xdr();
+
+  EXPECT_EQ(rv32_context.verify_contract(*contract),
+            InvokeErrorCode::Deterministic);
+}
+
 // Metadata cross-check for SDK-lowered RV32 artifacts.
 TEST_F(Rv32RuntimeContextTest,
        LoweredSdkArtifactFormatFingerprintMatchesRuntime)

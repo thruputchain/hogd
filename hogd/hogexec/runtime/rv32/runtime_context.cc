@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -49,7 +50,12 @@ host_trap_code_to_invoke_status(uint32_t code)
 bool
 runtime_contract_image_is_valid(const RuntimeContractImage &image)
 {
-  return image.program != nullptr &&
+  // memory_bytes is a free uint32_t on the image; cap it at kMaxMemoryBytes so
+  // an oversized host config is rejected here as invalid rather than surfacing
+  // later as a per-invocation construction trap misreported as a guest fault.
+  // memory_bytes == 0 is allowed (a zero-memory contract is a valid degenerate
+  // image; initial_memory must then be empty, which the size check enforces).
+  return image.program != nullptr && image.memory_bytes <= kMaxMemoryBytes &&
          image.initial_memory.size() <= image.memory_bytes;
 }
 
