@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <format>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -202,8 +201,13 @@ std::pair<InvokeStatus<void>, GasAmount>
 WasmtimeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
+  // write_invoke_name() fills a stack buffer with canonical UTF-8/ASCII
+  // export-name bytes (independent of the ordinary execution charset, see hogd
+  // issue #2722). It must stay on the stack: this runs below the noexcept
+  // syscall_Invoke_inner() path (see the try/catch below), so an allocating
+  // std::string here could throw std::bad_alloc across the noexcept boundary.
   uint8_t method_name[16];
-  std::format_to(method_name, "{:016X}", method_id);
+  write_invoke_name(method_id, method_name);
 
   WasmtimeInvokeResult res =
       wasmtime_invoke(wasmtime_runtime_ptr_, &method_name[0], 16, gas_limit);

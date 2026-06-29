@@ -3,7 +3,6 @@
 #include <charconv>
 #include <cstddef>
 #include <cstring>
-#include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -212,11 +211,40 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
-  // Turns a method ID (uint32) into a method name string that
-  // can be invoked within wasm.
+  // Writes the 16-byte Wasm method export name for `method` into `out`.
+  //
+  // The hex digits are emitted from a `u8"..."` literal so the bytes are the
+  // standard-mandated UTF-8 (== ASCII) encoding regardless of the ordinary
+  // execution character set (`-fexec-charset`). Rust decodes this name as UTF-8
+  // before the Wasm export lookup, and the resulting dispatch feeds the
+  // consensus event root, so an ordinary `std::format("{:016X}", ...)` would
+  // make protocol-visible dispatch depend on implementation-defined literal
+  // bytes that can diverge across honest builds. See hogd issue #2722.
+  //
+  // This fills a caller-provided stack buffer and performs no allocation, so it
+  // is safe on the noexcept child-Invoke dispatch path where a std::bad_alloc
+  // would otherwise cross the noexcept boundary and terminate.
+  constexpr static void write_invoke_name(MethodID method, uint8_t (&out)[16])
+  {
+    constexpr std::u8string_view kHexDigits = u8"0123456789ABCDEF";
+    for (size_t i = 0; i < 16; ++i) {
+      auto const nibble = (method >> ((15 - i) * 4)) & 0xFU;
+      out[i] = static_cast<uint8_t>(kHexDigits[nibble]);
+    }
+  }
+
+  // Turns a method ID into the 16-byte method name string that is invoked
+  // within wasm. Prefer write_invoke_name() on hot or noexcept paths to avoid
+  // the allocation.
   constexpr static std::string invoke_name(MethodID method)
   {
-    return std::format("{:016X}", method);
+    uint8_t buf[16];
+    write_invoke_name(method, buf);
+    std::string name(16, '\0');
+    for (size_t i = 0; i < 16; ++i) {
+      name[i] = static_cast<char>(buf[i]);
+    }
+    return name;
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>

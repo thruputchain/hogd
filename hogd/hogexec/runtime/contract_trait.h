@@ -217,14 +217,26 @@ public:
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
-    auto entrypoint =
-        sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                  ContractTrait::kVersion, Name.get());
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
-      x23assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
-                sdk_method_id(entrypoint));
+      // The generated kEntrypoints constants are the charset-independent source
+      // of truth: the SDK derives them from the UTF-8 method-name preimages, so
+      // they do not depend on the C++ ordinary execution character set
+      // (`-fexec-charset`). Convert the canonical Runtime::MethodID back to a
+      // ContractEntrypointID instead of returning the re-hash of ordinary
+      // kTraitName/kVersion/Name literal bytes, which can diverge across honest
+      // builds. The re-derivation is retained only as a debug cross-check. See
+      // hogd issue #2678.
+      auto canonical = entrypoint_from_method_id(
+          ContractTrait::kEntrypoints[kLookupIndex<Name>]);
+      x23assert(canonical ==
+                sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                          ContractTrait::kVersion, Name.get()));
+      return canonical;
     }
-    return entrypoint;
+    else {
+      return sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                       ContractTrait::kVersion, Name.get());
+    }
   }
 
   // Canonical Runtime::MethodID for the named entrypoint.

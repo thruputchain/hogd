@@ -4,7 +4,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <format>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -184,8 +183,11 @@ WasmiRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
+  // write_invoke_name() fills a stack buffer with canonical UTF-8/ASCII
+  // export-name bytes, independent of the ordinary execution charset and
+  // without allocating on this hot dispatch path (see hogd issue #2722).
   uint8_t method_name[16];
-  std::format_to(method_name, "{:016X}", method_id);
+  write_invoke_name(method_id, method_name);
 
   WasmiInvokeResult res =
       wasmi_invoke(wasmi_runtime_ptr_, &method_name[0], 16, gas_limit);
