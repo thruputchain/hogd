@@ -137,6 +137,16 @@ HogDBStatus<int128_t>
 BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
                      const ItemChange &new_change)
 {
+  // A modify on an invalidated block is doomed: a committed sibling has taken
+  // the tip. Surface kStaleBlock up front (mirroring lock()) so callers that
+  // skip check_stale -- e.g. InvokeTX::request_change modifying a key already
+  // locked in this transaction -- observe staleness on the operation itself
+  // rather than only later at close()/commit(), even when the underlying lock
+  // update would otherwise succeed.
+  if (is_invalidated()) [[unlikely]] {
+    return HogDBError(HogDBCode::kStaleBlock);
+  }
+
   // no storage cost for address balances.
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
@@ -152,15 +162,14 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   auto r = do_modify_lock(*lock, old_change, new_change, ctx);
   if (!r && is_invalidated()) [[unlikely]] {
-    // A modify of an already-locked item only re-derives cost; its sole
-    // fresh-error source is re-reading the live DAO for an RCQ consume's
-    // past-block sizes. A committed sibling block can prune those blocks --
-    // and invalidates us as it does so. Surface that as kStaleBlock so callers
-    // can tell a doomed block apart from a real error. The post-failure
-    // is_invalidated() re-check also closes the race where the sibling's block
-    // removal becomes visible before its invalidate store: observing the
-    // removal happens-after the invalidate, so this load sees it. Any failure
-    // on a non-invalidated block propagates unchanged.
+    // Catches the narrow race where a sibling invalidated us *during*
+    // do_modify_lock: its DAO block removal made an RCQ consume's past-block
+    // re-read fail (e.g. kNotFound). This re-check is reliable because RAMDB
+    // serializes that removal and this read through the same per-partition
+    // mutex, so observing the removal happens-after the sibling's invalidate
+    // store and this load sees it. A failure on a still-valid block (where the
+    // re-check returns false) propagates unchanged -- a real invariant
+    // violation, not staleness.
     return HogDBError(HogDBCode::kStaleBlock);
   }
   return r;

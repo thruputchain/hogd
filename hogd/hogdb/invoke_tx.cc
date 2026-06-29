@@ -285,11 +285,15 @@ InvokeTX::rollback_to_savepoint(int depth)
         // modify_lock only fails here when a committed sibling block pruned
         // DAO state this restored change depends on (e.g. an RCQ consume's
         // past block), which also invalidated this block -- so the error is
-        // always kStaleBlock. The block is doomed and will be discarded; stop
-        // rolling back and let the caller observe kStaleBlock on its next
-        // locked operation. changes_/balance_deltas_ are left only partially
-        // rolled back, which is harmless on a block that can never commit
-        // (assert_is_valid() short-circuits once the block is invalidated).
+        // always kStaleBlock. The block is doomed; stop rolling back and let
+        // the caller observe kStaleBlock on its next locked operation. We leave
+        // both changes_/balance_deltas_ partially rolled back AND the failing
+        // item's lock still holding tmp (the post-savepoint change) while
+        // vec.back() is now the pre-savepoint change -- so ~InvokeTX()->abort()
+        // later unlocks with the "wrong" change. All of this is harmless on a
+        // block that can never commit: get_meta() is cached (the unlock takes
+        // no live DAO read), every sibling tx sharing this lock is also
+        // invalidated, and assert_is_valid() short-circuits once invalidated.
         // A non-stale failure would be a real invariant violation.
         assert(ret.error() == HogDBError{HogDBCode::kStaleBlock});
         return;
