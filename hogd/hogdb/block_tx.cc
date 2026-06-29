@@ -137,16 +137,6 @@ HogDBStatus<int128_t>
 BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
                      const ItemChange &new_change)
 {
-  // A modify on an invalidated block is doomed: a committed sibling has taken
-  // the tip. Surface kStaleBlock up front (mirroring lock()) so callers that
-  // skip check_stale -- e.g. InvokeTX::request_change modifying a key already
-  // locked in this transaction -- observe staleness on the operation itself
-  // rather than only later at close()/commit(), even when the underlying lock
-  // update would otherwise succeed.
-  if (is_invalidated()) [[unlikely]] {
-    return HogDBError(HogDBCode::kStaleBlock);
-  }
-
   // no storage cost for address balances.
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
