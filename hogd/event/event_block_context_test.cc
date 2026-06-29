@@ -4,9 +4,11 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -15,6 +17,7 @@
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -22,10 +25,12 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
+#include "indexer.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fileio.h"
+#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
@@ -563,6 +568,164 @@ TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
     co_await context.finish_file_write();
     co_await context.finish_file(context.get_root_hash());
   }(pool, context)();
+}
+
+namespace {
+struct CapturingIndexerRpc {
+  using rpc_service = IndexerEvent1;
+
+  x23::Async<void>
+  indexer_event_process_events(BlockHeight block_height,
+                               const TxEventLogBatch &tx_events,
+                               const ProposedTransactionBatch &tx_bodies)
+  {
+    received_batches++;
+    last_block_height = block_height;
+    received_events = tx_events;
+    received_bodies = tx_bodies;
+    co_return;
+  }
+
+  size_t received_batches = 0;
+  BlockHeight last_block_height = -1;
+  TxEventLogBatch received_events;
+  ProposedTransactionBatch received_bodies;
+};
+static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
+
+indexer_event_client_t
+make_socketpair_indexer_client(CapturingIndexerRpc *server)
+{
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  x23::rpc_stream_logged(default_coropoll(), fds[1], -1)->server(server);
+  auto client_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  return client_stream->client<IndexerEvent1>();
+}
+
+ProposedTransaction
+make_distinct_body(uint64_t nonce)
+{
+  ProposedTransaction body;
+  body.signed_tx.tx.uniquifier.block_expiry_height =
+      static_cast<BlockHeight>(1000 + nonce);
+  body.signed_tx.tx.uniquifier.nonce = nonce;
+  body.signed_tx.tx.invocation.gas_limit = 1'000'000 + nonce;
+  return body;
+}
+
+TxEventLog
+make_event_for_body(ProposedTransaction const &body, uint8_t marker)
+{
+  TxEmittedEvent emitted_event;
+  emitted_event.contract_address[0] = marker;
+  emitted_event.serialized_event.push_back(marker);
+
+  TxEventLog event;
+  event.proposed_tx_hash = sha256(body.signed_tx.tx);
+  event.events.push_back(std::move(emitted_event));
+  return event;
+}
+} // namespace
+
+TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
+{
+  EventBlockContext context(temp_dir_, 1);
+  PerThread<TxEventLogBatch> event_registration_probe;
+  PerThread<ProposedTransactionBatch> body_registration_probe;
+
+  auto body_a = make_distinct_body(101);
+  auto body_b = make_distinct_body(202);
+  auto event_a = make_event_for_body(body_a, 0xA1);
+  auto event_b = make_event_for_body(body_b, 0xB2);
+
+  std::promise<void> a_event_registered;
+  std::promise<void> b_body_registered;
+  std::promise<void> a_body_registered;
+  std::promise<void> start_add_a;
+  std::promise<void> start_add_b;
+  std::promise<void> done_add_a;
+  std::promise<void> done_add_b;
+  std::promise<void> release_workers;
+
+  auto a_event_registered_f = a_event_registered.get_future();
+  auto b_body_registered_f = b_body_registered.get_future();
+  auto a_body_registered_f = a_body_registered.get_future();
+  auto start_add_a_f = start_add_a.get_future();
+  auto start_add_b_f = start_add_b.get_future();
+  auto done_add_a_f = done_add_a.get_future();
+  auto done_add_b_f = done_add_b.get_future();
+  auto release_workers_f = release_workers.get_future().share();
+
+  std::atomic<bool> added_a = false;
+  std::atomic<bool> added_b = false;
+
+  std::thread worker_a([&] {
+    event_registration_probe->clear();
+    a_event_registered.set_value();
+    b_body_registered_f.wait();
+    body_registration_probe->clear();
+    a_body_registered.set_value();
+
+    start_add_a_f.wait();
+    added_a.store(context.add_event(event_a, body_a)(),
+                  std::memory_order_release);
+    done_add_a.set_value();
+    release_workers_f.wait();
+  });
+
+  std::thread worker_b([&] {
+    a_event_registered_f.wait();
+    event_registration_probe->clear();
+    body_registration_probe->clear();
+    b_body_registered.set_value();
+
+    start_add_b_f.wait();
+    added_b.store(context.add_event(event_b, body_b)(),
+                  std::memory_order_release);
+    done_add_b.set_value();
+    release_workers_f.wait();
+  });
+
+  a_body_registered_f.wait();
+
+  context.executor_open_block();
+  start_add_a.set_value();
+  done_add_a_f.wait();
+  start_add_b.set_value();
+  done_add_b_f.wait();
+  EXPECT_TRUE(added_a.load(std::memory_order_acquire));
+  EXPECT_TRUE(added_b.load(std::memory_order_acquire));
+  context.executor_close_block();
+  finish_file(context);
+
+  CapturingIndexerRpc indexer;
+  std::vector<indexer_event_client_t> indexers;
+  indexers.push_back(make_socketpair_indexer_client(&indexer));
+  try {
+    context.send_events_to_indexers(/*block_height=*/7, indexers)();
+  } catch (...) {
+    release_workers.set_value();
+    worker_a.join();
+    worker_b.join();
+    throw;
+  }
+
+  release_workers.set_value();
+  worker_a.join();
+  worker_b.join();
+
+  ASSERT_EQ(indexer.received_batches, 1);
+  ASSERT_EQ(indexer.last_block_height, 7);
+  ASSERT_EQ(indexer.received_events.size(), 2);
+  ASSERT_EQ(indexer.received_bodies.size(), 2);
+
+  // For every forwarded index i, the body must be the one that produced the
+  // event log at the same index.
+  for (size_t i = 0; i < indexer.received_events.size(); i++) {
+    EXPECT_EQ(sha256(indexer.received_bodies[i].signed_tx.tx),
+              indexer.received_events[i].proposed_tx_hash);
+  }
 }
 
 } // namespace hogd
