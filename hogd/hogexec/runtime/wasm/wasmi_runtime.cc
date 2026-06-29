@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <string>
 #include <string_view>
 #include <utility>
 
@@ -184,13 +183,14 @@ WasmiRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
-  // invoke_name() emits canonical UTF-8/ASCII export-name bytes independent of
-  // the ordinary execution charset (see hogd issue #2722).
-  std::string const method_name = invoke_name(method_id);
+  // write_invoke_name() fills a stack buffer with canonical UTF-8/ASCII
+  // export-name bytes, independent of the ordinary execution charset and
+  // without allocating on this hot dispatch path (see hogd issue #2722).
+  uint8_t method_name[16];
+  write_invoke_name(method_id, method_name);
 
-  WasmiInvokeResult res = wasmi_invoke(
-      wasmi_runtime_ptr_, reinterpret_cast<uint8_t const *>(method_name.data()),
-      static_cast<uint32_t>(method_name.size()), gas_limit);
+  WasmiInvokeResult res =
+      wasmi_invoke(wasmi_runtime_ptr_, &method_name[0], 16, gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
   trace("Wasmi Invoke Result: {}",
