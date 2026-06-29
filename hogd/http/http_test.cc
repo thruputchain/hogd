@@ -68,8 +68,9 @@ TEST_F(HttpTest, RequestSplitAcrossReadsIsParsedCorrectly)
                         .body = "hello"};
   });
 
-  std::string response = request_chunked(
-      start(), {"GET /hel", "lo HTTP/1.1\r\nHost: localhost\r\n\r\n"});
+  std::string response =
+      request_chunked(start(),
+                      {"GET /hel", "lo HTTP/1.1\r\nHost: localhost\r\n\r\n"});
   EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
   EXPECT_TRUE(response.ends_with("\r\n\r\nhello"));
 }
