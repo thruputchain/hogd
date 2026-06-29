@@ -80,8 +80,9 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
   }
   {
     auto ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(
-        ul, [](EventWithBodyBatch &batch) { batch.clear(); });
+    events_with_bodies_.for_each(ul, [](EventWithBodyBatch &batch) {
+      batch.clear();
+    });
   }
   open_events_file();
 }
@@ -89,8 +90,9 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
 ReusableEventBlockContextData
 EventBlockContext::extract_data()
 {
-  return ReusableEventBlockContextData(
-      std::move(trie_), std::move(events_with_bodies_), std::move(buffers_));
+  return ReusableEventBlockContextData(std::move(trie_),
+                                       std::move(events_with_bodies_),
+                                       std::move(buffers_));
 }
 
 x23::Async<bool>
@@ -136,7 +138,8 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   // deliberately not added to the trie (it is not part of the consensus event
   // commitment).
   events_with_bodies_->emplace_back(
-      detail::EventWithBody{.event = std::move(event), .body = std::move(body)});
+      detail::EventWithBody{.event = std::move(event),
+                            .body = std::move(body)});
   co_return true;
 }
 
@@ -432,19 +435,19 @@ EventBlockContext::send_events_to_indexers(
   TxEventLogBatch full_event_log;
   ProposedTransactionBatch full_tx_bodies;
   try {
-    // Flatten the single per-thread container once, splitting each pair into the
-    // event-log and body vectors in lockstep.  Because both halves come from the
-    // same traversal of the same container, position i of each vector always
-    // refers to the same EventWithBody (#2826).
+    // Flatten the single per-thread container once, splitting each pair into
+    // the event-log and body vectors in lockstep.  Because both halves come
+    // from the same traversal of the same container, position i of each vector
+    // always refers to the same EventWithBody (#2826).
     std::unique_lock ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(
-        ul, [&full_event_log, &full_tx_bodies](EventWithBodyBatch &batch) {
-          for (detail::EventWithBody &pair : batch) {
-            full_event_log.push_back(std::move(pair.event));
-            full_tx_bodies.push_back(std::move(pair.body));
-          }
-          batch.clear();
-        });
+    events_with_bodies_.for_each(ul, [&full_event_log, &full_tx_bodies](
+                                         EventWithBodyBatch &batch) {
+      for (detail::EventWithBody &pair : batch) {
+        full_event_log.push_back(std::move(pair.event));
+        full_tx_bodies.push_back(std::move(pair.body));
+      }
+      batch.clear();
+    });
 
     // CI tests triggered an std::bad_alloc error here; logging the specifics of
     // the error in case it occurs again
@@ -453,10 +456,10 @@ EventBlockContext::send_events_to_indexers(
     throw;
   }
 
-  // [full_event_log] and [full_tx_bodies] are index-aligned: they are split from
-  // the same EventWithBody pairs in one traversal, so the body at position i
-  // belongs to the event log at position i.  They are forwarded together so the
-  // indexer never re-matches bodies to events.
+  // [full_event_log] and [full_tx_bodies] are index-aligned: they are split
+  // from the same EventWithBody pairs in one traversal, so the body at position
+  // i belongs to the event log at position i.  They are forwarded together so
+  // the indexer never re-matches bodies to events.
   CHECK(full_event_log.size() == full_tx_bodies.size());
 
   std::vector<x23::Async<void>> handles;

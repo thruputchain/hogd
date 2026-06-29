@@ -45,8 +45,8 @@ struct EventContext {
 // An event log paired with the transaction body that produced it.  The two are
 // stored together in a single PerThread container (rather than in two separate
 // PerThread<T> containers) so they are always flattened in one shared traversal
-// order at commit.  Keeping them in independent PerThread containers allowed the
-// per-index body/event association to cross, because PerThread<T> registers
+// order at commit.  Keeping them in independent PerThread containers allowed
+// the per-index body/event association to cross, because PerThread<T> registers
 // threads in a type-local order that can differ between T's (see issue #2826).
 struct EventWithBody {
   TxEventLog event;
@@ -62,8 +62,7 @@ struct ReusableEventBlockContextData {
       std::unique_ptr<MerkleTriePrefix> trie,
       PerThread<EventWithBodyBatch> events_with_bodies,
       PerThread<detail::EventContext> buffers)
-    : trie(std::move(trie)),
-      events_with_bodies(std::move(events_with_bodies)),
+    : trie(std::move(trie)), events_with_bodies(std::move(events_with_bodies)),
       buffers(std::move(buffers))
   {}
 
@@ -198,8 +197,9 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // Event logs and their transaction bodies, kept paired in one container so the
-  // per-index association cannot cross during the commit-time flatten (#2826).
+  // Event logs and their transaction bodies, kept paired in one container so
+  // the per-index association cannot cross during the commit-time flatten
+  // (#2826).
   PerThread<EventWithBodyBatch> events_with_bodies_;
   PerThread<detail::EventContext> buffers_;
 
