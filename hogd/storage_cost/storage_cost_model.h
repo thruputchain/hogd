@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 
 #include "contract.hh"
@@ -49,11 +50,20 @@ struct StorageCostModel {
 
   int128_t get_deployment_cost(DeployedContractHash const &hash) const
   {
-    if (hash.contract_type != ContractType::kWasmi) {
+    switch (hash.contract_type) {
+    case ContractType::kNative:
+    case ContractType::kMockTest:
+      // Native and mock contracts carry no deployable blob (contract_size is
+      // always 0), so deployment is free.
       return 0;
+    case ContractType::kWasmi:
+    case ContractType::kRv32:
+      // User-deployed contracts with a real ContractBlob payload are priced by
+      // their on-chain size.
+      return kBaseContractDeploymentCost +
+             (int128_t{hash.contract_size} * kContractDeploymentCostPerByte);
     }
-    return kBaseContractDeploymentCost +
-           (int128_t{hash.contract_size} * kContractDeploymentCostPerByte);
+    panic("Unrecoverable; Invalid contract type: {}", hash.contract_type);
   }
 
   constexpr int128_t get_auth_data_cost(size_t num_keys) const
