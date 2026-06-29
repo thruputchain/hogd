@@ -155,12 +155,6 @@ public:
     return out;
   }
 
-  void clear_db_hash(BlockTXID bid)
-  {
-    std::scoped_lock g(lock_);
-    db_hashes_.erase(bid);
-  }
-
   const auto &get_sched_db_client() { return sched_db_client_; }
 
   // The block ID must have already been shut down and have no outstanding

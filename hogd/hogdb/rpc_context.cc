@@ -163,6 +163,14 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
   // We make sure to delete the BlockTX _after_
   // deleting the pointers to it in the threadlocal caches.
   block_txes_.erase(bid);
+
+  // Drop any closed-but-uncommitted db hash cached for this block. This is the
+  // sole site that removes a BlockTX, so clearing here guarantees the cached
+  // hash never outlives its block. The commit path takes (erases) the hash via
+  // take_db_hash() before reaching teardown, so this erase is a no-op there;
+  // it matters on the abandon / deferred-GC paths, where the hash would
+  // otherwise leak until process exit.
+  db_hashes_.erase(bid);
 }
 
 void
