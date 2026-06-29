@@ -318,6 +318,53 @@ TEST(LtHash16, MultisetProperty)
   EXPECT_EQ(once, twice);
 }
 
+// Defense-in-depth: both consensus paths (incremental ChangeSet and full
+// rehash) now hash state elements through the piecewise overload, so they agree
+// by construction. This test pins that streaming encoding to the raw contiguous
+// add(BufView) primitive, so the documented format key || type || value cannot
+// silently drift between them.
+TEST(LtHash16, PiecewiseEqualsContiguous)
+{
+  std::vector<uint8_t> key = {1, 2, 3, 4};
+  uint8_t type = 0x7;
+  std::vector<uint8_t> value = {5, 6, 7, 8, 9};
+
+  std::vector<uint8_t> contiguous;
+  contiguous.insert(contiguous.end(), key.begin(), key.end());
+  contiguous.push_back(type);
+  contiguous.insert(contiguous.end(), value.begin(), value.end());
+
+  LtHash16 piecewise;
+  piecewise.add(key, type, value);
+
+  LtHash16 whole;
+  whole.add(contiguous);
+
+  EXPECT_EQ(piecewise, whole);
+
+  // remove() must mirror add() the same way.
+  piecewise.remove(key, type, value);
+  EXPECT_EQ(piecewise, LtHash16{});
+}
+
+// Empty key and empty value must still place the type byte between them, so the
+// piecewise and contiguous encodings stay aligned at the boundaries.
+TEST(LtHash16, PiecewiseEqualsContiguousEmptyPieces)
+{
+  std::vector<uint8_t> empty;
+  uint8_t type = 0x0;
+
+  std::vector<uint8_t> contiguous = {type};
+
+  LtHash16 piecewise;
+  piecewise.add(empty, type, empty);
+
+  LtHash16 whole;
+  whole.add(contiguous);
+
+  EXPECT_EQ(piecewise, whole);
+}
+
 } // namespace hogd
 
 int
