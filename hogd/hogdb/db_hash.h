@@ -6,7 +6,6 @@
 #include <cstring>
 #include <span>
 #include <tuple>
-#include <vector>
 
 #include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -41,6 +40,11 @@ db_hash_from_buf(x23::BufView buf)
   return db_hash_from_lthash16(hash);
 }
 
+// The element encoding key || type || value lives in exactly one place:
+// LtHash16's piecewise (streaming) overload. These helpers only add the
+// is_state_item guard and delegate, so the full-rehash path and the incremental
+// ChangeSet path share a single code path and agree by construction -- with no
+// per-item buffer allocation.
 inline void
 lthash_add_item(LtHash16 &hash, std::span<const std::byte> key, uint8_t type,
                 std::span<const std::byte> value)
@@ -48,12 +52,7 @@ lthash_add_item(LtHash16 &hash, std::span<const std::byte> key, uint8_t type,
   if (!is_state_item(key)) {
     return;
   }
-  std::vector<std::byte> element;
-  element.reserve(key.size() + 1 + value.size());
-  element.insert(element.end(), key.begin(), key.end());
-  element.push_back(static_cast<std::byte>(type));
-  element.insert(element.end(), value.begin(), value.end());
-  hash.add(element);
+  hash.add(key, type, value);
 }
 
 inline void
@@ -63,12 +62,7 @@ lthash_remove_item(LtHash16 &hash, std::span<const std::byte> key, uint8_t type,
   if (!is_state_item(key)) {
     return;
   }
-  std::vector<std::byte> element;
-  element.reserve(key.size() + 1 + value.size());
-  element.insert(element.end(), key.begin(), key.end());
-  element.push_back(static_cast<std::byte>(type));
-  element.insert(element.end(), value.begin(), value.end());
-  hash.remove(element);
+  hash.remove(key, type, value);
 }
 
 inline void
