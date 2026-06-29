@@ -163,6 +163,7 @@ struct HogDevnodeOptions {
   std::optional<std::filesystem::path> data_dir;
   hogd::BootstrapAccountConfig bootstrap_config;
   std::vector<std::filesystem::path> contract_artifact_directories;
+  std::optional<hogd::LogLevel> log_level;
 };
 
 class DataDirLock {
@@ -258,6 +259,8 @@ Options:
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
+  --log-level <level>            Log verbosity: critical, error, warn, info,
+                                 debug, or trace [default: build-dependent]
   --version                      Print version
   -h, --help                     Print help
 
@@ -296,6 +299,59 @@ parse_u32(const std::string &value, std::string_view name)
     throw std::runtime_error(std::format("Invalid {}: {}", name, value));
   }
   return static_cast<std::uint32_t>(parsed);
+}
+
+std::string_view
+log_level_name(hogd::LogLevel level)
+{
+  using enum hogd::LogLevel;
+  switch (level) {
+  case kCritical:
+    return "critical";
+  case kError:
+    return "error";
+  case kWarn:
+    return "warn";
+  case kInfo:
+    return "info";
+  case kDebug:
+    return "debug";
+  case kTrace:
+    return "trace";
+  }
+  return "unknown";
+}
+
+hogd::LogLevel
+parse_log_level(const std::string &value)
+{
+  using enum hogd::LogLevel;
+  hogd::LogLevel level;
+  if (value == "critical")
+    level = kCritical;
+  else if (value == "error")
+    level = kError;
+  else if (value == "warn")
+    level = kWarn;
+  else if (value == "info")
+    level = kInfo;
+  else if (value == "debug")
+    level = kDebug;
+  else if (value == "trace")
+    level = kTrace;
+  else
+    throw std::runtime_error(std::format("Invalid log level: {}", value));
+
+  // Levels above the compile-time ceiling are stripped from this build, so a
+  // request for them can never be honored. Reject it rather than silently
+  // capping.
+  if (!hogd::should_log(level)) {
+    throw std::runtime_error(std::format(
+        "Log level '{}' is unavailable in this build; the maximum verbosity "
+        "compiled in is '{}'",
+        value, log_level_name(hogd::kMaxLogLevel)));
+  }
+  return level;
 }
 
 std::uint32_t
@@ -399,6 +455,10 @@ parse_args(int argc, char *argv[])
       bootstrap_manifest_path = std::filesystem::path(argv[++i]);
       continue;
     }
+    if (arg == "--log-level" && i + 1 < argc) {
+      options.log_level = parse_log_level(argv[++i]);
+      continue;
+    }
     if (arg == "--dev-accounts" && i + 1 < argc) {
       sources.dev_accounts = true;
       dev_accounts_value = argv[++i];
@@ -469,7 +529,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
-  int ret = hogd::hogd_init(argc, argv);
+  int ret = options.log_level.has_value()
+                ? hogd::hogd_init(argc, argv, true, *options.log_level)
+                : hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
   hogd::info("starting hog-devnode!");
