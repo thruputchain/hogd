@@ -262,7 +262,7 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
   }
 
   if (ret->initiate_shutdown()) {
-    ctx_.clear_db_hash(id);
+    // remove_shutdown_block_tx() also drops any cached db hash for this block.
     ctx_.remove_shutdown_block_tx(id);
   }
 
