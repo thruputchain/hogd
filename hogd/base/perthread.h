@@ -284,8 +284,6 @@ public:
     inc(rhs);
     return *this;
   }
-  bool operator==(const T &rhs) const { return get() == rhs; }
-  auto operator<=>(const T &rhs) const { return get() <=> rhs; }
 
 private:
   struct TLCounter {
