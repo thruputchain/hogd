@@ -655,6 +655,43 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
 }
 
+// Regression test for issue #2814. Reproduces the subscribe-vs-commit window
+// deterministically: a block's auth-change publish for height H is dispatched
+// (capturing the current subscriber set under lock_) while the committed tip
+// still reads H-1, and a new subscriber is added in that window. The new
+// subscriber therefore misses height H's publish; it is never re-sent. If the
+// intro reports only the committed height H-1, the auth server inits to H-1 and
+// then parks forever waiting for H once a later height streams in. The intro
+// must instead report a height that covers any already-dispatched publish, so
+// the missed height is dropped as stale rather than awaited.
+TEST_F(AuthSubscriptionTest, IntroHeightCoversAlreadyPublishedHeight)
+{
+  constexpr BlockHeight kCommittedHeight = 4;
+  constexpr BlockHeight kPublishedHeight = kCommittedHeight + 1;
+
+  // The committed tip is H-1: this is what the racing intro reads.
+  ASSERT_TRUE(db_.write_dbtip(DbTip{.height = kCommittedHeight, .id = 0}));
+  RPCContext ctx(std::move(db_), nullptr);
+  ASSERT_EQ(ctx.get_height_threadsafe(), kCommittedHeight);
+
+  // Height H's publish is dispatched before the subscriber is added — the
+  // worst case of the race, forced deterministically. Running it synchronously
+  // guarantees start_forward_key_changes has captured the (empty) subscriber
+  // set, so the to-be-added subscriber has provably missed height H.
+  {
+    PerThread<KeyChangeBatch> key_changes;
+    ctx.get_auth_change_subscription_manager().publish_auth_changes(
+        kPublishedHeight, std::move(key_changes))();
+  }
+
+  HogDBAuthRpc rpc(ctx);
+  DBAuthIntroResult result = rpc.dbauth_intro(auth_card_)();
+  ASSERT_EQ(result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
+  // Before the fix this is kCommittedHeight (4) — the wedge. After the fix it
+  // covers the dispatched publish (>= 5), so height 5 is dropped as stale.
+  EXPECT_GE(result.current_height(), kPublishedHeight);
+}
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Regression test for issue #1725. A committed auth row must carry the height

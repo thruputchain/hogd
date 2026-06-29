@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <vector>
 
 #include "auth_card.hh"
@@ -24,7 +25,13 @@ public:
                                 PerThread<KeyChangeBatch> key_changes);
   x23::Async<void> publish_auth_changes(BlockHeight height,
                                         PerThread<KeyChangeBatch> key_changes);
-  x23::Async<bool> add_full_auth_change_subscriber(AuthCard card);
+  // Adds a subscriber. Returns nullopt on failure. On success, returns the
+  // highest auth-change height already dispatched to other subscribers at the
+  // moment this one was inserted (-1 if none) — the caller must report an intro
+  // height >= this value so the new subscriber doesn't park forever on a height
+  // whose publish it missed (issue #2814).
+  x23::Async<std::optional<BlockHeight>>
+  add_full_auth_change_subscriber(AuthCard card);
 
   ~AuthChangeSubscriptionManager() { inhibit_.destroy_wait(); }
 
@@ -61,11 +68,17 @@ private:
   erase_client_if_stale(const AuthCard &card,
                         const rpc_stream_t *expected_client_id);
 
-  // Under lock_: replace-or-insert one client.
-  x23::Async<void> insert_client(AuthCard card, auth_db_client_t client);
+  // Under lock_: replace-or-insert one client. Returns last_published_height_
+  // captured under the same lock, so the insert and the reported watermark are
+  // consistent w.r.t. publishes (issue #2814).
+  x23::Async<BlockHeight> insert_client(AuthCard card, auth_db_client_t client);
 
   x23::CoroLock lock_;
   std::map<AuthCard, auth_db_client_t> auth_db_clients_;
+  // Highest height passed to start_forward_key_changes so far (-1 if none).
+  // Guarded by lock_. Lets a newly added subscriber learn the highest publish
+  // it may have just missed, so its intro height can cover it (issue #2814).
+  BlockHeight last_published_height_ = -1;
   x23::DestroyInhibit inhibit_;
 };
 
