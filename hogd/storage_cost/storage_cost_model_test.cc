@@ -84,6 +84,14 @@ TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
   wasm_hash.contract_size = 0;
   EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{12000});
 
+  DeployedContractHash rv32_hash{.hash = {},
+                                 .contract_size = 100,
+                                 .contract_type = ContractType::kRv32};
+  EXPECT_EQ(model.get_deployment_cost(rv32_hash), int128_t{13000});
+
+  rv32_hash.contract_size = 0;
+  EXPECT_EQ(model.get_deployment_cost(rv32_hash), int128_t{12000});
+
   DeployedContractHash native_hash{.hash = {},
                                    .contract_size = 0,
                                    .contract_type = ContractType::kNative};
