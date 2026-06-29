@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <utility>
 
 // xdr types
@@ -170,6 +172,72 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
 
   int128_t gateway_value = from_xdr(result.payload().items[0].item().nnint());
   EXPECT_EQ(gateway_value, int128_t{1});
+}
+
+// Exercises the wait-out-publication path. While a commit is mid-publication
+// (commit_publishing_ held), a committed-tip read blocks in
+// wait_for_no_commit_publishing() instead of reading a tip that is
+// inconsistent with the just-applied ramdb data; once the publication
+// finishes the read proceeds and returns kRPCNone.
+//
+// Note: releasing the guard here does NOT advance the tip, so after the wait
+// the post-read staleness check passes on the first attempt and the retry
+// (`continue`) branch is not taken in this test. The staleness decision that
+// drives that branch is covered directly by
+// CommittedReadStaleDetectsTipAdvance.
+TEST(HogDBGatewayRpcTest, GetItemsWaitsOutCommitPublication)
+{
+  HogDBDAO dao = make_dao();
+
+  ContractAddress addr{};
+  for (std::size_t i = 0; i < addr.size(); ++i)
+    addr[i] = static_cast<std::uint8_t>(i + 1);
+  ASSERT_TRUE(dao.write_address_balance(addr, int128_t{12345}).has_value());
+
+  RPCContext ctx(std::move(dao), nullptr);
+
+  AddressAndKeyBatch batch;
+  batch.push_back(make_balance_query(addr));
+
+  HogDBGatewayRpc gateway(ctx);
+
+  // Hold a commit publication open, then release it from another thread once
+  // the gateway has had a chance to observe it and block in the wait.
+  auto publication_guard =
+      std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{1});
+
+  std::thread releaser([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    publication_guard.reset(); // finish_commit_publication
+  });
+
+  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  releaser.join();
+
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 1U);
+  ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
+  EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
+            int128_t{12345});
+}
+
+// is_committed_read_stale must report a snapshot as stale once the tip has
+// advanced past it, and as fresh for the current tip.
+TEST(HogDBGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
+{
+  HogDBDAO dao = make_dao();
+  RPCContext ctx(std::move(dao), nullptr);
+
+  DbTip before = ctx.get_tip();
+  EXPECT_FALSE(ctx.is_committed_read_stale(before));
+
+  ASSERT_TRUE(
+      ctx.update_dbtip(BlockTXID{7}, BlockHash{}, SHA256Hash{}, DbHash{})
+          .has_value());
+
+  // The pre-advance snapshot is now stale; the current tip is not.
+  EXPECT_TRUE(ctx.is_committed_read_stale(before));
+  EXPECT_FALSE(ctx.is_committed_read_stale(ctx.get_tip()));
 }
 
 } // namespace hogd

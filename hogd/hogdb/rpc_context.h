@@ -171,6 +171,40 @@ public:
 
   bool is_snapshot_read_stale(BlockTXID bid);
 
+  // Staleness check for reads served directly against the committed tip
+  // (no BlockTX snapshot), e.g. the public db gateway. A block commit
+  // applies its data to the live DAO (BlockTX::commit) *before* it advances
+  // the tip (update_dbtip), and holds commit_publishing_ across that whole
+  // window (see commit_block / CommitPublicationGuard). So a committed-tip
+  // read can observe height-(H+1) data while the tip still reads H.
+  //
+  // Callers snapshot the tip, perform their reads, then call this with the
+  // snapshot: a true result means a commit landed (or is mid-publication)
+  // during the read, so the snapshot's height label can no longer be
+  // trusted. Mirrors is_snapshot_read_stale() for the no-BlockTX path.
+  //
+  // The commit_publishing_ load is sequenced before get_tip() on purpose:
+  // the committer clears commit_publishing_ (release) only after
+  // update_dbtip, so observing it false here guarantees the subsequent
+  // get_tip() reflects the post-commit tip.
+  bool is_committed_read_stale(DbTip const &snapshot)
+  {
+    if (commit_publishing_.load(std::memory_order_acquire)) {
+      return true;
+    }
+    DbTip tip = get_tip();
+    return tip.id != snapshot.id || tip.height != snapshot.height;
+  }
+
+  // Block until no commit is mid-publication, so a committed-tip reader can
+  // start from a point where the tip and ramdb data are consistent. Returns
+  // immediately if nothing is publishing. Used to keep committed-tip read
+  // retries from spinning through a publication window.
+  void wait_for_no_commit_publishing()
+  {
+    commit_publishing_.wait(true, std::memory_order_acquire);
+  }
+
   class CommitPublicationGuard {
   public:
     CommitPublicationGuard(RPCContext &ctx, BlockTXID committer);
