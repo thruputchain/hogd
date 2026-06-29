@@ -186,8 +186,12 @@ public:
       release_memory_slot(std::move(buf_));
     }
   }
-  MemorySlot(MemorySlot &&other) noexcept : buf_(std::move(other.buf_))
+  MemorySlot(MemorySlot &&other) noexcept
+    : buf_(std::move(other.buf_)), owns_(other.owns_)
   {
+    // Inherit ownership from the source (not the default-initialized true), so
+    // moving an already-moved-from slot does not resurrect ownership, then
+    // clear the source so only one slot ever owns the buffer.
     other.owns_ = false;
   }
   MemorySlot &operator=(MemorySlot &&) = delete;

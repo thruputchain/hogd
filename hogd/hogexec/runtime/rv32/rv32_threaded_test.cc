@@ -321,6 +321,35 @@ TEST(Rv32Threaded, memorySlotMovedFromDoesNotReleaseEvenWhenNonEmpty)
   memory_slot_pool() = MemorySlotPool{};
 }
 
+// Regression for the double-move case: moving an already-moved-from MemorySlot
+// must inherit the source's (false) ownership, not resurrect it from the
+// default-initialized true. Otherwise the second move target would release a
+// slot it never owned -- the same pool corruption #2824 guards against.
+TEST(Rv32Threaded, memorySlotDoubleMovedFromDoesNotResurrectOwnership)
+{
+  memory_slot_pool() = MemorySlotPool{};
+  {
+    std::optional<MemorySlot> a(std::in_place); // a owns the slot
+    std::optional<MemorySlot> b(std::in_place, std::move(*a)); // -> b owns it
+    std::optional<MemorySlot> c(std::in_place, std::move(*a)); // a was already
+                                                               // moved from
+
+    // Model a conforming std::vector whose moved-from sources stay non-empty.
+    a->bytes().resize(1);
+    c->bytes().resize(1);
+
+    // Neither a (moved from) nor c (moved from an unowning source) owns a slot.
+    a.reset();
+    c.reset();
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+
+    // b is the sole owner; destroying it returns exactly one slot.
+    b.reset();
+    EXPECT_EQ(memory_slot_pool().count, 1U);
+  }
+  memory_slot_pool() = MemorySlotPool{};
+}
+
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
 {
   using test_program::branch;
