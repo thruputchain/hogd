@@ -279,10 +279,25 @@ InvokeTX::rollback_to_savepoint(int depth)
                                        &ItemVersion::tx_depth),
               vec.end());
     if (!vec.empty()) {
-      // can't fail because reservation <= than previous one.
-      [[maybe_unused]] HogDBStatus<int128_t> ret =
+      HogDBStatus<int128_t> ret =
           block_.get().modify_lock(key, tmp, vec.back().change);
-      assert(ret);
+      if (!ret) [[unlikely]] {
+        // modify_lock only fails here when a committed sibling block pruned
+        // DAO state this restored change depends on (e.g. an RCQ consume's
+        // past block), which also invalidated this block -- so the error is
+        // always kStaleBlock. The block is doomed; stop rolling back and let
+        // the caller observe kStaleBlock on its next locked operation. We leave
+        // both changes_/balance_deltas_ partially rolled back AND the failing
+        // item's lock still holding tmp (the post-savepoint change) while
+        // vec.back() is now the pre-savepoint change -- so ~InvokeTX()->abort()
+        // later unlocks with the "wrong" change. All of this is harmless on a
+        // block that can never commit: get_meta() is cached (the unlock takes
+        // no live DAO read), every sibling tx sharing this lock is also
+        // invalidated, and assert_is_valid() short-circuits once invalidated.
+        // A non-stale failure would be a real invariant violation.
+        assert(ret.error() == HogDBError{HogDBCode::kStaleBlock});
+        return;
+      }
       assert(vec.back().locked_storage_cost >= *ret);
       continue;
     }
@@ -569,6 +584,14 @@ InvokeTX::sync_balance_locks()
 void
 InvokeTX::assert_is_valid() const noexcept
 {
+  // A block invalidated by a committed sibling can be left with intentionally
+  // inconsistent internal accounting: rollback_to_savepoint bails out early
+  // when restoring a change fails against now-pruned DAO state, partially
+  // rolling back changes_/balance_deltas_. Such a block is discarded without
+  // committing, so its accounting invariants no longer need to hold.
+  if (block_.get().is_invalidated()) {
+    return;
+  }
   assert(tx_depth_ >= 0);
   assert(tx_depth_ <= kMaxSavepointDepth);
   if constexpr (is_debug_build()) {

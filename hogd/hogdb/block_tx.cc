@@ -150,7 +150,19 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  return do_modify_lock(*lock, old_change, new_change, ctx);
+  auto r = do_modify_lock(*lock, old_change, new_change, ctx);
+  if (!r && is_invalidated()) [[unlikely]] {
+    // Catches the narrow race where a sibling invalidated us *during*
+    // do_modify_lock: its DAO block removal made an RCQ consume's past-block
+    // re-read fail (e.g. kNotFound). This re-check is reliable because RAMDB
+    // serializes that removal and this read through the same per-partition
+    // mutex, so observing the removal happens-after the sibling's invalidate
+    // store and this load sees it. A failure on a still-valid block (where the
+    // re-check returns false) propagates unchanged -- a real invariant
+    // violation, not staleness.
+    return HogDBError(HogDBCode::kStaleBlock);
+  }
+  return r;
 }
 
 void
