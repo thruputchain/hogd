@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <span>
 #include <vector>
 
 #include "address_auth.hh"
