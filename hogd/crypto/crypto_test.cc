@@ -173,6 +173,16 @@ TEST(Ed25519, BatchUsage)
             true);
 }
 
+TEST(Ed25519, BatchUsageEmpty)
+{
+  // An empty batch trivially verifies and must not pass null scratch pointers
+  // to the FFI (vector::data() may be null when empty on libstdc++).
+  EXPECT_EQ(ed25519_verify_batch(std::span<const Ed25519PublicKey>{},
+                                 std::span<const Ed25519Signature>{},
+                                 std::span<const std::span<const std::byte>>{}),
+            true);
+}
+
 TEST(Ed25519, RandomKeygen)
 {
   auto [pk, sk] = ed25519_keygen();

@@ -250,6 +250,11 @@ ed25519_verify_batch(std::span<const Ed25519PublicKey> public_keys,
       public_keys.size() != msgs.size()) {
     return false;
   }
+  // An empty batch trivially verifies. Return early so we never hand the FFI a
+  // null scratch pointer (vector::data() may be null when empty).
+  if (public_keys.empty()) {
+    return true;
+  }
   using pk_ptr = const uint8_t (*)[32];
   using sig_ptr = const uint8_t (*)[64];
   std::vector<pk_ptr> public_keys_ptr(public_keys.size());
