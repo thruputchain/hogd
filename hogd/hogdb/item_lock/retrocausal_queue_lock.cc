@@ -22,7 +22,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
-#include "storage_item.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
