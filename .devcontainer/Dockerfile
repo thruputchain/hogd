@@ -62,6 +62,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     wabt \
     binaryen \
     gdb \
+    jq \
     libjemalloc-dev \
     libssl-dev \
     lz4 \

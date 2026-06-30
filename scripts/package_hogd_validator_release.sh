@@ -1,13 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <build-dir> <output-dir>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 <build-dir> <output-dir> [flavor]" >&2
   exit 1
 fi
 
 build_dir=$1
 output_dir=$2
+flavor=${3:-release}
+
+case "$flavor" in
+  release)
+    validator_package=hogd-validator-linux-x86_64
+    hog_devnode_package=hog-devnode-linux-x86_64
+    ;;
+  debug)
+    validator_package=hogd-validator-debug-linux-x86_64
+    hog_devnode_package=hog-devnode-debug-linux-x86_64
+    ;;
+  *)
+    echo "error: unsupported flavor: $flavor" >&2
+    exit 1
+    ;;
+esac
 
 copy_exec() {
   local src=$1
@@ -38,8 +54,8 @@ mkdir -p "$output_dir"
 staging_dir=$(mktemp -d)
 trap 'rm -rf "$staging_dir"' EXIT
 
-validator_dir="$staging_dir/hogd-validator-linux-x86_64"
-hog_devnode_dir="$staging_dir/hog-devnode-linux-x86_64"
+validator_dir="$staging_dir/$validator_package"
+hog_devnode_dir="$staging_dir/$hog_devnode_package"
 mkdir -p "$validator_dir/contracts" "$hog_devnode_dir/contracts"
 
 copy_exec "$build_dir/hogd/hogdb/hogdb" "$validator_dir/hog-db"
@@ -57,7 +73,7 @@ copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
 copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
   "$hog_devnode_dir/contracts/dev_wallet.rv32a"
 
-tar -C "$validator_dir" -czf "$output_dir/hogd-validator-linux-x86_64.tar.gz" \
+tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
   contracts/dev_wallet.rv32a \
   hog-auth \
   hog-db \
@@ -68,6 +84,6 @@ tar -C "$validator_dir" -czf "$output_dir/hogd-validator-linux-x86_64.tar.gz" \
   hog-indexer \
   hog-mempool
 
-tar -C "$hog_devnode_dir" -czf "$output_dir/hog-devnode-linux-x86_64.tar.gz" \
+tar -C "$hog_devnode_dir" -czf "$output_dir/$hog_devnode_package.tar.gz" \
   contracts/dev_wallet.rv32a \
   hog-devnode

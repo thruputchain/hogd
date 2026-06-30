@@ -28,4 +28,6 @@ target_link_libraries(
   mempool
 )
 
-set_property(TARGET mempool_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set_property(TARGET mempool_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

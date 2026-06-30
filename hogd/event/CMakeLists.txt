@@ -40,7 +40,9 @@ target_link_libraries(
   hogd
 )
 
-set_property(TARGET event_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set_property(TARGET event_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
 
 add_library(event_test_objects OBJECT
   event_block_context_test.cc

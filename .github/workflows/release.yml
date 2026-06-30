@@ -127,8 +127,41 @@ jobs:
             -x "-DRUST_BUILD_CPU=x86-64-v2" \
             hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
 
+      - name: Build GCC Debug
+        run: |
+          ./scripts/build.sh \
+            -d build/debug \
+            -t Debug \
+            -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
+            -x "-DRUST_BUILD_CPU=x86-64-v2" \
+            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
+
+      - name: Check Linux binaries for unexpected AVX-512
+        run: |
+          ./scripts/check-no-unexpected-avx512.sh \
+            build/release/hogd/hogdb/hogdb \
+            build/release/hogd/hogexec/hogexec \
+            build/release/hogd/mempool/mempool_exec \
+            build/release/hogd/auth/auth_exec \
+            build/release/hogd/event/event_exec \
+            build/release/hogd/indexer/indexer_exec \
+            build/release/hogd/devnode/hog-devnode \
+            build/release/hogd/devnode/hog-hosted-bootstrap \
+            build/debug/hogd/hogdb/hogdb \
+            build/debug/hogd/hogexec/hogexec \
+            build/debug/hogd/mempool/mempool_exec \
+            build/debug/hogd/auth/auth_exec \
+            build/debug/hogd/event/event_exec \
+            build/debug/hogd/indexer/indexer_exec \
+            build/debug/hogd/devnode/hog-devnode \
+            build/debug/hogd/devnode/hog-hosted-bootstrap
+
       - name: Prepare artifacts
-        run: ./scripts/package_hogd_validator_release.sh build/release artifacts
+        run: |
+          ./scripts/package_hogd_validator_release.sh build/release artifacts
+          ./scripts/package_hogd_validator_release.sh build/debug artifacts debug
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
