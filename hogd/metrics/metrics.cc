@@ -9,8 +9,8 @@
 namespace hogd {
 
 namespace {
-// Synthetic gauge reporting whether each component has finished initialization.
-// Emitted for every component regardless of init state.
+// Synthetic gauge reporting components that have not finished initialization.
+// Emitted (with value 0) only for components still initializing.
 constexpr const char *kComponentInitializedMetric =
     "hogd_metrics_component_initialized";
 } // namespace
@@ -35,18 +35,23 @@ Metrics::dump_to_prometheus_string()
 {
   std::ostringstream os;
 
-  // Report each component's initialization status. This reads only the
+  // Report components still (or never) initializing. This reads only the
   // done_with_init_ atomic, never a component's metrics map, so it is always
-  // safe -- including for components still (or never) initializing. It lets
-  // monitoring distinguish "component reported no such metric" from "component
-  // never finished init", which the per-component skip below would otherwise
-  // hide.
-  os << std::format("# TYPE {} gauge\n", kComponentInitializedMetric);
+  // safe. It lets monitoring distinguish "component reported no such metric"
+  // from "component never finished init", which the per-component skip below
+  // would otherwise hide. Initialized components are left out: their metrics
+  // appearing below already signals they are up.
+  bool emitted_init_type = false;
   for (size_t i = 0; i < components_.size(); i++) {
-    os << std::format("{}{{component=\"{}\"}} {}\n",
-                      kComponentInitializedMetric,
-                      static_cast<ComponentName>(i),
-                      done_with_init(static_cast<ComponentName>(i)) ? 1 : 0);
+    if (done_with_init(static_cast<ComponentName>(i))) {
+      continue;
+    }
+    if (!emitted_init_type) {
+      os << std::format("# TYPE {} gauge\n", kComponentInitializedMetric);
+      emitted_init_type = true;
+    }
+    os << std::format("{}{{component=\"{}\"}} 0\n", kComponentInitializedMetric,
+                      static_cast<ComponentName>(i));
   }
 
   for (size_t i = 0; i < components_.size(); i++) {

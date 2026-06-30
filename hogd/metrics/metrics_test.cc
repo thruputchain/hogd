@@ -414,11 +414,14 @@ TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "executor_metrics_test_mixed_executor 11");
-  expect_dump_contains(
-      dump, "hogd_metrics_component_initialized{component=\"executor\"} 1");
   const std::vector<std::string_view> dump_lines = get_lines(dump);
   EXPECT_FALSE(std::ranges::contains(dump_lines,
                                      "mempool_metrics_test_mixed_mempool 22"))
+      << dump;
+  // The initialized component gets no status line; the uninitialized one does.
+  EXPECT_FALSE(std::ranges::contains(
+      dump_lines,
+      "hogd_metrics_component_initialized{component=\"executor\"} 0"))
       << dump;
   expect_dump_contains(
       dump, "hogd_metrics_component_initialized{component=\"mempool\"} 0");
