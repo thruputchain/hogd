@@ -391,6 +391,10 @@ TEST_F(MetricsTest, DumpOmitsComponentStillInitializing)
       std::ranges::contains(dump_lines,
                             "executor_metrics_test_uninit_queue_depth 17"))
       << dump;
+  // The component's init status is still reported (read from the atomic flag,
+  // not the racy metrics map), so monitoring can see it never finished init.
+  expect_dump_contains(
+      dump, "hogd_metrics_component_initialized{component=\"executor\"} 0");
 }
 
 TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
@@ -410,10 +414,14 @@ TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump, "executor_metrics_test_mixed_executor 11");
+  expect_dump_contains(
+      dump, "hogd_metrics_component_initialized{component=\"executor\"} 1");
   const std::vector<std::string_view> dump_lines = get_lines(dump);
   EXPECT_FALSE(std::ranges::contains(dump_lines,
                                      "mempool_metrics_test_mixed_mempool 22"))
       << dump;
+  expect_dump_contains(
+      dump, "hogd_metrics_component_initialized{component=\"mempool\"} 0");
 }
 
 TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
