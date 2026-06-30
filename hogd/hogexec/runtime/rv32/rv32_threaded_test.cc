@@ -290,6 +290,67 @@ TEST(Rv32Threaded, movedFromMachineDoesNotReleaseItsSlot)
   EXPECT_EQ(target.reg(3), 17U);
 }
 
+// Regression for issue #2824: moving a MemorySlot must transfer slot ownership
+// and release the buffer exactly once. Ownership is "buf_ holds an allocation"
+// (capacity != 0); the move resets the source to no allocation, so the transfer
+// never depends on the implicit moved-from std::vector state -- the standard
+// only guarantees a moved-from library object is "valid but unspecified". An
+// acquired slot owns its reserved buffer even before it is filled, so no resize
+// is needed to model ownership here.
+TEST(Rv32Threaded, memorySlotMoveTransfersOwnershipExactlyOnce)
+{
+  memory_slot_pool() = MemorySlotPool{};
+  {
+    std::optional<MemorySlot> source(std::in_place);
+    ASSERT_NE(source->bytes().capacity(), 0U); // acquired => owns its buffer
+    std::optional<MemorySlot> target(std::in_place, std::move(*source));
+
+    // The move handed the buffer to target and reset the source to no
+    // allocation, independent of the std::vector's moved-from representation.
+    EXPECT_NE(target->bytes().capacity(), 0U);
+    EXPECT_EQ(source->bytes().capacity(), 0U);
+
+    // Destroying the moved-from (allocation-less) source releases nothing.
+    ASSERT_EQ(memory_slot_pool().count, 0U);
+    source.reset();
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+
+    // target is the sole owner; destroying it returns exactly one slot.
+    target.reset();
+    EXPECT_EQ(memory_slot_pool().count, 1U);
+  }
+  memory_slot_pool() = MemorySlotPool{};
+}
+
+// Moving an already-moved-from MemorySlot must stay safe: the first move resets
+// the source to no allocation, so the second move sees a source with capacity 0
+// and produces a target with capacity 0. Only the sole owner's slot is ever
+// released -- a second move must not resurrect ownership and double-release.
+TEST(Rv32Threaded, memorySlotDoubleMoveReleasesExactlyOnce)
+{
+  memory_slot_pool() = MemorySlotPool{};
+  {
+    std::optional<MemorySlot> a(std::in_place);
+    std::optional<MemorySlot> b(std::in_place, std::move(*a)); // b owns it
+    std::optional<MemorySlot> c(std::in_place,
+                                std::move(*a)); // a already reset
+
+    EXPECT_NE(b->bytes().capacity(), 0U);
+    EXPECT_EQ(a->bytes().capacity(), 0U);
+    EXPECT_EQ(c->bytes().capacity(), 0U);
+
+    // Neither the moved-from a nor c (moved from a reset source) owns a slot.
+    a.reset();
+    c.reset();
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+
+    // b is the sole owner; destroying it returns exactly one slot.
+    b.reset();
+    EXPECT_EQ(memory_slot_pool().count, 1U);
+  }
+  memory_slot_pool() = MemorySlotPool{};
+}
+
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
 {
   using test_program::branch;
