@@ -112,8 +112,21 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
-      - name: Build GCC Debug
-        run: ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
+      - name: Build GCC Debug (node binaries only)
+        run: |
+          # Configure only (-n), then build just the node daemons this test
+          # launches and their transitive deps — not the whole tree, tests, or
+          # benchmarks. Target names from the hogd/*/CMakeLists.txt files
+          # (hogdb_exec has OUTPUT_NAME hogdb).
+          ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror" -n
+          make -C build/gcc -j"$(nproc)" \
+            loadgen_server \
+            mempool_exec \
+            hogexec \
+            event_exec \
+            indexer_exec \
+            hogdb_exec \
+            auth_exec
 
       - name: Install Go
         uses: actions/setup-go@v5
