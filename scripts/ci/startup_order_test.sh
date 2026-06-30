@@ -16,43 +16,43 @@
 set -Eeuo pipefail
 
 usage() {
-	echo "Usage: $0 <scenario>" >&2
-	echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer" >&2
+  echo "Usage: $0 <scenario>" >&2
+  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer" >&2
 }
 
 SCENARIO="${1:-}"
 if [[ -z "$SCENARIO" ]]; then
-	usage
-	exit 2
+  usage
+  exit 2
 fi
 
 # Resolve the launch order (space-separated component keys) for the scenario.
 case "$SCENARIO" in
 mempool-first)
-	ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
-	;;
+  ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
+  ;;
 mempool-last)
-	ORDER=(loadgen hogexec event indexer hogdb auth mempool chuckd)
-	;;
+  ORDER=(loadgen hogexec event indexer hogdb auth mempool chuckd)
+  ;;
 mempool-middle)
-	ORDER=(loadgen hogexec event mempool indexer hogdb auth chuckd)
-	;;
+  ORDER=(loadgen hogexec event mempool indexer hogdb auth chuckd)
+  ;;
 indexer-before-event)
-	ORDER=(mempool loadgen hogexec indexer event hogdb auth chuckd)
-	;;
+  ORDER=(mempool loadgen hogexec indexer event hogdb auth chuckd)
+  ;;
 event-before-indexer)
-	ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
-	;;
+  ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
+  ;;
 *)
-	echo "unknown scenario: $SCENARIO" >&2
-	usage
-	exit 2
-	;;
+  echo "unknown scenario: $SCENARIO" >&2
+  usage
+  exit 2
+  ;;
 esac
 
 if [[ "${HOG_STARTUP_LIST_ONLY:-}" == "1" ]]; then
-	printf '%s\n' "${ORDER[@]}"
-	exit 0
+  printf '%s\n' "${ORDER[@]}"
+  exit 0
 fi
 
 BUILD_DIR="${BUILD_DIR:-build/gcc}"
@@ -107,22 +107,22 @@ declare -A PID_OF
 LAUNCHED=()
 
 cleanup() {
-	local status=$?
-	trap - EXIT INT TERM
-	for key in "${LAUNCHED[@]}"; do
-		local pid="${PID_OF[$key]:-}"
-		[[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
-	done
-	# chuckd forks scpd; reap it by name.
-	pkill -f "$(basename "$SCPD_BIN")" 2>/dev/null || true
-	pkill -f loadgen_server 2>/dev/null || true
-	sleep 1
-	for key in "${LAUNCHED[@]}"; do
-		local pid="${PID_OF[$key]:-}"
-		[[ -n "$pid" ]] && kill -KILL "$pid" 2>/dev/null || true
-	done
-	rm -rf "$WORK_DIR"
-	exit "$status"
+  local status=$?
+  trap - EXIT INT TERM
+  for key in "${LAUNCHED[@]}"; do
+    local pid="${PID_OF[$key]:-}"
+    [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
+  done
+  # chuckd forks scpd; reap it by name.
+  pkill -f "$(basename "$SCPD_BIN")" 2>/dev/null || true
+  pkill -f loadgen_server 2>/dev/null || true
+  sleep 1
+  for key in "${LAUNCHED[@]}"; do
+    local pid="${PID_OF[$key]:-}"
+    [[ -n "$pid" ]] && kill -KILL "$pid" 2>/dev/null || true
+  done
+  rm -rf "$WORK_DIR"
+  exit "$status"
 }
 trap cleanup EXIT INT TERM
 
@@ -135,80 +135,80 @@ trap cleanup EXIT INT TERM
 # leaving it alive and holding its fixed port for the next serial scenario.
 # The exit status is recovered later via `wait` in the crash check.
 spawn() {
-	local key="$1"
-	shift
-	echo "launch $key: $*"
-	"$@" >"$WORK_DIR/$key.log" 2>&1 &
-	PID_OF[$key]=$!
-	LAUNCHED+=("$key")
+  local key="$1"
+  shift
+  echo "launch $key: $*"
+  "$@" >"$WORK_DIR/$key.log" 2>&1 &
+  PID_OF[$key]=$!
+  LAUNCHED+=("$key")
 }
 
 launch() {
-	local key="$1"
-	case "$key" in
-	loadgen)
-		spawn loadgen "$LOADGEN_BIN" --bind-ip "$IP" --port "$LOADGEN_PORT" \
-			--metrics-port "$LOADGEN_HTTP_PORT"
-		;;
-	mempool)
-		spawn mempool "$MEMPOOL_BIN" --bind-ip "$IP" --metrics-port "$MEMPOOL_HTTP_PORT" \
-			--network-id 0 --num-db-shards 1 --num-exec-shards 1 \
-			--db-port "$MEMPOOL_DB_PORT" --event-port "$MEMPOOL_EVENT_PORT" \
-			--executor-port "$MEMPOOL_EXECUTOR_PORT" --auth-port "$MEMPOOL_AUTH_PORT" \
-			--coordinator-port "$MEMPOOL_COORDINATOR_PORT"
-		;;
-	hogexec)
-		spawn hogexec "$HOGEXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
-			--bind-ip "$IP" --nthreads 64 --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
-			--metrics-port "$EXECUTOR_HTTP_PORT"
-		;;
-	event)
-		spawn event "$EVENT_BIN" --mempool-addr "$IP:$MEMPOOL_EVENT_PORT" \
-			--bind-ip "$IP" --work-dir "$WORK_DIR/event" \
-			--executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" \
-			--indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
-		;;
-	indexer)
-		spawn indexer "$INDEXER_BIN" --event-addr "$IP:$EVENT_INDEXER_PORT" \
-			--db-path "$WORK_DIR/indexer" --bind-ip "$IP" \
-			--event-port "$INDEXER_EVENT_PORT" \
-			--block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" \
-			--metrics-port "$INDEXER_HTTP_PORT"
-		;;
-	hogdb)
-		spawn hogdb "$HOGDB_BIN" --db-path "$WORK_DIR/hogdb.data" --ram-bytes 2000000000 \
-			--bind-ip "$IP" --coordinator-addr "$IP:$MEMPOOL_DB_PORT" \
-			--executor-port "$DB_EXECUTOR_PORT" --mempool-port "$DB_MEMPOOL_PORT" \
-			--auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"
-		;;
-	auth)
-		spawn auth "$AUTH_BIN" --mempool-addr "$IP:$MEMPOOL_AUTH_PORT" --bind-ip "$IP" \
-			--db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT" \
-			--metrics-port "$AUTH_HTTP_PORT"
-		;;
-	chuckd)
-		# num-blocks is deliberately huge: the loadgen drives one block per
-		# loop iteration on demand (no upfront allocation), so a large count
-		# just keeps the bench running well past the settle window. This is a
-		# startup-order test — we want every process up and busy at check time,
-		# then killed by cleanup; we do not want the bench to run to completion
-		# and tear the coordinator down mid-check.
-		spawn chuckd "$CHUCKD_BIN" -l info --stack --config "$CHUCKD_CONFIG" \
-			--instance 970c9b --seed 1410441218572558875 --metrics :2223 \
-			bench coordinator_loadgen \
-			--in-addr "$IP:7888" --debug-port 5500 \
-			--num-accts 100 --txs-per-block 1000 --num-blocks 1000000 \
-			--storage-dir "$WORK_DIR/chuckd-storage" --out-addr :50000 \
-			--loadgen-addr "$IP:$LOADGEN_PORT" \
-			--sched-addr "$IP:$MEMPOOL_COORDINATOR_PORT" \
-			--scpd-path "$SCPD_BIN" \
-			--scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
-		;;
-	*)
-		echo "internal error: unknown component $key" >&2
-		exit 3
-		;;
-	esac
+  local key="$1"
+  case "$key" in
+  loadgen)
+    spawn loadgen "$LOADGEN_BIN" --bind-ip "$IP" --port "$LOADGEN_PORT" \
+      --metrics-port "$LOADGEN_HTTP_PORT"
+    ;;
+  mempool)
+    spawn mempool "$MEMPOOL_BIN" --bind-ip "$IP" --metrics-port "$MEMPOOL_HTTP_PORT" \
+      --network-id 0 --num-db-shards 1 --num-exec-shards 1 \
+      --db-port "$MEMPOOL_DB_PORT" --event-port "$MEMPOOL_EVENT_PORT" \
+      --executor-port "$MEMPOOL_EXECUTOR_PORT" --auth-port "$MEMPOOL_AUTH_PORT" \
+      --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
+    ;;
+  hogexec)
+    spawn hogexec "$HOGEXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
+      --bind-ip "$IP" --nthreads 64 --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
+      --metrics-port "$EXECUTOR_HTTP_PORT"
+    ;;
+  event)
+    spawn event "$EVENT_BIN" --mempool-addr "$IP:$MEMPOOL_EVENT_PORT" \
+      --bind-ip "$IP" --work-dir "$WORK_DIR/event" \
+      --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" \
+      --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
+    ;;
+  indexer)
+    spawn indexer "$INDEXER_BIN" --event-addr "$IP:$EVENT_INDEXER_PORT" \
+      --db-path "$WORK_DIR/indexer" --bind-ip "$IP" \
+      --event-port "$INDEXER_EVENT_PORT" \
+      --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" \
+      --metrics-port "$INDEXER_HTTP_PORT"
+    ;;
+  hogdb)
+    spawn hogdb "$HOGDB_BIN" --db-path "$WORK_DIR/hogdb.data" --ram-bytes 2000000000 \
+      --bind-ip "$IP" --coordinator-addr "$IP:$MEMPOOL_DB_PORT" \
+      --executor-port "$DB_EXECUTOR_PORT" --mempool-port "$DB_MEMPOOL_PORT" \
+      --auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"
+    ;;
+  auth)
+    spawn auth "$AUTH_BIN" --mempool-addr "$IP:$MEMPOOL_AUTH_PORT" --bind-ip "$IP" \
+      --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT" \
+      --metrics-port "$AUTH_HTTP_PORT"
+    ;;
+  chuckd)
+    # num-blocks is deliberately huge: the loadgen drives one block per
+    # loop iteration on demand (no upfront allocation), so a large count
+    # just keeps the bench running well past the settle window. This is a
+    # startup-order test — we want every process up and busy at check time,
+    # then killed by cleanup; we do not want the bench to run to completion
+    # and tear the coordinator down mid-check.
+    spawn chuckd "$CHUCKD_BIN" -l info --stack --config "$CHUCKD_CONFIG" \
+      --instance 970c9b --seed 1410441218572558875 --metrics :2223 \
+      bench coordinator_loadgen \
+      --in-addr "$IP:7888" --debug-port 5500 \
+      --num-accts 100 --txs-per-block 1000 --num-blocks 1000000 \
+      --storage-dir "$WORK_DIR/chuckd-storage" --out-addr :50000 \
+      --loadgen-addr "$IP:$LOADGEN_PORT" \
+      --sched-addr "$IP:$MEMPOOL_COORDINATOR_PORT" \
+      --scpd-path "$SCPD_BIN" \
+      --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
+    ;;
+  *)
+    echo "internal error: unknown component $key" >&2
+    exit 3
+    ;;
+  esac
 }
 
 # Do NOT pre-create the daemons' own data directories. The indexer's
@@ -219,8 +219,8 @@ mkdir -p "$WORK_DIR/event" "$WORK_DIR/chuckd-storage"
 
 echo "=== scenario $SCENARIO: launching in order: ${ORDER[*]} ==="
 for key in "${ORDER[@]}"; do
-	launch "$key"
-	sleep "$STAGGER_SECS"
+  launch "$key"
+  sleep "$STAGGER_SECS"
 done
 
 echo "=== all launched; settling ${SETTLE_SECS}s ==="
@@ -229,28 +229,28 @@ sleep "$SETTLE_SECS"
 echo "=== crash check ==="
 failed=0
 for key in "${LAUNCHED[@]}"; do
-	pid="${PID_OF[$key]}"
-	if kill -0 "$pid" 2>/dev/null; then
-		echo "ok    $key (pid $pid still running)"
-		continue
-	fi
-	# Process already exited; recover its status. `wait` on a finished
-	# background child of this shell returns that child's exit status.
-	status=0
-	wait "$pid" 2>/dev/null || status=$?
-	if [[ "$status" == "0" ]]; then
-		echo "ok    $key (exited cleanly, status 0)"
-	else
-		echo "FAIL  $key (exit status $status)"
-		echo "----- last 50 lines of $key.log -----"
-		tail -n 50 "$WORK_DIR/$key.log" || true
-		echo "-------------------------------------"
-		failed=1
-	fi
+  pid="${PID_OF[$key]}"
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "ok    $key (pid $pid still running)"
+    continue
+  fi
+  # Process already exited; recover its status. `wait` on a finished
+  # background child of this shell returns that child's exit status.
+  status=0
+  wait "$pid" 2>/dev/null || status=$?
+  if [[ "$status" == "0" ]]; then
+    echo "ok    $key (exited cleanly, status 0)"
+  else
+    echo "FAIL  $key (exit status $status)"
+    echo "----- last 50 lines of $key.log -----"
+    tail -n 50 "$WORK_DIR/$key.log" || true
+    echo "-------------------------------------"
+    failed=1
+  fi
 done
 
 if [[ "$failed" -ne 0 ]]; then
-	echo "=== scenario $SCENARIO FAILED ==="
-	exit 1
+  echo "=== scenario $SCENARIO FAILED ==="
+  exit 1
 fi
 echo "=== scenario $SCENARIO PASSED ==="
