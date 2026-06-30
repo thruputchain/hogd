@@ -187,11 +187,17 @@ launch() {
 			--metrics-port "$AUTH_HTTP_PORT"
 		;;
 	chuckd)
+		# num-blocks is deliberately huge: the loadgen drives one block per
+		# loop iteration on demand (no upfront allocation), so a large count
+		# just keeps the bench running well past the settle window. This is a
+		# startup-order test — we want every process up and busy at check time,
+		# then killed by cleanup; we do not want the bench to run to completion
+		# and tear the coordinator down mid-check.
 		spawn chuckd "$CHUCKD_BIN" -l info --stack --config "$CHUCKD_CONFIG" \
 			--instance 970c9b --seed 1410441218572558875 --metrics :2223 \
 			bench coordinator_loadgen \
 			--in-addr "$IP:7888" --debug-port 5500 \
-			--num-accts 100 --txs-per-block 1000 --num-blocks 10 \
+			--num-accts 100 --txs-per-block 1000 --num-blocks 1000000 \
 			--storage-dir "$WORK_DIR/chuckd-storage" --out-addr :50000 \
 			--loadgen-addr "$IP:$LOADGEN_PORT" \
 			--sched-addr "$IP:$MEMPOOL_COORDINATOR_PORT" \
@@ -205,7 +211,11 @@ launch() {
 	esac
 }
 
-mkdir -p "$WORK_DIR/event" "$WORK_DIR/indexer" "$WORK_DIR/chuckd-storage"
+# Do NOT pre-create the daemons' own data directories. The indexer's
+# IndexDB::open_or_make_new() only creates a fresh DB when its path does NOT
+# exist; a pre-existing empty dir sends it down the open() path, which aborts
+# with "DB Not Found". Each daemon creates its own dir (matches launch-multi.sh).
+mkdir -p "$WORK_DIR/event" "$WORK_DIR/chuckd-storage"
 
 echo "=== scenario $SCENARIO: launching in order: ${ORDER[*]} ==="
 for key in "${ORDER[@]}"; do
