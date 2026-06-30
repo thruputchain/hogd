@@ -28,6 +28,16 @@ Metrics::dump_to_prometheus_string()
 {
   std::ostringstream os;
   for (size_t i = 0; i < components_.size(); i++) {
+    // Skip components still initializing. Iterating a component's metrics map
+    // concurrently with a registration call's try_emplace is a data race (UB).
+    // The acquire load here pairs with the release store in
+    // mark_done_with_init(): once it observes true, every metric registered for
+    // this component is fully constructed and visible, and registering more is
+    // disallowed, so the map is safe to iterate without a lock.
+    if (!done_with_init(static_cast<ComponentName>(i))) {
+      continue;
+    }
+
     Component &component = components_[i];
 
     for (auto &[name, metric] : component.metrics) {

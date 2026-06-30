@@ -374,6 +374,48 @@ TEST_F(MetricsTest, DumpIncludesMetricsFromMultipleComponents)
   expect_dump_contains(dump, "mempool_metrics_test_multi_mempool 22");
 }
 
+TEST_F(MetricsTest, DumpOmitsComponentStillInitializing)
+{
+  Metrics &metrics = Metrics::instance();
+
+  // Registered but never marked done with init: the dump must skip this
+  // component to avoid racing with concurrent registration.
+  Metrics::Gauge queue_depth =
+      metrics.gauge(Metrics::ComponentName::kExecutor,
+                    "metrics_test_uninit_queue_depth", "");
+  queue_depth.record(17);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  const std::vector<std::string_view> dump_lines = get_lines(dump);
+  EXPECT_FALSE(
+      std::ranges::contains(dump_lines,
+                            "executor_metrics_test_uninit_queue_depth 17"))
+      << dump;
+}
+
+TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Gauge executor_metric =
+      metrics.gauge(Metrics::ComponentName::kExecutor,
+                    "metrics_test_mixed_executor", "");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+  // Mempool is registered but left initializing.
+  Metrics::Gauge mempool_metric =
+      metrics.gauge(Metrics::ComponentName::kMempool,
+                    "metrics_test_mixed_mempool", "");
+  executor_metric.record(11);
+  mempool_metric.record(22);
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "executor_metrics_test_mixed_executor 11");
+  const std::vector<std::string_view> dump_lines = get_lines(dump);
+  EXPECT_FALSE(std::ranges::contains(dump_lines,
+                                     "mempool_metrics_test_mixed_mempool 22"))
+      << dump;
+}
+
 TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
 {
   Metrics &metrics = Metrics::instance();
