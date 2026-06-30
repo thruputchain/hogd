@@ -33,4 +33,6 @@ target_link_libraries(
   metrics
   http
 )
-set_property(TARGET auth_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+  set_property(TARGET auth_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

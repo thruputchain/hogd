@@ -250,7 +250,10 @@ else()
   set(USE_RTTI ON CACHE BOOL "" FORCE)
 endif()
 
-set(PORTABLE OFF CACHE BOOL "" FORCE)  # Allow architecture-specific optimizations
+# Keep RocksDB on the same portable CPU baseline as the rest of hogd. RocksDB's
+# PORTABLE=OFF path injects -march=native, which can leak AVX-512 into release
+# artifacts built on AVX-512-capable runners.
+set(PORTABLE ON CACHE BOOL "" FORCE)
 set(FORCE_SSE42 ON CACHE BOOL "" FORCE)  # Enable SSE4.2 (modern CPUs)
 # Compression support (all fast and commonly available)
 set(WITH_SNAPPY ON CACHE BOOL "" FORCE)
