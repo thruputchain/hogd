@@ -5,19 +5,20 @@
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last
 #              indexer-before-event event-before-indexer
+#              coordinator-first
 #
 # Env overrides (defaults target the namespace cpp gcc-debug build layout):
 #   BUILD_DIR   build directory holding the C++ binaries (default build/gcc)
 #   CHUCKD_BIN  path to chuckd.dev   (default $BUILD_DIR/chuckd.dev)
 #   SCPD_BIN    path to scpd.dev     (default $BUILD_DIR/scpd.dev)
 #   SETTLE_SECS seconds to wait after the last launch (default 25)
-#   STAGGER_SECS seconds between launches (default 2)
+#   STAGGER_SECS seconds between launches (default 3, for predictable ordering)
 #   HOG_STARTUP_LIST_ONLY=1  print the resolved launch order and exit (no launch)
 set -Eeuo pipefail
 
 usage() {
   echo "Usage: $0 <scenario>" >&2
-  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer" >&2
+  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first" >&2
 }
 
 SCENARIO="${1:-}"
@@ -43,6 +44,19 @@ indexer-before-event)
 event-before-indexer)
   ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
   ;;
+coordinator-first)
+  # Reproduction attempt: bring up the mempool hub + loadgen + coordinator
+  # early, but defer the mempool's downstream services (hogexec, hogdb, auth)
+  # to the end. The coordinator can then start driving transactions into the
+  # mempool before auth/executor/db have connected, so the mempool's
+  # schedulercoord_submit_unvetted path forwards an RPC onto a not-yet-ready
+  # fd. Connection-level retry covers a peer that is merely *dialing in* late;
+  # it does NOT cover an RPC *issued* on a downstream that has not registered.
+  # If that is the order-dependent crash, this scenario fails (mempool aborts
+  # with "RPC call on failed file descriptor"). auth is launched last to widen
+  # the window.
+  ORDER=(mempool loadgen chuckd event indexer hogexec hogdb auth)
+  ;;
 *)
   echo "unknown scenario: $SCENARIO" >&2
   usage
@@ -59,7 +73,11 @@ BUILD_DIR="${BUILD_DIR:-build/gcc}"
 CHUCKD_BIN="${CHUCKD_BIN:-$BUILD_DIR/chuckd.dev}"
 SCPD_BIN="${SCPD_BIN:-$BUILD_DIR/scpd.dev}"
 SETTLE_SECS="${SETTLE_SECS:-25}"
-STAGGER_SECS="${STAGGER_SECS:-2}"
+# Stagger launches by a few seconds so a service genuinely starts before the
+# next one — the launch order is then the actual wall-clock order, which is
+# what these scenarios are predicated on (e.g. coordinator-first needs the
+# coordinator to truly precede auth/hogexec/hogdb).
+STAGGER_SECS="${STAGGER_SECS:-3}"
 IP=127.0.0.1
 
 # Repo root (this script lives in scripts/ci/).

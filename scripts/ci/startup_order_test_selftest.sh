@@ -32,6 +32,7 @@ check_complete() {
 check mempool-first "mempool loadgen hogexec event indexer hogdb auth chuckd"
 check mempool-last "loadgen hogexec event indexer hogdb auth mempool chuckd"
 check mempool-middle "loadgen hogexec event mempool indexer hogdb auth chuckd"
+check coordinator-first "mempool loadgen chuckd event indexer hogexec hogdb auth"
 
 # Ordering relations for the indexer/event scenarios.
 idx_before_event() {
@@ -59,7 +60,26 @@ event_before_idx() {
 idx_before_event
 event_before_idx
 
-for s in mempool-first mempool-last mempool-middle indexer-before-event event-before-indexer; do
+# coordinator-first must launch chuckd before each mempool-downstream service
+# (auth, hogexec, hogdb) so the coordinator can drive traffic before they
+# register with the mempool.
+coordinator_before_downstreams() {
+  local order
+  order="$(HOG_STARTUP_LIST_ONLY=1 "$SCRIPT" coordinator-first)"
+  local c
+  c=$(grep -n '^chuckd$' <<<"$order" | cut -d: -f1)
+  local dep p
+  for dep in auth hogexec hogdb; do
+    p=$(grep -n "^${dep}\$" <<<"$order" | cut -d: -f1)
+    [[ "$c" -lt "$p" ]] || {
+      echo "FAIL coordinator-first: chuckd($c) not before $dep($p)"
+      fail=1
+    }
+  done
+}
+coordinator_before_downstreams
+
+for s in mempool-first mempool-last mempool-middle indexer-before-event event-before-indexer coordinator-first; do
   check_complete "$s"
 done
 

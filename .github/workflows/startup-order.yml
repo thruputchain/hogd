@@ -157,6 +157,14 @@ jobs:
       - name: "Scenario: event-before-indexer"
         run: ./scripts/ci/startup_order_test.sh event-before-indexer
 
+      # Reproduction attempt for the reported "wrong start order" crash:
+      # coordinator drives traffic before the mempool's downstream services
+      # (auth/hogexec/hogdb) connect. Expected to FAIL (mempool aborts on an
+      # RPC to a not-yet-ready fd) if that hypothesis holds. Runs last so the
+      # known-good orderings above are exercised first.
+      - name: "Scenario: coordinator-first"
+        run: ./scripts/ci/startup_order_test.sh coordinator-first
+
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
