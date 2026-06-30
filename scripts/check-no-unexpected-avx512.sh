@@ -17,15 +17,37 @@ for binary in "$@"; do
 
   # BLAKE3 includes explicit runtime-dispatched AVX-512 implementations. Those
   # symbols are allowed; generic dependency or application code is not.
-  if objdump -d --demangle --no-show-raw-insn "$binary" | awk -v binary="$binary" '
+  if objdump -d --demangle "$binary" | awk -v binary="$binary" '
+    {
+      delete fields
+      has_evex = 0
+      has_avx512 = 0
+    }
     /^[[:xdigit:]]+ <.*>:$/ {
       symbol = $0
       sub(/^[[:xdigit:]]+ </, "", symbol)
       sub(/>:$/, "", symbol)
       next
     }
-    {
-      has_avx512 = \
+    /^[[:space:]]*[[:xdigit:]]+:/ {
+      rest = $0
+      sub(/^[[:space:]]*[[:xdigit:]]+:[[:space:]]*/, "", rest)
+      split(rest, fields, /[[:space:]]+/)
+
+      mnemonic = ""
+      for (i = 1; i in fields; i++) {
+        if (fields[i] ~ /^[[:xdigit:]][[:xdigit:]]$/) {
+          continue
+        }
+        mnemonic = fields[i]
+        break
+      }
+
+      # AVX-512 and AVX-512VL instructions are EVEX-encoded. Checking the raw
+      # prefix catches instructions that only use xmm/ymm operands and no masks.
+      has_evex = tolower(fields[1]) == "62" && mnemonic != "" && mnemonic != "(bad)"
+
+      has_avx512 = has_evex || \
         $0 ~ /%zmm[0-9]+/ || \
         $0 ~ /(^|[^[:alnum:]_])zmm[0-9]+([^[:alnum:]_]|$)/ || \
         $0 ~ /%k[1-7]([^[:digit:]]|$)/ || \
