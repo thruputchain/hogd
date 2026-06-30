@@ -32,7 +32,8 @@ Ed25519SignatureVerifier::add_signature(const Ed25519PublicKey &public_key,
 bool
 Ed25519SignatureVerifier::verify()
 {
-  return ed25519_verify_batch(public_keys_, signatures_, serialized_txs_);
+  return ed25519_verify_batch(public_keys_, signatures_,
+                              std::span<const x23::Buf>(serialized_txs_));
 }
 
 namespace {

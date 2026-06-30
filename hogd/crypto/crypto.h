@@ -242,29 +242,27 @@ ed25519_keygen_from_seed(std::span<const std::byte, 32> seed)
 
 template<x23::is_bytespan T>
 inline bool
-ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
-                     std::vector<Ed25519Signature> signatures,
-                     std::vector<T> msgs)
+ed25519_verify_batch(std::span<const Ed25519PublicKey> public_keys,
+                     std::span<const Ed25519Signature> signatures,
+                     std::span<const T> msgs)
 {
   if (public_keys.size() != signatures.size() ||
       public_keys.size() != msgs.size()) {
     return false;
   }
   using pk_ptr = const uint8_t (*)[32];
-  auto *public_keys_ptr = new pk_ptr[public_keys.size()];
   using sig_ptr = const uint8_t (*)[64];
-  auto *signatures_ptr = new sig_ptr[public_keys.size()];
-  auto *msgs_ptr = new MessageSpan[public_keys.size()];
+  std::vector<pk_ptr> public_keys_ptr(public_keys.size());
+  std::vector<sig_ptr> signatures_ptr(public_keys.size());
+  std::vector<MessageSpan> msgs_ptr(public_keys.size());
   for (size_t i = 0; i < public_keys.size(); i++) {
     public_keys_ptr[i] = detail::span_to_pointer(public_keys[i]);
     signatures_ptr[i] = detail::span_to_pointer(signatures[i]);
     msgs_ptr[i] = detail::span_to_message_span(msgs[i]);
   }
-  auto result = ed25519_dalek_verify_batch(public_keys_ptr, signatures_ptr,
-                                           msgs_ptr, public_keys.size());
-  delete[] public_keys_ptr;
-  delete[] signatures_ptr;
-  delete[] msgs_ptr;
+  auto result =
+      ed25519_dalek_verify_batch(public_keys_ptr.data(), signatures_ptr.data(),
+                                 msgs_ptr.data(), public_keys.size());
   return result == Ed25519Result::Success;
 }
 

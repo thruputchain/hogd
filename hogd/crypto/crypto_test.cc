@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <gtest/gtest.h>
 
@@ -161,11 +162,14 @@ TEST(Ed25519, BatchUsage)
   auto sig3 = ed25519_sign(sk3, msg3).value();
   // NOLINTEND(bugprone-unchecked-optional-access)
 
-  EXPECT_EQ(ed25519_verify_batch({pk1, pk2, pk3}, {sig1, sig2, sig3},
-                                 std::vector<std::span<const std::byte>>{
-                                     std::as_bytes(std::span(msg1)),
-                                     std::as_bytes(std::span(msg2)),
-                                     std::as_bytes(std::span(msg3))}),
+  std::array<std::span<const std::byte>, 3> msgs{std::as_bytes(std::span(msg1)),
+                                                 std::as_bytes(std::span(msg2)),
+                                                 std::as_bytes(
+                                                     std::span(msg3))};
+  EXPECT_EQ(ed25519_verify_batch(std::array{pk1, pk2, pk3},
+                                 std::array{sig1, sig2, sig3},
+                                 std::span<const std::span<const std::byte>>(
+                                     msgs)),
             true);
 }
 
