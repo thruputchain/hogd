@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
@@ -168,31 +169,41 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 
 // RAII owner of a single guest-memory pool slot. Acquires a buffer from the
 // thread-local pool on construction and returns it on destruction; moving a
-// slot transfers the buffer to the target and marks the source as no longer
-// owning, so a moved-from slot releases nothing. Keeping ownership in this one
-// type means the owning machine needs no destructor or custom move of its own,
-// and the release decision rides on an explicit ownership bit rather than on
-// the moved-from std::vector value -- the standard only guarantees a moved-from
-// library object is "valid but unspecified", so a moved-from vector is not
-// guaranteed empty(). The pool is thread_local, so a slot must be destroyed on
-// its constructing thread while that thread is alive (true for the
-// per-invocation stack machines); do not give one static storage duration.
+// slot hands the buffer to the target and resets the source to no allocation,
+// so a moved-from slot releases nothing. Keeping ownership in this one type
+// means the owning machine needs no destructor or custom move of its own.
+//
+// Ownership is encoded as "buf_ holds an allocation", i.e. capacity() != 0:
+// acquire_memory_slot reserves capacity up front, so an acquired slot owns its
+// buffer even before it is filled, while a moved-from slot is reset to an empty
+// vector (capacity 0). The release decision therefore never depends on the
+// *implicit* moved-from std::vector value -- the standard only guarantees a
+// moved-from library object is "valid but unspecified", not empty()/capacity()
+// == 0 -- because the move constructor makes the source's empty state explicit
+// (which also makes a double move safe: a second move sees a source with no
+// allocation). buf_ holds the slot directly so MemorySlot is exactly the width
+// of a std::vector, keeping ThreadedMachine's cache-line layout (the
+// static_assert after the class guards this). The pool is thread_local, so a
+// slot must be destroyed on its constructing thread while that thread is alive
+// (true for the per-invocation stack machines); do not give one static storage
+// duration.
 class MemorySlot {
 public:
   MemorySlot() : buf_(acquire_memory_slot()) {}
   ~MemorySlot()
   {
-    if (owns_) {
+    // capacity() != 0 means this slot still holds a pool buffer to return; a
+    // moved-from slot was reset to no allocation and releases nothing.
+    if (buf_.capacity() != 0) {
       release_memory_slot(std::move(buf_));
     }
   }
   MemorySlot(MemorySlot &&other) noexcept
-    : buf_(std::move(other.buf_)), owns_(other.owns_)
+    : buf_(std::exchange(other.buf_, std::vector<uint8_t>{}))
   {
-    // Inherit ownership from the source (not the default-initialized true), so
-    // moving an already-moved-from slot does not resurrect ownership, then
-    // clear the source so only one slot ever owns the buffer.
-    other.owns_ = false;
+    // std::exchange hands other's buffer to buf_ and leaves other holding a
+    // fresh empty vector (capacity 0), so ownership transfer does not depend on
+    // the unspecified moved-from std::vector state.
   }
   MemorySlot &operator=(MemorySlot &&) = delete;
   MemorySlot(const MemorySlot &) = delete;
@@ -206,7 +217,6 @@ public:
 
 private:
   std::vector<uint8_t> buf_;
-  bool owns_ = true;
 };
 
 // alignas(64): pin the base to a cache-line boundary so member offsets map
@@ -366,6 +376,18 @@ public:
   const bool exec_traced_;
   uint32_t halt_code_ = 0;
 };
+
+// Lock the cache-line layout the comments above call load-bearing. memory_ must
+// stay exactly the width of a std::vector (MemorySlot adds no fields) so the
+// hot read/write scalar gas_remaining_ keeps its own cache line at offset 192
+// and the struct stays 256 bytes (4 * 64). Wrapping memory_ in a type that grew
+// it by 8 bytes silently pushed gas_remaining_ to offset 256 and the struct to
+// 320 (one extra cache line); these guard against that regressing again.
+static_assert(offsetof(ThreadedMachine, gas_remaining_) == 192,
+              "gas_remaining_ must stay on its own cache line (offset 3 * 64); "
+              "check the memory_ member width and field order above");
+static_assert(sizeof(ThreadedMachine) == 256,
+              "ThreadedMachine size changed -- check the cache-line layout");
 
 // Passed BY VALUE through the musttail chain: two pointers fit in two registers
 // (AArch64), so the machine pointer and run base stay in registers across the

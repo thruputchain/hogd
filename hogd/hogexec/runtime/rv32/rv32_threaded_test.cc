@@ -290,55 +290,56 @@ TEST(Rv32Threaded, movedFromMachineDoesNotReleaseItsSlot)
   EXPECT_EQ(target.reg(3), 17U);
 }
 
-// Regression for issue #2824: MemorySlot release is gated on an explicit
-// ownership bit, never on whether the moved-from std::vector happens to be
-// empty(). The standard only guarantees a moved-from library object is "valid
-// but unspecified", so a conforming std::vector may leave the source
-// non-empty. This models that state and proves the moved-from slot still
-// releases nothing while the move target retains sole ownership.
-TEST(Rv32Threaded, memorySlotMovedFromDoesNotReleaseEvenWhenNonEmpty)
+// Regression for issue #2824: moving a MemorySlot must transfer slot ownership
+// and release the buffer exactly once. Ownership is "buf_ holds an allocation"
+// (capacity != 0); the move resets the source to no allocation, so the transfer
+// never depends on the implicit moved-from std::vector state -- the standard
+// only guarantees a moved-from library object is "valid but unspecified". An
+// acquired slot owns its reserved buffer even before it is filled, so no resize
+// is needed to model ownership here.
+TEST(Rv32Threaded, memorySlotMoveTransfersOwnershipExactlyOnce)
 {
   memory_slot_pool() = MemorySlotPool{};
   {
     std::optional<MemorySlot> source(std::in_place);
+    ASSERT_NE(source->bytes().capacity(), 0U); // acquired => owns its buffer
     std::optional<MemorySlot> target(std::in_place, std::move(*source));
 
-    // Simulate a conforming std::vector whose moved-from source stays
-    // non-empty; ownership tracking must ignore the vector's value.
-    source->bytes().resize(1);
-    ASSERT_FALSE(source->bytes().empty());
+    // The move handed the buffer to target and reset the source to no
+    // allocation, independent of the std::vector's moved-from representation.
+    EXPECT_NE(target->bytes().capacity(), 0U);
+    EXPECT_EQ(source->bytes().capacity(), 0U);
 
-    // The moved-from slot owns nothing now, so destroying it releases nothing.
+    // Destroying the moved-from (allocation-less) source releases nothing.
     ASSERT_EQ(memory_slot_pool().count, 0U);
     source.reset();
     EXPECT_EQ(memory_slot_pool().count, 0U);
 
-    // The move target is the sole owner; destroying it returns exactly one
-    // slot to the pool.
+    // target is the sole owner; destroying it returns exactly one slot.
     target.reset();
     EXPECT_EQ(memory_slot_pool().count, 1U);
   }
   memory_slot_pool() = MemorySlotPool{};
 }
 
-// Regression for the double-move case: moving an already-moved-from MemorySlot
-// must inherit the source's (false) ownership, not resurrect it from the
-// default-initialized true. Otherwise the second move target would release a
-// slot it never owned -- the same pool corruption #2824 guards against.
-TEST(Rv32Threaded, memorySlotDoubleMovedFromDoesNotResurrectOwnership)
+// Moving an already-moved-from MemorySlot must stay safe: the first move resets
+// the source to no allocation, so the second move sees a source with capacity 0
+// and produces a target with capacity 0. Only the sole owner's slot is ever
+// released -- a second move must not resurrect ownership and double-release.
+TEST(Rv32Threaded, memorySlotDoubleMoveReleasesExactlyOnce)
 {
   memory_slot_pool() = MemorySlotPool{};
   {
-    std::optional<MemorySlot> a(std::in_place); // a owns the slot
-    std::optional<MemorySlot> b(std::in_place, std::move(*a)); // -> b owns it
-    std::optional<MemorySlot> c(std::in_place, std::move(*a)); // a was already
-                                                               // moved from
+    std::optional<MemorySlot> a(std::in_place);
+    std::optional<MemorySlot> b(std::in_place, std::move(*a)); // b owns it
+    std::optional<MemorySlot> c(std::in_place,
+                                std::move(*a)); // a already reset
 
-    // Model a conforming std::vector whose moved-from sources stay non-empty.
-    a->bytes().resize(1);
-    c->bytes().resize(1);
+    EXPECT_NE(b->bytes().capacity(), 0U);
+    EXPECT_EQ(a->bytes().capacity(), 0U);
+    EXPECT_EQ(c->bytes().capacity(), 0U);
 
-    // Neither a (moved from) nor c (moved from an unowning source) owns a slot.
+    // Neither the moved-from a nor c (moved from a reset source) owns a slot.
     a.reset();
     c.reset();
     EXPECT_EQ(memory_slot_pool().count, 0U);
