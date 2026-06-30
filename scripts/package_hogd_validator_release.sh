@@ -11,18 +11,18 @@ output_dir=$2
 flavor=${3:-release}
 
 case "$flavor" in
-  release)
-    validator_package=hogd-validator-linux-x86_64
-    hog_devnode_package=hog-devnode-linux-x86_64
-    ;;
-  debug)
-    validator_package=hogd-validator-debug-linux-x86_64
-    hog_devnode_package=hog-devnode-debug-linux-x86_64
-    ;;
-  *)
-    echo "error: unsupported flavor: $flavor" >&2
-    exit 1
-    ;;
+release)
+  validator_package=hogd-validator-linux-x86_64
+  hog_devnode_package=hog-devnode-linux-x86_64
+  ;;
+debug)
+  validator_package=hogd-validator-debug-linux-x86_64
+  hog_devnode_package=hog-devnode-debug-linux-x86_64
+  ;;
+*)
+  echo "error: unsupported flavor: $flavor" >&2
+  exit 1
+  ;;
 esac
 
 copy_exec() {
