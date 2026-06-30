@@ -48,8 +48,8 @@ for binary in "$@"; do
       has_evex = tolower(fields[1]) == "62" && mnemonic != "" && mnemonic != "(bad)"
 
       has_avx512 = has_evex || \
-        $0 ~ /%zmm[0-9]+/ || \
-        $0 ~ /(^|[^[:alnum:]_])zmm[0-9]+([^[:alnum:]_]|$)/ || \
+        $0 ~ /%zmm[0-9][0-9]*/ || \
+        $0 ~ /(^|[^[:alnum:]_])zmm[0-9][0-9]*([^[:alnum:]_]|$)/ || \
         $0 ~ /%k[1-7]([^[:digit:]]|$)/ || \
         $0 ~ /(^|[^[:alnum:]_])k[1-7]([^[:alnum:]_]|$)/
     }
