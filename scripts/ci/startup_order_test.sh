@@ -126,16 +126,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Launch a command in the background, capturing log + exit status.
+# Launch a binary in the background, redirecting its output to a log.
 # Usage: spawn <key> <binary> [args...]
+#
+# The binary is backgrounded directly (NOT wrapped in a `( ... )` subshell),
+# so $! is the PID of the binary itself. This matters for cleanup: signaling
+# a wrapper subshell would not reach the long-running daemon it launched,
+# leaving it alive and holding its fixed port for the next serial scenario.
+# The exit status is recovered later via `wait` in the crash check.
 spawn() {
 	local key="$1"
 	shift
 	echo "launch $key: $*"
-	(
-		"$@"
-		echo $? >"$WORK_DIR/$key.exit"
-	) >"$WORK_DIR/$key.log" 2>&1 &
+	"$@" >"$WORK_DIR/$key.log" 2>&1 &
 	PID_OF[$key]=$!
 	LAUNCHED+=("$key")
 }
@@ -221,19 +224,14 @@ for key in "${LAUNCHED[@]}"; do
 		echo "ok    $key (pid $pid still running)"
 		continue
 	fi
-	# Process exited; consult its recorded status (may race the redirect, so wait briefly).
-	status=""
-	for _ in 1 2 3 4 5; do
-		[[ -f "$WORK_DIR/$key.exit" ]] && {
-			status="$(cat "$WORK_DIR/$key.exit")"
-			break
-		}
-		sleep 0.2
-	done
+	# Process already exited; recover its status. `wait` on a finished
+	# background child of this shell returns that child's exit status.
+	status=0
+	wait "$pid" 2>/dev/null || status=$?
 	if [[ "$status" == "0" ]]; then
 		echo "ok    $key (exited cleanly, status 0)"
 	else
-		echo "FAIL  $key (exit status '${status:-unknown}')"
+		echo "FAIL  $key (exit status $status)"
 		echo "----- last 50 lines of $key.log -----"
 		tail -n 50 "$WORK_DIR/$key.log" || true
 		echo "-------------------------------------"
