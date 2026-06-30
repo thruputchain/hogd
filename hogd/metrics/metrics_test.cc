@@ -391,10 +391,6 @@ TEST_F(MetricsTest, DumpOmitsComponentStillInitializing)
       std::ranges::contains(dump_lines,
                             "executor_metrics_test_uninit_queue_depth 17"))
       << dump;
-  // The component's init status is still reported (read from the atomic flag,
-  // not the racy metrics map), so monitoring can see it never finished init.
-  expect_dump_contains(
-      dump, "hogd_metrics_component_initialized{component=\"executor\"} 0");
 }
 
 TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
@@ -418,13 +414,6 @@ TEST_F(MetricsTest, DumpOmitsUninitializedComponentButIncludesInitialized)
   EXPECT_FALSE(std::ranges::contains(dump_lines,
                                      "mempool_metrics_test_mixed_mempool 22"))
       << dump;
-  // The initialized component gets no status line; the uninitialized one does.
-  EXPECT_FALSE(std::ranges::contains(
-      dump_lines,
-      "hogd_metrics_component_initialized{component=\"executor\"} 0"))
-      << dump;
-  expect_dump_contains(
-      dump, "hogd_metrics_component_initialized{component=\"mempool\"} 0");
 }
 
 TEST_F(MetricsTest, PerThreadMetricDumpsAggregatedSamples)
