@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <gtest/gtest.h>
 
@@ -9,6 +10,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/lthash16.h"
 #include "hogd/init.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -161,11 +163,24 @@ TEST(Ed25519, BatchUsage)
   auto sig3 = ed25519_sign(sk3, msg3).value();
   // NOLINTEND(bugprone-unchecked-optional-access)
 
-  EXPECT_EQ(ed25519_verify_batch({pk1, pk2, pk3}, {sig1, sig2, sig3},
-                                 std::vector<std::span<const std::byte>>{
-                                     std::as_bytes(std::span(msg1)),
-                                     std::as_bytes(std::span(msg2)),
-                                     std::as_bytes(std::span(msg3))}),
+  std::array<std::span<const std::byte>, 3> msgs{std::as_bytes(std::span(msg1)),
+                                                 std::as_bytes(std::span(msg2)),
+                                                 std::as_bytes(
+                                                     std::span(msg3))};
+  EXPECT_EQ(ed25519_verify_batch(std::array{pk1, pk2, pk3},
+                                 std::array{sig1, sig2, sig3},
+                                 std::span<const std::span<const std::byte>>(
+                                     msgs)),
+            true);
+}
+
+TEST(Ed25519, BatchUsageEmpty)
+{
+  // An empty batch trivially verifies and must not pass null scratch pointers
+  // to the FFI (vector::data() may be null when empty on libstdc++).
+  EXPECT_EQ(ed25519_verify_batch(std::span<const Ed25519PublicKey>{},
+                                 std::span<const Ed25519Signature>{},
+                                 std::span<const std::span<const std::byte>>{}),
             true);
 }
 
