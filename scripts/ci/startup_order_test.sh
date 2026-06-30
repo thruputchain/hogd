@@ -5,7 +5,7 @@
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last
 #              indexer-before-event event-before-indexer
-#              coordinator-first
+#              coordinator-first starve-auth
 #
 # Env overrides (defaults target the namespace cpp gcc-debug build layout):
 #   BUILD_DIR   build directory holding the C++ binaries (default build/gcc)
@@ -18,7 +18,7 @@ set -Eeuo pipefail
 
 usage() {
   echo "Usage: $0 <scenario>" >&2
-  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first" >&2
+  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first starve-auth" >&2
 }
 
 SCENARIO="${1:-}"
@@ -56,6 +56,18 @@ coordinator-first)
   # with "RPC call on failed file descriptor"). auth is launched last to widen
   # the window.
   ORDER=(mempool loadgen chuckd event indexer hogexec hogdb auth)
+  ;;
+starve-auth)
+  # Aggressive reproduction: NEVER start auth. Everything else comes up and the
+  # coordinator drives traffic, so the mempool's schedulercoord_submit_unvetted
+  # path must call authmempool_verify_transactions on an auth client that never
+  # connected. If the mempool processes the submit instead of gating on auth
+  # readiness, that RPC lands on an absent fd -> XdrException in a detached
+  # coroutine -> abort. The crash check only inspects launched components, so
+  # the missing auth is fine; a mempool that aborts here is the reproduction.
+  # (If the mempool instead blocks until auth registers, every launched proc
+  # stays alive and this passes -- telling us the hub gates on downstreams.)
+  ORDER=(mempool loadgen hogexec hogdb event indexer chuckd)
   ;;
 *)
   echo "unknown scenario: $SCENARIO" >&2

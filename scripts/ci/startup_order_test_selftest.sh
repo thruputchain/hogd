@@ -33,6 +33,7 @@ check mempool-first "mempool loadgen hogexec event indexer hogdb auth chuckd"
 check mempool-last "loadgen hogexec event indexer hogdb auth mempool chuckd"
 check mempool-middle "loadgen hogexec event mempool indexer hogdb auth chuckd"
 check coordinator-first "mempool loadgen chuckd event indexer hogexec hogdb auth"
+check starve-auth "mempool loadgen hogexec hogdb event indexer chuckd"
 
 # Ordering relations for the indexer/event scenarios.
 idx_before_event() {
@@ -78,6 +79,19 @@ coordinator_before_downstreams() {
   done
 }
 coordinator_before_downstreams
+
+# starve-auth intentionally omits auth (and only auth) to starve the mempool's
+# verify path: it must contain chuckd and every component except auth.
+starve_auth_omits_auth() {
+  local order
+  order="$(HOG_STARTUP_LIST_ONLY=1 "$SCRIPT" starve-auth | sort | tr '\n' ' ' | sed 's/ $//')"
+  local want="chuckd event hogdb hogexec indexer loadgen mempool"
+  if [[ "$order" != "$want" ]]; then
+    echo "FAIL starve-auth set: got [$order] want [$want] (auth omitted, all others present)"
+    fail=1
+  fi
+}
+starve_auth_omits_auth
 
 for s in mempool-first mempool-last mempool-middle indexer-before-event event-before-indexer coordinator-first; do
   check_complete "$s"

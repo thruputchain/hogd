@@ -165,6 +165,13 @@ jobs:
       - name: "Scenario: coordinator-first"
         run: ./scripts/ci/startup_order_test.sh coordinator-first
 
+      # Aggressive reproduction: auth is never started while the coordinator
+      # drives traffic, forcing the mempool to verify against an absent auth fd
+      # for the whole window. FAILs if the mempool aborts (the reported crash);
+      # passes if the mempool gates on auth readiness instead.
+      - name: "Scenario: starve-auth"
+        run: ./scripts/ci/startup_order_test.sh starve-auth
+
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
