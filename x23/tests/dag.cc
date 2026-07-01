@@ -309,9 +309,9 @@ TEST(Dag, CleanupWaitsForRunningSiblingsToDrain)
 {
   Dag dag("cleanup-drain", pool);
   std::atomic_bool slow_started{false};
-  std::atomic_bool release_slow{false};
   std::atomic_bool slow_finished{false};
   std::atomic_bool cleanup_saw_slow_finished{false};
+  CoroCB<void> release_slow;
 
   DagCleanup cleanup = dag.cleanup("cleanup", [&]() -> Async<void> {
     cleanup_saw_slow_finished.store(slow_finished.load(
@@ -320,11 +320,13 @@ TEST(Dag, CleanupWaitsForRunningSiblingsToDrain)
     co_return;
   });
   dag.async<void>("slow", [&]() -> Async<void> {
+    auto pending_pair = make_async<void>();
+    Async<void> pending = std::move(pending_pair.first);
+    release_slow = pending_pair.second;
     cleanup.arm();
     slow_started.store(true, std::memory_order_release);
     slow_started.notify_all();
-    while (!release_slow.load(std::memory_order_acquire))
-      release_slow.wait(false);
+    co_await pending;
     slow_finished.store(true, std::memory_order_release);
     co_return;
   });
@@ -343,10 +345,10 @@ TEST(Dag, CleanupWaitsForRunningSiblingsToDrain)
   while (!slow_started.load(std::memory_order_acquire))
     slow_started.wait(false);
 
+  ASSERT_TRUE(release_slow);
   std::this_thread::sleep_for(20ms);
   EXPECT_FALSE(done.load(std::memory_order_acquire));
-  release_slow.store(true, std::memory_order_release);
-  release_slow.notify_all();
+  release_slow();
 
   while (!done.load(std::memory_order_acquire))
     done.wait(false);
