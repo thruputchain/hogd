@@ -56,7 +56,7 @@ union PublicKey {
 
   PublicKey_Ed25519_Body ed25519;
 
-  Tag tag() const
+  Tag tag() const noexcept
   {
     Tag out;
     std::memcpy(&out, this, sizeof(out));
@@ -109,7 +109,7 @@ union AuthClaim {
   AuthClaim_kSourceAddressAuthData_Body k_source_address_auth_data;
   AuthClaim_kPubkeySignature_Body k_pubkey_signature;
 
-  Tag tag() const
+  Tag tag() const noexcept
   {
     Tag out;
     std::memcpy(&out, this, sizeof(out));
