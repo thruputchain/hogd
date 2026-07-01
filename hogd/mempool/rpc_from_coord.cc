@@ -395,39 +395,87 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    this mempool will never be asked to nominate a block, so it will be
   //    unable to process and erase the currently enqueued txs, so it will never
   //    free up capacity.
-  SignedTransactionBatch txs;
-  if (!(co_await parallel_batch_to_t(batch, txs))) {
-    MempoolMetrics::instance().rejected_malformed_vetted_rpc_count.increment();
-    info("submit_vetted rejected malformed transaction batch");
-    co_return;
+  auto txs = std::make_shared<SignedTransactionBatch>();
+  auto commit_guard = std::make_shared<x23::CoroGuard>();
+  x23::Dag submit_dag("schedulercoord_submit_vetted", default_threadpool());
+
+  auto decode_node =
+      submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
+        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+          MempoolMetrics::instance()
+              .rejected_malformed_vetted_rpc_count.increment();
+          info("submit_vetted rejected malformed transaction batch");
+          submit_dag.fail(x23::DagFailureKind::Cancelled, "decode batch");
+          co_return;
+        }
+        record_submitted_vetted(txs->size());
+        co_return;
+      });
+
+  auto lock_commit_node =
+      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+                             [&, commit_guard]() -> x23::Async<void> {
+                               co_await (*commit_guard)(commit_lock_);
+                               co_return;
+                             });
+
+  auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
+      "verify transactions", submit_dag.after(lock_commit_node),
+      [&]() -> x23::Async<AuthErrorCodeBatch> {
+        const BlockHeight verify_height = scheduler_->current_block();
+        co_return co_await auth_client_->authmempool_verify_transactions(
+            verify_height, *txs);
+      });
+
+  auto prune_node = submit_dag.async<void>(
+      "prune auth failures", submit_dag.after(verify_node),
+      [&]() -> x23::Async<void> {
+        const AuthErrorCodeBatch &auth_ret = verify_node.get();
+        x23::Vec<size_t> to_remove_indices;
+        for (size_t i = 0; i < auth_ret.size(); i++) {
+          const AuthErrorCode &code = auth_ret[i];
+          if (code != AuthErrorCode::kAuthSuccess) {
+            mark_tx_failed_authentication(sha256((*txs)[i].tx));
+            to_remove_indices.push_back(i);
+          }
+        }
+        MempoolMetrics::instance().auth_failed_tx_count.increment(
+            to_remove_indices.size());
+        if (!to_remove_indices.empty()) {
+          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+        }
+        co_return;
+      });
+
+  submit_dag.async<void>("add txs", submit_dag.after(prune_node),
+                         [&, commit_guard]() -> x23::Async<void> {
+                           co_await scheduler_->add_txs(*txs);
+                           MempoolMetrics::instance()
+                               .accepted_vetted_tx_count.increment(txs->size());
+                           // [commit_guard] is a smart pointer that has a
+                           // [reset()] method just like [x23::CoroGuard].
+                           // clang-tidy prefers that we dereference
+                           // [commit_guard] with [*] below rather than write
+                           // [commit_guard->reset()], just so that this is more
+                           // readable.
+                           (*commit_guard).reset();
+                           co_return;
+                         });
+
+  co_await submit_dag.run();
+  if (!submit_dag.ok() && submit_dag.failure().exception) {
+    std::rethrow_exception(submit_dag.failure().exception);
   }
-  size_t num_submitted_txs = txs.size();
-  record_submitted_vetted(num_submitted_txs);
-
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
-
-  const BlockHeight verify_height = scheduler_->current_block();
-  AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             txs);
-
-  x23::Vec<size_t> to_remove_indices;
-  for (size_t i = 0; i < auth_ret.size(); i++) {
-    const AuthErrorCode &code = auth_ret[i];
-    if (code != AuthErrorCode::kAuthSuccess) {
-      mark_tx_failed_authentication(sha256(txs[i].tx));
-      to_remove_indices.push_back(i);
-    }
+  if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
+      dot_dir != nullptr && *dot_dir != '\0') {
+    static std::atomic<size_t> dot_counter{0};
+    const size_t dot_idx = dot_counter.fetch_add(1, std::memory_order_relaxed);
+    const std::filesystem::path dot_path =
+        std::filesystem::path(dot_dir) /
+        ("mempool_submit_vetted_" + std::to_string(dot_idx) + ".dot");
+    std::ofstream graph_dot(dot_path, std::ios::out | std::ios::trunc);
+    graph_dot << submit_dag.dot();
   }
-  MempoolMetrics::instance().auth_failed_tx_count.increment(
-      to_remove_indices.size());
-  if (!to_remove_indices.empty()) {
-    remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
-  }
-
-  co_await scheduler_->add_txs(txs);
-  MempoolMetrics::instance().accepted_vetted_tx_count.increment(txs.size());
   co_return;
 }
 
