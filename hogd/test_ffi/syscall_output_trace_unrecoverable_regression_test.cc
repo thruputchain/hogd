@@ -122,7 +122,10 @@ TEST(TestBindingsTest, TracedGetBlockHeightOutputRecordsTraceWithoutCrashing)
                                 reinterpret_cast<uint64_t>(&height), 0, 0, 0, 0,
                                 0, 0);
     expect_syscall_ok(result);
-    EXPECT_EQ(height, 0);
+    // GetBlockHeight reports the executing block height (parent tip + 1). The
+    // mock handler runs on a genesis tip (height 0), so the executing height is
+    // 1.
+    EXPECT_EQ(height, 1);
   });
 }
 
