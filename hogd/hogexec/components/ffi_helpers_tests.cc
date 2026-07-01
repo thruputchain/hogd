@@ -54,7 +54,7 @@ TEST(FFIHelpers, SourceAddressClaimAllowedKeysPassthroughUnchanged)
   a.source_address_claim().required_weight = 1;
 
   auto ffi = FFIHelperType<generated::AuthClaim>::to_ffi(a);
-  ASSERT_EQ(ffi.tag, generated::AuthClaim::AuthClaim_kSourceAddressAuthData);
+  ASSERT_EQ(ffi.tag(), generated::AuthClaim::AuthClaim_kSourceAddressAuthData);
   EXPECT_EQ(ffi.k_source_address_auth_data.source_address_claim.allowed_keys,
             kAllowedKeys);
 
