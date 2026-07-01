@@ -231,6 +231,214 @@ TEST(Dag, RunningSiblingsDrainAfterFailure)
   EXPECT_TRUE(slow_finished.load(std::memory_order_acquire));
 }
 
+TEST(Dag, ArmedCleanupRunsOnLaterFailure)
+{
+  Dag dag("cleanup", pool);
+  std::vector<int> cleaned;
+
+  DagCleanup cleanup =
+      dag.cleanup("cleanup a", [&]() -> Async<void> {
+        cleaned.push_back(1);
+        co_return;
+      });
+  auto acquire = dag.async<void>("acquire", [&]() -> Async<void> {
+    cleanup.arm();
+    co_return;
+  });
+  dag.async<void>("fail", dag.after(acquire), [&]() -> Async<void> {
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  dag.run()();
+
+  EXPECT_FALSE(dag.ok());
+  ASSERT_EQ(cleaned.size(), 1UL);
+  EXPECT_EQ(cleaned[0], 1);
+}
+
+TEST(Dag, DisarmedCleanupDoesNotRunOnLaterFailure)
+{
+  Dag dag("cleanup-disarm", pool);
+  std::atomic_bool cleaned{false};
+
+  DagCleanup cleanup =
+      dag.cleanup("cleanup a", [&]() -> Async<void> {
+        cleaned.store(true, std::memory_order_release);
+        co_return;
+      });
+  auto acquire = dag.async<void>("acquire", [&]() -> Async<void> {
+    cleanup.arm();
+    co_return;
+  });
+  auto release = dag.async<void>("release", dag.after(acquire),
+                                 [&]() -> Async<void> {
+                                   cleanup.disarm();
+                                   co_return;
+                                 });
+  dag.async<void>("fail", dag.after(release), [&]() -> Async<void> {
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  dag.run()();
+
+  EXPECT_FALSE(dag.ok());
+  EXPECT_FALSE(cleaned.load(std::memory_order_acquire));
+}
+
+TEST(Dag, UnarmedCleanupDoesNotRun)
+{
+  Dag dag("cleanup-unarmed", pool);
+  std::atomic_bool cleaned{false};
+
+  dag.cleanup("cleanup a", [&]() -> Async<void> {
+    cleaned.store(true, std::memory_order_release);
+    co_return;
+  });
+  dag.async<void>("fail", [&]() -> Async<void> {
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  dag.run()();
+
+  EXPECT_FALSE(dag.ok());
+  EXPECT_FALSE(cleaned.load(std::memory_order_acquire));
+}
+
+TEST(Dag, CleanupWaitsForRunningSiblingsToDrain)
+{
+  Dag dag("cleanup-drain", pool);
+  std::atomic_bool slow_started{false};
+  std::atomic_bool release_slow{false};
+  std::atomic_bool slow_finished{false};
+  std::atomic_bool cleanup_saw_slow_finished{false};
+
+  DagCleanup cleanup = dag.cleanup("cleanup", [&]() -> Async<void> {
+    cleanup_saw_slow_finished.store(
+        slow_finished.load(std::memory_order_acquire),
+        std::memory_order_release);
+    co_return;
+  });
+  dag.async<void>("slow", [&]() -> Async<void> {
+    cleanup.arm();
+    slow_started.store(true, std::memory_order_release);
+    slow_started.notify_all();
+    while (!release_slow.load(std::memory_order_acquire))
+      release_slow.wait(false);
+    slow_finished.store(true, std::memory_order_release);
+    co_return;
+  });
+  dag.async<void>("fail", [&]() -> Async<void> {
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  std::atomic_bool done{false};
+  [](Dag &dag, std::atomic_bool &done) -> Detached {
+    co_await dag.run();
+    done.store(true, std::memory_order_release);
+    done.notify_all();
+  }(dag, done);
+
+  while (!slow_started.load(std::memory_order_acquire))
+    slow_started.wait(false);
+
+  std::this_thread::sleep_for(20ms);
+  EXPECT_FALSE(done.load(std::memory_order_acquire));
+  release_slow.store(true, std::memory_order_release);
+  release_slow.notify_all();
+
+  while (!done.load(std::memory_order_acquire))
+    done.wait(false);
+
+  EXPECT_FALSE(dag.ok());
+  EXPECT_TRUE(cleanup_saw_slow_finished.load(std::memory_order_acquire));
+}
+
+TEST(Dag, CleanupRunsInReverseArmOrder)
+{
+  Dag dag("cleanup-order", pool);
+  std::vector<int> cleaned;
+
+  DagCleanup cleanup_a =
+      dag.cleanup("cleanup a", [&]() -> Async<void> {
+        cleaned.push_back(1);
+        co_return;
+      });
+  DagCleanup cleanup_b =
+      dag.cleanup("cleanup b", [&]() -> Async<void> {
+        cleaned.push_back(2);
+        co_return;
+      });
+  auto acquire_a = dag.async<void>("acquire a", [&]() -> Async<void> {
+    cleanup_a.arm();
+    co_return;
+  });
+  auto acquire_b = dag.async<void>("acquire b", dag.after(acquire_a),
+                                   [&]() -> Async<void> {
+                                     cleanup_b.arm();
+                                     co_return;
+                                   });
+  dag.async<void>("fail", dag.after(acquire_b), [&]() -> Async<void> {
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  dag.run()();
+
+  ASSERT_EQ(cleaned.size(), 2UL);
+  EXPECT_EQ(cleaned[0], 2);
+  EXPECT_EQ(cleaned[1], 1);
+}
+
+TEST(Dag, CleanupFailureDoesNotReplaceOriginalFailure)
+{
+  Dag dag("cleanup-failure", pool);
+
+  DagCleanup cleanup = dag.cleanup("cleanup", [&]() -> Async<void> {
+    throw std::runtime_error("cleanup failed");
+    co_return;
+  });
+  dag.async<void>("fail", [&]() -> Async<void> {
+    cleanup.arm();
+    dag.fail(DagFailureKind::Cancelled, "fail");
+    co_return;
+  });
+
+  dag.run()();
+
+  EXPECT_FALSE(dag.ok());
+  EXPECT_EQ(dag.failure().kind, DagFailureKind::Cancelled);
+  EXPECT_EQ(dag.failure().node, "fail");
+  const std::vector<DagFailure> cleanup_failures = dag.cleanup_failures();
+  ASSERT_EQ(cleanup_failures.size(), 1UL);
+  EXPECT_EQ(cleanup_failures[0].kind, DagFailureKind::Exception);
+  EXPECT_EQ(cleanup_failures[0].node, "cleanup");
+}
+
+TEST(Dag, CleanupDoesNotRunOnSuccess)
+{
+  Dag dag("cleanup-success", pool);
+  std::atomic_bool cleaned{false};
+
+  DagCleanup cleanup =
+      dag.cleanup("cleanup", [&]() -> Async<void> {
+        cleaned.store(true, std::memory_order_release);
+        co_return;
+      });
+  dag.async<void>("succeed", [&]() -> Async<void> {
+    cleanup.arm();
+    co_return;
+  });
+
+  dag.run()();
+
+  EXPECT_TRUE(dag.ok());
+  EXPECT_FALSE(cleaned.load(std::memory_order_acquire));
+}
+
 TEST(Dag, StatsRecordStartedAndFinishedNodes)
 {
   Dag dag("stats", pool);

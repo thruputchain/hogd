@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <exception>
@@ -55,6 +56,7 @@ struct DagDeps {
 };
 
 class Dag;
+class DagCleanup;
 
 template<typename T> class DagNode {
 public:
@@ -91,6 +93,22 @@ private:
   DagNode(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
   // Owning graph and insertion-order id. DagNode is a lightweight handle.
+  Dag *dag_{nullptr};
+  size_t id_{0};
+};
+
+class DagCleanup {
+public:
+  DagCleanup() = default;
+
+  void arm() const;
+  void disarm() const;
+  bool armed() const;
+
+private:
+  friend class Dag;
+  DagCleanup(Dag *dag, size_t id) : dag_(dag), id_(id) {}
+
   Dag *dag_{nullptr};
   size_t id_{0};
 };
@@ -142,6 +160,23 @@ public:
   Dag(const Dag &) = delete;
   Dag &operator=(const Dag &) = delete;
 
+  // Add a failure cleanup action. Cleanup actions run only if the graph fails,
+  // after all normal nodes that were already running have drained. Callers arm
+  // a cleanup after acquiring a resource and disarm it after the resource is
+  // released or ownership is transferred.
+  template<typename Fn> DagCleanup cleanup(std::string_view name, Fn &&fn)
+  {
+    std::lock_guard lock(mutex_);
+    x23assert(!started_);
+
+    const size_t id = cleanups_.size();
+    auto cleanup = std::make_unique<CleanupBase>();
+    cleanup->name = name;
+    cleanup->run = make_cleanup_runner(std::forward<Fn>(fn));
+    cleanups_.push_back(std::move(cleanup));
+    return DagCleanup(this, id);
+  }
+
   // Add a CPU-bound root node. The callable runs on pool_.bg() and either
   // returns T or, for T=void, returns nothing.
   template<typename T, typename Fn>
@@ -192,6 +227,7 @@ public:
     Async<void> done = std::move(done_pair.first);
     CoroCB<void> cb = done_pair.second;
     std::vector<size_t> to_start;
+    std::vector<size_t> cleanup_ids;
     CoroCB<void> done_cb;
     {
       std::lock_guard lock(mutex_);
@@ -202,10 +238,12 @@ public:
       for (size_t i = 0; i < nodes_.size(); i++)
         nodes_[i]->queued_at = graph_started_at_;
       mark_ready_roots_locked(to_start);
-      done_cb = finish_cb_locked();
+      done_cb = finish_cb_locked(cleanup_ids);
     }
     launch_nodes(to_start);
-    if (done_cb)
+    if (!cleanup_ids.empty())
+      run_cleanups(std::move(cleanup_ids));
+    else if (done_cb)
       done_cb();
     co_await done;
   }
@@ -230,6 +268,11 @@ public:
   {
     std::lock_guard lock(mutex_);
     return failure_;
+  }
+  std::vector<DagFailure> cleanup_failures() const
+  {
+    std::lock_guard lock(mutex_);
+    return cleanup_failures_;
   }
   // Return a snapshot of per-node lifecycle timing and state.
   std::vector<DagNodeStats> stats() const
@@ -397,6 +440,13 @@ private:
     std::chrono::steady_clock::time_point finished_at;
   };
 
+  struct CleanupBase {
+    std::string name;
+    std::function<Async<void>()> run;
+    bool armed{false};
+    size_t arm_order{0};
+  };
+
   // Wrap a synchronous callable as an Async<void> runner that first switches to
   // the thread pool and then stores the result.
   template<typename T, typename Fn>
@@ -436,6 +486,15 @@ private:
     }
   }
 
+  template<typename Fn> std::function<Async<void>()> make_cleanup_runner(Fn &&fn)
+  {
+    return [fn = std::decay_t<Fn>(std::forward<Fn>(fn))]() mutable
+               -> Async<void> {
+      co_await std::invoke(fn);
+      co_return;
+    };
+  }
+
   // Register a node before the graph starts and wire predecessor/successor
   // edges. Dependencies must refer to earlier nodes.
   template<typename T>
@@ -464,11 +523,79 @@ private:
     return DagNode<T>(this, id);
   }
 
+  void arm_cleanup(size_t id)
+  {
+    std::lock_guard lock(mutex_);
+    x23assert(id < cleanups_.size());
+    x23assert(!cleanup_started_);
+
+    CleanupBase &cleanup = *cleanups_[id];
+    if (cleanup.armed)
+      return;
+    cleanup.armed = true;
+    cleanup.arm_order = next_cleanup_arm_order_++;
+  }
+
+  void disarm_cleanup(size_t id)
+  {
+    std::lock_guard lock(mutex_);
+    x23assert(id < cleanups_.size());
+    x23assert(!cleanup_started_);
+    cleanups_[id]->armed = false;
+  }
+
+  bool cleanup_armed(size_t id) const
+  {
+    std::lock_guard lock(mutex_);
+    x23assert(id < cleanups_.size());
+    return cleanups_[id]->armed;
+  }
+
   // Return typed storage for a node. The caller is responsible for requesting
   // the same T that was used when the node was added.
   template<typename T> NodeStorage<T> &storage(size_t id) const
   {
     return static_cast<NodeStorage<T> &>(*nodes_[id]->storage);
+  }
+
+  std::vector<size_t> armed_cleanups_locked()
+  {
+    std::vector<size_t> ret;
+    ret.reserve(cleanups_.size());
+    for (size_t i = 0; i < cleanups_.size(); i++) {
+      if (cleanups_[i]->armed)
+        ret.push_back(i);
+    }
+    std::sort(ret.begin(), ret.end(), [&](size_t a, size_t b) {
+      return cleanups_[a]->arm_order > cleanups_[b]->arm_order;
+    });
+    return ret;
+  }
+
+  Detached run_cleanups(std::vector<size_t> cleanup_ids)
+  {
+    for (const size_t cleanup_id : cleanup_ids) {
+      try {
+        co_await cleanups_[cleanup_id]->run();
+      } catch (...) {
+        std::lock_guard lock(mutex_);
+        cleanup_failures_.push_back(DagFailure{
+            .kind = DagFailureKind::Exception,
+            .node = cleanups_[cleanup_id]->name,
+            .exception = std::current_exception(),
+        });
+      }
+    }
+
+    CoroCB<void> done_cb;
+    {
+      std::lock_guard lock(mutex_);
+      cleanup_finished_ = true;
+      graph_finished_at_ = std::chrono::steady_clock::now();
+      done_cb = done_cb_;
+    }
+    if (done_cb)
+      done_cb();
   }
 
   std::string
@@ -608,6 +735,7 @@ private:
   void finish_node(size_t id, bool failed)
   {
     std::vector<size_t> to_start;
+    std::vector<size_t> cleanup_ids;
     CoroCB<void> done_cb;
     {
       std::lock_guard lock(mutex_);
@@ -618,10 +746,12 @@ private:
       x23assert(running_ > 0);
       running_--;
       mark_ready_successors_locked(id, to_start);
-      done_cb = finish_cb_locked();
+      done_cb = finish_cb_locked(cleanup_ids);
     }
     launch_nodes(to_start);
-    if (done_cb)
+    if (!cleanup_ids.empty())
+      run_cleanups(std::move(cleanup_ids));
+    else if (done_cb)
       done_cb();
   }
 
@@ -640,7 +770,7 @@ private:
   }
 
   // Return the run() completion callback if the graph is now terminal.
-  CoroCB<void> finish_cb_locked()
+  CoroCB<void> finish_cb_locked(std::vector<size_t> &cleanup_ids)
   {
     if (!started_ || finished_ || running_ != 0)
       return {};
@@ -651,9 +781,24 @@ private:
           return {};
     }
 
+    if (failure_.kind == DagFailureKind::None) {
+      finished_ = true;
+      graph_finished_at_ = std::chrono::steady_clock::now();
+      return done_cb_;
+    }
+
+    cleanup_ids = armed_cleanups_locked();
+    if (cleanup_ids.empty()) {
+      finished_ = true;
+      cleanup_started_ = true;
+      cleanup_finished_ = true;
+      graph_finished_at_ = std::chrono::steady_clock::now();
+      return done_cb_;
+    }
+
     finished_ = true;
-    graph_finished_at_ = std::chrono::steady_clock::now();
-    return done_cb_;
+    cleanup_started_ = true;
+    return {};
   }
 
   // Diagnostic graph name.
@@ -664,10 +809,12 @@ private:
   mutable std::mutex mutex_;
   // Nodes in insertion order. Node ids are indexes into this vector.
   std::vector<std::unique_ptr<NodeBase>> nodes_;
+  std::vector<std::unique_ptr<CleanupBase>> cleanups_;
   // Node ids with no dependencies.
   std::vector<size_t> roots_;
   // First graph-level failure, if any.
   DagFailure failure_;
+  std::vector<DagFailure> cleanup_failures_;
   // Callback used to resume run() when the graph reaches a terminal state.
   CoroCB<void> done_cb_;
   // Wall-clock lifecycle of the whole graph run.
@@ -675,13 +822,17 @@ private:
   std::chrono::steady_clock::time_point graph_finished_at_;
   // Count of currently-running nodes.
   size_t running_{0};
+  size_t next_cleanup_arm_order_{0};
   // True after run() has been called.
   bool started_{false};
   // True after run() has completed or is ready to complete.
   bool finished_{false};
+  bool cleanup_started_{false};
+  bool cleanup_finished_{false};
 
   template<typename T> friend class DagNode;
   friend class DagNode<void>;
+  friend class DagCleanup;
 };
 
 template<typename T>
@@ -713,6 +864,27 @@ DagNode<void>::ready() const
 {
   std::lock_guard lock(dag_->mutex_);
   return dag_->nodes_[id_]->state == Dag::NodeState::Done;
+}
+
+inline void
+DagCleanup::arm() const
+{
+  x23assert(dag_ != nullptr);
+  dag_->arm_cleanup(id_);
+}
+
+inline void
+DagCleanup::disarm() const
+{
+  x23assert(dag_ != nullptr);
+  dag_->disarm_cleanup(id_);
+}
+
+inline bool
+DagCleanup::armed() const
+{
+  x23assert(dag_ != nullptr);
+  return dag_->cleanup_armed(id_);
 }
 
 } // namespace x23
