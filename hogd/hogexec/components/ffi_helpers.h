@@ -27,7 +27,7 @@ template<> struct FFIHelperType<generated::PublicKey> {
   static std::optional<PublicKey>
   to_cpp(generated::PublicKey const &ffi_public_key)
   {
-    switch (ffi_public_key.tag) {
+    switch (ffi_public_key.tag()) {
     case generated::PublicKey::PublicKey_Ed25519:
       PublicKey cpp_public_key;
       cpp_public_key.scheme(CryptographicScheme::Ed25519);
@@ -35,15 +35,17 @@ template<> struct FFIHelperType<generated::PublicKey> {
       return cpp_public_key;
     }
     error("Unknown public key type: {}",
-          static_cast<int32_t>(ffi_public_key.tag));
+          static_cast<int32_t>(ffi_public_key.tag()));
     return std::nullopt;
   }
 
   static generated::PublicKey to_ffi(PublicKey const &cpp_public_key)
   {
     generated::PublicKey ffi_public_key{};
-    ffi_public_key.tag = generated::PublicKey::PublicKey_Ed25519;
-    ffi_public_key.ed25519.ed25519 = cpp_public_key.ed25519();
+    ffi_public_key.ed25519 = {
+        .tag = generated::PublicKey::PublicKey_Ed25519,
+        .ed25519 = cpp_public_key.ed25519(),
+    };
     return ffi_public_key;
   }
 
@@ -92,7 +94,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
   {
     AuthClaim auth_claim{};
 
-    switch (ffi_auth_claim.tag) {
+    switch (ffi_auth_claim.tag()) {
     case generated::AuthClaim::AuthClaim_kSourceAddressAuthData:
       auth_claim.claim_type(AuthClaimType::kSourceAddressAuthData);
       auth_claim.source_address_claim().allowed_keys =
@@ -116,7 +118,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
     }
     }
     error("Unknown auth claim type: {}",
-          static_cast<int32_t>(ffi_auth_claim.tag));
+          static_cast<int32_t>(ffi_auth_claim.tag()));
     return std::nullopt;
   }
 
