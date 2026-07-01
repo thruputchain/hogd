@@ -13,6 +13,7 @@
 // Rather than post-processing the output, we maintain these types by hand.
 
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 #include <utility>
 
@@ -21,6 +22,24 @@
 #include "types.hh"
 
 namespace hogd::generated {
+
+// These types mirror Rust #[repr(i32)] enums with fields, whose layout is
+// defined as a union of variant structs that each begin with the tag
+// (Rust reference, "primitive representation of enums with fields").
+// The seemingly cleaner `struct { Tag tag; union payload; }` form is NOT
+// layout-equivalent: it would align every payload to the union's overall
+// alignment, whereas the variant-struct form places each payload right
+// after the tag per that variant's own alignment (e.g. AuthClaim's
+// source-address payload sits at offset 4 while the pubkey payload sits at
+// offset 8).
+//
+// The unions deliberately have no standalone scalar `Tag` member: reading
+// one after a variant body was written is undefined behavior (the
+// common-initial-sequence rule only covers struct members). Use the tag()
+// accessor, which reads the discriminant out of the object representation
+// with memcpy — well-defined for these trivially copyable types no matter
+// which variant body is active or whether the value was copied in as raw
+// bytes from guest memory.
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -35,15 +54,21 @@ union PublicKey {
     static_assert(std::is_trivially_copyable_v<Ed25519PublicKey>);
   };
 
-  Tag tag;
   PublicKey_Ed25519_Body ed25519;
+
+  Tag tag() const
+  {
+    Tag out;
+    std::memcpy(&out, this, sizeof(out));
+    return out;
+  }
 };
 
 static_assert(std::is_trivially_copyable_v<PublicKey>);
 static_assert(std::is_standard_layout_v<PublicKey>);
 static_assert(sizeof(PublicKey) == sizeof(hogd::PublicKey));
 static_assert(alignof(PublicKey) == alignof(hogd::PublicKey));
-static_assert(offsetof(PublicKey, tag) == 0);
+static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, tag) == 0);
 static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, ed25519) ==
               sizeof(PublicKey::Tag));
 
@@ -81,16 +106,24 @@ union AuthClaim {
     PubkeyAccountPreimage pubkey_preimage;
   };
 
-  Tag tag;
   AuthClaim_kSourceAddressAuthData_Body k_source_address_auth_data;
   AuthClaim_kPubkeySignature_Body k_pubkey_signature;
+
+  Tag tag() const
+  {
+    Tag out;
+    std::memcpy(&out, this, sizeof(out));
+    return out;
+  }
 };
 
 static_assert(std::is_trivially_copyable_v<AuthClaim>);
 static_assert(std::is_standard_layout_v<AuthClaim>);
 static_assert(sizeof(AuthClaim) == sizeof(hogd::AuthClaim));
 static_assert(alignof(AuthClaim) == alignof(hogd::AuthClaim));
-static_assert(offsetof(AuthClaim, tag) == 0);
+static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
+                       tag) == 0);
+static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body, tag) == 0);
 static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
                        source_address_claim) == sizeof(AuthClaim::Tag));
 static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body,

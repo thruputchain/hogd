@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <limits>
 
 #include "auth_claim.hh"
@@ -59,7 +60,7 @@ TEST(FFIHelpers, PubkeySignatureClaimRoundtrip)
 TEST(FFIHelpers, PublicKeyRoundtrip)
 {
   generated::PublicKey ffi_pk{};
-  ffi_pk.tag = generated::PublicKey::PublicKey_Ed25519;
+  ffi_pk.ed25519.tag = generated::PublicKey::PublicKey_Ed25519;
   for (size_t i = 0; i < 32; i++) {
     ffi_pk.ed25519.ed25519[i] = static_cast<uint8_t>(i + 1);
   }
@@ -71,16 +72,37 @@ TEST(FFIHelpers, PublicKeyRoundtrip)
   }
 
   auto ffi_pk2 = FFIHelperType<generated::PublicKey>::to_ffi(*cpp_pk);
-  ASSERT_EQ(ffi_pk2.tag, generated::PublicKey::PublicKey_Ed25519);
+  ASSERT_EQ(ffi_pk2.tag(), generated::PublicKey::PublicKey_Ed25519);
   for (size_t i = 0; i < 32; i++) {
     ASSERT_EQ(ffi_pk2.ed25519.ed25519[i], static_cast<uint8_t>(i + 1));
   }
 }
 
+// The tag() accessor must read the discriminant regardless of which body
+// member was last written (values may also arrive as raw bytes from guest
+// memory, where no C++ union member was ever "assigned").
+TEST(FFIHelpers, AuthClaimTagAccessor)
+{
+  AuthClaim source_claim(AuthClaimType::kSourceAddressAuthData);
+  auto ffi_source = FFIHelperType<generated::AuthClaim>::to_ffi(source_claim);
+  ASSERT_EQ(ffi_source.tag(),
+            generated::AuthClaim::AuthClaim_kSourceAddressAuthData);
+
+  AuthClaim pubkey_claim(AuthClaimType::kPubkeySignature);
+  auto ffi_pubkey = FFIHelperType<generated::AuthClaim>::to_ffi(pubkey_claim);
+  ASSERT_EQ(ffi_pubkey.tag(), generated::AuthClaim::AuthClaim_kPubkeySignature);
+
+  generated::AuthClaim from_raw_bytes;
+  std::memcpy(&from_raw_bytes, &ffi_pubkey, sizeof(from_raw_bytes));
+  ASSERT_EQ(from_raw_bytes.tag(),
+            generated::AuthClaim::AuthClaim_kPubkeySignature);
+}
+
 TEST(FFIHelpers, AuthClaimInvalid)
 {
-  generated::AuthClaim ffi_auth_claim;
-  ffi_auth_claim.tag = static_cast<generated::AuthClaim::Tag>(-1);
+  generated::AuthClaim ffi_auth_claim{};
+  ffi_auth_claim.k_source_address_auth_data.tag =
+      static_cast<generated::AuthClaim::Tag>(-1);
   auto b = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
   ASSERT_FALSE(b.has_value());
 }
@@ -90,7 +112,8 @@ TEST(FFIHelpers, AuthClaimInvalidTags)
   for (int tag_val :
        {-2, 100, 255, 1000, std::numeric_limits<int32_t>::max()}) {
     generated::AuthClaim ffi_auth_claim{};
-    ffi_auth_claim.tag = static_cast<generated::AuthClaim::Tag>(tag_val);
+    ffi_auth_claim.k_source_address_auth_data.tag =
+        static_cast<generated::AuthClaim::Tag>(tag_val);
     auto result = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
     EXPECT_FALSE(result.has_value())
         << "Expected nullopt for invalid tag value " << tag_val;
