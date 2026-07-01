@@ -1629,7 +1629,9 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     order = decoded->order;
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
-    cursor_pos.seq = decoded->sequence_number;
+    // ROOT_TX rows are always written with seq == 0, so the position we
+    // resume past never carries a meaningful sequence number.
+    cursor_pos.seq = 0;
     anchor_block = cursor_pos.block;
     have_cursor = true;
   }
