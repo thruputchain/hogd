@@ -447,19 +447,20 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
-  submit_dag.async<void>(
-      "add txs", submit_dag.after(prune_node),
-      [&, commit_guard]() -> x23::Async<void> {
-        co_await scheduler_->add_txs(*txs);
-        MempoolMetrics::instance().accepted_vetted_tx_count.increment(
-            txs->size());
-        // [commit_guard] is a smart pointer that has a [reset()] method just
-        // like [x23::CoroGuard]. clang-tidy prefers that we dereference
-        // [commit_guard] with [*] below rather than write
-        // [commit_guard->reset()], just so that this is more readable.
-        (*commit_guard).reset();
-        co_return;
-      });
+  submit_dag.async<void>("add txs", submit_dag.after(prune_node),
+                         [&, commit_guard]() -> x23::Async<void> {
+                           co_await scheduler_->add_txs(*txs);
+                           MempoolMetrics::instance()
+                               .accepted_vetted_tx_count.increment(txs->size());
+                           // [commit_guard] is a smart pointer that has a
+                           // [reset()] method just like [x23::CoroGuard].
+                           // clang-tidy prefers that we dereference
+                           // [commit_guard] with [*] below rather than write
+                           // [commit_guard->reset()], just so that this is more
+                           // readable.
+                           (*commit_guard).reset();
+                           co_return;
+                         });
 
   co_await submit_dag.run();
   if (!submit_dag.ok() && submit_dag.failure().exception) {
