@@ -142,16 +142,15 @@ SystemCallHandler::replay_uniquifier_expired()
     return false;
   }
   assert(root_invoked_address_.has_value());
-  // The executing height is the parent tip's height + 1: HogDB's BlockTx
-  // executes at parent_tip.height + 1 (see RPCContext::open_block_tx_locked)
-  // and get_block_height() reads that parent tip. A tip-read failure is
-  // propagated.
+  // get_block_height() returns the executing block height (parent tip + 1),
+  // which is exactly the height ReplayCacheLock validates expiry against. A
+  // tip-read failure is propagated.
   auto height = get_block_height();
   if (!height.has_value()) {
     return std::unexpected(height.error());
   }
   return replay_uniquifier_expired(*tx_uniquifier_, *root_invoked_address_,
-                                   *height + 1);
+                                   *height);
 }
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -2024,7 +2023,13 @@ SystemCallHandler::get_block_height() const
   if (!tip.has_value()) {
     return tip.error();
   }
-  return tip.value()->height;
+  // The contract-visible current block height is the *executing* block height,
+  // which is the parent tip's height + 1: HogDB opens the BlockTX at
+  // get_tip().height + 1 (see RPCContext::open_block_tx_locked) and get_db_tip()
+  // returns the parent tip for an open block. Contract-facing height-gated logic
+  // (auth-token expiry, timelocks) must observe the executing height, matching
+  // the replay-cache expiry check.
+  return tip.value()->height + 1;
 }
 
 // == Auth token syscalls ==
