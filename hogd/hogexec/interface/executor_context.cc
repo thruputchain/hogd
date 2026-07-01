@@ -4,6 +4,7 @@
 #include <cassert>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <utility>
 
@@ -153,11 +154,30 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
   assert(mode_ == ExecutionMode::kProposing);
 
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(signed_tx.tx, *snapshot_cache_, proxy,
-                                    make_per_tx_event_server_proxy(tx_id),
-                                    ProposalModeCtor{}, *context);
-  syscall_handler.root_invoke();
-  auto exec_res = syscall_handler.try_commit_transaction();
+  // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
+  // re-serializes the tx for sha256 (#1905); both are proportional to
+  // attacker-influenced input. This runs on a detached DispatchPool worker,
+  // so an escaping throw would hit std::terminate(). Contain bad_alloc only;
+  // anything else is a genuine bug and should still terminate.
+  std::optional<SystemCallHandler> syscall_handler;
+  try {
+    syscall_handler.emplace(signed_tx.tx, *snapshot_cache_, proxy,
+                            make_per_tx_event_server_proxy(tx_id),
+                            ProposalModeCtor{}, *context);
+  } catch (std::bad_alloc const &e) {
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter (cf. database_proxy.cc commit_transaction).
+    try {
+      error("Unrecoverable: SystemCallHandler construction failed: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("SystemCallHandler ctor failure diagnostic");
+    }
+    return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+  }
+  syscall_handler->root_invoke();
+  auto exec_res = syscall_handler->try_commit_transaction();
 
   auto out = ExecProposeResult(exec_res);
 
@@ -165,7 +185,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
   case ExecResult::ExecResultOK:
   case ExecResult::ExecResultTxDeterministicError:
   case ExecResult::ExecResultTxRootFrameReverted:
-    out.proposal_data() = syscall_handler.get_proposal_data();
+    out.proposal_data() = syscall_handler->get_proposal_data();
     break;
   case ExecResult::ExecResultTxNonDeterministicError:
   case ExecResult::ExecResultFailedGasSponsorship:
@@ -205,7 +225,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
         .signed_tx = signed_tx,
         .nondeterministic_proposal_data = out.proposal_data(),
     };
-    syscall_handler.emit_events(exec_res, std::move(proposed_tx))(
+    syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return;
@@ -222,13 +242,32 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx.signed_tx.tx, *snapshot_cache_, proxy,
-                                    make_per_tx_event_server_proxy(tx_id),
-                                    ValidationModeCtor{
-                                        tx.nondeterministic_proposal_data},
-                                    *context);
-  syscall_handler.root_invoke();
-  auto exec_res = syscall_handler.try_commit_transaction();
+  // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
+  // re-serializes the tx for sha256 (#1905); both are proportional to
+  // attacker-influenced input. This runs on a detached DispatchPool worker,
+  // so an escaping throw would hit std::terminate(). Contain bad_alloc only;
+  // anything else is a genuine bug and should still terminate.
+  std::optional<SystemCallHandler> syscall_handler;
+  try {
+    syscall_handler.emplace(tx.signed_tx.tx, *snapshot_cache_, proxy,
+                            make_per_tx_event_server_proxy(tx_id),
+                            ValidationModeCtor{
+                                tx.nondeterministic_proposal_data},
+                            *context);
+  } catch (std::bad_alloc const &e) {
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter (cf. database_proxy.cc commit_transaction).
+    try {
+      error("Unrecoverable: SystemCallHandler construction failed: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("SystemCallHandler ctor failure diagnostic");
+    }
+    return ExecResult::ExecResultUnrecoverable;
+  }
+  syscall_handler->root_invoke();
+  auto exec_res = syscall_handler->try_commit_transaction();
 
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
@@ -237,7 +276,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
     // In validation mode the full body was given to us; forward it as-is.
-    syscall_handler.emit_events(exec_res, tx)(
+    syscall_handler->emit_events(exec_res, tx)(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();
