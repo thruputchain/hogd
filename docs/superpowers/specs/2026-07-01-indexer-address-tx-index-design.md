@@ -74,7 +74,7 @@ natively rather than recreate that centralization dependency. Cosmos
 |-----|---------|---------|
 | `get_transaction_info(hash)` | point-get on `tx_index` (keyed by hash) — **already exists** in `rpc_from_block_explorer.h` | `TxInfoResult` |
 | `get_transactions(cursor)` | whole-chain walk, **no address param** | `TransactionPage` (+ cursor) |
-| `get_transactions_by_address(addr, cursor)` | prefix-scan the folded address index, `kind=ROOT_TX` | `TransactionPage` (+ cursor) |
+| `get_transactions_by_address(addr, cursor)` | prefix-scan the folded address index, `kind=ROOT_TX` | `TransactionRefPage`: `{tx_hash, height}` refs (+ cursor) |
 
 By-hash is already implemented as `get_transaction_info`. An optional rename to
 `get_transaction_by_hash` is cosmetic and out of scope unless trivially free
@@ -102,21 +102,36 @@ hydration reads `tx_index`, exactly as `get_events` does today.
 - `get_transactions_by_address(A)` prefix-scans `A ‖ 0x01`, hydrating each hit
   via a `tx_index` lookup and returning `TxInfo`.
 
-### Return shape: hydrated `TxInfo`
+### Return shape: lightweight refs (Solana style)
 
-`get_transactions_by_address` returns fully hydrated `TxInfo` rows (body +
-event log), matching `get_events`, which already hydrates during its scan
-(point-get into `tx_index` per hit). This gives wallets one round-trip, keeps
-API symmetry, and requires **no** redundant body storage in the address index
-(rows stay empty-valued; hydration hits `tx_index`).
+`get_transactions_by_address` returns a `TransactionRefPage` — a list of
+`{tx_hash, height}` refs plus a cursor — **not** hydrated `TxInfo`. The client
+hydrates on demand via the existing `get_transaction_info(hash)`. This mirrors
+Solana's `getSignaturesForAddress` (signatures + slot + cursor, hydrate via
+`getTransaction`).
+
+Consequences:
+
+- The scan needs **zero** `tx_index` hydration: the `address_index` key already
+  carries `block_height` and `tx_hash`, so the walk reads refs straight off the
+  index keys. Cheaper than `get_events`, which must hydrate because there is no
+  standalone "get event by id" API — transactions *do* have a by-hash API, so
+  refs + hydrate is the natural split here. The asymmetry with `get_events` is
+  intentional and justified by that difference.
+- Index rows stay empty-valued; no body storage in the address index.
+- A ref may momentarily outlive its `tx_index` row only under retention/pruning
+  (not yet implemented); `get_transaction_info` already returns `TxInfoNotFound`
+  in that case, so the client degrades gracefully.
 
 ## Affected code
 
 - `protocol/indexer.x`
   - Delete `address` from `TransactionQuery` (and its TODO comment).
-  - Add a `get_transactions_by_address` request/response (reuse
-    `TransactionPage`; a query struct carrying `address` + anchor/order/cursor/
-    limit, mirroring `TransactionQuery` minus the removed field).
+  - Add `get_transactions_by_address`: a query struct carrying `address` +
+    anchor/order/cursor/limit (mirroring `TransactionQuery` minus the removed
+    field), returning a new `TransactionRefPage { TransactionRef refs<>;
+    opaque cursor<>; BlockHeight latest_block; BlockHeight oldest_block; }`
+    where `TransactionRef { SHA256Hash tx_hash; BlockHeight height; }`.
 - `hogd/indexer/key_format.h`
   - Rename `kContractIndexColumnFamily` → `kAddressIndexColumnFamily`
     (`"address_index"`).
@@ -131,19 +146,19 @@ API symmetry, and requires **no** redundant body storage in the address index
     creator already takes it); wire it through the ingest path.
   - `ContractIter` / `get_events`: seek/prefix on `address ‖ 0x00`.
   - New `IndexDB::get_transactions_by_address`: mirror `get_events`'s
-    ContractIter merge-walk and cursor handling with `kind=0x01`, hydrating full
-    `TxInfo` per hit.
+    ContractIter merge-walk and cursor handling with `kind=0x01`, but emit
+    `{tx_hash, height}` refs read directly off the index keys — **no** per-hit
+    `tx_index` hydration.
   - `get_transactions`: delete the `if (query.address)` block.
 - `hogd/indexer/rpc_from_block_explorer.h`
   - Add the `get_transactions_by_address` handler.
 
 ## Migration
 
-The indexer is derived secondary state (built from events + bodies forwarded by
-the event server), so the `address_index` key-format change and CF rename
-require a **reindex/rebuild**, not a data migration. There is no in-place
-upgrade of existing `contract_index` rows; document the rebuild step. (Acceptable
-for a pre-production chain; confirm no deployed indexer DB must be preserved.)
+None. There is no deployment and no backwards-compatibility requirement: the
+`address_index` key format and CF rename can change freely, `TransactionQuery.
+address` can be removed outright, and no existing indexer DB must be preserved
+or upgraded in place.
 
 ## #2842 resolution
 
@@ -156,8 +171,9 @@ by its root invoked address, independent of whether it emitted events.
 
 - **Regression for #2842**: ingest an eventless root invocation targeting `A`
   via `indexer_event_process_events`; assert `get_transactions_by_address(A)`
-  returns it (the exact case the old filter dropped). Reuse the PoC from the
-  issue, retargeted to the new RPC.
+  returns a ref with that `tx_hash`, and that `get_transaction_info(tx_hash)`
+  then hydrates the full body (the exact case the old filter dropped). Reuse the
+  PoC from the issue, retargeted to the new RPC + hydration step.
 - **Event index unchanged**: existing `get_events` tests must pass as-is
   (semantics preserved; only the key prefix grew).
 - **Separation**: a tx that emits an event from contract `B` while rooted at
