@@ -202,6 +202,142 @@ TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
   EXPECT_EQ(page.transactions.size(), 2);
 }
 
+TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
+{
+  BlockHeight block_height = 101;
+
+  ContractAddress root_addr;
+  std::ranges::fill(root_addr, 0xCC);
+
+  ProposedTransaction body;
+  body.signed_tx.tx.uniquifier.nonce = 42;
+  body.signed_tx.tx.invocation.invoked_address = root_addr;
+
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x33);
+
+  TxEventLog event_log;           // no events emitted
+  event_log.proposed_tx_hash = tx_hash;
+  ASSERT_TRUE(event_log.events.empty());
+
+  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+                                       ProposedTransactionBatch{body})();
+
+  AddressTransactionQuery query{};
+  query.address = root_addr;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0;
+
+  TransactionRefPage page = block_explorer_->get_transactions_by_address(query)();
+  ASSERT_EQ(page.refs.size(), 1);
+  EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
+  EXPECT_EQ(page.refs[0].height, block_height);
+
+  // The ref hydrates to the full body via the existing by-hash API.
+  TxInfoResult info = block_explorer_->get_transaction_info(page.refs[0].tx_hash)();
+  ASSERT_EQ(info.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(info.info().tx.signed_tx.tx.invocation.invoked_address, root_addr);
+}
+
+TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
+{
+  BlockHeight block_height = 200;
+
+  ContractAddress root_a, emitter_b;
+  std::ranges::fill(root_a, 0xA1);
+  std::ranges::fill(emitter_b, 0xB2);
+
+  ProposedTransaction body;
+  body.signed_tx.tx.invocation.invoked_address = root_a;
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x44);
+
+  TxEventLog event_log;
+  event_log.proposed_tx_hash = tx_hash;
+  TxEmittedEvent ev;
+  ev.contract_address = emitter_b;   // event emitted by B, not the root A
+  ev.num_topics = 0;
+  ev.serialized_event.resize(4);
+  event_log.events.push_back(ev);
+
+  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+                                       ProposedTransactionBatch{body})();
+
+  auto query_for = [&](ContractAddress const &addr) {
+    AddressTransactionQuery q{};
+    q.address = addr;
+    q.order = IterationOrder::IterationOrderAscending;
+    q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    q.limit = 0;
+    return block_explorer_->get_transactions_by_address(q)();
+  };
+
+  // Rooted at A → in A's history.
+  TransactionRefPage a_page = query_for(root_a);
+  ASSERT_EQ(a_page.refs.size(), 1);
+  EXPECT_EQ(a_page.refs[0].tx_hash, tx_hash);
+
+  // B only emitted an event → NOT in B's transaction history.
+  TransactionRefPage b_page = query_for(emitter_b);
+  EXPECT_TRUE(b_page.refs.empty());
+
+  // But B's event is still found via the event index.
+  EventQuery eq{};
+  EventFilter filter{};
+  filter.contract_addresses.push_back(emitter_b);
+  eq.filters.push_back(filter);
+  eq.order = IterationOrder::IterationOrderAscending;
+  eq.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  eq.limit = 0;
+  EventPage ep = block_explorer_->get_events(eq)();
+  EXPECT_EQ(ep.events.size(), 1);
+}
+
+TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
+{
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xD4);
+
+  std::vector<SHA256Hash> hashes;
+  for (uint8_t i = 0; i < 3; i++) {
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+    SHA256Hash h;
+    std::ranges::fill(h, static_cast<char>(0x50 + i));
+    hashes.push_back(h);
+    TxEventLog log;
+    log.proposed_tx_hash = h;
+    event_->indexer_event_process_events(
+        static_cast<BlockHeight>(300 + i), TxEventLogBatch{log},
+        ProposedTransactionBatch{body})();
+  }
+
+  AddressTransactionQuery q{};
+  q.address = addr;
+  q.order = IterationOrder::IterationOrderAscending;
+  q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  q.limit = 1;
+
+  std::vector<SHA256Hash> seen;
+  for (int guard = 0; guard < 10; guard++) {
+    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
+    for (auto const &r : page.refs) {
+      seen.push_back(r.tx_hash);
+    }
+    if (page.cursor.empty()) {
+      break;
+    }
+    q.cursor = page.cursor;
+  }
+
+  ASSERT_EQ(seen.size(), 3);
+  EXPECT_EQ(seen[0], hashes[0]);   // block 300
+  EXPECT_EQ(seen[1], hashes[1]);   // block 301
+  EXPECT_EQ(seen[2], hashes[2]);   // block 302
+}
+
 } // namespace hogd
 
 int

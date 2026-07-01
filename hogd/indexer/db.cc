@@ -145,27 +145,29 @@ IndexerStatus<bool>
 create_contract_index_sst_chunk(
     rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *contract_cf_handle,
     BlockHeight block_height, std::span<const TxEventLog> events_chunk,
+    std::span<const ProposedTransaction> bodies_chunk,
     const std::string &sst_path, const rocksdb::Options &sst_options,
     const rocksdb::EnvOptions &env_options, size_t chunk_idx)
 {
-  // Count total events in this chunk to reserve space
+  // Count total events; reserve space for events + one ROOT_TX row per body.
   size_t total_events = 0;
   for (const auto &event_log : events_chunk) {
     total_events += event_log.events.size();
   }
 
-  // Skip empty chunks - don't create SST file
-  if (total_events == 0) {
+  // Skip only when this chunk would produce no rows at all.
+  if (total_events == 0 && bodies_chunk.empty()) {
     return false;
   }
 
-  // Collect entries for this chunk
   std::vector<std::pair<std::string, std::string>> entries;
-  entries.reserve(total_events);
-  std::string key_buffer; // Reusable buffer for key construction
+  entries.reserve(total_events + bodies_chunk.size());
+  std::string key_buffer;
   const std::string empty_string;
 
-  for (const auto &event_log : events_chunk) {
+  for (size_t i = 0; i < events_chunk.size(); i++) {
+    const TxEventLog &event_log = events_chunk[i];
+
     uint32_t sequence_number = 0;
     for (const auto &emitted_event : event_log.events) {
       IndexerKeyFormat::make_contract_key(key_buffer,
@@ -176,6 +178,19 @@ create_contract_index_sst_chunk(
                                           sequence_number);
       entries.emplace_back(key_buffer, empty_string);
       sequence_number++;
+    }
+
+    // One ROOT_TX row keyed by the tx's root invoked address (seq = 0).
+    // Bodies are index-aligned with events; callers that pass no bodies
+    // (event-log-only tests) simply get no ROOT_TX rows.
+    if (i < bodies_chunk.size()) {
+      const ContractAddress &root_addr =
+          bodies_chunk[i].signed_tx.tx.invocation.invoked_address;
+      IndexerKeyFormat::make_contract_key(key_buffer, root_addr,
+                                          IndexerKeyFormat::kRootTx,
+                                          block_height,
+                                          event_log.proposed_tx_hash, 0);
+      entries.emplace_back(key_buffer, empty_string);
     }
   }
 
@@ -651,20 +666,24 @@ IndexDB::consume_events(BlockHeight block_height,
     const size_t end_idx =
         std::min(start_idx + contract_events_chunk_size, events.size());
     const auto events_chunk = events.subspan(start_idx, end_idx - start_idx);
+    const auto bodies_chunk =
+        start_idx < bodies.size()
+            ? bodies.subspan(start_idx,
+                             std::min(end_idx, bodies.size()) - start_idx)
+            : std::span<const ProposedTransaction>{};
     const std::string &chunk_sst_path = contract_sst_paths[i];
 
     auto *db_ptr = db_.get();
     CHECK_PTR(db_ptr);
 
     auto future = pool.submit([db = db_ptr, contract_cf = contract_cf_handle_,
-                               block_height, events_chunk, &chunk_sst_path,
-                               &contract_sst_options, &env_options,
-                               i]() -> IndexerStatus<bool> {
+                               block_height, events_chunk, bodies_chunk,
+                               &chunk_sst_path, &contract_sst_options,
+                               &env_options, i]() -> IndexerStatus<bool> {
       try {
-        return create_contract_index_sst_chunk(db, contract_cf, block_height,
-                                               events_chunk, chunk_sst_path,
-                                               contract_sst_options,
-                                               env_options, i);
+        return create_contract_index_sst_chunk(
+            db, contract_cf, block_height, events_chunk, bodies_chunk,
+            chunk_sst_path, contract_sst_options, env_options, i);
       } catch (...) {
         return IndexerError(IndexerErrorCode::kInternal);
       }
@@ -1568,6 +1587,109 @@ IndexDB::get_transactions(TransactionQuery const &query) const
   }
 
   if (any_emitted && page.transactions.size() < rows.size()) {
+    EventCursorPayload payload;
+    payload.order = order;
+    payload.block_height = last_emitted.block;
+    payload.tx_hash = last_emitted.tx;
+    payload.sequence_number = 0;
+    std::string encoded = cursor::encode(payload);
+    page.cursor.append_range(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+  }
+
+  return page;
+}
+
+IndexerStatus<TransactionRefPage>
+IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
+{
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+
+  TransactionRefPage page;
+  const BlockHeight max_serve_block = latest_block();
+  page.latest_block = max_serve_block;
+  page.oldest_block = oldest_block();
+
+  const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
+
+  IterationOrder order;
+  BlockHeight anchor_block;
+  bool have_cursor = false;
+  Position cursor_pos{};
+
+  if (!query.cursor.empty()) {
+    auto decoded = cursor::decode(
+        std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
+                         query.cursor.size()));
+    if (!decoded || !is_valid_iteration_order(decoded->order)) {
+      return page;
+    }
+    order = decoded->order;
+    cursor_pos.block = decoded->block_height;
+    cursor_pos.tx = decoded->tx_hash;
+    cursor_pos.seq = decoded->sequence_number;
+    anchor_block = cursor_pos.block;
+    have_cursor = true;
+  }
+  else {
+    order = query.order;
+    if (!is_valid_iteration_order(order)) {
+      return page;
+    }
+    switch (query.anchor.kind()) {
+    case BlockAnchorKind::AnchorAtBeginning:
+      if (order == IterationOrder::IterationOrderDescending) {
+        return page;
+      }
+      anchor_block = oldest_block();
+      break;
+    case BlockAnchorKind::AnchorAtEnd:
+      if (order == IterationOrder::IterationOrderAscending) {
+        return page;
+      }
+      anchor_block = max_serve_block;
+      break;
+    case BlockAnchorKind::AnchorAtHeight:
+      anchor_block = query.anchor.height();
+      if (anchor_block < oldest_block()) {
+        if (order == IterationOrder::IterationOrderDescending) {
+          return page;
+        }
+        anchor_block = oldest_block();
+      }
+      break;
+    }
+  }
+
+  if (order == IterationOrder::IterationOrderDescending &&
+      anchor_block > max_serve_block) {
+    anchor_block = max_serve_block;
+  }
+
+  ContractIter iter(db_.get(), contract_cf_handle_, query.address, order,
+                    max_serve_block, IndexerKeyFormat::kRootTx);
+  iter.seek(anchor_block, order);
+  if (have_cursor && iter.has_current()) {
+    iter.skip_past(order, cursor_pos);
+  }
+
+  Position last_emitted{};
+  bool any_emitted = false;
+  while (page.refs.size() < limit && iter.has_current()) {
+    Position const pos = iter.current();
+    TransactionRef ref;
+    ref.tx_hash = pos.tx;
+    ref.height = pos.block;
+    page.refs.push_back(ref);
+    last_emitted = pos;
+    any_emitted = true;
+    iter.advance(order);
+  }
+
+  // More rows remain past the page — emit a continuation cursor.
+  if (any_emitted && iter.has_current()) {
     EventCursorPayload payload;
     payload.order = order;
     payload.block_height = last_emitted.block;
