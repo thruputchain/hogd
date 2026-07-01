@@ -105,7 +105,7 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 
 HogDBStatus<int128_t>
 BlockTX::lock(const ItemKey &key, ItemChange &change,
-             std::optional<DbConflictCode> *conflict_reason)
+              std::optional<DbConflictCode> *conflict_reason)
 {
   if (auto s = check_stale();
       !s || mode_ == BlockExecutionMode::kBlockExecutionModeViewing)

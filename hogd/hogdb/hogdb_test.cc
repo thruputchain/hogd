@@ -3487,9 +3487,8 @@ TEST_F(HogDBTest, BytestringConflictRecordsDbConflictReason)
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
   constexpr std::array<std::byte, 1> kValueA = {std::byte{0xAA}};
-  ASSERT_TRUE(
-      itx_a.request_bytes(key, std::span(kValueA),
-                          std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.request_bytes(key, std::span(kValueA),
+                                  std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(itx_a.sync_balance_locks());
 
   ASSERT_TRUE(block_tx.try_acquire_reference());

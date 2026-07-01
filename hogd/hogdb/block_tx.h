@@ -66,8 +66,8 @@ public:
   // be needed to support the change, if committed.
   HogDBStatus<int128_t>
   modify_lock(const ItemKey &key, const ItemChange &old_change,
-             const ItemChange &new_change,
-             std::optional<DbConflictCode> *conflict_reason = nullptr);
+              const ItemChange &new_change,
+              std::optional<DbConflictCode> *conflict_reason = nullptr);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.
