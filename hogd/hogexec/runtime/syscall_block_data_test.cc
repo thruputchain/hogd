@@ -184,8 +184,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
 }
 
 // Regression for #2847: GetBlockHeight must report the *executing* block height
-// (parent tip + 1), not the last-committed parent tip. A transaction runs in the
-// block being built on top of committed height N, i.e. at height N+1, and
+// (parent tip + 1), not the last-committed parent tip. A transaction runs in
+// the block being built on top of committed height N, i.e. at height N+1, and
 // height-gated contract logic (auth-token expiry, timelocks) must observe that.
 TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
 {
