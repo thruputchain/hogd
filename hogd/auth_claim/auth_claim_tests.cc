@@ -407,6 +407,55 @@ TEST_F(AuthClaimTests, PubkeySignatureClaimRejectedWithoutPanic)
   EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthMalformed);
 }
 
+// `allowed_keys` is an author-declared allow-policy (see protocol/auth_claim.x:
+// "The bitmap specifies which are allowed to be used to sign the
+// transaction."), not a reflection of which slots are registered on the
+// account. A bitmap may therefore include in-range slots that are unoccupied in
+// AddressAuthData; the verifier only requires that every *actual* signature
+// uses a key that is both in the bitmap and registered, and that the weight
+// threshold is met. Accepting an over-broad bitmap grants no capability, since
+// an unregistered slot cannot produce a valid signature. This is
+// working-as-intended (issue #2793).
+TEST_F(AuthClaimTests, OverbroadAllowedKeysBitmapAccepted)
+{
+  constexpr uint32_t kRegisteredSlot = 0;
+  constexpr uint32_t kUnregisteredSlot = 20; // in range (< kMaxSigners), unset
+  static_assert(kUnregisteredSlot < kMaxSigners);
+
+  // Bitmap advertises both slots, but only slot 0 is registered below.
+  AuthClaim claim =
+      make_claim((1U << kRegisteredSlot) | (1U << kUnregisteredSlot));
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction(claim);
+  DecoratedSignature sig = make_signature(sk, tx, kRegisteredSlot);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  // Only slot 0 is populated; slot 20 is absent from the auth row.
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
+      .required_weight = 1,
+  };
+  ASSERT_TRUE(auth_data.public_keys[kRegisteredSlot]);
+  ASSERT_FALSE(auth_data.public_keys[kUnregisteredSlot]);
+
+  // All three verification levels accept the over-broad bitmap because the sole
+  // signature uses the registered slot 0 and meets the required weight.
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, auth_data).has_value());
+
+  // The unregistered slot grants no authority: a signature that *claims* slot
+  // 20 still fails because the slot is not in the auth row.
+  DecoratedSignature spoof_sig = make_signature(sk, tx, kUnregisteredSlot);
+  SignedTransaction spoof_stx{.tx = tx, .signatures = {spoof_sig}};
+  auto spoof_result = verify_auth(spoof_stx, auth_data);
+  EXPECT_FALSE(spoof_result.has_value());
+  EXPECT_EQ(spoof_result.error().code(),
+            AuthVerifyErrorCode::kAuthDataMismatch);
+}
+
 TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
 {
   constexpr Weight kMaxWeight = std::numeric_limits<Weight>::max();

@@ -38,6 +38,31 @@ TEST(FFIHelpers, SourceAddressClaimRoundtrip)
   ASSERT_EQ(a, *b);
 }
 
+// `allowed_keys` is author-declared allow-policy that is part of the signed
+// transaction body, not verified signer evidence. The syscall boundary passes
+// the stored claim through verbatim -- including in-range slots that are not
+// registered on the account -- so a contract reading GetAuthClaim sees exactly
+// what the author committed to. Locking in this passthrough (issue #2793, WAI).
+TEST(FFIHelpers, SourceAddressClaimAllowedKeysPassthroughUnchanged)
+{
+  constexpr uint32_t kUnregisteredSlot = 20;
+  constexpr uint32_t kAllowedKeys = (1U << 0) | (1U << kUnregisteredSlot);
+
+  AuthClaim a(AuthClaimType::kSourceAddressAuthData);
+  a.source_address_claim().allowed_keys = kAllowedKeys;
+  a.source_address_claim().required_weight = 1;
+
+  auto ffi = FFIHelperType<generated::AuthClaim>::to_ffi(a);
+  ASSERT_EQ(ffi.tag, generated::AuthClaim::AuthClaim_kSourceAddressAuthData);
+  EXPECT_EQ(ffi.k_source_address_auth_data.source_address_claim.allowed_keys,
+            kAllowedKeys);
+
+  // Round-trips unchanged too: no slot is filtered on either conversion.
+  auto b = roundtrip_auth_claim(a);
+  ASSERT_TRUE(b.has_value());
+  EXPECT_EQ(a, *b);
+}
+
 TEST(FFIHelpers, PubkeySignatureClaimRoundtrip)
 {
   AuthClaim a(AuthClaimType::kPubkeySignature);
