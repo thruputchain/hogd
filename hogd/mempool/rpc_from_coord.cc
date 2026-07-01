@@ -253,7 +253,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
           info("submit_unvetted rejected txs as the mempool has too many "
                "pending txs");
-          commit_guard->reset();
+          // [commit_guard] is a smart pointer that has a [reset()] method just
+          // like [x23::CoroGuard]. clang-tidy prefers that we dereference
+          // [commit_guard] with [*] below rather than write
+          // [commit_guard->reset()], just so that this is more readable.
+          (*commit_guard).reset();
           submit_dag.fail(x23::DagFailureKind::Cancelled, "enforce capacity");
           co_return;
         }
@@ -337,7 +341,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_await scheduler_->add_txs(*txs);
         MempoolMetrics::instance().accepted_unvetted_tx_count.increment(
             txs->size());
-        commit_guard->reset();
+        // [commit_guard] is a smart pointer that has a [reset()] method just
+        // like [x23::CoroGuard]. clang-tidy prefers that we dereference
+        // [commit_guard] with [*] below rather than write
+        // [commit_guard->reset()], just so that this is more readable.
+        (*commit_guard).reset();
         co_return;
       });
 
