@@ -534,7 +534,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
   // Executing height is the block being built (parent tip + 1). The harness
   // knows both independently of the (previously buggy) GetBlockHeight syscall.
   const BlockHeight executing_height = get_block_number();
-  const BlockHeight parent_tip = BlockHeight{executing_height - 1};
+  const auto parent_tip = BlockHeight{executing_height - 1};
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_contract;
