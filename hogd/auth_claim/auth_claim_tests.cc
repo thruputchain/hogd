@@ -408,13 +408,14 @@ TEST_F(AuthClaimTests, PubkeySignatureClaimRejectedWithoutPanic)
 }
 
 // `allowed_keys` is an author-declared allow-policy (see protocol/auth_claim.x:
-// "The bitmap specifies which are allowed to be used to sign the transaction."),
-// not a reflection of which slots are registered on the account. A bitmap may
-// therefore include in-range slots that are unoccupied in AddressAuthData; the
-// verifier only requires that every *actual* signature uses a key that is both
-// in the bitmap and registered, and that the weight threshold is met. Accepting
-// an over-broad bitmap grants no capability, since an unregistered slot cannot
-// produce a valid signature. This is working-as-intended (issue #2793).
+// "The bitmap specifies which are allowed to be used to sign the
+// transaction."), not a reflection of which slots are registered on the
+// account. A bitmap may therefore include in-range slots that are unoccupied in
+// AddressAuthData; the verifier only requires that every *actual* signature
+// uses a key that is both in the bitmap and registered, and that the weight
+// threshold is met. Accepting an over-broad bitmap grants no capability, since
+// an unregistered slot cannot produce a valid signature. This is
+// working-as-intended (issue #2793).
 TEST_F(AuthClaimTests, OverbroadAllowedKeysBitmapAccepted)
 {
   constexpr uint32_t kRegisteredSlot = 0;
@@ -445,8 +446,8 @@ TEST_F(AuthClaimTests, OverbroadAllowedKeysBitmapAccepted)
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data).has_value());
   EXPECT_TRUE(verify_auth(stx, auth_data).has_value());
 
-  // The unregistered slot grants no authority: a signature that *claims* slot 20
-  // still fails because the slot is not in the auth row.
+  // The unregistered slot grants no authority: a signature that *claims* slot
+  // 20 still fails because the slot is not in the auth row.
   DecoratedSignature spoof_sig = make_signature(sk, tx, kUnregisteredSlot);
   SignedTransaction spoof_stx{.tx = tx, .signatures = {spoof_sig}};
   auto spoof_result = verify_auth(spoof_stx, auth_data);

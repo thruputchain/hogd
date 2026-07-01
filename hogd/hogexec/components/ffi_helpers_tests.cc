@@ -54,9 +54,8 @@ TEST(FFIHelpers, SourceAddressClaimAllowedKeysPassthroughUnchanged)
 
   auto ffi = FFIHelperType<generated::AuthClaim>::to_ffi(a);
   ASSERT_EQ(ffi.tag, generated::AuthClaim::AuthClaim_kSourceAddressAuthData);
-  EXPECT_EQ(
-      ffi.k_source_address_auth_data.source_address_claim.allowed_keys,
-      kAllowedKeys);
+  EXPECT_EQ(ffi.k_source_address_auth_data.source_address_claim.allowed_keys,
+            kAllowedKeys);
 
   // Round-trips unchanged too: no slot is filtered on either conversion.
   auto b = roundtrip_auth_claim(a);
