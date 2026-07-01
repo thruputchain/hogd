@@ -521,6 +521,105 @@ protected:
   }
 };
 
+// Regression for #2847: auth-token expiry must be validated against the
+// executing block height (parent tip + 1), not the last-committed parent tip.
+// A transaction executing in block H+1 must reject a token whose expiry is H
+// (already expired for that block), and observe GetBlockHeight() == H+1.
+TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  advance_block();
+
+  // Executing height is the block being built (parent tip + 1). The harness
+  // knows both independently of the (previously buggy) GetBlockHeight syscall.
+  const BlockHeight executing_height = get_block_number();
+  const auto parent_tip = BlockHeight{executing_height - 1};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_contract;
+  fns_contract.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        // GetBlockHeight reports the executing height, not the parent tip.
+        BlockHeight observed_height{};
+        auto h_res = ctx.syscall<SyscallNo::kGetBlockHeight>(observed_height);
+        EXPECT_TRUE(h_res.has_value());
+        EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(observed_height, executing_height);
+
+        auto try_mint = [&](BlockHeight expiry, uint32_t &id) {
+          AuthTokenNode node{.consumer_address = kAddr,
+                             .payload = x23::serialize(1U),
+                             .child_nodes = {}};
+          auto serialized = x23::serialize(node);
+          return ctx.syscall<SyscallNo::kMintAuthToken>(
+              expiry,
+              std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                             serialized.data()),
+                                         serialized.size()},
+              id);
+        };
+
+        // expiry == parent tip == executing_height - 1: already expired for the
+        // executing block, so mint must be rejected.
+        {
+          uint32_t id = 0;
+          auto r = try_mint(parent_tip, id);
+          EXPECT_TRUE(r.has_value());
+          EXPECT_EQ(r.value(),
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        }
+
+        // expiry == executing height: still valid, mint and consume succeed.
+        {
+          uint32_t id = 0;
+          auto r = try_mint(executing_height, id);
+          EXPECT_TRUE(r.has_value());
+          EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+          std::array<std::byte, 256> buf{};
+          RuntimeMemoryLength w = 0;
+          uint32_t s = 0, c = 0;
+          ContractAddress m{};
+          auto cr = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              id, std::span<std::byte>{buf}, m, w, s, c);
+          EXPECT_TRUE(cr.has_value());
+          EXPECT_EQ(cr.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+          EXPECT_EQ(w, x23::serialize(1U).size());
+        }
+
+        return {};
+      });
+  auto contract = std::make_unique<NativeContract>(std::move(fns_contract));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
