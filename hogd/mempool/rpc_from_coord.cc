@@ -307,7 +307,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
-  auto notify_node = submit_dag.async<void>(
+  submit_dag.async<void>(
       "launch vetted notify", submit_dag.after(prune_node),
       [&, txs]() -> x23::Async<void> {
         pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
