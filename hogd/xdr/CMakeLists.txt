@@ -13,6 +13,7 @@ add_xdr(
   ../../protocol/contract.x
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x
+  ../../protocol/db_conflict.x
   ../../protocol/discovery.x
   ../../protocol/event.x
   ../../protocol/event_rpc.x
