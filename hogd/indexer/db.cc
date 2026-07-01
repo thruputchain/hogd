@@ -14,7 +14,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -171,6 +170,7 @@ create_contract_index_sst_chunk(
     for (const auto &emitted_event : event_log.events) {
       IndexerKeyFormat::make_contract_key(key_buffer,
                                           emitted_event.contract_address,
+                                          IndexerKeyFormat::kEvent,
                                           block_height,
                                           event_log.proposed_tx_hash,
                                           sequence_number);
@@ -1020,10 +1020,16 @@ class ContractIter {
 public:
   ContractIter(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *cf,
                ContractAddress addr, IterationOrder order,
-               BlockHeight max_block)
-    : contract_(addr), order_(order), max_block_(max_block),
+               BlockHeight max_block, IndexerKeyFormat::RecordKind kind)
+    : contract_(addr), order_(order), max_block_(max_block), kind_(kind),
       iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
-  {}
+  {
+    // Boundary prefix: address(32) + kind(1).  refresh_current() stops the
+    // walk when a key leaves this range, so an EVENT iterator never bleeds
+    // into ROOT_TX rows for the same address (and vice versa).
+    kind_prefix_.append(reinterpret_cast<const char *>(contract_.data()), 32);
+    kind_prefix_.push_back(static_cast<char>(kind_));
+  }
 
   ContractAddress const &contract() const { return contract_; }
   bool has_current() const { return has_current_; }
@@ -1040,7 +1046,7 @@ public:
   void seek(BlockHeight anchor, IterationOrder order)
   {
     std::string prefix;
-    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, anchor);
+    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, kind_, anchor);
     if (order == IterationOrder::IterationOrderAscending) {
       iter_->Seek(prefix);
     }
@@ -1118,14 +1124,12 @@ private:
     rocksdb::Slice key = iter_->key();
     const std::string_view key_sv(key.data(), key.size());
     if (key_sv.size() < IndexerKeyFormat::kContractKeyPrefixSize ||
-        !key_sv.starts_with(
-            std::string_view(reinterpret_cast<const char *>(contract_.data()),
-                             std::tuple_size_v<ContractAddress>))) {
+        !key_sv.starts_with(kind_prefix_)) {
       has_current_ = false;
       return;
     }
     ContractAddress addr_out;
-    if (!IndexerKeyFormat::parse_contract_key(key_sv, &addr_out,
+    if (!IndexerKeyFormat::parse_contract_key(key_sv, &addr_out, nullptr,
                                               &current_.block, &current_.tx,
                                               &current_.seq)) {
       has_current_ = false;
@@ -1148,6 +1152,8 @@ private:
   ContractAddress contract_;
   IterationOrder order_;
   BlockHeight max_block_;
+  IndexerKeyFormat::RecordKind kind_;
+  std::string kind_prefix_;
   std::unique_ptr<rocksdb::Iterator> iter_;
   std::vector<std::size_t> filter_indices_;
   Position current_{};
@@ -1272,7 +1278,7 @@ IndexDB::get_events(EventQuery const &query) const
       }
       else {
         iters.emplace_back(db_.get(), contract_cf_handle_, addr, order,
-                           max_serve_block);
+                           max_serve_block, IndexerKeyFormat::kEvent);
         iters.back().add_filter(fidx);
       }
     }

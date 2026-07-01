@@ -33,8 +33,9 @@ public:
   // Column family: contract_index
   // This index is responsible for allowing searches of events by contract
   // address. Key format:
-  //   contract_address (32 bytes) + block_height (8 bytes BE) + tx_hash (32
-  //   bytes) + sequence_number (4 bytes BE) (total: 76 bytes)
+  //   contract_address (32 bytes) + kind (1 byte) + block_height (8 bytes
+  //   BE) + tx_hash (32 bytes) + sequence_number (4 bytes BE) (total: 77
+  //   bytes)
   // Value format:
   //   empty string (event data is looked up from tx_index using block_height
   //   and tx_hash)
@@ -60,16 +61,23 @@ public:
   // Total: 32 bytes
   static constexpr size_t kTxKeySize = 32;
 
-  // Contract index key format:
-  //   contract_address (32 bytes) + block_height (8 bytes BE) +
-  //   tx_hash (32 bytes) + sequence_number (4 bytes BE)
-  // Total: 76 bytes
-  static constexpr size_t kContractKeySize = 32 + 8 + 32 + 4;
+  // Record kind discriminator, stored as 1 byte immediately after the
+  // address so each (address, kind) forms a contiguous key range.
+  enum RecordKind : uint8_t {
+    kEvent = 0,  // one row per emitted event, keyed by emitter address
+    kRootTx = 1, // one row per tx, keyed by root invoked_address (seq = 0)
+  };
 
-  // Contract index key prefix format (for range queries):
-  //   contract_address (32 bytes) + block_height (8 bytes BE)
-  // Total: 40 bytes
-  static constexpr size_t kContractKeyPrefixSize = 32 + 8;
+  // Contract index key format:
+  //   contract_address (32) + kind (1) + block_height (8 BE) +
+  //   tx_hash (32) + sequence_number (4 BE)
+  // Total: 77 bytes
+  static constexpr size_t kContractKeySize = 32 + 1 + 8 + 32 + 4;
+
+  // Contract index key prefix (for range queries):
+  //   contract_address (32) + kind (1) + block_height (8 BE)
+  // Total: 41 bytes
+  static constexpr size_t kContractKeyPrefixSize = 32 + 1 + 8;
 
   // Build a transaction index key into the provided buffer
   static void make_tx_key(std::string &key, SHA256Hash const &tx_hash);
@@ -77,20 +85,21 @@ public:
   // Build a contract index key prefix into the provided buffer
   static void make_contract_key_prefix(std::string &key,
                                        ContractAddress const &address,
+                                       RecordKind kind,
                                        BlockHeight block_height);
 
   // Build a contract index key into the provided buffer
   static void make_contract_key(std::string &key,
                                 ContractAddress const &address,
-                                BlockHeight block_height,
+                                RecordKind kind, BlockHeight block_height,
                                 SHA256Hash const &tx_hash,
                                 uint32_t sequence_number);
 
   // Parse a contract key and extract components
   // Returns true if parsing succeeded, false otherwise
   static bool parse_contract_key(std::string_view key, ContractAddress *address,
-                                 BlockHeight *block_height, SHA256Hash *tx_hash,
-                                 uint32_t *sequence_number);
+                                 RecordKind *kind, BlockHeight *block_height,
+                                 SHA256Hash *tx_hash, uint32_t *sequence_number);
 };
 
 } // namespace hogd
