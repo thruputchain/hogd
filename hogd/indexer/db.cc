@@ -1535,17 +1535,6 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       return IndexerError(IndexerErrorCode::kInternal);
     }
 
-    if (query.address) {
-      const bool matched =
-          std::ranges::any_of(record.events.events,
-                              [&](TxEmittedEvent const &ev) {
-                                return ev.contract_address == *query.address;
-                              });
-      if (!matched) {
-        continue;
-      }
-    }
-
     rows.push_back(TransactionRow{.pos = pos,
                                   .tx = std::move(record.tx),
                                   .events = std::move(record.events)});

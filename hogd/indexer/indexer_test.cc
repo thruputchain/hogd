@@ -186,6 +186,22 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   }
 }
 
+TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
+{
+  BlockHeight block_height = 100;
+  TxEventLogBatch events = create_event_logs();          // 2 txs, addrs 0xAA/0xBB
+  ProposedTransactionBatch bodies = create_tx_bodies(events.size());
+  event_->indexer_event_process_events(block_height, events, bodies)();
+
+  TransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0;
+
+  TransactionPage page = block_explorer_->get_transactions(query)();
+  EXPECT_EQ(page.transactions.size(), 2);
+}
+
 } // namespace hogd
 
 int
