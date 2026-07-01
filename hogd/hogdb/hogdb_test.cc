@@ -16,6 +16,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "db_sched.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -3466,6 +3467,44 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
 
+  itx_a.abort();
+  itx_a.release_blocktx_reference();
+}
+
+// Regression test for #2759: a bytestring value-mismatch conflict must record
+// a DbConflictCode reason on the losing InvokeTX, in addition to returning
+// the generic kConflict error.
+TEST_F(HogDBTest, BytestringConflictRecordsDbConflictReason)
+{
+  Address addr = make_address(kAddress + 302);
+  setup_contract_address(addr);
+  ItemKey key = make_item_key(addr, 0);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  constexpr std::array<std::byte, 1> kValueA = {std::byte{0xAA}};
+  ASSERT_TRUE(
+      itx_a.request_bytes(key, std::span(kValueA),
+                          std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  constexpr std::array<std::byte, 1> kValueB = {std::byte{0xBB}};
+  auto r = itx_b.request_bytes(key, std::span(kValueB),
+                               std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictValueMismatch,
+            *itx_b.last_conflict_reason());
+
+  itx_b.abort();
+  itx_b.release_blocktx_reference();
   itx_a.abort();
   itx_a.release_blocktx_reference();
 }

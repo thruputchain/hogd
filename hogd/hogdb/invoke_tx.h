@@ -4,12 +4,14 @@
 
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
@@ -121,6 +123,15 @@ public:
 
   HogDBStatus<void> sync_balance_locks();
 
+  // Reason for the most recent kConflict returned by a request_* method or
+  // sync_balance_locks (#2759). Empty if the last failure was not a
+  // conflict or no request has failed. Cleared at the start of each
+  // lock-acquiring request.
+  std::optional<DbConflictCode> last_conflict_reason() const
+  {
+    return last_conflict_reason_;
+  }
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -152,6 +163,7 @@ private:
 
   unsigned int tx_depth_{0};
   PerThreadARC<BlockTX> &block_;
+  std::optional<DbConflictCode> last_conflict_reason_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
   // combine it with the latest balance delta for that address.

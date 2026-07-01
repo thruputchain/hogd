@@ -93,6 +93,8 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
 HogDBStatus<void>
 InvokeTX::update_balance_lock(Address const &addr)
 {
+  last_conflict_reason_.reset();
+
   // Combines the manual balance transfers with the up-to-now storage cost
   // to create/apply/update one balance nnint delta.
   auto storage_change_res = get_storage_balance_change(addr);
@@ -106,7 +108,7 @@ InvokeTX::update_balance_lock(Address const &addr)
   auto &change = changes_[key];
   if (change.empty()) {
 
-    auto status = block_.get().lock(key, new_item);
+    auto status = block_.get().lock(key, new_item, &last_conflict_reason_);
     if (!status) {
       if constexpr (is_debug_build()) {
         ContractAddress contract_addr = addr.get_raw();
@@ -141,7 +143,8 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto status = block_.get().modify_lock(key, last.change, new_item);
+  auto status = block_.get().modify_lock(key, last.change, new_item,
+                                         &last_conflict_reason_);
   if (!status) {
     if constexpr (is_debug_build()) {
       ContractAddress contract_addr = addr.get_raw();
@@ -367,12 +370,15 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
+  last_conflict_reason_.reset();
+
   assert(!key.is_address_balance());
   std::vector<ItemVersion> &v = changes_[key];
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDBStatus<int128_t> ret = block_.get().lock(key, change);
+    HogDBStatus<int128_t> ret =
+        block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
       return ret.error();
     }
@@ -394,8 +400,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   ItemVersion &item = v.back();
   if (auto r = change.narrow(item.change); !r)
     return r.error();
-  HogDBStatus<int128_t> ret =
-      block_.get().modify_lock(key, item.change, change);
+  HogDBStatus<int128_t> ret = block_.get().modify_lock(key, item.change, change,
+                                                       &last_conflict_reason_);
   if (!ret) {
     return ret.error();
   }

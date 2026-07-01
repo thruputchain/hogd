@@ -1,8 +1,10 @@
 #pragma once
 
 #include <concepts>
+#include <optional>
 #include <utility>
 
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -33,6 +35,22 @@ struct LockContext {
   // locks to compute conservative reservations that account for the
   // snapshot_cost_transform subtraction in ItemLock.
   int128_t item_lock_snapshot_cost = 0;
+
+  // When non-null, conflict leaf sites record the DbConflictCode reason
+  // here before returning kConflict (#2759). Wired from InvokeTX through
+  // BlockTX::lock/modify_lock.
+  std::optional<DbConflictCode> *conflict_reason = nullptr;
+
+  // Records the conflict reason (if a sink is attached) and returns the
+  // generic conflict error, so leaf sites stay one-liners:
+  //   return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+  HogDBError conflict(DbConflictCode code) const
+  {
+    if (conflict_reason != nullptr) {
+      *conflict_reason = code;
+    }
+    return HogDBError{HogDBCode::kConflict};
+  }
 };
 
 template<typename Lock>
