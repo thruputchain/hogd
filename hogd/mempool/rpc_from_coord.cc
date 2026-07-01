@@ -1581,257 +1581,390 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
-  PendingBlock cache{};
-  {
-    // We call [reserve] here to avoid racing with accesses to [cache.tx_hashes]
-    // in [parallel_batch_to_t()] below.
-    cache.txs.reserve(kMaxBlockSize);
-    cache.tx_hashes.reserve(kMaxBlockSize);
-    cache.result_tx_hashes.reserve(kMaxBlockSize);
-    cache.result_tx_nominations.reserve(kMaxBlockSize);
-
-    x23::Async<bool> tx_nondeterministic_data_handle =
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nominations);
-    x23::Async<bool> tx_hash_handle =
-        parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
-
-    const bool decoded_tx_nominations =
-        co_await tx_nondeterministic_data_handle;
-
-    const bool decoded_tx_hashes = co_await tx_hash_handle;
-
-    if (!decoded_tx_nominations || !decoded_tx_hashes) {
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationMalformed;
-      info("schedulercoord_validate rejected malformed nomination batch");
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationMalformed);
-    }
-
-    if (cache.tx_hashes.size() != tx_nominations.size()) {
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationMalformed;
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationMalformed);
-    }
-
-    // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
-    // correctly when we use the helper functions above to send txs to the
-    // executors.
-    cache.block_id = generate_block_id();
-    validation_tx_count = cache.tx_hashes.size();
-  }
-
-  co_await wait_for_transfer_data(nomination.block_height - 1);
-  co_await wait_for_auth_data(nomination.block_height - 1);
-
-  DbSchedResult snapshot_result = co_await create_snapshot(
-      /*prev_block_id=*/db_tip.id, cache.block_id,
-      BlockExecutionMode::kBlockExecutionModeValidation);
-  if (snapshot_result != DbSchedResult::DbSchedResultOK) {
-    co_await decrement_num_validations_in_progress();
-    if (snapshot_result == DbSchedResult::DbSchedResultInvalidParentId) {
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
-      info("schedulercoord_validate ret");
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
-    }
-    info("schedulercoord_validate ret");
-    CHECK_EQ(snapshot_result, DbSchedResult::DbSchedResultError);
-    validation_outcome =
-        SchedulerValidationOutcome::SchedulerValidationDbFailed;
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationDbFailed);
-  }
-  CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
-
-  x23::Vec<x23::Async<ExecResult>> open_validation_block_handles;
-  for (size_t i = 0; i < exec_clients_.size(); i++) {
-    open_validation_block_handles.push_back(
-        open_validation_block(cache.block_id, /*executor_idx=*/i));
-  }
-  bool open_validation_block_success = true;
-  x23::Vec<ExecResult> open_validation_block_ret;
-  for (x23::Async<ExecResult> &handle : open_validation_block_handles) {
-    open_validation_block_ret.push_back(co_await handle);
-    if (open_validation_block_ret.back() != ExecResult::ExecResultOK) {
-      open_validation_block_success = false;
-    }
-  }
-  if (!open_validation_block_success) {
-    co_await finish_all_executors(cache.block_id);
-    co_await abandon_block(cache);
-    co_await decrement_num_validations_in_progress();
-    validation_outcome =
-        SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
-    info("schedulercoord_validate ret");
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
-  }
-
-  // [nomination] includes the tx hashes and the nondeterministic proposal
-  // data. We need to use these tx hashes to look up the vetted txs in
-  // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
-  // the nondeterministic proposal data to form a [ProposedTransaction], which
-  // is what the executors expect to receive.
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+  PendingBlock cache{};
   bool validated = true;
-  SHA256Hash txset_hash;
-  {
-    const std::vector<ChunkRange> validation_chunks =
-        make_chunks_for_max_size(cache.tx_hashes.size(),
-                                 kNumTxsPerNominationChunk);
-    x23::Vec<x23::Async<PreparedAndValidatedChunk>> chunk_handles;
-    chunk_handles.reserve(validation_chunks.size());
-
-    for (const ChunkRange &chunk : validation_chunks) {
-      x23::span<const SignedTransactionHash> tx_hashes_span(
-          cache.tx_hashes.begin() + chunk.start,
-          cache.tx_hashes.begin() + chunk.end);
-      x23::span<const NondeterministicProposalData> tx_nominations_span(
-          tx_nominations.begin() + chunk.start,
-          tx_nominations.begin() + chunk.end);
-      chunk_handles.push_back(prepare_and_validate_chunk(cache.block_id,
-                                                         tx_hashes_span,
-                                                         tx_nominations_span));
-    }
-
-    // Compute the txset hash here so that we can overlap its compute overhead
-    // with that of the block execution.
-    txset_hash = get_txset_hash(cache.tx_hashes);
-
-    x23::Vec<PreparedAndValidatedChunk> chunk_results;
-    chunk_results.reserve(chunk_handles.size());
-    for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
-      chunk_results.push_back(co_await handle);
-    }
-    for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
-      validated = chunk_result.validated && validated;
-      missing_tx_hashes += chunk_result.missing_tx_hashes;
-      cache.txs += chunk_result.txs;
-    }
-
-    for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
-      if (tx_failed_authentication(tx_hash)) {
-        co_await finish_all_executors(cache.block_id);
-        co_await abandon_block(cache);
-        co_await decrement_num_validations_in_progress();
-        validation_outcome =
-            SchedulerValidationOutcome::SchedulerValidationInvalid;
-        info("schedulercoord_validate ret");
-        co_return SchedulerValidationResult(
-            SchedulerValidationOutcome::SchedulerValidationInvalid);
-      }
-    }
-
-    if (!missing_tx_hashes.empty()) {
-      co_await finish_all_executors(cache.block_id);
-      co_await abandon_block(cache);
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationMissingTxs;
-
-      SchedulerValidationResult ret(
-          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
-      ret.missing_tx_hashes() = missing_tx_hashes;
-      info("schedulercoord_validate ret");
-      co_return ret;
-    }
-    CHECK_EQ(cache.txs.size(), tx_nominations.size());
-  }
-
-  if (!validated) {
-    co_await finish_all_executors(cache.block_id);
-    co_await abandon_block(cache);
-    co_await decrement_num_validations_in_progress();
-    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  x23::Async<void> finish_block_handle = finish_all_executors(cache.block_id);
-  {
-    x23::Async<DbBlockResult> close_snapshot_handle =
-        close_snapshot(cache.block_id);
-    x23::Async<EventBlockResult> event_close_block_handle =
-        eventsched_close_block(cache.block_id, scheduler_->current_block() + 1);
-
-    {
-      // I am deliberately co_await'ing [event_close_block_handle] first since
-      // [close_snapshot()] (the other RPC call above) can fail, and I would
-      // rather not have to deal with co_await'ing [event_close_block_handle] as
-      // well in the error path for that.
-      EventBlockResult result = co_await event_close_block_handle;
-      CHECK_EQ(result.error(), RPCError::kRPCNone);
-      cache.db_tip.events_hash = result.root_hash();
-    }
-    {
-      DbBlockResult result = co_await close_snapshot_handle;
-      // A forged RCQ observation can pass executor validation and be rejected
-      // only by hogdb at [dbsched_close_snapshot()], so an invalid nominated
-      // block can reach this path.
-      if (result.result() != DbSchedResult::DbSchedResultOK) {
-        CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-                 DbSchedResult::DbSchedResultOK);
-        co_await finish_block_handle;
-        co_await decrement_num_validations_in_progress();
-        validation_outcome =
-            SchedulerValidationOutcome::SchedulerValidationInvalid;
-        info("schedulercoord_validate ret");
-        co_return SchedulerValidationResult(
-            SchedulerValidationOutcome::SchedulerValidationInvalid);
-      }
-      cache.db_tip.db_hash = result.db_hash();
-    }
-  }
-
-  BlockHeader header{.network_id = network_id_,
-                     .block_height = nomination.block_height,
-                     .txset_hash = txset_hash,
-                     .db_hash = cache.db_tip.db_hash,
-                     .events_hash = cache.db_tip.events_hash,
-                     .prev_block_hash = nomination.prev_block_hash};
-  SHA256Hash block_hash = sha256(header);
-  if (block_hash != nomination.block_hash) {
-    co_await finish_block_handle;
-    // The event block and DB snapshot were closed above, but a hash mismatch
-    // means this block is never added to [validated_block_cache_], so
-    // [schedulercoord_commit_block] will never abandon it. Abandon both here to
-    // avoid leaking the event block context and orphaning its events file.
-    co_await abandon_block(cache);
-    co_await decrement_num_validations_in_progress();
-    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  co_await finish_block_handle;
-
-  cache.db_tip = DbTip{.height = nomination.block_height,
-                       .block_hash = nomination.block_hash,
-                       .events_hash = cache.db_tip.events_hash,
-                       .db_hash = cache.db_tip.db_hash,
-                       .id = cache.block_id};
   SchedulerValidationResult result(
-      SchedulerValidationOutcome::SchedulerValidationOK);
-  result.block().db_tip = cache.db_tip;
-  result.block().signed_transactions = {};
-  co_await t_to_parallel_batch(cache.txs, result.block().signed_transactions);
+      SchedulerValidationOutcome::SchedulerValidationInvalid);
+  SchedulerValidationOutcome dag_outcome =
+      SchedulerValidationOutcome::SchedulerValidationInvalid;
+  bool log_validation_return = true;
+  BlockID validation_block_id{};
+  std::atomic_bool validation_block_transferred{false};
+  x23::Dag validation_dag("schedulercoord_validate", default_threadpool());
 
-  const BlockID block_id = cache.block_id;
-  {
-    x23::CoroGuard cache_cg;
-    co_await cache_cg(validated_block_cache_lock_);
-    CHECK(!validated_block_cache_.contains(cache.block_id));
-    validated_block_cache_[block_id] = std::move(cache);
+  x23::DagCleanup snapshot_cleanup = validation_dag.cleanup(
+      "abandon validation snapshot", [&]() -> x23::Async<void> {
+        if (validation_block_transferred.load(std::memory_order_acquire)) {
+          co_return;
+        }
+        CHECK_EQ(co_await abandon_snapshot(validation_block_id),
+                 DbSchedResult::DbSchedResultOK);
+        co_return;
+      });
+  x23::DagCleanup event_cleanup = validation_dag.cleanup(
+      "abandon validation event block", [&]() -> x23::Async<void> {
+        if (validation_block_transferred.load(std::memory_order_acquire)) {
+          co_return;
+        }
+        CHECK_EQ(co_await eventsched_abandon_block(validation_block_id),
+                 RPCError::kRPCNone);
+        co_return;
+      });
+  x23::Vec<x23::DagCleanup> executor_cleanups;
+  executor_cleanups.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    executor_cleanups.push_back(
+        validation_dag.cleanup("finish executor", [&, i]() -> x23::Async<void> {
+          co_await finish_block(validation_block_id,
+                                /*executor_idx=*/i);
+          co_return;
+        }));
   }
+
+  auto set_result = [&](SchedulerValidationOutcome outcome) {
+    dag_outcome = outcome;
+    result = SchedulerValidationResult(outcome);
+  };
+  auto cancel_with_result = [&](SchedulerValidationOutcome outcome,
+                                const char *node) {
+    set_result(outcome);
+    validation_dag.fail(x23::DagFailureKind::Cancelled, node);
+  };
+
+  auto decode_node = validation_dag.async<void>(
+      "decode nomination batches", [&]() -> x23::Async<void> {
+        // We call [reserve] here to avoid racing with accesses to
+        // [cache.tx_hashes] in [parallel_batch_to_t()] below.
+        cache.txs.reserve(kMaxBlockSize);
+        cache.tx_hashes.reserve(kMaxBlockSize);
+        cache.result_tx_hashes.reserve(kMaxBlockSize);
+        cache.result_tx_nominations.reserve(kMaxBlockSize);
+
+        x23::Async<bool> tx_nondeterministic_data_handle =
+            parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                                tx_nominations);
+        x23::Async<bool> tx_hash_handle =
+            parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
+
+        const bool decoded_tx_nominations =
+            co_await tx_nondeterministic_data_handle;
+        const bool decoded_tx_hashes = co_await tx_hash_handle;
+        if (!decoded_tx_nominations || !decoded_tx_hashes) {
+          info("schedulercoord_validate rejected malformed nomination batch");
+          log_validation_return = false;
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationMalformed,
+              "decode nomination batches");
+          co_return;
+        }
+
+        if (cache.tx_hashes.size() != tx_nominations.size()) {
+          log_validation_return = false;
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationMalformed,
+              "decode nomination batches");
+          co_return;
+        }
+
+        cache.block_id = generate_block_id();
+        validation_block_id = cache.block_id;
+        validation_tx_count = cache.tx_hashes.size();
+        co_return;
+      });
+
+  auto transfer_data_node =
+      validation_dag.async<void>("wait transfer data",
+                                 validation_dag.after(decode_node),
+                                 [&]() -> x23::Async<void> {
+                                   co_await wait_for_transfer_data(
+                                       nomination.block_height - 1);
+                                   co_return;
+                                 });
+  auto auth_data_node =
+      validation_dag.async<void>("wait auth data",
+                                 validation_dag.after(decode_node),
+                                 [&]() -> x23::Async<void> {
+                                   co_await wait_for_auth_data(
+                                       nomination.block_height - 1);
+                                   co_return;
+                                 });
+
+  auto create_snapshot_node = validation_dag.async<void>(
+      "create validation snapshot",
+      validation_dag.after(transfer_data_node, auth_data_node),
+      [&]() -> x23::Async<void> {
+        DbSchedResult snapshot_result = co_await create_snapshot(
+            /*prev_block_id=*/db_tip.id, validation_block_id,
+            BlockExecutionMode::kBlockExecutionModeValidation);
+        if (snapshot_result == DbSchedResult::DbSchedResultOK) {
+          snapshot_cleanup.arm();
+          co_return;
+        }
+        if (snapshot_result == DbSchedResult::DbSchedResultInvalidParentId) {
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock,
+              "create validation snapshot");
+          co_return;
+        }
+        CHECK_EQ(snapshot_result, DbSchedResult::DbSchedResultError);
+        cancel_with_result(
+            SchedulerValidationOutcome::SchedulerValidationDbFailed,
+            "create validation snapshot");
+        co_return;
+      });
+
+  auto open_event_node = validation_dag.async<void>(
+      "open event block", validation_dag.after(create_snapshot_node),
+      [&]() -> x23::Async<void> {
+        CHECK_EQ(co_await eventsched_open_block(validation_block_id),
+                 RPCError::kRPCNone);
+        event_cleanup.arm();
+        co_return;
+      });
+
+  x23::Vec<x23::DagNode<ExecResult>> open_validation_block_nodes;
+  open_validation_block_nodes.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    open_validation_block_nodes.push_back(validation_dag.async<ExecResult>(
+        "open executor validation block", validation_dag.after(open_event_node),
+        [&, i]() -> x23::Async<ExecResult> {
+          ExecResult result =
+              co_await open_validation_block(validation_block_id,
+                                             /*executor_idx=*/i);
+          if (result == ExecResult::ExecResultOK) {
+            executor_cleanups[i].arm();
+          }
+          co_return result;
+        }));
+  }
+
+  x23::DagDeps check_open_validation_deps =
+      merge_dag_deps(validation_dag.after(open_event_node),
+                     dag_deps_from_nodes(open_validation_block_nodes));
+  auto check_open_validation_node = validation_dag.async<void>(
+      "check executor validation blocks", std::move(check_open_validation_deps),
+      [&]() -> x23::Async<void> {
+        bool open_validation_block_success = true;
+        for (const x23::DagNode<ExecResult> &node :
+             open_validation_block_nodes) {
+          if (node.get() != ExecResult::ExecResultOK) {
+            open_validation_block_success = false;
+          }
+        }
+        if (!open_validation_block_success) {
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationExecutorFailed,
+              "check executor validation blocks");
+        }
+        co_return;
+      });
+
+  auto prepare_validate_node = validation_dag.async<void>(
+      "prepare and validate chunks",
+      validation_dag.after(check_open_validation_node),
+      [&]() -> x23::Async<void> {
+        // [nomination] includes the tx hashes and the nondeterministic
+        // proposal data. We use these tx hashes to look up the vetted txs in
+        // [vetted_txs_]. Assuming we find all of the txs, we then combine them
+        // with the nondeterministic proposal data to form a
+        // [ProposedTransaction], which is what the executors expect.
+        const std::vector<ChunkRange> validation_chunks =
+            make_chunks_for_max_size(cache.tx_hashes.size(),
+                                     kNumTxsPerNominationChunk);
+        x23::Vec<x23::Async<PreparedAndValidatedChunk>> chunk_handles;
+        chunk_handles.reserve(validation_chunks.size());
+
+        for (const ChunkRange &chunk : validation_chunks) {
+          x23::span<const SignedTransactionHash> tx_hashes_span(
+              cache.tx_hashes.begin() + chunk.start,
+              cache.tx_hashes.begin() + chunk.end);
+          x23::span<const NondeterministicProposalData> tx_nominations_span(
+              tx_nominations.begin() + chunk.start,
+              tx_nominations.begin() + chunk.end);
+          chunk_handles.push_back(
+              prepare_and_validate_chunk(validation_block_id, tx_hashes_span,
+                                         tx_nominations_span));
+        }
+
+        x23::Vec<PreparedAndValidatedChunk> chunk_results;
+        chunk_results.reserve(chunk_handles.size());
+        for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
+          chunk_results.push_back(co_await handle);
+        }
+        for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
+          validated = chunk_result.validated && validated;
+          missing_tx_hashes += chunk_result.missing_tx_hashes;
+          cache.txs += chunk_result.txs;
+        }
+        co_return;
+      });
+
+  auto txset_hash_node = validation_dag.cpu<SHA256Hash>(
+      "compute txset hash", validation_dag.after(check_open_validation_node),
+      [&]() { return get_txset_hash(cache.tx_hashes); });
+
+  auto check_validation_node = validation_dag.async<void>(
+      "check validation chunks", validation_dag.after(prepare_validate_node),
+      [&]() -> x23::Async<void> {
+        for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
+          if (tx_failed_authentication(tx_hash)) {
+            cancel_with_result(
+                SchedulerValidationOutcome::SchedulerValidationInvalid,
+                "check validation chunks");
+            co_return;
+          }
+        }
+
+        if (!missing_tx_hashes.empty()) {
+          dag_outcome =
+              SchedulerValidationOutcome::SchedulerValidationMissingTxs;
+          result = SchedulerValidationResult(
+              SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+          result.missing_tx_hashes() = missing_tx_hashes;
+          validation_dag.fail(x23::DagFailureKind::Cancelled,
+                              "check validation chunks");
+          co_return;
+        }
+        CHECK_EQ(cache.txs.size(), tx_nominations.size());
+
+        if (!validated) {
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationInvalid,
+              "check validation chunks");
+          co_return;
+        }
+        co_return;
+      });
+
+  x23::Vec<x23::DagNode<void>> finish_executor_nodes;
+  finish_executor_nodes.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    finish_executor_nodes.push_back(
+        validation_dag.async<void>("finish executor",
+                                   validation_dag.after(check_validation_node),
+                                   [&, i]() -> x23::Async<void> {
+                                     co_await finish_block(validation_block_id,
+                                                           /*executor_idx=*/i);
+                                     executor_cleanups[i].disarm();
+                                     co_return;
+                                   }));
+  }
+  auto close_snapshot_node = validation_dag.async<DbBlockResult>(
+      "close validation snapshot", validation_dag.after(check_validation_node),
+      [&]() -> x23::Async<DbBlockResult> {
+        co_return co_await close_snapshot(validation_block_id);
+      });
+  auto close_event_node = validation_dag.async<EventBlockResult>(
+      "close event block", validation_dag.after(check_validation_node),
+      [&]() -> x23::Async<EventBlockResult> {
+        co_return co_await eventsched_close_block(validation_block_id,
+                                                  scheduler_->current_block() +
+                                                      1);
+      });
+  x23::DagDeps close_validation_deps =
+      merge_dag_deps(validation_dag.after(close_snapshot_node, close_event_node,
+                                          txset_hash_node),
+                     dag_deps_from_nodes(finish_executor_nodes));
+
+  auto check_closed_node = validation_dag.async<void>(
+      "check closed validation block", std::move(close_validation_deps),
+      [&]() -> x23::Async<void> {
+        {
+          EventBlockResult event_result = close_event_node.get();
+          CHECK_EQ(event_result.error(), RPCError::kRPCNone);
+          cache.db_tip.events_hash = event_result.root_hash();
+        }
+        {
+          DbBlockResult db_result = close_snapshot_node.get();
+          // A forged RCQ observation can pass executor validation and be
+          // rejected only by hogdb at [dbsched_close_snapshot()], so an invalid
+          // nominated block can reach this path.
+          if (db_result.result() != DbSchedResult::DbSchedResultOK) {
+            CHECK_EQ(co_await abandon_snapshot(validation_block_id),
+                     DbSchedResult::DbSchedResultOK);
+            snapshot_cleanup.disarm();
+            cancel_with_result(
+                SchedulerValidationOutcome::SchedulerValidationInvalid,
+                "check closed validation block");
+            co_return;
+          }
+          cache.db_tip.db_hash = db_result.db_hash();
+        }
+
+        BlockHeader header{.network_id = network_id_,
+                           .block_height = nomination.block_height,
+                           .txset_hash = txset_hash_node.get(),
+                           .db_hash = cache.db_tip.db_hash,
+                           .events_hash = cache.db_tip.events_hash,
+                           .prev_block_hash = nomination.prev_block_hash};
+        SHA256Hash block_hash = sha256(header);
+        if (block_hash != nomination.block_hash) {
+          // The event block and DB snapshot were closed above, but a hash
+          // mismatch means this block is never added to
+          // [validated_block_cache_], so [schedulercoord_commit_block] will
+          // never abandon it. Abandon both here to avoid leaking the event
+          // block context and orphaning its events file.
+          CHECK_EQ(co_await abandon_snapshot(validation_block_id),
+                   DbSchedResult::DbSchedResultOK);
+          snapshot_cleanup.disarm();
+          CHECK_EQ(co_await eventsched_abandon_block(validation_block_id),
+                   RPCError::kRPCNone);
+          event_cleanup.disarm();
+          cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationInvalid,
+              "check closed validation block");
+          co_return;
+        }
+        co_return;
+      });
+
+  validation_dag.async<void>(
+      "build validation result", validation_dag.after(check_closed_node),
+      [&]() -> x23::Async<void> {
+        cache.db_tip = DbTip{.height = nomination.block_height,
+                             .block_hash = nomination.block_hash,
+                             .events_hash = cache.db_tip.events_hash,
+                             .db_hash = cache.db_tip.db_hash,
+                             .id = validation_block_id};
+        set_result(SchedulerValidationOutcome::SchedulerValidationOK);
+        result.block().db_tip = cache.db_tip;
+        result.block().signed_transactions = {};
+        co_await t_to_parallel_batch(cache.txs,
+                                     result.block().signed_transactions);
+
+        const BlockID block_id = validation_block_id;
+        {
+          x23::CoroGuard cache_cg;
+          co_await cache_cg(validated_block_cache_lock_);
+          CHECK(!validated_block_cache_.contains(block_id));
+          validated_block_cache_[block_id] = std::move(cache);
+          validation_block_transferred.store(true, std::memory_order_release);
+        }
+        snapshot_cleanup.disarm();
+        event_cleanup.disarm();
+        co_return;
+      });
+
+  co_await validation_dag.run();
   co_await decrement_num_validations_in_progress();
-  validation_outcome = SchedulerValidationOutcome::SchedulerValidationOK;
-  info("schedulercoord_validate ret");
+  validation_outcome = dag_outcome;
+  if (!validation_dag.ok() && validation_dag.failure().exception) {
+    std::rethrow_exception(validation_dag.failure().exception);
+  }
+  if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
+      dot_dir != nullptr && *dot_dir != '\0') {
+    static std::atomic<size_t> dot_counter{0};
+    const size_t dot_idx = dot_counter.fetch_add(1, std::memory_order_relaxed);
+    const std::filesystem::path dot_path =
+        std::filesystem::path(dot_dir) /
+        ("mempool_validate_" + std::to_string(dot_idx) + ".dot");
+    std::ofstream graph_dot(dot_path, std::ios::out | std::ios::trunc);
+    graph_dot << validation_dag.dot();
+  }
+  if (log_validation_return) {
+    info("schedulercoord_validate ret");
+  }
   co_return result;
 }
 

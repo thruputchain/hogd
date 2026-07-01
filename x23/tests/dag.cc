@@ -236,11 +236,10 @@ TEST(Dag, ArmedCleanupRunsOnLaterFailure)
   Dag dag("cleanup", pool);
   std::vector<int> cleaned;
 
-  DagCleanup cleanup =
-      dag.cleanup("cleanup a", [&]() -> Async<void> {
-        cleaned.push_back(1);
-        co_return;
-      });
+  DagCleanup cleanup = dag.cleanup("cleanup a", [&]() -> Async<void> {
+    cleaned.push_back(1);
+    co_return;
+  });
   auto acquire = dag.async<void>("acquire", [&]() -> Async<void> {
     cleanup.arm();
     co_return;
@@ -262,20 +261,19 @@ TEST(Dag, DisarmedCleanupDoesNotRunOnLaterFailure)
   Dag dag("cleanup-disarm", pool);
   std::atomic_bool cleaned{false};
 
-  DagCleanup cleanup =
-      dag.cleanup("cleanup a", [&]() -> Async<void> {
-        cleaned.store(true, std::memory_order_release);
-        co_return;
-      });
+  DagCleanup cleanup = dag.cleanup("cleanup a", [&]() -> Async<void> {
+    cleaned.store(true, std::memory_order_release);
+    co_return;
+  });
   auto acquire = dag.async<void>("acquire", [&]() -> Async<void> {
     cleanup.arm();
     co_return;
   });
-  auto release = dag.async<void>("release", dag.after(acquire),
-                                 [&]() -> Async<void> {
-                                   cleanup.disarm();
-                                   co_return;
-                                 });
+  auto release =
+      dag.async<void>("release", dag.after(acquire), [&]() -> Async<void> {
+        cleanup.disarm();
+        co_return;
+      });
   dag.async<void>("fail", dag.after(release), [&]() -> Async<void> {
     dag.fail(DagFailureKind::Cancelled, "fail");
     co_return;
@@ -316,9 +314,9 @@ TEST(Dag, CleanupWaitsForRunningSiblingsToDrain)
   std::atomic_bool cleanup_saw_slow_finished{false};
 
   DagCleanup cleanup = dag.cleanup("cleanup", [&]() -> Async<void> {
-    cleanup_saw_slow_finished.store(
-        slow_finished.load(std::memory_order_acquire),
-        std::memory_order_release);
+    cleanup_saw_slow_finished.store(slow_finished.load(
+                                        std::memory_order_acquire),
+                                    std::memory_order_release);
     co_return;
   });
   dag.async<void>("slow", [&]() -> Async<void> {
@@ -362,25 +360,23 @@ TEST(Dag, CleanupRunsInReverseArmOrder)
   Dag dag("cleanup-order", pool);
   std::vector<int> cleaned;
 
-  DagCleanup cleanup_a =
-      dag.cleanup("cleanup a", [&]() -> Async<void> {
-        cleaned.push_back(1);
-        co_return;
-      });
-  DagCleanup cleanup_b =
-      dag.cleanup("cleanup b", [&]() -> Async<void> {
-        cleaned.push_back(2);
-        co_return;
-      });
+  DagCleanup cleanup_a = dag.cleanup("cleanup a", [&]() -> Async<void> {
+    cleaned.push_back(1);
+    co_return;
+  });
+  DagCleanup cleanup_b = dag.cleanup("cleanup b", [&]() -> Async<void> {
+    cleaned.push_back(2);
+    co_return;
+  });
   auto acquire_a = dag.async<void>("acquire a", [&]() -> Async<void> {
     cleanup_a.arm();
     co_return;
   });
-  auto acquire_b = dag.async<void>("acquire b", dag.after(acquire_a),
-                                   [&]() -> Async<void> {
-                                     cleanup_b.arm();
-                                     co_return;
-                                   });
+  auto acquire_b =
+      dag.async<void>("acquire b", dag.after(acquire_a), [&]() -> Async<void> {
+        cleanup_b.arm();
+        co_return;
+      });
   dag.async<void>("fail", dag.after(acquire_b), [&]() -> Async<void> {
     dag.fail(DagFailureKind::Cancelled, "fail");
     co_return;
@@ -423,11 +419,10 @@ TEST(Dag, CleanupDoesNotRunOnSuccess)
   Dag dag("cleanup-success", pool);
   std::atomic_bool cleaned{false};
 
-  DagCleanup cleanup =
-      dag.cleanup("cleanup", [&]() -> Async<void> {
-        cleaned.store(true, std::memory_order_release);
-        co_return;
-      });
+  DagCleanup cleanup = dag.cleanup("cleanup", [&]() -> Async<void> {
+    cleaned.store(true, std::memory_order_release);
+    co_return;
+  });
   dag.async<void>("succeed", [&]() -> Async<void> {
     cleanup.arm();
     co_return;

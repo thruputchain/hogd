@@ -486,13 +486,14 @@ private:
     }
   }
 
-  template<typename Fn> std::function<Async<void>()> make_cleanup_runner(Fn &&fn)
+  template<typename Fn>
+  std::function<Async<void>()> make_cleanup_runner(Fn &&fn)
   {
-    return [fn = std::decay_t<Fn>(std::forward<Fn>(fn))]() mutable
-               -> Async<void> {
-      co_await std::invoke(fn);
-      co_return;
-    };
+    return
+        [fn = std::decay_t<Fn>(std::forward<Fn>(fn))]() mutable -> Async<void> {
+          co_await std::invoke(fn);
+          co_return;
+        };
   }
 
   // Register a node before the graph starts and wire predecessor/successor
