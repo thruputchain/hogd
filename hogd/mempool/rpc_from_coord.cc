@@ -331,7 +331,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       });
 
   submit_dag.async<void>(
-      "add txs", submit_dag.after(notify_node),
+      "add txs", submit_dag.after(prune_node),
       [&, commit_guard]() -> x23::Async<void> {
         // Careful: it is tempting to overlap the overhead of
         // [authmempool_verify_transactions()] with that of
