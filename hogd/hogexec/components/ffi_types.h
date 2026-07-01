@@ -121,8 +121,8 @@ static_assert(std::is_trivially_copyable_v<AuthClaim>);
 static_assert(std::is_standard_layout_v<AuthClaim>);
 static_assert(sizeof(AuthClaim) == sizeof(hogd::AuthClaim));
 static_assert(alignof(AuthClaim) == alignof(hogd::AuthClaim));
-static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
-                       tag) == 0);
+static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body, tag) ==
+              0);
 static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body, tag) == 0);
 static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
                        source_address_claim) == sizeof(AuthClaim::Tag));
