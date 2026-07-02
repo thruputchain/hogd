@@ -1147,13 +1147,14 @@ private:
       has_current_ = false;
       return;
     }
-    ContractAddress addr_out;
-    if (!IndexerKeyFormat::parse_contract_key(key_sv, &addr_out, nullptr,
-                                              &current_.block, &current_.tx,
-                                              &current_.seq)) {
+    auto parsed = IndexerKeyFormat::parse_contract_key(key_sv);
+    if (!parsed) {
       has_current_ = false;
       return;
     }
+    current_.block = parsed->block_height;
+    current_.tx = parsed->tx_hash;
+    current_.seq = parsed->sequence_number;
     if (order_ == IterationOrder::IterationOrderAscending &&
         current_.block > max_block_) {
       // Rows above the contiguous watermark are not servable: they

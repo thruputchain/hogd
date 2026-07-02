@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -95,11 +96,20 @@ public:
                                 SHA256Hash const &tx_hash,
                                 uint32_t sequence_number);
 
-  // Parse a contract key and extract components
-  // Returns true if parsing succeeded, false otherwise
-  static bool parse_contract_key(std::string_view key, ContractAddress *address,
-                                 RecordKind *kind, BlockHeight *block_height,
-                                 SHA256Hash *tx_hash, uint32_t *sequence_number);
+  // Decoded components of a contract index key.
+  struct ParsedContractKey {
+    ContractAddress address;
+    RecordKind kind;
+    BlockHeight block_height;
+    SHA256Hash tx_hash;
+    uint32_t sequence_number;
+  };
+
+  // Parse a contract index key.  Returns the decoded components, or
+  // std::nullopt if [key] is not exactly kContractKeySize bytes.  Callers
+  // read whichever fields they need and ignore the rest.
+  static std::optional<ParsedContractKey>
+  parse_contract_key(std::string_view key);
 };
 
 } // namespace hogd

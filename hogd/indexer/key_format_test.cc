@@ -125,50 +125,13 @@ TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
                                       IndexerKeyFormat::kEvent, original_height,
                                       original_tx_hash, original_seq);
 
-  ContractAddress parsed_address;
-  IndexerKeyFormat::RecordKind parsed_kind;
-  BlockHeight parsed_height;
-  SHA256Hash parsed_tx_hash;
-  uint32_t parsed_seq;
-
-  bool success = IndexerKeyFormat::parse_contract_key(
-      key, &parsed_address, &parsed_kind, &parsed_height, &parsed_tx_hash,
-      &parsed_seq);
-
-  ASSERT_TRUE(success);
-  EXPECT_EQ(parsed_address, original_address);
-  EXPECT_EQ(parsed_kind, IndexerKeyFormat::kEvent);
-  EXPECT_EQ(parsed_height, original_height);
-  EXPECT_EQ(parsed_tx_hash, original_tx_hash);
-  EXPECT_EQ(parsed_seq, original_seq);
-}
-
-// Test contract key parsing with null address pointer
-TEST_F(IndexerKeyFormatTest, ContractKeyParseNullAddress)
-{
-  ContractAddress address;
-  std::ranges::fill(address, 0x66);
-  BlockHeight height = 100;
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x77);
-  uint32_t seq = 5;
-
-  std::string key;
-  IndexerKeyFormat::make_contract_key(key, address, IndexerKeyFormat::kEvent,
-                                      height, tx_hash, seq);
-
-  BlockHeight parsed_height;
-  SHA256Hash parsed_tx_hash;
-  uint32_t parsed_seq;
-
-  // Parse with null address and kind pointers (should still work)
-  bool success = IndexerKeyFormat::parse_contract_key(
-      key, nullptr, nullptr, &parsed_height, &parsed_tx_hash, &parsed_seq);
-
-  ASSERT_TRUE(success);
-  EXPECT_EQ(parsed_height, height);
-  EXPECT_EQ(parsed_tx_hash, tx_hash);
-  EXPECT_EQ(parsed_seq, seq);
+  auto parsed = IndexerKeyFormat::parse_contract_key(key);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->address, original_address);
+  EXPECT_EQ(parsed->kind, IndexerKeyFormat::kEvent);
+  EXPECT_EQ(parsed->block_height, original_height);
+  EXPECT_EQ(parsed->tx_hash, original_tx_hash);
+  EXPECT_EQ(parsed->sequence_number, original_seq);
 }
 
 // Test contract key parsing with wrong size
@@ -176,16 +139,9 @@ TEST_F(IndexerKeyFormatTest, ContractKeyParseWrongSize)
 {
   std::string wrong_key = "too short";
 
-  ContractAddress address;
-  IndexerKeyFormat::RecordKind kind;
-  BlockHeight height;
-  SHA256Hash tx_hash;
-  uint32_t seq;
+  auto parsed = IndexerKeyFormat::parse_contract_key(wrong_key);
 
-  bool success = IndexerKeyFormat::parse_contract_key(
-      wrong_key, &address, &kind, &height, &tx_hash, &seq);
-
-  EXPECT_FALSE(success);
+  EXPECT_FALSE(parsed.has_value());
 }
 
 // Test that contract key prefixes are lexicographically ordered by block_height
@@ -223,18 +179,13 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
     IndexerKeyFormat::make_contract_key(key, addr, kind, block, tx_hash, seq);
     EXPECT_EQ(key.size(), IndexerKeyFormat::kContractKeySize);
 
-    ContractAddress addr_out;
-    IndexerKeyFormat::RecordKind kind_out;
-    BlockHeight block_out;
-    SHA256Hash tx_out;
-    uint32_t seq_out;
-    ASSERT_TRUE(IndexerKeyFormat::parse_contract_key(
-        key, &addr_out, &kind_out, &block_out, &tx_out, &seq_out));
-    EXPECT_EQ(addr_out, addr);
-    EXPECT_EQ(kind_out, kind);
-    EXPECT_EQ(block_out, block);
-    EXPECT_EQ(tx_out, tx_hash);
-    EXPECT_EQ(seq_out, seq);
+    auto parsed = IndexerKeyFormat::parse_contract_key(key);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->address, addr);
+    EXPECT_EQ(parsed->kind, kind);
+    EXPECT_EQ(parsed->block_height, block);
+    EXPECT_EQ(parsed->tx_hash, tx_hash);
+    EXPECT_EQ(parsed->sequence_number, seq);
   }
 
   // The kind byte sits right after the address, so EVENT and ROOT_TX rows
