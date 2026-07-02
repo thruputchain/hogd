@@ -14,6 +14,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -451,6 +452,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
     return HogDBError(HogDBCode::kOverflow);
   }
   if (sum < std::min<int128_t>(base, 0)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
     return HogDBError(HogDBCode::kConflict);
   }
 
@@ -468,6 +470,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
       return HogDBError(HogDBCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -500,6 +503,7 @@ InvokeTX::request_auth_data(Address const &addr,
   AuthDataItem auth_data_item(std::move(base_auth_data.value()));
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
       return HogDBError(HogDBCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
@@ -531,6 +535,7 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
   // We do not support setting exclusive locks on replay cache items;
   // consuming a nonce is already a unique event.
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
     return HogDBError(HogDBCode::kConflict);
   }
 

@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <variant>
 
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -59,7 +60,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
 
   if (lock_state == kFinalizedPermamentExclusiveLock) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
   }
   CHECK_EQ(lock_state, kUncommitted);
 
@@ -69,7 +70,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   // finalized while we were waiting.
   lock_state = lock_state_.load(std::memory_order_acquire);
   if (lock_state == kFinalizedPermamentExclusiveLock) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
   }
   if (lock_state == kFinalized) {
     lock.unlock();
@@ -211,7 +212,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
   CHECK(before == nullptr || (!before->is_exclusive()));
 
   if (after != nullptr && after->is_exclusive()) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
   }
 
   auto local_cost = std::visit(
@@ -235,7 +236,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           if (after != nullptr) {
             after_inner = after->get_inner<change_type>();
             if (after_inner == nullptr) {
-              return HogDBError{HogDBCode::kConflict};
+              return ctx.conflict(DbConflictCode::kDbConflictTypeMismatch);
             }
           }
           return lock.try_atomic_change_lock(before_inner, after_inner, ctx);
@@ -318,14 +319,14 @@ ItemLock::handle_try_atomic_from_pending(
     if (before == nullptr && pending_refcount_ > 0) {
       // we do not have a lock, and some other transaction already has a ref on
       // this lock. Cannot acquire in exclusive mode
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
     }
 
     if (before != nullptr && pending_refcount_ > 1) {
       CHECK(!before->is_exclusive());
       // we have a lock, but some other transaction already has a ref on this
       // lock. Cannot acquire in exclusive mode
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
     }
 
     CHECK((before == nullptr && pending_refcount_ == 0) ||
@@ -350,7 +351,7 @@ ItemLock::handle_try_atomic_from_pending(
           panic("bad pendingstate");
         }
         else if constexpr (std::is_same_v<lock_t, ExclusiveLock>) {
-          return HogDBError{HogDBCode::kConflict};
+          return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
         }
         else {
           using change_type = typename lock_t::change_type;
@@ -365,7 +366,7 @@ ItemLock::handle_try_atomic_from_pending(
           if (after != nullptr) {
             after_inner = after->get_inner<change_type>();
             if (after_inner == nullptr) {
-              return HogDBError{HogDBCode::kConflict};
+              return ctx.conflict(DbConflictCode::kDbConflictTypeMismatch);
             }
           }
 

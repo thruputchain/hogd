@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
@@ -156,13 +157,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       // any entries before, then some other transaction set delta.consume.
       // Hence, there would be two consumers for the block, which is a
       // conflict.
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
     }
 
     if (!this_tx_already_consumed) {
       bool expected = false;
       if (!consumed_.compare_exchange_strong(expected, true)) {
-        return HogDBError{HogDBCode::kConflict};
+        return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
       }
       undo.push([this] { consumed_.store(false, std::memory_order_relaxed); });
     }
@@ -214,7 +215,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
     if (reserved_before + additional_entries >
         kRetrocausalQueueBlockEntriesMaxLen) {
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
     }
   }
   else if (new_entries_count < previous_entries_count) {

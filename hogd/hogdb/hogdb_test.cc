@@ -2212,6 +2212,9 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     auto sync_result = invoke_tx.sync_balance_locks();
     ASSERT_FALSE(sync_result.has_value());
     EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
+    ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
+    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+              *invoke_tx.last_conflict_reason());
 
     invoke_tx.rollback_to_savepoint(0);
     invoke_tx.release_blocktx_reference();
@@ -3506,6 +3509,102 @@ TEST_F(HogDBTest, BytestringConflictRecordsDbConflictReason)
   itx_b.release_blocktx_reference();
   itx_a.abort();
   itx_a.release_blocktx_reference();
+}
+
+// Regression test for #2759: requesting a different item type than what is
+// already locked at a key must record kDbConflictTypeMismatch.
+TEST_F(HogDBTest, ConflictReasonTypeMismatch)
+{
+  Address addr = make_address(kAddress + 303);
+  setup_contract_address(addr);
+  ItemKey key = make_item_key(addr, 0);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  constexpr std::array<std::byte, 1> kValueA = {std::byte{0xAA}};
+  ASSERT_TRUE(itx_a.request_bytes(key, std::span(kValueA),
+                                  std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  auto r = itx_b.request_nnint128(key, /*base=*/0, /*delta=*/1,
+                                  std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictTypeMismatch,
+            *itx_b.last_conflict_reason());
+
+  itx_b.abort();
+  itx_b.release_blocktx_reference();
+  itx_a.abort();
+  itx_a.release_blocktx_reference();
+}
+
+// Regression test for #2759: consuming the same uniquifier twice in the same
+// block must record kDbConflictReplayProtection.
+TEST_F(HogDBTest, ConflictReasonReplayProtection)
+{
+  Address addr = make_address(kAddress + 304);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  ASSERT_TRUE(itx_a.request_consume_uniquifier(
+      addr, Uniquifier(5, 42), std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  auto r = itx_b.request_consume_uniquifier(addr, Uniquifier(5, 42),
+                                            std::to_underlying(
+                                                StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictReplayProtection,
+            *itx_b.last_conflict_reason());
+
+  itx_b.abort();
+  itx_b.release_blocktx_reference();
+  itx_a.abort();
+  itx_a.release_blocktx_reference();
+}
+
+// Regression test for #2759: setting ExclusiveLock on a balance key is
+// rejected directly by InvokeTX (before reaching any lock) and must record
+// kDbConflictExclusiveLock.
+TEST_F(HogDBTest, ConflictReasonExclusiveLockBalanceFlag)
+{
+  Address addr = make_address(kAddress + 305);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  auto r = invoke_tx.request_nnint128(make_address_balance_item_key(addr), 100,
+                                      std::to_underlying(
+                                          StorageDeltaFlags::ExclusiveLock));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
+            *invoke_tx.last_conflict_reason());
+
+  invoke_tx.abort();
+  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, InvalidateSiblingBlockTX)
