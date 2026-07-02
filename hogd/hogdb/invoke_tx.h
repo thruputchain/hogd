@@ -131,9 +131,8 @@ public:
   sync_balance_locks(ContractAddress *first_conflicting_addr = nullptr);
 
   // Reason for the most recent kConflict returned by a request_* method or
-  // sync_balance_locks (#2759). Empty if the last failure was not a
-  // conflict or no request has failed. Cleared at the start of each
-  // lock-acquiring request.
+  // sync_balance_locks (#2759). Meaningful only immediately after a request
+  // that returned kConflict; a stale value may remain after other failures.
   std::optional<DbConflictCode> last_conflict_reason() const
   {
     return last_conflict_reason_;

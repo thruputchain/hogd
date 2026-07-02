@@ -107,7 +107,7 @@ BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
                                               StorageDeltaBatch const &batch,
                                               DbDiagnosticLevel /*level*/)
 {
-  // diagnostics wired in the next commit (#2759)
+  // test double: produces no diagnostics
   {
     auto blocked = blocked_subtransaction_keys_.take();
     for (auto const &delta : batch) {

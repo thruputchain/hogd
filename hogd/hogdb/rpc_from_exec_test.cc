@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -12,6 +14,7 @@
 #include "types.hh"
 
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"

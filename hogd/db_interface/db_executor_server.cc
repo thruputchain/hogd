@@ -77,7 +77,7 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                            StorageDeltaBatch const &batch,
                                            DbDiagnosticLevel /*level*/)
 {
-  // diagnostics wired in the next commit (#2759)
+  // test double: produces no diagnostics
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
     return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
