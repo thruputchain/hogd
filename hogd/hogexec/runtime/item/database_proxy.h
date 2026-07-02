@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -73,9 +74,14 @@ public:
                                          AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  SystemStatus<bool>
-  try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                              StorageDeltaBatch const &delta_batch);
+  // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
+  // non-null it receives the conflict diagnostics the server built for
+  // the requested [level].
+  SystemStatus<bool> try_push_new_subtransaction(
+      BlockID block_id, TransactionID tx_id,
+      StorageDeltaBatch const &delta_batch,
+      DbDiagnosticLevel level = DbDiagnosticLevel::kDbDiagnosticNone,
+      DbConflictResult *conflict_out = nullptr);
 
   SystemStatus<void>
   commit_transaction(BlockID block_id, TransactionID tx_id,

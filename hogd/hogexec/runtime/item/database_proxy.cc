@@ -12,6 +12,7 @@
 
 #include "address_auth.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -262,7 +263,9 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
-                                           StorageDeltaBatch const &delta_batch)
+                                           StorageDeltaBatch const &delta_batch,
+                                           DbDiagnosticLevel level,
+                                           DbConflictResult *conflict_out)
 {
   if constexpr (is_debug_build()) {
     for (auto const &delta : delta_batch) {
@@ -270,9 +273,23 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    auto res =
-        client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-    return to_system_error_code<false>(res, [] { return true; });
+    auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch,
+                                                   level);
+    switch (res.error()) {
+    case RPCError::kRPCNone:
+      return true;
+    case RPCError::kRPCStorageWriteFailed:
+      if (conflict_out != nullptr) {
+        *conflict_out = std::move(res.conflict());
+      }
+      return false;
+    case RPCError::kRPCBadBlockID:
+      return SystemError{SystemErrorCode::Abandon};
+    default:
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            res.error());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
     // worker, so contain every failure -- XdrBadInput (oversized delta batch),

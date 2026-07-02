@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
@@ -100,20 +101,22 @@ BlockSnapshotRpc::get_deployment(BlockID block,
   return out;
 }
 
-RPCError
+TryPushSubtransactionResult
 BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
                                               TransactionID /*unused*/,
-                                              StorageDeltaBatch const &batch)
+                                              StorageDeltaBatch const &batch,
+                                              DbDiagnosticLevel /*level*/)
 {
+  // diagnostics wired in the next commit (#2759)
   {
     auto blocked = blocked_subtransaction_keys_.take();
     for (auto const &delta : batch) {
       if (blocked->contains(delta.addrkey)) {
-        return RPCError::kRPCUnrecoverable;
+        return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
       }
     }
   }
-  return RPCError::kRPCNone;
+  return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
 RPCError

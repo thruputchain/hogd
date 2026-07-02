@@ -8,6 +8,7 @@
 #include <type_traits>
 
 // generated x23 headers
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -30,8 +31,10 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
-  RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                       StorageDeltaBatch const &batch);
+  TryPushSubtransactionResult
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch const &batch,
+                              DbDiagnosticLevel level);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 

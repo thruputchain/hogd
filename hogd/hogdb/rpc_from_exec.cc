@@ -11,6 +11,7 @@
 // generated x23 headers
 #include "address_auth.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -210,10 +211,12 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
   return RPCError::kRPCNone;
 }
 
-RPCError
+TryPushSubtransactionResult
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch const &batch)
+                                              StorageDeltaBatch const &batch,
+                                              DbDiagnosticLevel /*level*/)
 {
+  // diagnostics wired in the next commit (#2759)
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
           block, tx);
@@ -221,9 +224,9 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
 
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
-    return RPCError::kRPCBadBlockID;
+    return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
   if (itx->get_savepoint_head() >= kMaxSavepointDepth) [[unlikely]] {
-    return RPCError::kRPCUnrecoverable;
+    return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
   int depth = itx->create_savepoint();
 
@@ -249,7 +252,7 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
         trace("Failed to request delta: {} {}", x23::show(delta), err);
       }
       itx->rollback_to_savepoint(depth - 1);
-      return err;
+      return TryPushSubtransactionResult(err);
     }
   }
   auto bal_req = itx->sync_balance_locks();
@@ -259,10 +262,10 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
             bal_req.error());
     }
     itx->rollback_to_savepoint(depth - 1);
-    return to_rpc_error(bal_req.error());
+    return TryPushSubtransactionResult(to_rpc_error(bal_req.error()));
   }
   itx->assert_is_valid();
-  return RPCError::kRPCNone;
+  return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
 RPCError
