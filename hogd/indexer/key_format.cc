@@ -1,9 +1,12 @@
 #include "hogd/indexer/key_format.h"
+
+#include "hogd/base/log.h"
 #include "types.hh"
 
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -69,7 +72,14 @@ IndexerKeyFormat::parse_contract_key(std::string_view key)
   std::memcpy(out.address.data(), key.data() + offset, kAddressLen);
   offset += kAddressLen;
 
-  out.kind = static_cast<RecordKind>(static_cast<uint8_t>(key[offset]));
+  // A wrong-size key (above) is a benign "not a contract key" miss.  But a
+  // correctly-sized key whose kind byte is neither kEvent nor kRootTx is a
+  // corrupt row (or one written by a newer binary): the data is present and
+  // wrong, so fail loud rather than silently reporting it as absent.
+  const auto raw_kind = static_cast<uint8_t>(key[offset]);
+  CHECK(raw_kind == static_cast<uint8_t>(kEvent) ||
+        raw_kind == static_cast<uint8_t>(kRootTx));
+  out.kind = static_cast<RecordKind>(raw_kind);
   offset += kKindLen;
 
   uint64_t height_be;

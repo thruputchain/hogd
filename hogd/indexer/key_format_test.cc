@@ -127,11 +127,12 @@ TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
 
   auto parsed = IndexerKeyFormat::parse_contract_key(key);
   ASSERT_TRUE(parsed.has_value());
-  EXPECT_EQ(parsed->address, original_address);
-  EXPECT_EQ(parsed->kind, IndexerKeyFormat::kEvent);
-  EXPECT_EQ(parsed->block_height, original_height);
-  EXPECT_EQ(parsed->tx_hash, original_tx_hash);
-  EXPECT_EQ(parsed->sequence_number, original_seq);
+  const auto &p = parsed.value();
+  EXPECT_EQ(p.address, original_address);
+  EXPECT_EQ(p.kind, IndexerKeyFormat::kEvent);
+  EXPECT_EQ(p.block_height, original_height);
+  EXPECT_EQ(p.tx_hash, original_tx_hash);
+  EXPECT_EQ(p.sequence_number, original_seq);
 }
 
 // Test contract key parsing with wrong size
@@ -181,11 +182,12 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
 
     auto parsed = IndexerKeyFormat::parse_contract_key(key);
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->address, addr);
-    EXPECT_EQ(parsed->kind, kind);
-    EXPECT_EQ(parsed->block_height, block);
-    EXPECT_EQ(parsed->tx_hash, tx_hash);
-    EXPECT_EQ(parsed->sequence_number, seq);
+    const auto &p = parsed.value();
+    EXPECT_EQ(p.address, addr);
+    EXPECT_EQ(p.kind, kind);
+    EXPECT_EQ(p.block_height, block);
+    EXPECT_EQ(p.tx_hash, tx_hash);
+    EXPECT_EQ(p.sequence_number, seq);
   }
 
   // The kind byte sits right after the address, so EVENT and ROOT_TX rows

@@ -5,10 +5,12 @@
 #include <filesystem>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -336,6 +338,54 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
   EXPECT_EQ(seen[0], hashes[0]);   // block 300
   EXPECT_EQ(seen[1], hashes[1]);   // block 301
   EXPECT_EQ(seen[2], hashes[2]);   // block 302
+}
+
+// Regression: a batch in which NO transaction emits any event (every
+// TxEventLog is present but has an empty events vector) must still write a
+// ROOT_TX row for every body.  Guards against the contract-index chunking
+// being driven by emitted-event count rather than transaction count.
+TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
+{
+  BlockHeight block_height = 500;
+
+  std::vector<ContractAddress> addrs;
+  TxEventLogBatch logs;
+  ProposedTransactionBatch bodies;
+  for (uint8_t i = 0; i < 4; i++) {
+    ContractAddress addr;
+    std::ranges::fill(addr, static_cast<char>(0x60 + i));
+    addrs.push_back(addr);
+
+    SHA256Hash h;
+    std::ranges::fill(h, static_cast<char>(0x90 + i));
+
+    TxEventLog log;
+    log.proposed_tx_hash = h;
+    logs.push_back(log); // present, but emits no events
+
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+    bodies.push_back(body);
+  }
+
+  // Whole batch ingested in a single call: events.size() == 4, but the total
+  // number of emitted events across the batch is 0.
+  event_->indexer_event_process_events(block_height, logs, bodies)();
+
+  for (uint8_t i = 0; i < 4; i++) {
+    AddressTransactionQuery q{};
+    q.address = addrs[i];
+    q.order = IterationOrder::IterationOrderAscending;
+    q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    q.limit = 0;
+
+    // Each eventless tx must still have produced its ROOT_TX row.
+    TransactionRefPage page =
+        block_explorer_->get_transactions_by_address(q)();
+    ASSERT_EQ(page.refs.size(), 1);
+    EXPECT_EQ(page.refs[0].tx_hash, logs[i].proposed_tx_hash);
+  }
 }
 
 } // namespace hogd
