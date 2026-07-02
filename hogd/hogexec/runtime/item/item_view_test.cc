@@ -81,8 +81,9 @@ protected:
     return entry;
   }
 
+  template<size_t MaxSize>
   static std::vector<uint32_t>
-  read_entries(x23::Vec<QueueEntry, 0xffffffff> const &entries)
+  read_entries(x23::Vec<QueueEntry, MaxSize> const &entries)
   {
     std::vector<uint32_t> out;
     out.reserve(entries.size());

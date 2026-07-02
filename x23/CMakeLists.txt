@@ -226,6 +226,8 @@ if(X23_IS_TOP_LEVEL)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "use test benchmark" FORCE)
     set(BENCHMARK_USE_LIBCXX ${USE_LIBCXX} CACHE BOOL "use LLVM libc++" FORCE)
     add_subdirectory(${BENCHMARK_PATH} ${CMAKE_BINARY_DIR}/benchmark)
+    target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
+    target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
   endif()
 endif()
 
