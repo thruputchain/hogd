@@ -170,10 +170,16 @@ DatabaseProxy::look_up_shard(AddressAndKey const &key) const
 }
 
 DatabaseProxy::client_t &
-DatabaseProxy::client_for(AddressAndKey const & /*key*/)
+DatabaseProxy::client_for(AddressAndKey const &key)
 {
-  // Primary shard for now. To turn on per-key routing, change this one line to:
-  //   return clients_[look_up_shard(key)];
+  return clients_[look_up_shard(key)];
+}
+
+DatabaseProxy::client_t &
+DatabaseProxy::client_for()
+{
+  // Primary shard: global/keyless requests (db tip, viewing snapshots) and
+  // content-addressed lookups (contracts) route here for now.
   return clients_[0];
 }
 
@@ -268,9 +274,23 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
-    auto &client = client_for();
-    auto res = client.commit_transaction(block_id, tx_id, new_contracts);
-    return to_system_error_code<VoidMarker{}>(res, [] {});
+    // Fan out commit to every shard (each has the tx open from the prepare
+    // push) -- the commit phase of the cross-shard 2PC. New contracts are
+    // content-addressed and live on the primary shard (shard 0); other shards
+    // commit only their own deltas, with an empty contract batch.
+    static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+    static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+    static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
+                                                   kEmptyContracts);
+    for (size_t shard = 0; shard < clients_.size(); ++shard) {
+      auto res = clients_[shard].commit_transaction(
+          block_id, tx_id, shard == 0 ? new_contracts : kEmptyBatch);
+      auto status = to_system_error_code<VoidMarker{}>(res, [] {});
+      if (!status.has_value()) {
+        return status;
+      }
+    }
+    return SystemStatus<void>{};
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
     // exception terminates hogexec. Contain every failure here and return a
@@ -297,9 +317,15 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
 SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  auto &client = client_for();
-  auto res = client.abort_transaction(block_id, tx_id);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  // Fan out abort to every shard the transaction has open.
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
+    auto res = clients_[shard].abort_transaction(block_id, tx_id);
+    auto status = to_system_error_code<VoidMarker{}>(res, [] {});
+    if (!status.has_value()) {
+      return status;
+    }
+  }
+  return SystemStatus<void>{};
 }
 
 SystemStatus<bool>
@@ -313,12 +339,25 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    // TODO: a delta batch can span shards; split per shard once cross-shard
-    // writes are handled.
-    auto &client = client_for();
-    auto res =
-        client.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-    return to_system_error_code<false>(res, [] { return true; });
+    // Split the batch so each shard receives only the deltas for the keys it
+    // owns. Every shard gets a (possibly empty) subtransaction so all shards'
+    // savepoint stacks stay aligned for pop_subtransactions. This is the prepare
+    // phase of the cross-shard 2PC.
+    std::vector<StorageDeltaBatch> per_shard(clients_.size());
+    for (auto const &delta : delta_batch) {
+      per_shard[look_up_shard(delta.addrkey)].push_back(delta);
+    }
+    for (size_t shard = 0; shard < clients_.size(); ++shard) {
+      auto res = clients_[shard].try_push_new_subtransaction(block_id, tx_id,
+                                                             per_shard[shard]);
+      auto status = to_system_error_code<false>(res, [] { return true; });
+      // Stop on the first error or conflict; the caller aborts, which fans the
+      // abort out to every shard.
+      if (!status.has_value() || !status.value()) {
+        return status;
+      }
+    }
+    return SystemStatus<bool>{true};
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
     // worker, so contain every failure -- XdrBadInput (oversized delta batch),
@@ -341,9 +380,16 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  auto &client = client_for();
-  auto res = client.pop_subtransactions(block_id, tx_id, count);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  // Every shard has an aligned savepoint stack (see try_push_new_subtransaction),
+  // so pop `count` from each.
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
+    auto res = clients_[shard].pop_subtransactions(block_id, tx_id, count);
+    auto status = to_system_error_code<VoidMarker{}>(res, [] {});
+    if (!status.has_value()) {
+      return status;
+    }
+  }
+  return SystemStatus<void>{};
 }
 
 SystemStatus<DbTip>

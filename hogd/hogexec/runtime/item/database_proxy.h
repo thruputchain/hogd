@@ -100,11 +100,11 @@ private:
   // single shard this is always 0.
   size_t look_up_shard(AddressAndKey const &key) const;
 
-  // The client a request goes to. Every method gets its client from here.
-  // Returns the primary shard (clients_[0]) for now; to enable per-key routing,
-  // change its body in this one place to clients_[look_up_shard(key)]. Requests
-  // without a natural key (commit/abort/tip/snapshots/contract) use the default.
-  client_t &client_for(AddressAndKey const &key = {});
+  // The client for the shard that owns `key` (per-key routing, by address).
+  client_t &client_for(AddressAndKey const &key);
+  // The client for the primary shard (shard 0). Used by global/keyless requests
+  // (db tip, viewing snapshots) and content-addressed lookups (contracts).
+  client_t &client_for();
 
   // One client per discovered db shard (see ShardedDB::shards_).
   std::vector<client_t> clients_;
