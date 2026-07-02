@@ -71,7 +71,7 @@ def map_type(ty):
     elif kind == "address":
         return "ContractAddress"
     elif kind == "vec":
-        inner = map_type(ty["inner"])
+        inner = map_type(ty["element"])
         max_len = ty["max_len"]
         return f"x23::Vec<{inner}, {max_len}>"
     elif kind == "array":
@@ -121,7 +121,7 @@ def generate_interface_struct(interface, wasm_file=None):
     function_signatures = []
     for method in methods:
         return_type = map_type(method["return_type"])
-        args = [map_type(arg["ty"]) for arg in method["args"]]
+        args = [map_type(arg["type"]) for arg in method["args"]]
 
         if exception_types:
             exn_args = ", ".join(exception_types)

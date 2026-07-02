@@ -28,11 +28,11 @@ class TestMapXdrType(unittest.TestCase):
         self.assertEqual(map_xdr_type({"kind": "named", "name": "Foo"}), "Foo")
 
     def test_vec_u8_is_opaque(self) -> None:
-        ty = {"kind": "vec", "inner": {"kind": "u8"}, "max_len": 1000}
+        ty = {"kind": "vec", "element": {"kind": "u8"}, "max_len": 1000}
         self.assertEqual(map_xdr_type(ty), "opaque<1000>")
 
     def test_vec_non_u8(self) -> None:
-        ty = {"kind": "vec", "inner": {"kind": "u32"}, "max_len": 50}
+        ty = {"kind": "vec", "element": {"kind": "u32"}, "max_len": 50}
         self.assertEqual(map_xdr_type(ty), "unsigned int<50>")
 
     def test_array_u8_is_opaque(self) -> None:
@@ -67,8 +67,8 @@ class TestEmitEnum(unittest.TestCase):
 class TestEmitStruct(unittest.TestCase):
     def test_basic_struct(self) -> None:
         result = emit_struct("ChannelState", [
-            {"name": "channel_id", "ty": {"kind": "u64"}},
-            {"name": "balance", "ty": {"kind": "i128"}},
+            {"name": "channel_id", "type": {"kind": "u64"}},
+            {"name": "balance", "type": {"kind": "i128"}},
         ])
         self.assertIn("struct ChannelState {", result)
         self.assertIn("\tunsigned hyper channel_id;", result)
@@ -76,8 +76,8 @@ class TestEmitStruct(unittest.TestCase):
 
     def test_struct_with_opaque(self) -> None:
         result = emit_struct("WithBytes", [
-            {"name": "data", "ty": {"kind": "vec", "inner": {"kind": "u8"}, "max_len": 256}},
-            {"name": "hash", "ty": {"kind": "array", "element": {"kind": "u8"}, "len": 32}},
+            {"name": "data", "type": {"kind": "vec", "element": {"kind": "u8"}, "max_len": 256}},
+            {"name": "hash", "type": {"kind": "array", "element": {"kind": "u8"}, "len": 32}},
         ])
         self.assertIn("\topaque<256> data;", result)
         self.assertIn("\topaque[32] hash;", result)
@@ -94,7 +94,7 @@ class TestGenerateXdr(unittest.TestCase):
         type_defs = [
             {"kind": "enum", "name": "E", "variants": [{"name": "A", "value": 1}]},
             {"kind": "struct", "name": "S", "fields": [
-                {"name": "x", "ty": {"kind": "u32"}}
+                {"name": "x", "type": {"kind": "u32"}}
             ]},
         ]
         result = generate_xdr(type_defs, "test_ns")

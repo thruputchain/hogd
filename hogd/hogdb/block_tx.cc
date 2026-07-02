@@ -277,7 +277,7 @@ BlockTX::commit(WorkerPool &pool)
                           ? HogDBCode::kInvalidExecutorBehavior
                           : HogDBCode::kInternal);
   }
-  if (auto r = db_.apply(*changeset_); !r) {
+  if (auto r = db_.apply(*changeset_, pool); !r) {
     return r.error();
   }
   changeset_.reset();

@@ -12,8 +12,8 @@ set -ex
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo install --locked --registry groundhog groundhog-cli@0.5.7
+  cargo install --locked --registry groundhog groundhog-cli@0.5.11
 
 echo "Installing groundhog-rv32-lower..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo install --locked --registry groundhog groundhog-rv32-lower@0.5.7
+  cargo install --locked --registry groundhog groundhog-rv32-lower@0.5.11
