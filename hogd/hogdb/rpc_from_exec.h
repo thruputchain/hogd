@@ -69,7 +69,8 @@ private:
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageDeltaFlagSet flags);
+                              StorageDeltaFlagSet flags,
+                              DbConflictCode *conflict_code);
 };
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);

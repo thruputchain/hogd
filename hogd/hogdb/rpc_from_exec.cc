@@ -87,6 +87,23 @@ to_span(const Bytestring &bs)
   return {reinterpret_cast<const std::byte *>(bs.data()), bs.size()};
 }
 
+// Maps a failed request's HogDBCode + the InvokeTX reason slot to the
+// DbConflictCode reported to the executor. Call only for failures that
+// to_rpc_error maps to kRPCStorageWriteFailed.
+DbConflictCode
+extract_conflict_reason(InvokeTX const &tx, HogDBCode code)
+{
+  if (code == HogDBCode::kOverflow) {
+    return DbConflictCode::kDbConflictOverflow;
+  }
+  assert(code == HogDBCode::kConflict);
+  auto reason = tx.last_conflict_reason();
+  // Every kConflict producer on this path records a reason (Task 3
+  // contract); a missing reason is a programmer error.
+  assert(reason.has_value());
+  return reason.value_or(DbConflictCode::kDbConflictExclusiveLock);
+}
+
 } // namespace
 
 // HogDBExecutorRpc implementations
@@ -94,31 +111,38 @@ to_span(const Bytestring &bs)
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageDeltaFlagSet flags)
+                              StorageDeltaFlagSet flags,
+                              DbConflictCode *conflict_code)
 {
+  auto finish = [&tx, conflict_code](HogDBStatus<void> ret) {
+    RPCError err = to_rpc_error(ret);
+    if (err == RPCError::kRPCStorageWriteFailed && conflict_code != nullptr) {
+      *conflict_code = extract_conflict_reason(tx, ret.error().code());
+    }
+    return err;
+  };
+
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
-    return to_rpc_error(tx.request_bytes(make_item_key(addrkey),
-                                         to_span(delta.bytestring()), flags));
+    return finish(tx.request_bytes(make_item_key(addrkey),
+                                   to_span(delta.bytestring()), flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
-    return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint_add()),
-                                            flags));
+    return finish(tx.request_nnint128(make_item_key(addrkey),
+                                      from_xdr(delta.nnint_add()), flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-    return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint().set_value),
-                                            from_xdr(delta.nnint().add_value),
-                                            flags));
+    return finish(tx.request_nnint128(make_item_key(addrkey),
+                                      from_xdr(delta.nnint().set_value),
+                                      from_xdr(delta.nnint().add_value),
+                                      flags));
   case StorageDeltaType::kDeltaTypeDelete:
-    return to_rpc_error(tx.request_deletion(make_item_key(addrkey), flags));
+    return finish(tx.request_deletion(make_item_key(addrkey), flags));
   case StorageDeltaType::kDeltaTypeDeployContract:
     assert(addrkey.key.key_type() == StorageKeyType::Metadata);
-    return to_rpc_error(
-        tx.request_deploy_contract(addrkey.address,
-                                   delta.deployed_contract_hash()));
+    return finish(tx.request_deploy_contract(addrkey.address,
+                                             delta.deployed_contract_hash()));
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     assert(addrkey.key.key_type() == StorageKeyType::AuthData);
-    return to_rpc_error(
+    return finish(
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     CHECK(addrkey.key.key_type() == StorageKeyType::ReplayCache);
@@ -127,14 +151,14 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     // consumes no uniquifier for it, so a uniquifier-consume delta keyed here
     // can only come from a buggy executor: reject it as invalid behavior.
     if (addrkey.address == kInitialTokenClaimPrecompileAddress) {
-      return to_rpc_error(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+      return finish(HogDBError{HogDBCode::kInvalidExecutorBehavior});
     }
-    return to_rpc_error(tx.request_consume_uniquifier(
+    return finish(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
-    return to_rpc_error(tx.request_retrocausal_queue(make_item_key(addrkey),
-                                                     delta.retrocausal_queue(),
-                                                     flags));
+    return finish(tx.request_retrocausal_queue(make_item_key(addrkey),
+                                               delta.retrocausal_queue(),
+                                               flags));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
@@ -214,9 +238,8 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 TryPushSubtransactionResult
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch const &batch,
-                                              DbDiagnosticLevel /*level*/)
+                                              DbDiagnosticLevel level)
 {
-  // diagnostics wired in the next commit (#2759)
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
           block, tx);
@@ -239,30 +262,73 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     }
   }
 
+  DbConflictResult conflict(level);
+  auto record = [&](AddressAndKey const &addrkey, DbConflictCode code) {
+    DbConflictDiagnostic d{.addrkey = addrkey, .code = code};
+    if (level == DbDiagnosticLevel::kDbDiagnosticFirst) {
+      conflict.first() = std::move(d);
+    }
+    else if (level == DbDiagnosticLevel::kDbDiagnosticAll) {
+      conflict.conflicts().push_back(std::move(d));
+    }
+  };
+  auto fail = [&](RPCError err) {
+    itx->rollback_to_savepoint(depth - 1);
+    TryPushSubtransactionResult res(err);
+    if (err == RPCError::kRPCStorageWriteFailed) {
+      res.conflict() = std::move(conflict);
+    }
+    return res;
+  };
+
+  RPCError first_err = RPCError::kRPCNone;
   for (auto const &delta : batch) {
     if constexpr (is_debug_build()) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
       assert(is_valid_delta(delta.delta));
     }
-    if (RPCError err =
-            request_one(*itx, delta.addrkey, delta.delta, delta.flags);
-        err != RPCError::kRPCNone) {
-
-      if constexpr (is_debug_build()) {
-        trace("Failed to request delta: {} {}", x23::show(delta), err);
-      }
-      itx->rollback_to_savepoint(depth - 1);
-      return TryPushSubtransactionResult(err);
+    DbConflictCode conflict_code{};
+    RPCError err = request_one(*itx, delta.addrkey, delta.delta, delta.flags,
+                               &conflict_code);
+    if (err == RPCError::kRPCNone) {
+      continue;
     }
+    if constexpr (is_debug_build()) {
+      trace("Failed to request delta: {} {}", x23::show(delta), err);
+    }
+    if (err != RPCError::kRPCStorageWriteFailed) {
+      // Non-conflict failure (stale block, executor misbehavior, ...):
+      // abort immediately in every mode, no diagnostics attached.
+      return fail(err);
+    }
+    record(delta.addrkey, conflict_code);
+    if (level != DbDiagnosticLevel::kDbDiagnosticAll) {
+      return fail(err);
+    }
+    // kDbDiagnosticAll: best-effort — keep evaluating the remaining
+    // deltas against the surviving state; single rollback at the end.
+    first_err = RPCError::kRPCStorageWriteFailed;
   }
-  auto bal_req = itx->sync_balance_locks();
+
+  ContractAddress balance_conflict_addr{};
+  auto bal_req = itx->sync_balance_locks(&balance_conflict_addr);
   if (!bal_req) {
     if constexpr (is_debug_build()) {
       trace("Failed to acquire balance locks after batch of deltas: {}",
             bal_req.error());
     }
-    itx->rollback_to_savepoint(depth - 1);
-    return TryPushSubtransactionResult(to_rpc_error(bal_req.error()));
+    RPCError err = to_rpc_error(bal_req);
+    if (err != RPCError::kRPCStorageWriteFailed) {
+      return fail(err);
+    }
+    AddressAndKey bal_key{.address = balance_conflict_addr,
+                          .key = StorageKey(
+                              StorageKeyType::FreeNativeTokenBalance)};
+    record(bal_key, extract_conflict_reason(*itx, bal_req.error().code()));
+    return fail(RPCError::kRPCStorageWriteFailed);
+  }
+  if (first_err != RPCError::kRPCNone) {
+    return fail(first_err);
   }
   itx->assert_is_valid();
   return TryPushSubtransactionResult(RPCError::kRPCNone);
