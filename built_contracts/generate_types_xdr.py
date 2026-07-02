@@ -29,7 +29,7 @@ def map_xdr_type(ty: dict[str, Any]) -> str:
     elif kind == "named":
         return ty["name"]
     elif kind == "vec":
-        inner: dict[str, Any] = ty["inner"]
+        inner: dict[str, Any] = ty["element"]
         max_len: int = ty["max_len"]
         if inner["kind"] == "u8":
             return f"opaque<{max_len}>"
@@ -57,7 +57,7 @@ def emit_enum(name: str, variants: list[dict[str, Any]]) -> str:
 def emit_struct(name: str, fields: list[dict[str, Any]]) -> str:
     lines: list[str] = [f"struct {name} {{"]
     for f in fields:
-        xdr_type = map_xdr_type(f["ty"])
+        xdr_type = map_xdr_type(f["type"])
         lines.append(f"\t{xdr_type} {f['name']};")
     lines.append("};")
     return "\n".join(lines)
