@@ -25,6 +25,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -123,11 +124,11 @@ public:
 
   // Synchronizes balance locks for all addresses touched at the current
   // savepoint depth. On failure, if [first_conflicting_addr] is non-null it
-  // is set to the address whose balance lock failed (balance sync aborts at
-  // the first failure). The conflict reason, if any, is recorded in
-  // last_conflict_reason().
+  // receives the raw contract address of the failing balance (balance sync
+  // aborts at the first failure). The conflict reason, if any, is recorded
+  // in last_conflict_reason().
   HogDBStatus<void>
-  sync_balance_locks(Address *first_conflicting_addr = nullptr);
+  sync_balance_locks(ContractAddress *first_conflicting_addr = nullptr);
 
   // Reason for the most recent kConflict returned by a request_* method or
   // sync_balance_locks (#2759). Empty if the last failure was not a

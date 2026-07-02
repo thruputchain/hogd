@@ -2209,14 +2209,14 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
         conflict_addr, Uniquifier(7, 300),
         std::to_underlying(StorageDeltaFlags::None)));
 
-    Address failed_addr = make_address("placeholder");
+    ContractAddress failed_addr{};
     auto sync_result = invoke_tx.sync_balance_locks(&failed_addr);
     ASSERT_FALSE(sync_result.has_value());
     EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
     ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
     EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
               *invoke_tx.last_conflict_reason());
-    EXPECT_EQ(failed_addr, conflict_addr);
+    EXPECT_EQ(failed_addr, conflict_addr.get_raw());
 
     invoke_tx.rollback_to_savepoint(0);
     invoke_tx.release_blocktx_reference();
