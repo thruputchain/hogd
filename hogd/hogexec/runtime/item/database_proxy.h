@@ -127,6 +127,21 @@ public:
                                                std::move(delta), flags);
   }
 
+  // Diagnostic detail requested from hogdb on push failures. Defaults to
+  // none (prod). SDK/testing harnesses and proposal-mode opt-in raise it
+  // via SystemCallHandler::set_db_diagnostic_level.
+  void set_diagnostic_level(DbDiagnosticLevel level)
+  {
+    diagnostic_level_ = level;
+  }
+
+  // Conflict diagnostics from the most recent failed push; the None arm
+  // if the last push succeeded or diagnostics are disabled.
+  DbConflictResult const &last_push_conflict() const
+  {
+    return last_push_conflict_;
+  }
+
   SystemStatus<bool> try_push_current_subtransaction()
   {
     if constexpr (is_debug_build()) {
@@ -146,9 +161,13 @@ public:
                    std::mt19937{std::random_device{}()});
     }
 
+    last_push_conflict_ =
+        DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
     auto r =
         db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
-                                              current_subtransaction_batch_);
+                                              current_subtransaction_batch_,
+                                              diagnostic_level_,
+                                              &last_push_conflict_);
     current_subtransaction_batch_.clear();
     return r;
   }
@@ -183,5 +202,7 @@ private:
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
+  DbDiagnosticLevel diagnostic_level_{DbDiagnosticLevel::kDbDiagnosticNone};
+  DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
 };
 } // namespace hogd
