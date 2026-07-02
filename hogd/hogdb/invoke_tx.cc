@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -559,7 +560,7 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
 }
 
 HogDBStatus<void>
-InvokeTX::sync_balance_locks()
+InvokeTX::sync_balance_locks(Address *first_conflicting_addr)
 {
   if constexpr (is_debug_build()) {
     std::vector<const Address *> addrs;
@@ -573,6 +574,11 @@ InvokeTX::sync_balance_locks()
     for (const auto *addr : addrs) {
       auto status = update_balance_lock(*addr);
       if (!status) {
+        if (first_conflicting_addr != nullptr) {
+          // Address has a const member, so it is not copy-assignable;
+          // reconstruct it in place instead.
+          std::construct_at(first_conflicting_addr, *addr);
+        }
         return status.error();
       }
     }
@@ -582,6 +588,9 @@ InvokeTX::sync_balance_locks()
       if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
         auto status = update_balance_lock(addr);
         if (!status) {
+          if (first_conflicting_addr != nullptr) {
+            std::construct_at(first_conflicting_addr, addr);
+          }
           return status.error();
         }
       }

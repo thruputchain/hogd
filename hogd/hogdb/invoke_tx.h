@@ -121,7 +121,13 @@ public:
 
   void assert_is_valid() const noexcept;
 
-  HogDBStatus<void> sync_balance_locks();
+  // Synchronizes balance locks for all addresses touched at the current
+  // savepoint depth. On failure, if [first_conflicting_addr] is non-null it
+  // is set to the address whose balance lock failed (balance sync aborts at
+  // the first failure). The conflict reason, if any, is recorded in
+  // last_conflict_reason().
+  HogDBStatus<void>
+  sync_balance_locks(Address *first_conflicting_addr = nullptr);
 
   // Reason for the most recent kConflict returned by a request_* method or
   // sync_balance_locks (#2759). Empty if the last failure was not a
