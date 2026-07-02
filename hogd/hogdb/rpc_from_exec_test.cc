@@ -56,8 +56,6 @@ make_bytes_delta(AddressAndKey addrkey, std::uint8_t byte)
                                  std::to_underlying(StorageDeltaFlags::None)};
 }
 
-} // namespace
-
 class RpcFromExecDiagnosticsTest : public ::testing::Test {
 protected:
   void SetUp() override
@@ -179,5 +177,7 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
                                         DbDiagnosticLevel::kDbDiagnosticFirst);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
+
+} // namespace
 
 } // namespace hogd
