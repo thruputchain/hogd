@@ -7,8 +7,10 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
@@ -228,6 +230,54 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
       make_free_native_token_balance_addrkey(contract_addr1));
   ASSERT_TRUE(contract_bal1.has_value());
   ASSERT_EQ(from_xdr(contract_bal1.value().nnint()), 0);
+}
+
+TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB does not produce conflict diagnostics";
+  }
+
+  auto contract_addr0 = make_contract_address(0);
+  setup_grant_storage_token(contract_addr0, 2 * cost_model_->get_nnint_cost());
+
+  DatabaseProxy &db_proxy = get_db_proxy();
+  auto key = make_contract_data_addrkey(contract_addr0, "conflict");
+
+  StorageDeltaBatch winner;
+  winner.push_back(FlaggedStorageDelta{.addrkey = key,
+                                       .delta = make_nnint_set_add_delta(0, 1),
+                                       .flags = std::to_underlying(
+                                           StorageDeltaFlags::None)});
+  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner);
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  // Different base value at the same key from another tx: value mismatch.
+  StorageDeltaBatch loser;
+  loser.push_back(FlaggedStorageDelta{.addrkey = key,
+                                      .delta = make_nnint_set_add_delta(5, 1),
+                                      .flags = std::to_underlying(
+                                          StorageDeltaFlags::None)});
+  DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
+  auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
+                                                 &conflict);
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_FALSE(r2.value());
+  // The fixture runs Proposal mode: hogdb selects All in debug builds,
+  // First in release builds.
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(conflict.conflicts().size(), 1U);
+    EXPECT_EQ(conflict.conflicts()[0].addrkey, key);
+    EXPECT_EQ(conflict.conflicts()[0].code,
+              DbConflictCode::kDbConflictValueMismatch);
+  }
+  else {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(conflict.first().addrkey, key);
+    EXPECT_EQ(conflict.first().code, DbConflictCode::kDbConflictValueMismatch);
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -13,6 +13,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -404,7 +405,8 @@ static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
 SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
-                                           StorageDeltaBatch const &delta_batch)
+                                           StorageDeltaBatch const &delta_batch,
+                                           DbConflictResult *conflict_out)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
@@ -440,7 +442,21 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
   try {
     auto res =
         client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-    return to_system_error_code<false>(res, [] { return true; });
+    switch (res.error()) {
+    case RPCError::kRPCNone:
+      return true;
+    case RPCError::kRPCStorageWriteFailed:
+      if (conflict_out != nullptr) {
+        *conflict_out = std::move(res.conflict());
+      }
+      return false;
+    case RPCError::kRPCBadBlockID:
+      return SystemError{SystemErrorCode::Abandon};
+    default:
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            res.error());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
     // worker, so contain every failure -- XdrBadInput (oversized delta batch),

@@ -33,7 +33,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                            NondeterministicProposalData ndet)
 {
   ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
-  SystemCallHandler syscall_handler(snapshot_cache, proxy,
+  SystemCallHandler syscall_handler(snapshot_cache, std::move(proxy),
                                     std::move(event_proxy), std::move(ctor),
                                     context, query.auth_claim, SHA256Hash{});
 

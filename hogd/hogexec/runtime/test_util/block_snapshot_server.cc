@@ -100,20 +100,21 @@ BlockSnapshotRpc::get_deployment(BlockID block,
   return out;
 }
 
-RPCError
+TryPushSubtransactionResult
 BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
                                               TransactionID /*unused*/,
                                               StorageDeltaBatch const &batch)
 {
+  // test double: produces no diagnostics
   {
     auto blocked = blocked_subtransaction_keys_.take();
     for (auto const &delta : batch) {
       if (blocked->contains(delta.addrkey)) {
-        return RPCError::kRPCUnrecoverable;
+        return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
       }
     }
   }
-  return RPCError::kRPCNone;
+  return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
 RPCError

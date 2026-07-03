@@ -494,6 +494,14 @@ private:
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
 
+  // Trace-logs db_proxy_'s last_push_conflict() if hogdb captured
+  // diagnostics for the failed push; a no-op otherwise (kDbDiagnosticNone,
+  // e.g. validation/viewing blocks). Diagnostics arrive automatically for
+  // proposal blocks -- hogdb selects the level from the block's execution
+  // mode, so there is no seam to configure here. Called right after each
+  // 2pc push failure site sets two_phase_commit_failed_.
+  void log_db_conflict_diagnostic() const;
+
   BlockExecutionMode get_block_execution_mode() const
   {
     if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {

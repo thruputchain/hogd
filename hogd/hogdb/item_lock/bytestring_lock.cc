@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <span>
 
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -19,7 +20,7 @@ BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after,
 {
   assert(before == nullptr || before->value_view() == bytestring_);
   if (after != nullptr && after->value_view() != bytestring_) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
   }
   return get_storage_cost_of_committed_value(ctx.cost_model);
 }

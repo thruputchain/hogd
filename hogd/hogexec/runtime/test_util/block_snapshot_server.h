@@ -47,8 +47,9 @@ public:
   static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                       StorageDeltaBatch const &batch);
+  TryPushSubtransactionResult
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch const &batch);
 
   // Revert one or more subtransactions.
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
