@@ -8,6 +8,7 @@
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"

@@ -2214,9 +2214,11 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     auto sync_result = invoke_tx.sync_balance_locks(&failed_addr);
     ASSERT_FALSE(sync_result.has_value());
     EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
     EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
               *invoke_tx.last_conflict_reason());
+    // NOLINTEND(bugprone-unchecked-optional-access)
     EXPECT_EQ(failed_addr, conflict_addr.get_raw());
 
     invoke_tx.rollback_to_savepoint(0);
@@ -3543,9 +3545,11 @@ TEST_F(HogDBTest, BytestringConflictRecordsDbConflictReason)
                                std::to_underlying(StorageDeltaFlags::None));
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
   EXPECT_EQ(DbConflictCode::kDbConflictValueMismatch,
             *itx_b.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
   itx_b.release_blocktx_reference();
@@ -3578,9 +3582,11 @@ TEST_F(HogDBTest, ConflictReasonTypeMismatch)
                                   std::to_underlying(StorageDeltaFlags::None));
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
   EXPECT_EQ(DbConflictCode::kDbConflictTypeMismatch,
             *itx_b.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
   itx_b.release_blocktx_reference();
@@ -3612,9 +3618,11 @@ TEST_F(HogDBTest, ConflictReasonReplayProtection)
                                                 StorageDeltaFlags::None));
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
   EXPECT_EQ(DbConflictCode::kDbConflictReplayProtection,
             *itx_b.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
   itx_b.release_blocktx_reference();
@@ -3641,9 +3649,11 @@ TEST_F(HogDBTest, ConflictReasonExclusiveLockBalanceFlag)
                                           StorageDeltaFlags::ExclusiveLock));
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(HogDBCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
   EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
             *invoke_tx.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   invoke_tx.abort();
   invoke_tx.release_blocktx_reference();

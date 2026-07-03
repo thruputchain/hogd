@@ -562,7 +562,9 @@ InvokeTX::conflict_reason_for(HogDBCode code) const
     return DbConflictCode::kDbConflictOverflow;
   }
   CHECK(code == HogDBCode::kConflict);
+  // CHECK below guarantees last_conflict_reason_ has a value.
   CHECK(last_conflict_reason_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return *last_conflict_reason_;
 }
 
