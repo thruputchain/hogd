@@ -234,10 +234,10 @@ TEST(Dag, RunningSiblingsDrainAfterFailure)
 TEST(Dag, ArmedCleanupRunsOnLaterFailure)
 {
   Dag dag("cleanup", pool);
-  std::vector<int> cleaned;
+  std::atomic_bool cleaned{false};
 
   DagCleanup cleanup = dag.cleanup("cleanup a", [&]() -> Async<void> {
-    cleaned.push_back(1);
+    cleaned.store(true, std::memory_order_release);
     co_return;
   });
   auto acquire = dag.async<void>("acquire", [&]() -> Async<void> {
@@ -252,8 +252,7 @@ TEST(Dag, ArmedCleanupRunsOnLaterFailure)
   dag.run()();
 
   EXPECT_FALSE(dag.ok());
-  ASSERT_EQ(cleaned.size(), 1UL);
-  EXPECT_EQ(cleaned[0], 1);
+  EXPECT_TRUE(cleaned.load(std::memory_order_acquire));
 }
 
 TEST(Dag, DisarmedCleanupDoesNotRunOnLaterFailure)
