@@ -1622,14 +1622,30 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         }));
   }
 
-  auto set_result = [&](SchedulerValidationOutcome outcome) {
+  x23::CoroLock set_result_lock;
+  auto set_result =
+      [&](SchedulerValidationOutcome outcome) -> x23::Async<void> {
+    x23::CoroGuard cg;
+    co_await cg(set_result_lock);
+
     dag_outcome = outcome;
     result = SchedulerValidationResult(outcome);
+    co_return;
   };
+
+  x23::CoroLock cancel_with_result_lock;
+  std::atomic<bool> cancel_with_result_set{false};
   auto cancel_with_result = [&](SchedulerValidationOutcome outcome,
-                                const char *node) {
-    set_result(outcome);
+                                const char *node) -> x23::Async<void> {
+    x23::CoroGuard cg;
+    co_await cg(cancel_with_result_lock);
+
+    if (!cancel_with_result_set.load(std::memory_order_acquire)) {
+      co_await set_result(outcome);
+      cancel_with_result_set.store(true, std::memory_order_relaxed);
+    }
     validation_dag.fail(x23::DagFailureKind::Cancelled, node);
+    co_return;
   };
 
   auto decode_node = validation_dag.async<void>(
@@ -1653,7 +1669,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         if (!decoded_tx_nominations || !decoded_tx_hashes) {
           info("schedulercoord_validate rejected malformed nomination batch");
           log_validation_return = false;
-          cancel_with_result(
+          co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationMalformed,
               "decode nomination batches");
           co_return;
@@ -1661,7 +1677,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
         if (cache.tx_hashes.size() != tx_nominations.size()) {
           log_validation_return = false;
-          cancel_with_result(
+          co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationMalformed,
               "decode nomination batches");
           co_return;
@@ -1702,13 +1718,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           co_return;
         }
         if (snapshot_result == DbSchedResult::DbSchedResultInvalidParentId) {
-          cancel_with_result(
+          co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock,
               "create validation snapshot");
           co_return;
         }
         CHECK_EQ(snapshot_result, DbSchedResult::DbSchedResultError);
-        cancel_with_result(
+        co_await cancel_with_result(
             SchedulerValidationOutcome::SchedulerValidationDbFailed,
             "create validation snapshot");
         co_return;
@@ -1723,46 +1739,30 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_return;
       });
 
-  x23::Vec<x23::DagNode<ExecResult>> open_validation_block_nodes;
+  x23::Vec<x23::DagNode<void>> open_validation_block_nodes;
   open_validation_block_nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
-    open_validation_block_nodes.push_back(validation_dag.async<ExecResult>(
+    open_validation_block_nodes.push_back(validation_dag.async<void>(
         "open executor validation block", validation_dag.after(open_event_node),
-        [&, i]() -> x23::Async<ExecResult> {
+        [&, i]() -> x23::Async<void> {
           ExecResult result =
               co_await open_validation_block(validation_block_id,
                                              /*executor_idx=*/i);
-          if (result == ExecResult::ExecResultOK) {
-            executor_cleanups[i].arm();
+          if (result != ExecResult::ExecResultOK) {
+            co_await cancel_with_result(
+                SchedulerValidationOutcome::SchedulerValidationExecutorFailed,
+                "open executor validation block");
+            co_return;
           }
-          co_return result;
+          executor_cleanups[i].arm();
+          co_return;
         }));
   }
 
-  x23::DagDeps check_open_validation_deps =
-      merge_dag_deps(validation_dag.after(open_event_node),
-                     dag_deps_from_nodes(open_validation_block_nodes));
-  auto check_open_validation_node = validation_dag.async<void>(
-      "check executor validation blocks", std::move(check_open_validation_deps),
-      [&]() -> x23::Async<void> {
-        bool open_validation_block_success = true;
-        for (const x23::DagNode<ExecResult> &node :
-             open_validation_block_nodes) {
-          if (node.get() != ExecResult::ExecResultOK) {
-            open_validation_block_success = false;
-          }
-        }
-        if (!open_validation_block_success) {
-          cancel_with_result(
-              SchedulerValidationOutcome::SchedulerValidationExecutorFailed,
-              "check executor validation blocks");
-        }
-        co_return;
-      });
-
   auto prepare_validate_node = validation_dag.async<void>(
       "prepare and validate chunks",
-      validation_dag.after(check_open_validation_node),
+      merge_dag_deps(validation_dag.after(open_event_node),
+                     dag_deps_from_nodes(open_validation_block_nodes)),
       [&]() -> x23::Async<void> {
         // [nomination] includes the tx hashes and the nondeterministic
         // proposal data. We use these tx hashes to look up the vetted txs in
@@ -1800,16 +1800,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_return;
       });
 
-  auto txset_hash_node = validation_dag.cpu<SHA256Hash>(
-      "compute txset hash", validation_dag.after(check_open_validation_node),
-      [&]() { return get_txset_hash(cache.tx_hashes); });
+  auto txset_hash_node =
+      validation_dag.cpu<SHA256Hash>("compute txset hash",
+                                     validation_dag.after(decode_node), [&]() {
+                                       return get_txset_hash(cache.tx_hashes);
+                                     });
 
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
       [&]() -> x23::Async<void> {
         for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
           if (tx_failed_authentication(tx_hash)) {
-            cancel_with_result(
+            co_await cancel_with_result(
                 SchedulerValidationOutcome::SchedulerValidationInvalid,
                 "check validation chunks");
             co_return;
@@ -1829,7 +1831,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         CHECK_EQ(cache.txs.size(), tx_nominations.size());
 
         if (!validated) {
-          cancel_with_result(
+          co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationInvalid,
               "check validation chunks");
           co_return;
@@ -1881,10 +1883,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           // rejected only by hogdb at [dbsched_close_snapshot()], so an invalid
           // nominated block can reach this path.
           if (db_result.result() != DbSchedResult::DbSchedResultOK) {
-            CHECK_EQ(co_await abandon_snapshot(validation_block_id),
-                     DbSchedResult::DbSchedResultOK);
-            snapshot_cleanup.disarm();
-            cancel_with_result(
+            co_await cancel_with_result(
                 SchedulerValidationOutcome::SchedulerValidationInvalid,
                 "check closed validation block");
             co_return;
@@ -1903,15 +1902,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           // The event block and DB snapshot were closed above, but a hash
           // mismatch means this block is never added to
           // [validated_block_cache_], so [schedulercoord_commit_block] will
-          // never abandon it. Abandon both here to avoid leaking the event
-          // block context and orphaning its events file.
-          CHECK_EQ(co_await abandon_snapshot(validation_block_id),
-                   DbSchedResult::DbSchedResultOK);
-          snapshot_cleanup.disarm();
-          CHECK_EQ(co_await eventsched_abandon_block(validation_block_id),
-                   RPCError::kRPCNone);
-          event_cleanup.disarm();
-          cancel_with_result(
+          // never abandon it.
+          //
+          // [snapshot_cleanup] and [event_cleanup] abandon both to ensure that
+          // we do not leak the event block context and orphan its events file.
+          co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationInvalid,
               "check closed validation block");
           co_return;
@@ -1927,7 +1922,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                              .events_hash = cache.db_tip.events_hash,
                              .db_hash = cache.db_tip.db_hash,
                              .id = validation_block_id};
-        set_result(SchedulerValidationOutcome::SchedulerValidationOK);
+        co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
         result.block().db_tip = cache.db_tip;
         result.block().signed_transactions = {};
         co_await t_to_parallel_batch(cache.txs,
