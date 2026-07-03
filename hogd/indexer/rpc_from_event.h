@@ -26,9 +26,12 @@ public:
   // [tx_events] and [tx_bodies] are index-aligned: [tx_bodies][i] is the body
   // of the transaction whose event log is [tx_events][i].
   //
-  // TODO(gramseyer): persist [tx_bodies] to the flat-file body store, keyed by
-  // [tx_events][i].proposed_tx_hash.  For now only the event log is processed;
-  // the bodies are accepted and dropped until the store lands in a follow-up.
+  // [tx_bodies] are consumed into the tx_index value (serving by-hash and
+  // transaction-page lookups) and used to key ROOT_TX rows in the address
+  // index (serving get_transactions_by_address).
+  //
+  // TODO(gramseyer): move body storage out of the tx_index value into a
+  // dedicated flat-file body store, keyed by [tx_events][i].proposed_tx_hash.
   x23::Async<void>
   indexer_event_process_events(BlockHeight block_height,
                                const TxEventLogBatch &tx_events,
