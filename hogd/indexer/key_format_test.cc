@@ -127,6 +127,7 @@ TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
 
   auto parsed = IndexerKeyFormat::parse_contract_key(key);
   ASSERT_TRUE(parsed.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT above
   const auto &p = parsed.value();
   EXPECT_EQ(p.address, original_address);
   EXPECT_EQ(p.kind, IndexerKeyFormat::kEvent);
@@ -182,6 +183,7 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
 
     auto parsed = IndexerKeyFormat::parse_contract_key(key);
     ASSERT_TRUE(parsed.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT above
     const auto &p = parsed.value();
     EXPECT_EQ(p.address, addr);
     EXPECT_EQ(p.kind, kind);

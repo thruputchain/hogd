@@ -1,10 +1,10 @@
 #include "hogd/indexer/key_format.h"
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 
 #include <bit>
-#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string>
