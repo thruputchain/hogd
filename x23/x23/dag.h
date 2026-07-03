@@ -101,14 +101,21 @@ class DagCleanup {
 public:
   DagCleanup() = default;
 
+  // Mark this cleanup as needed if the DAG later fails. Call after acquiring
+  // the resource the cleanup releases.
   void arm() const;
+  // Mark this cleanup as no longer needed, usually after the resource was
+  // released normally or ownership was transferred to a successful result.
   void disarm() const;
+  // Return whether this cleanup would run if the DAG failed now.
   bool armed() const;
 
 private:
   friend class Dag;
   DagCleanup(Dag *dag, size_t id) : dag_(dag), id_(id) {}
 
+  // Owning graph and insertion-order id. DagCleanup is a lightweight handle;
+  // the callable and arm state live in Dag::cleanups_.
   Dag *dag_{nullptr};
   size_t id_{0};
 };
@@ -567,6 +574,9 @@ private:
       if (cleanups_[i]->armed)
         ret.push_back(i);
     }
+    // Cleanups unwind acquired resources, so run the most recently armed
+    // cleanup first. This mirrors stack-style teardown when later resources
+    // may depend on earlier ones.
     std::sort(ret.begin(), ret.end(), [&](size_t a, size_t b) {
       return cleanups_[a]->arm_order > cleanups_[b]->arm_order;
     });
@@ -575,10 +585,15 @@ private:
 
   Detached run_cleanups(std::vector<size_t> cleanup_ids)
   {
+    // Failure cleanup starts only after all already-running normal nodes have
+    // drained. The ids are captured while holding mutex_ and executed here
+    // without the graph lock so cleanup coroutines can await and call out.
     for (const size_t cleanup_id : cleanup_ids) {
       try {
         co_await cleanups_[cleanup_id]->run();
       } catch (...) {
+        // Preserve the original graph failure in failure_. Cleanup exceptions
+        // are diagnostic follow-on failures and should not decide dag.ok().
         std::lock_guard lock(mutex_);
         cleanup_failures_.push_back(DagFailure{
             .kind = DagFailureKind::Exception,
@@ -591,6 +606,7 @@ private:
     CoroCB<void> done_cb;
     {
       std::lock_guard lock(mutex_);
+      // run() completes after cleanup has finished, not when cleanup starts.
       cleanup_finished_ = true;
       graph_finished_at_ = std::chrono::steady_clock::now();
       done_cb = done_cb_;
@@ -776,6 +792,9 @@ private:
     if (!started_ || finished_ || running_ != 0)
       return {};
 
+    // On success, every ready node must have had a chance to start before the
+    // graph can complete. On failure, scheduling has already stopped, so
+    // pending nodes are intentionally abandoned.
     if (failure_.kind == DagFailureKind::None) {
       for (size_t i = 0; i < nodes_.size(); i++)
         if (ready_locked(i))
@@ -788,6 +807,9 @@ private:
       return done_cb_;
     }
 
+    // A failed graph becomes terminal only after all armed cleanups have been
+    // run. Capture the cleanup set once so later arm/disarm calls are rejected
+    // and cannot race with teardown.
     cleanup_ids = armed_cleanups_locked();
     if (cleanup_ids.empty()) {
       finished_ = true;
@@ -810,11 +832,15 @@ private:
   mutable std::mutex mutex_;
   // Nodes in insertion order. Node ids are indexes into this vector.
   std::vector<std::unique_ptr<NodeBase>> nodes_;
+  // Failure-only cleanup actions in insertion order. Each cleanup can be armed
+  // after acquiring a resource and disarmed after successful release/transfer.
   std::vector<std::unique_ptr<CleanupBase>> cleanups_;
   // Node ids with no dependencies.
   std::vector<size_t> roots_;
   // First graph-level failure, if any.
   DagFailure failure_;
+  // Exceptions raised while cleaning up a failed graph. These are reported
+  // separately so cleanup problems do not replace the primary failure.
   std::vector<DagFailure> cleanup_failures_;
   // Callback used to resume run() when the graph reaches a terminal state.
   CoroCB<void> done_cb_;
@@ -823,12 +849,15 @@ private:
   std::chrono::steady_clock::time_point graph_finished_at_;
   // Count of currently-running nodes.
   size_t running_{0};
+  // Monotonic sequence number used to unwind armed cleanups in reverse order.
   size_t next_cleanup_arm_order_{0};
   // True after run() has been called.
   bool started_{false};
   // True after run() has completed or is ready to complete.
   bool finished_{false};
+  // True once the failed graph has captured the armed cleanup set.
   bool cleanup_started_{false};
+  // True once all captured failure cleanups have run.
   bool cleanup_finished_{false};
 
   template<typename T> friend class DagNode;
@@ -870,6 +899,8 @@ DagNode<void>::ready() const
 inline void
 DagCleanup::arm() const
 {
+  // Arming order is recorded by Dag so failed runs can unwind cleanups in the
+  // reverse order resources were acquired.
   x23assert(dag_ != nullptr);
   dag_->arm_cleanup(id_);
 }
@@ -877,6 +908,7 @@ DagCleanup::arm() const
 inline void
 DagCleanup::disarm() const
 {
+  // Disarming prevents the cleanup from participating in failure teardown.
   x23assert(dag_ != nullptr);
   dag_->disarm_cleanup(id_);
 }
