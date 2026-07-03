@@ -191,7 +191,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
 TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
 {
   BlockHeight block_height = 100;
-  TxEventLogBatch events = create_event_logs();          // 2 txs, addrs 0xAA/0xBB
+  TxEventLogBatch events = create_event_logs(); // 2 txs, addrs 0xAA/0xBB
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
   event_->indexer_event_process_events(block_height, events, bodies)();
 
@@ -218,7 +218,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x33);
 
-  TxEventLog event_log;           // no events emitted
+  TxEventLog event_log; // no events emitted
   event_log.proposed_tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
@@ -231,13 +231,15 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   query.limit = 0;
 
-  TransactionRefPage page = block_explorer_->get_transactions_by_address(query)();
+  TransactionRefPage page =
+      block_explorer_->get_transactions_by_address(query)();
   ASSERT_EQ(page.refs.size(), 1);
   EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
   EXPECT_EQ(page.refs[0].height, block_height);
 
   // The ref hydrates to the full body via the existing by-hash API.
-  TxInfoResult info = block_explorer_->get_transaction_info(page.refs[0].tx_hash)();
+  TxInfoResult info =
+      block_explorer_->get_transaction_info(page.refs[0].tx_hash)();
   ASSERT_EQ(info.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(info.info().tx.signed_tx.tx.invocation.invoked_address, root_addr);
 }
@@ -258,7 +260,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   TxEventLog event_log;
   event_log.proposed_tx_hash = tx_hash;
   TxEmittedEvent ev;
-  ev.contract_address = emitter_b;   // event emitted by B, not the root A
+  ev.contract_address = emitter_b; // event emitted by B, not the root A
   ev.num_topics = 0;
   ev.serialized_event.resize(4);
   event_log.events.push_back(ev);
@@ -311,9 +313,9 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     hashes.push_back(h);
     TxEventLog log;
     log.proposed_tx_hash = h;
-    event_->indexer_event_process_events(
-        static_cast<BlockHeight>(300 + i), TxEventLogBatch{log},
-        ProposedTransactionBatch{body})();
+    event_->indexer_event_process_events(static_cast<BlockHeight>(300 + i),
+                                         TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
   }
 
   AddressTransactionQuery q{};
@@ -335,9 +337,9 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
   }
 
   ASSERT_EQ(seen.size(), 3);
-  EXPECT_EQ(seen[0], hashes[0]);   // block 300
-  EXPECT_EQ(seen[1], hashes[1]);   // block 301
-  EXPECT_EQ(seen[2], hashes[2]);   // block 302
+  EXPECT_EQ(seen[0], hashes[0]); // block 300
+  EXPECT_EQ(seen[1], hashes[1]); // block 301
+  EXPECT_EQ(seen[2], hashes[2]); // block 302
 }
 
 // Regression: a batch in which NO transaction emits any event (every
@@ -381,8 +383,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     q.limit = 0;
 
     // Each eventless tx must still have produced its ROOT_TX row.
-    TransactionRefPage page =
-        block_explorer_->get_transactions_by_address(q)();
+    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
     ASSERT_EQ(page.refs.size(), 1);
     EXPECT_EQ(page.refs[0].tx_hash, logs[i].proposed_tx_hash);
   }

@@ -39,8 +39,9 @@ TEST_F(IndexerKeyFormatTest, ContractKeyPrefixByteOrder)
   BlockHeight block_height = 0x0123456789ABCDEF;
 
   std::string key;
-  IndexerKeyFormat::make_contract_key_prefix(
-      key, address, IndexerKeyFormat::kEvent, block_height);
+  IndexerKeyFormat::make_contract_key_prefix(key, address,
+                                             IndexerKeyFormat::kEvent,
+                                             block_height);
 
   EXPECT_EQ(key.size(), IndexerKeyFormat::kContractKeyPrefixSize);
 
@@ -127,7 +128,7 @@ TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
 
   auto parsed = IndexerKeyFormat::parse_contract_key(key);
   ASSERT_TRUE(parsed.has_value());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT above
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded above
   const auto &p = parsed.value();
   EXPECT_EQ(p.address, original_address);
   EXPECT_EQ(p.kind, IndexerKeyFormat::kEvent);
@@ -153,12 +154,12 @@ TEST_F(IndexerKeyFormatTest, ContractKeyPrefixLexicographicOrder)
   std::ranges::fill(address, 0x99);
 
   std::string key1, key2, key3;
-  IndexerKeyFormat::make_contract_key_prefix(
-      key1, address, IndexerKeyFormat::kEvent, 100);
-  IndexerKeyFormat::make_contract_key_prefix(
-      key2, address, IndexerKeyFormat::kEvent, 200);
-  IndexerKeyFormat::make_contract_key_prefix(
-      key3, address, IndexerKeyFormat::kEvent, 300);
+  IndexerKeyFormat::make_contract_key_prefix(key1, address,
+                                             IndexerKeyFormat::kEvent, 100);
+  IndexerKeyFormat::make_contract_key_prefix(key2, address,
+                                             IndexerKeyFormat::kEvent, 200);
+  IndexerKeyFormat::make_contract_key_prefix(key3, address,
+                                             IndexerKeyFormat::kEvent, 300);
 
   // Prefixes should be in lexicographic order
   EXPECT_LT(key1, key2);
@@ -183,7 +184,7 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
 
     auto parsed = IndexerKeyFormat::parse_contract_key(key);
     ASSERT_TRUE(parsed.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT above
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded above
     const auto &p = parsed.value();
     EXPECT_EQ(p.address, addr);
     EXPECT_EQ(p.kind, kind);

@@ -170,12 +170,9 @@ create_contract_index_sst_chunk(
 
     uint32_t sequence_number = 0;
     for (const auto &emitted_event : event_log.events) {
-      IndexerKeyFormat::make_contract_key(key_buffer,
-                                          emitted_event.contract_address,
-                                          IndexerKeyFormat::kEvent,
-                                          block_height,
-                                          event_log.proposed_tx_hash,
-                                          sequence_number);
+      IndexerKeyFormat::make_contract_key(
+          key_buffer, emitted_event.contract_address, IndexerKeyFormat::kEvent,
+          block_height, event_log.proposed_tx_hash, sequence_number);
       entries.emplace_back(key_buffer, empty_string);
       sequence_number++;
     }
@@ -681,9 +678,11 @@ IndexDB::consume_events(BlockHeight block_height,
                                &chunk_sst_path, &contract_sst_options,
                                &env_options, i]() -> IndexerStatus<bool> {
       try {
-        return create_contract_index_sst_chunk(
-            db, contract_cf, block_height, events_chunk, bodies_chunk,
-            chunk_sst_path, contract_sst_options, env_options, i);
+        return create_contract_index_sst_chunk(db, contract_cf, block_height,
+                                               events_chunk, bodies_chunk,
+                                               chunk_sst_path,
+                                               contract_sst_options,
+                                               env_options, i);
       } catch (...) {
         return IndexerError(IndexerErrorCode::kInternal);
       }
@@ -1065,7 +1064,8 @@ public:
   void seek(BlockHeight anchor, IterationOrder order)
   {
     std::string prefix;
-    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, kind_, anchor);
+    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, kind_,
+                                               anchor);
     if (order == IterationOrder::IterationOrderAscending) {
       iter_->Seek(prefix);
     }

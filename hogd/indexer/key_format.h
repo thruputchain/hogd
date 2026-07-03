@@ -91,8 +91,8 @@ public:
 
   // Build a contract index key into the provided buffer
   static void make_contract_key(std::string &key,
-                                ContractAddress const &address,
-                                RecordKind kind, BlockHeight block_height,
+                                ContractAddress const &address, RecordKind kind,
+                                BlockHeight block_height,
                                 SHA256Hash const &tx_hash,
                                 uint32_t sequence_number);
 
