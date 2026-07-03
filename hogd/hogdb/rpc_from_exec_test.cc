@@ -5,12 +5,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <utility>
 
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 #include "hogd/base/compiler.h"
@@ -58,6 +60,22 @@ make_bytes_delta(AddressAndKey addrkey, std::uint8_t byte)
                              .delta = std::move(delta),
                              .flags =
                                  std::to_underlying(StorageDeltaFlags::None)};
+}
+
+// Requests to consume [uniquifier] for [addr]. The request itself succeeds
+// (a fresh replay-cache entry); it's the balance lock it charges storage
+// cost against that can later fail at sync_balance_locks.
+FlaggedStorageDelta
+make_consume_uniquifier_delta(ContractAddress const &addr,
+                              Uniquifier uniquifier)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeConsumeUniquifier);
+  delta.consume_uniquifier_args().uniquifier = uniquifier;
+  return FlaggedStorageDelta{
+      .addrkey = AddressAndKey{.address = addr,
+                               .key = StorageKey(StorageKeyType::ReplayCache)},
+      .delta = std::move(delta),
+      .flags = std::to_underlying(StorageDeltaFlags::None)};
 }
 
 class RpcFromExecDiagnosticsTest : public ::testing::Test {
@@ -144,6 +162,54 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsConflicts)
     EXPECT_EQ(r.conflict().first().addrkey, key_a);
     EXPECT_EQ(r.conflict().first().code,
               DbConflictCode::kDbConflictValueMismatch);
+  }
+}
+
+TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
+{
+  // Neither address below has a seeded balance (unlike addr_ from SetUp), so
+  // consuming a uniquifier locks a positive storage cost against a balance
+  // delta that starts at zero, driving it negative and failing bounds at
+  // sync -- for both addresses, since the per-delta requests themselves
+  // succeed and only balance sync fails.
+  ContractAddress addr_a{};
+  ContractAddress addr_b{};
+  for (std::size_t i = 0; i < addr_a.size(); ++i) {
+    addr_a[i] = static_cast<std::uint8_t>(0x10 + i);
+    addr_b[i] = static_cast<std::uint8_t>(0x30 + i);
+  }
+
+  StorageDeltaBatch batch;
+  batch.push_back(make_consume_uniquifier_delta(
+      addr_a, Uniquifier{.block_expiry_height = BlockHeight{100}, .nonce = 1}));
+  batch.push_back(make_consume_uniquifier_delta(
+      addr_b, Uniquifier{.block_expiry_height = BlockHeight{100}, .nonce = 2}));
+
+  auto r =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{5}, batch);
+  ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
+
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(r.conflict().conflicts().size(), 2U);
+    std::set<ContractAddress> expected{addr_a, addr_b};
+    std::set<ContractAddress> actual;
+    for (auto const &d : r.conflict().conflicts()) {
+      EXPECT_EQ(d.code, DbConflictCode::kDbConflictBoundsExceeded);
+      EXPECT_EQ(d.addrkey.key.key_type(),
+                StorageKeyType::FreeNativeTokenBalance);
+      actual.insert(d.addrkey.address);
+    }
+    EXPECT_EQ(expected, actual);
+  }
+  else {
+    ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(r.conflict().first().code,
+              DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(r.conflict().first().addrkey.key.key_type(),
+              StorageKeyType::FreeNativeTokenBalance);
+    EXPECT_TRUE(r.conflict().first().addrkey.address == addr_a ||
+                r.conflict().first().addrkey.address == addr_b);
   }
 }
 

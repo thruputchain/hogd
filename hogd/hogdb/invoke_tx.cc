@@ -558,9 +558,23 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
   return request_change(key, std::move(change));
 }
 
-HogDBStatus<void>
-InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr)
+DbConflictCode
+InvokeTX::conflict_reason_for(HogDBCode code) const
 {
+  if (code == HogDBCode::kOverflow) {
+    return DbConflictCode::kDbConflictOverflow;
+  }
+  CHECK(code == HogDBCode::kConflict);
+  CHECK(last_conflict_reason_.has_value());
+  return *last_conflict_reason_;
+}
+
+HogDBStatus<void>
+InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr,
+                             std::vector<BalanceConflict> *all_conflicts)
+{
+  std::optional<HogDBError> first_error;
+
   if constexpr (is_debug_build()) {
     std::vector<const Address *> addrs;
     for (const auto &[addr, vec] : balance_deltas_) {
@@ -573,6 +587,17 @@ InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr)
     for (const auto *addr : addrs) {
       auto status = update_balance_lock(*addr);
       if (!status) {
+        HogDBCode code = status.error().code();
+        if (all_conflicts != nullptr &&
+            (code == HogDBCode::kConflict || code == HogDBCode::kOverflow)) {
+          all_conflicts->push_back(
+              BalanceConflict{.addr = addr->get_raw(),
+                              .reason = conflict_reason_for(code)});
+          if (!first_error.has_value()) {
+            first_error = status.error();
+          }
+          continue;
+        }
         if (first_conflicting_addr != nullptr) {
           *first_conflicting_addr = addr->get_raw();
         }
@@ -585,6 +610,17 @@ InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr)
       if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
         auto status = update_balance_lock(addr);
         if (!status) {
+          HogDBCode code = status.error().code();
+          if (all_conflicts != nullptr &&
+              (code == HogDBCode::kConflict || code == HogDBCode::kOverflow)) {
+            all_conflicts->push_back(
+                BalanceConflict{.addr = addr.get_raw(),
+                                .reason = conflict_reason_for(code)});
+            if (!first_error.has_value()) {
+              first_error = status.error();
+            }
+            continue;
+          }
           if (first_conflicting_addr != nullptr) {
             *first_conflicting_addr = addr.get_raw();
           }
@@ -592,6 +628,10 @@ InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr)
         }
       }
     }
+  }
+
+  if (first_error.has_value()) {
+    return std::unexpected{*first_error};
   }
 
   assert_is_valid();

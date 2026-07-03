@@ -126,13 +126,26 @@ public:
   // Execution mode of the block this transaction runs in.
   BlockExecutionMode execution_mode() const { return block_.get().mode(); }
 
+  // One failed balance-lock acquisition: the raw address whose balance
+  // could not be reconciled and the conflict reason.
+  struct BalanceConflict {
+    ContractAddress addr;
+    DbConflictCode reason;
+  };
+
   // Synchronizes balance locks for all addresses touched at the current
-  // savepoint depth. On failure, if [first_conflicting_addr] is non-null it
-  // receives the raw contract address of the failing balance (balance sync
-  // aborts at the first failure). The conflict reason, if any, is recorded
-  // in last_conflict_reason().
+  // savepoint depth.
+  //
+  // On failure with [all_conflicts] null: aborts at the first failing
+  // address, reporting it via [first_conflicting_addr] if non-null.
+  // With [all_conflicts] non-null: keeps evaluating the remaining
+  // addresses best-effort, appending every conflict/overflow failure, and
+  // returns the first error; any non-conflict failure (e.g. stale block)
+  // aborts immediately without being appended. The conflict reason, if
+  // any, is recorded in last_conflict_reason().
   HogDBStatus<void>
-  sync_balance_locks(ContractAddress *first_conflicting_addr = nullptr);
+  sync_balance_locks(ContractAddress *first_conflicting_addr = nullptr,
+                     std::vector<BalanceConflict> *all_conflicts = nullptr);
 
   // Reason for the most recent kConflict returned by a request_* method or
   // sync_balance_locks (#2759). Meaningful only immediately after a request
@@ -141,6 +154,12 @@ public:
   {
     return last_conflict_reason_;
   }
+
+  // Maps a failed request's error code to the DbConflictCode reported to
+  // the executor: kOverflow maps directly; kConflict reads the recorded
+  // reason. CHECK rather than assert: silently defaulting a missing reason
+  // would misreport the conflict type in release builds.
+  DbConflictCode conflict_reason_for(HogDBCode code) const;
 
 private:
   struct ItemVersion {

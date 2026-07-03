@@ -7,6 +7,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -2252,6 +2253,45 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
   ASSERT_EQ(1, replay_meta->heights.size());
   EXPECT_EQ(7, replay_meta->heights[0].height);
   EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
+}
+
+TEST_F(HogDBTest, SyncBalanceLocksReportsAllBalanceConflicts)
+{
+  // Neither address has a seeded balance, so the storage cost locked by
+  // consuming a uniquifier drives each address's balance delta negative,
+  // failing bounds at sync -- for both addresses, since the collector keeps
+  // going after the first failure.
+  Address addr_a = make_address(kAddress + 60);
+  Address addr_b = make_address(kAddress + 61);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 5,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+  invoke_tx.create_savepoint();
+
+  ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+      addr_a, Uniquifier(7, 100), std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+      addr_b, Uniquifier(7, 200), std::to_underlying(StorageDeltaFlags::None)));
+
+  std::vector<InvokeTX::BalanceConflict> conflicts;
+  auto sync_result = invoke_tx.sync_balance_locks(nullptr, &conflicts);
+  ASSERT_FALSE(sync_result.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
+  ASSERT_EQ(2U, conflicts.size());
+
+  std::set<ContractAddress> expected_addrs{addr_a.get_raw(), addr_b.get_raw()};
+  std::set<ContractAddress> actual_addrs;
+  for (auto const &c : conflicts) {
+    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded, c.reason);
+    actual_addrs.insert(c.addr);
+  }
+  EXPECT_EQ(expected_addrs, actual_addrs);
+
+  invoke_tx.rollback_to_savepoint(0);
+  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, ReplayCacheGCPrunesMultipleHeightsAtOnce)

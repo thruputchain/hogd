@@ -5,6 +5,7 @@
 #include <set>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include "hogd/hogexec/common/block_id_util.h"
 
@@ -87,23 +88,6 @@ to_span(const Bytestring &bs)
   return {reinterpret_cast<const std::byte *>(bs.data()), bs.size()};
 }
 
-// Maps a failed request's HogDBCode + the InvokeTX reason slot to the
-// DbConflictCode reported to the executor. Call only for failures that
-// to_rpc_error maps to kRPCStorageWriteFailed.
-DbConflictCode
-extract_conflict_reason(InvokeTX const &tx, HogDBCode code)
-{
-  if (code == HogDBCode::kOverflow) {
-    return DbConflictCode::kDbConflictOverflow;
-  }
-  assert(code == HogDBCode::kConflict);
-  auto reason = tx.last_conflict_reason();
-  // Every kConflict producer on this path records a reason (Task 3
-  // contract); a missing reason is a programmer error.
-  assert(reason.has_value());
-  return reason.value_or(DbConflictCode::kDbConflictExclusiveLock);
-}
-
 // Diagnostic level for a push, selected from the block's execution mode:
 // proposals report conflicts (everything in debug builds, first-only in
 // release); validation and viewing report nothing.
@@ -130,7 +114,7 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
   auto finish = [&tx, conflict_code](HogDBStatus<void> ret) {
     RPCError err = to_rpc_error(ret);
     if (err == RPCError::kRPCStorageWriteFailed && conflict_code != nullptr) {
-      *conflict_code = extract_conflict_reason(tx, ret.error().code());
+      *conflict_code = tx.conflict_reason_for(ret.error().code());
     }
     return err;
   };
@@ -324,7 +308,11 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   }
 
   ContractAddress balance_conflict_addr{};
-  auto bal_req = itx->sync_balance_locks(&balance_conflict_addr);
+  std::vector<InvokeTX::BalanceConflict> balance_conflicts;
+  const bool collect_all = (level == DbDiagnosticLevel::kDbDiagnosticAll);
+  auto bal_req =
+      itx->sync_balance_locks(collect_all ? nullptr : &balance_conflict_addr,
+                              collect_all ? &balance_conflicts : nullptr);
   if (!bal_req) {
     if constexpr (is_debug_build()) {
       trace("Failed to acquire balance locks after batch of deltas: {}",
@@ -334,10 +322,20 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     if (err != RPCError::kRPCStorageWriteFailed) {
       return fail(err);
     }
-    AddressAndKey bal_key{.address = balance_conflict_addr,
-                          .key = StorageKey(
-                              StorageKeyType::FreeNativeTokenBalance)};
-    record(bal_key, extract_conflict_reason(*itx, bal_req.error().code()));
+    if (collect_all) {
+      for (auto const &bc : balance_conflicts) {
+        record(AddressAndKey{.address = bc.addr,
+                             .key = StorageKey(
+                                 StorageKeyType::FreeNativeTokenBalance)},
+               bc.reason);
+      }
+    }
+    else {
+      record(AddressAndKey{.address = balance_conflict_addr,
+                           .key = StorageKey(
+                               StorageKeyType::FreeNativeTokenBalance)},
+             itx->conflict_reason_for(bal_req.error().code()));
+    }
     return fail(RPCError::kRPCStorageWriteFailed);
   }
   if (first_err != RPCError::kRPCNone) {
