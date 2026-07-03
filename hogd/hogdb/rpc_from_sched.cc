@@ -4,7 +4,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <limits>
 #include <optional>
 #include <span>
 #include <sys/socket.h>
@@ -400,8 +399,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
       },
       [&](ContractAddress const &addr,
           AddressAuthData const &auth_data) -> int128_t {
-        x23::Vec<AuthDataChangeSigner, std::numeric_limits<uint32_t>::max()>
-            auth_data_change_signers;
+        x23::Vec<AuthDataChangeSigner, kMaxSigners> auth_data_change_signers;
         for (uint32_t i = 0; i < kMaxSigners; i++) {
           if (auth_data.public_keys[i]) {
             auth_data_change_signers.push_back({

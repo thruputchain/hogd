@@ -63,6 +63,16 @@ public:
     co_return std::move(*status);
   }
 
+  x23::Async<TransactionRefPage>
+  get_transactions_by_address(AddressTransactionQuery query)
+  {
+    auto status = db_.get_transactions_by_address(query);
+    if (!status) {
+      co_return TransactionRefPage{};
+    }
+    co_return std::move(*status);
+  }
+
 private:
   IndexDB &db_;
 };
