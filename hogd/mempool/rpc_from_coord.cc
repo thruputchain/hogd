@@ -2142,8 +2142,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         co_return;
       });
 
+  // There is no rollback path for scheduler mutations, so do not apply them
+  // until all external commit/abandon RPCs have succeeded.
   auto scheduler_update_node = commit_dag.async<void>(
-      "update scheduler", commit_dag.after(prepare_node),
+      "update scheduler",
+      commit_dag.after(commit_block_node, abandon_snapshots_node,
+                       abandon_events_node),
       [&]() -> x23::Async<void> {
         clear_expired_failed_authentication_txs();
 
@@ -2227,9 +2231,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       });
 
   commit_dag.async<void>(
-      "finalize commit",
-      commit_dag.after(scheduler_update_node, commit_block_node,
-                       abandon_snapshots_node, abandon_events_node),
+      "finalize commit", commit_dag.after(scheduler_update_node),
       [&]() -> x23::Async<void> {
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
