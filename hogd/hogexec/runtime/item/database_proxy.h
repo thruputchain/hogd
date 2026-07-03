@@ -75,13 +75,12 @@ public:
                                          uint32_t index);
 
   // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
-  // non-null it receives the conflict diagnostics the server built for
-  // the requested [level].
-  SystemStatus<bool> try_push_new_subtransaction(
-      BlockID block_id, TransactionID tx_id,
-      StorageDeltaBatch const &delta_batch,
-      DbDiagnosticLevel level = DbDiagnosticLevel::kDbDiagnosticNone,
-      DbConflictResult *conflict_out = nullptr);
+  // non-null it receives the conflict diagnostics hogdb built at the level
+  // it selected from the block's execution mode.
+  SystemStatus<bool>
+  try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
+                              StorageDeltaBatch const &delta_batch,
+                              DbConflictResult *conflict_out = nullptr);
 
   SystemStatus<void>
   commit_transaction(BlockID block_id, TransactionID tx_id,
@@ -127,16 +126,9 @@ public:
                                                std::move(delta), flags);
   }
 
-  // Diagnostic detail requested from hogdb on push failures. Defaults to
-  // none (prod). SDK/testing harnesses and proposal-mode opt-in raise it
-  // via SystemCallHandler::set_db_diagnostic_level.
-  void set_diagnostic_level(DbDiagnosticLevel level)
-  {
-    diagnostic_level_ = level;
-  }
-
-  // Conflict diagnostics from the most recent failed push; the None arm
-  // if the last push succeeded or diagnostics are disabled.
+  // Conflict diagnostics from the most recent failed push, at the level
+  // the database selected from the block mode; the None arm if the last
+  // push succeeded or the block is not a proposal.
   DbConflictResult const &last_push_conflict() const
   {
     return last_push_conflict_;
@@ -166,7 +158,6 @@ public:
     auto r =
         db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
                                               current_subtransaction_batch_,
-                                              diagnostic_level_,
                                               &last_push_conflict_);
     current_subtransaction_batch_.clear();
     return r;
@@ -202,7 +193,6 @@ private:
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
-  DbDiagnosticLevel diagnostic_level_{DbDiagnosticLevel::kDbDiagnosticNone};
   DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
 };
 } // namespace hogd

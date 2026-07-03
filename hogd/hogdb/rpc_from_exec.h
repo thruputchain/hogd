@@ -33,8 +33,7 @@ public:
   RPCError abort_transaction(BlockID block, TransactionID tx);
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch,
-                              DbDiagnosticLevel level);
+                              StorageDeltaBatch const &batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 

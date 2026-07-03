@@ -104,6 +104,19 @@ extract_conflict_reason(InvokeTX const &tx, HogDBCode code)
   return reason.value_or(DbConflictCode::kDbConflictExclusiveLock);
 }
 
+// Diagnostic level for a push, selected from the block's execution mode:
+// proposals report conflicts (everything in debug builds, first-only in
+// release); validation and viewing report nothing.
+constexpr DbDiagnosticLevel
+diagnostic_level_for(BlockExecutionMode mode)
+{
+  if (mode != BlockExecutionMode::kBlockExecutionModeProposal) {
+    return DbDiagnosticLevel::kDbDiagnosticNone;
+  }
+  return is_debug_build() ? DbDiagnosticLevel::kDbDiagnosticAll
+                          : DbDiagnosticLevel::kDbDiagnosticFirst;
+}
+
 } // namespace
 
 // HogDBExecutorRpc implementations
@@ -237,8 +250,7 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 
 TryPushSubtransactionResult
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch const &batch,
-                                              DbDiagnosticLevel level)
+                                              StorageDeltaBatch const &batch)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -248,6 +260,7 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
+  const DbDiagnosticLevel level = diagnostic_level_for(itx->execution_mode());
   if (itx->get_savepoint_head() >= kMaxSavepointDepth) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }

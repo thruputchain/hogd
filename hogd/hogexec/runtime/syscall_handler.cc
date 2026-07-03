@@ -20,6 +20,7 @@
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -1044,12 +1045,6 @@ InvocationFrameTrace const *
 SystemCallHandler::get_trace() const
 {
   return invocation_frame_trace_.get();
-}
-
-void
-SystemCallHandler::set_db_diagnostic_level(DbDiagnosticLevel level)
-{
-  db_proxy_.set_diagnostic_level(level);
 }
 
 void

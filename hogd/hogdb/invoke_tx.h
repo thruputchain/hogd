@@ -23,6 +23,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -121,6 +122,9 @@ public:
   bool release_blocktx_reference() { return block_.release_reference(); }
 
   void assert_is_valid() const noexcept;
+
+  // Execution mode of the block this transaction runs in.
+  BlockExecutionMode execution_mode() const { return block_.get().mode(); }
 
   // Synchronizes balance locks for all addresses touched at the current
   // savepoint depth. On failure, if [first_conflicting_addr] is non-null it

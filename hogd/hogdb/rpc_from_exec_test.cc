@@ -13,6 +13,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -75,15 +76,13 @@ protected:
     rpc_ = std::make_unique<HogDBExecutorRpc>(*ctx_);
   }
 
-  // Pushes a winning write at [key] from tx 1 so a differing write at the
-  // same key conflicts.
-  void seed_conflict(AddressAndKey const &key)
+  // Pushes a winning write at [key] from [tx] in [block] so a differing
+  // write at the same key conflicts.
+  void seed_conflict(BlockID block, TransactionID tx, AddressAndKey const &key)
   {
     StorageDeltaBatch batch;
     batch.push_back(make_bytes_delta(key, 0xAA));
-    auto r =
-        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1}, batch,
-                                          DbDiagnosticLevel::kDbDiagnosticNone);
+    auto r = rpc_->try_push_new_subtransaction(block, tx, batch);
     ASSERT_EQ(r.error(), RPCError::kRPCNone);
   }
 
@@ -92,49 +91,34 @@ protected:
   std::unique_ptr<HogDBExecutorRpc> rpc_;
 };
 
-TEST_F(RpcFromExecDiagnosticsTest, NoneLevelReturnsEmptyDiagnostics)
+TEST_F(RpcFromExecDiagnosticsTest, ValidationModeReturnsNoDiagnostics)
 {
+  ASSERT_TRUE(
+      ctx_->open_block_tx(BlockID{2},
+                          BlockExecutionMode::kBlockExecutionModeValidation));
+
   auto key = make_data_key(addr_, 1);
-  seed_conflict(key);
+  seed_conflict(BlockID{2}, TransactionID{1}, key);
 
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key, 0xBB));
   auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, batch,
-                                        DbDiagnosticLevel::kDbDiagnosticNone);
+      rpc_->try_push_new_subtransaction(BlockID{2}, TransactionID{2}, batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
   EXPECT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticNone);
 }
 
-TEST_F(RpcFromExecDiagnosticsTest, FirstLevelReportsFirstConflict)
-{
-  auto key = make_data_key(addr_, 1);
-  seed_conflict(key);
-
-  StorageDeltaBatch batch;
-  batch.push_back(make_bytes_delta(key, 0xBB));
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, batch,
-                                        DbDiagnosticLevel::kDbDiagnosticFirst);
-  ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
-  ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-  EXPECT_EQ(r.conflict().first().addrkey, key);
-  EXPECT_EQ(r.conflict().first().code,
-            DbConflictCode::kDbConflictValueMismatch);
-}
-
-TEST_F(RpcFromExecDiagnosticsTest, AllLevelReportsEveryConflict)
+TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsConflicts)
 {
   auto key_a = make_data_key(addr_, 1);
   auto key_b = make_data_key(addr_, 2);
-  seed_conflict(key_a);
+  seed_conflict(BlockID{1}, TransactionID{1}, key_a);
   {
     // Second winner, separate tx, second key.
     StorageDeltaBatch batch;
     batch.push_back(make_bytes_delta(key_b, 0xAA));
     auto r =
-        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, batch,
-                                          DbDiagnosticLevel::kDbDiagnosticNone);
+        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, batch);
     ASSERT_EQ(r.error(), RPCError::kRPCNone);
   }
 
@@ -142,17 +126,24 @@ TEST_F(RpcFromExecDiagnosticsTest, AllLevelReportsEveryConflict)
   batch.push_back(make_bytes_delta(key_a, 0xBB));
   batch.push_back(make_bytes_delta(key_b, 0xBB));
   auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch,
-                                        DbDiagnosticLevel::kDbDiagnosticAll);
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
-  ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
-  ASSERT_EQ(r.conflict().conflicts().size(), 2U);
-  // Note: debug builds shuffle batches executor-side, not here; hogdb
-  // preserves batch order, so order is deterministic in this direct test.
-  EXPECT_EQ(r.conflict().conflicts()[0].addrkey, key_a);
-  EXPECT_EQ(r.conflict().conflicts()[1].addrkey, key_b);
-  for (auto const &d : r.conflict().conflicts()) {
-    EXPECT_EQ(d.code, DbConflictCode::kDbConflictValueMismatch);
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(r.conflict().conflicts().size(), 2U);
+    // key_a then key_b, both kDbConflictValueMismatch (order: hogdb
+    // preserves batch order).
+    EXPECT_EQ(r.conflict().conflicts()[0].addrkey, key_a);
+    EXPECT_EQ(r.conflict().conflicts()[1].addrkey, key_b);
+    for (auto const &d : r.conflict().conflicts()) {
+      EXPECT_EQ(d.code, DbConflictCode::kDbConflictValueMismatch);
+    }
+  }
+  else {
+    ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(r.conflict().first().addrkey, key_a);
+    EXPECT_EQ(r.conflict().first().code,
+              DbConflictCode::kDbConflictValueMismatch);
   }
 }
 
@@ -160,15 +151,14 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
 {
   auto key_a = make_data_key(addr_, 1);
   auto key_b = make_data_key(addr_, 2);
-  seed_conflict(key_a);
+  seed_conflict(BlockID{1}, TransactionID{1}, key_a);
 
-  // Tx 3: one good delta (key_b) + one conflicting delta (key_a), All mode.
+  // Tx 3: one good delta (key_b) + one conflicting delta (key_a).
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key_b, 0xCC));
   batch.push_back(make_bytes_delta(key_a, 0xBB));
   auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch,
-                                        DbDiagnosticLevel::kDbDiagnosticAll);
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
 
   // The whole subtransaction rolled back: tx 4 can now claim key_b with
@@ -176,8 +166,7 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
   StorageDeltaBatch retry;
   retry.push_back(make_bytes_delta(key_b, 0xDD));
   auto r2 =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{4}, retry,
-                                        DbDiagnosticLevel::kDbDiagnosticFirst);
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{4}, retry);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 

@@ -40,6 +40,7 @@ public:
   // getters
   HogDBDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
+  BlockExecutionMode mode() const { return mode_; }
 
   void invalidate() { invalidated_.store(true, std::memory_order_release); }
   bool is_invalidated() const

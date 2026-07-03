@@ -264,7 +264,6 @@ SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
-                                           DbDiagnosticLevel level,
                                            DbConflictResult *conflict_out)
 {
   if constexpr (is_debug_build()) {
@@ -273,8 +272,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch,
-                                                   level);
+    auto res =
+        client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
     switch (res.error()) {
     case RPCError::kRPCNone:
       return true;

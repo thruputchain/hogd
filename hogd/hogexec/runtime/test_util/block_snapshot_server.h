@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "contract.hh"
-#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -50,8 +49,7 @@ public:
   // Create a new subtransaction on top of the current (sub)transaction.
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch,
-                              DbDiagnosticLevel level);
+                              StorageDeltaBatch const &batch);
 
   // Revert one or more subtransactions.
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,

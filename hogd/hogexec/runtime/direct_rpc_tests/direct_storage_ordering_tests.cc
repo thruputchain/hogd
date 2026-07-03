@@ -10,6 +10,7 @@
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
@@ -231,7 +232,7 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
   ASSERT_EQ(from_xdr(contract_bal1.value().nnint()), 0);
 }
 
-TEST_P(DirectStorageOrderingTest, FirstLevelDiagnosticOnConflict)
+TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB does not produce conflict diagnostics";
@@ -259,14 +260,24 @@ TEST_P(DirectStorageOrderingTest, FirstLevelDiagnosticOnConflict)
                                       .flags = std::to_underlying(
                                           StorageDeltaFlags::None)});
   DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
-  auto r2 = db_proxy.try_push_new_subtransaction(
-      get_block_number(), 2, loser, DbDiagnosticLevel::kDbDiagnosticFirst,
-      &conflict);
+  auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
+                                                 &conflict);
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
-  ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-  EXPECT_EQ(conflict.first().addrkey, key);
-  EXPECT_EQ(conflict.first().code, DbConflictCode::kDbConflictValueMismatch);
+  // The fixture runs Proposal mode: hogdb selects All in debug builds,
+  // First in release builds.
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(conflict.conflicts().size(), 1U);
+    EXPECT_EQ(conflict.conflicts()[0].addrkey, key);
+    EXPECT_EQ(conflict.conflicts()[0].code,
+              DbConflictCode::kDbConflictValueMismatch);
+  }
+  else {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(conflict.first().addrkey, key);
+    EXPECT_EQ(conflict.first().code, DbConflictCode::kDbConflictValueMismatch);
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -8,7 +8,6 @@
 #include <type_traits>
 
 #include "contract.hh"
-#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -38,8 +37,7 @@ public:
   // Otherwise does not change subtransaction count, and is a no-op.
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch,
-                              DbDiagnosticLevel level);
+                              StorageDeltaBatch const &batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
   ExpectedStorageItem get_snapshot_item(BlockID block,
