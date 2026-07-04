@@ -2115,7 +2115,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       });
 
   auto commit_block_node =
-      commit_dag.async<void>("commit block", commit_dag.after(prepare_node),
+      commit_dag.async<void>("commit block",
+                             commit_dag.after(prepare_node, lock_hog_age_node),
                              [&]() -> x23::Async<void> {
                                CHECK_PTR(commit_plan.committed_cache);
                                co_await commit_block(
@@ -2235,14 +2236,26 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
               commit_plan.committed_cache->txs,
               commit_plan.committed_cache->db_tip.height);
         }
-        (*hog_age_guard).reset();
         co_return;
       });
 
+  // HogDB commit publishes transfer deltas, and MempoolDbRpc writes average hog
+  // ages to DB after processing those deltas. Keep this lock held until the
+  // scheduler has applied pending hog ages and DB commit is complete, matching
+  // the synchronization the pre-DAG code relied on.
+  auto release_hog_age_node =
+      commit_dag.async<void>("release pending hog age update",
+                             commit_dag.after(scheduler_update_node,
+                                              commit_block_node),
+                             [hog_age_guard]() -> x23::Async<void> {
+                               (*hog_age_guard).reset();
+                               co_return;
+                             });
+
   commit_dag.async<void>(
       "finalize commit",
-      commit_dag.after(scheduler_update_node, commit_block_node,
-                       abandon_snapshots_node, abandon_events_node),
+      commit_dag.after(release_hog_age_node, abandon_snapshots_node,
+                       abandon_events_node),
       [&]() -> x23::Async<void> {
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
