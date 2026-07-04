@@ -23,7 +23,7 @@ if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
 fi
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c clang "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
@@ -97,7 +97,7 @@ if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
 fi
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c clang "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
