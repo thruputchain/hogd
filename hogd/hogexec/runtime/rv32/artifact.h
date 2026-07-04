@@ -21,10 +21,13 @@ namespace hogd::rv32 {
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
-inline constexpr uint32_t kArtifactFormatVersion = 4;
-inline constexpr uint32_t kArtifactHeaderBytes = 132;
+inline constexpr uint32_t kArtifactFormatVersion = 5;
+inline constexpr uint32_t kArtifactHeaderBytes = 128;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
-inline constexpr uint32_t kArtifactEntryAbiVersion = 2;
+// v3: the VM seeds sp (x2) to 0 at entry; the guest owns stack placement and
+// must set sp itself (a stack touch before that wraps below 0 and traps OOB).
+// v2 seeded sp to the top of data memory.
+inline constexpr uint32_t kArtifactEntryAbiVersion = 3;
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
@@ -45,9 +48,8 @@ inline constexpr size_t kArtifactGasDigestOffset = 40;
 inline constexpr size_t kArtifactMemoryBytesOffset = 48;
 inline constexpr size_t kArtifactCodeSizeOffset = 52;
 inline constexpr size_t kArtifactInitialMemorySizeOffset = 56;
-inline constexpr size_t kArtifactCodeOffsetOffset = 60;
-inline constexpr size_t kArtifactInitialMemoryOffsetOffset = 64;
-inline constexpr size_t kArtifactCodeDigestOffset = 68;
+inline constexpr size_t kArtifactInitialMemoryStartOffset = 60;
+inline constexpr size_t kArtifactCodeDigestOffset = 64;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
 inline constexpr char8_t kArtifactSectionDigestAlgorithm[] = u8"sha256";
@@ -148,7 +150,7 @@ constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v4");
+  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
 
   digest = format_fingerprint_bytes(digest, u8"magic", kArtifactMagic);
   digest = format_fingerprint_u64(digest, u8"format_version", format_version);
@@ -211,14 +213,10 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
                                       u8"header.initial_memory_size.size",
                                       kArtifactInitialMemorySizeOffset, 4);
   digest =
-      format_fingerprint_layout_field(digest, u8"header.code_offset.offset",
-                                      u8"header.code_offset.size",
-                                      kArtifactCodeOffsetOffset, 4);
-  digest =
       format_fingerprint_layout_field(digest,
-                                      u8"header.initial_memory_offset.offset",
-                                      u8"header.initial_memory_offset.size",
-                                      kArtifactInitialMemoryOffsetOffset, 4);
+                                      u8"header.initial_memory_start.offset",
+                                      u8"header.initial_memory_start.size",
+                                      kArtifactInitialMemoryStartOffset, 4);
   digest =
       format_fingerprint_layout_field(digest, u8"header.code_digest.offset",
                                       u8"header.code_digest.size",
@@ -244,32 +242,35 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
   digest = format_fingerprint_u64(digest, u8"code_size_nonzero", 1);
+  digest = format_fingerprint_u64(
+      digest, u8"initial_memory_start_plus_size_le_memory_bytes", 1);
   digest = format_fingerprint_u64(digest,
-                                  u8"initial_memory_size_le_memory_bytes", 1);
+                                  u8"initial_memory_start_zero_when_empty", 1);
   digest = format_fingerprint_string(digest, u8"canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
-  digest = format_fingerprint_u64(digest, u8"sections_must_be_in_bounds", 1);
-  digest = format_fingerprint_u64(digest, u8"sections_must_not_overlap", 1);
   digest =
       format_fingerprint_u64(digest, u8"no_section_gaps_or_trailing_bytes", 1);
   return digest;
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x3aed01915d1a5e1dULL);
+static_assert(kArtifactFormatFingerprint == 0x8e5caf3e9cd23b22ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v4 header, little-endian:
+// RV32 artifact v5 header, little-endian:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
-// code_offset, initial_memory_offset, sha256(code), sha256(initial_memory).
-// Body: header || code || initial_memory. v4 moves method dispatch into the
-// guest (no dispatch table); the stored memory is only the initialized prefix
-// (initial_memory_size <= memory_bytes), zero-extended by the runtime.
+// initial_memory_start, sha256(code), sha256(initial_memory).
+// Body: header || code || initial_memory, exactly — section file positions
+// are derived from the canonical order, not stored. Method dispatch is in the
+// guest (since v4). The stored image is placed at data-space VA
+// initial_memory_start (a guest VA, unrelated to file layout); the runtime
+// zero-fills [0, start) — e.g. a stack-first guest's stack region — and
+// [start + size, memory_bytes).
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,
@@ -284,7 +285,7 @@ enum class ArtifactError {
   kMemorySizeInvalid,
   kCodeSizeInvalid,
   kInitialMemoryTooLarge,
-  kInvalidOffsets,
+  kInvalidSectionLayout,
   kCodeDigestMismatch,
   kInitialMemoryDigestMismatch,
   kInvalidProgram,
@@ -292,6 +293,9 @@ enum class ArtifactError {
 
 struct ArtifactImage {
   std::shared_ptr<const Program> program;
+  // Materialized prefix [0, initial_memory_start + stored size): leading
+  // zeros below the image's load VA are included so consumers can keep
+  // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
@@ -301,6 +305,8 @@ struct ArtifactImage {
 struct ThreadedArtifactImage {
   std::span<const uint8_t> code;
   std::span<const uint8_t> initial_memory;
+  // Data-space VA where initial_memory is placed; [0, start) zero-fills.
+  uint32_t initial_memory_start = 0;
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
