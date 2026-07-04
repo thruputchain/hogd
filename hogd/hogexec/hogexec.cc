@@ -62,6 +62,14 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
   const ParsedHostPort coordinator =
       parse_host_port("coordinator address", coordinator_addr);
 
+  const bool view_gateway_configured =
+      db_executor_addr || event_executor_addr || view_gateway_port;
+  if (view_gateway_configured &&
+      (!db_executor_addr || !event_executor_addr || !view_gateway_port)) {
+    throw std::runtime_error("--db-executor-addr, --event-executor-addr, and "
+                             "--view-gateway-port must be provided together");
+  }
+
   Executor executor(nthreads);
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(coordinator.host, coordinator.port);
@@ -71,11 +79,7 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
   info("PORT hogexec.mempool={}", actual_mempool_port);
 
   std::unique_ptr<ViewGatewayServer> view_gateway_server;
-  if (db_executor_addr || event_executor_addr || view_gateway_port) {
-    if (!db_executor_addr || !event_executor_addr || !view_gateway_port) {
-      throw std::runtime_error("--db-executor-addr, --event-executor-addr, and "
-                               "--view-gateway-port must be provided together");
-    }
+  if (view_gateway_configured) {
     const ParsedHostPort event_executor =
         parse_host_port("event executor address", *event_executor_addr);
     view_gateway_server =
