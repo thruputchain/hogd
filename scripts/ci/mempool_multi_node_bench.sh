@@ -283,8 +283,12 @@ publish_results() {
     echo 'failed to collect coordinator output; skipping summary metric file' >&2
   fi
 
-  #echo 'commit metrics history updates'
-  #"$REPO_ROOT/scripts/commit_metrics.sh"
+  if [[ ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} -eq 0 ]]; then
+    echo 'commit metrics history updates'
+    "$REPO_ROOT/scripts/commit_metrics.sh"
+  else
+    echo 'skipping metrics history commit'
+  fi
   PUBLISHED_RESULTS=1
 }
 
