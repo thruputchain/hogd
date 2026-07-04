@@ -16,8 +16,14 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
+BUILD_SANITIZER_ARGS=()
+if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
+  BUILD_SANITIZER_ARGS=(-f "-fsanitize=address" -x -DX23_CORO_TRACE=1)
+  export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+fi
+
 echo 'configure'
-./scripts/build.sh -d release -t Release -c clang -f "-fsanitize=address" -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c clang "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
@@ -30,7 +36,6 @@ popd >/dev/null
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
-export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
 echo 'run bench server'
 mkdir -p ci_work_dir/
@@ -56,6 +61,8 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+HOG_E2E_PAYMENT_MULTI_NODE_ASAN = "{{ .hog_e2e_payment_multi_node_asan }}"
+MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS = "{{ .mempool_multi_node_bench_skip_commit_metrics }}"
 
 [jobs.host]
 bench_1 = "hog6"
@@ -83,8 +90,14 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
+BUILD_SANITIZER_ARGS=()
+if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
+  BUILD_SANITIZER_ARGS=(-f "-fsanitize=address" -x -DX23_CORO_TRACE=1)
+  export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+fi
+
 echo 'configure'
-./scripts/build.sh -d release -t Release -c clang -f "-fsanitize=address" -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c clang "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
@@ -94,7 +107,6 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 export BUILD_DIR=release
 export WORK_DIR=ci_work_dir/
-export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
 shutdown_bench_servers() {
   set +e
@@ -115,13 +127,9 @@ mkdir -p ci_work_dir/
 
 echo 'run mempool benchmarks'
 set +e
-MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh
+./scripts/ci/mempool_multi_node_bench.sh
 mempool_bench_exit=$?
 set -e
-
-# Not committing performance metrics on an asan run
-#echo 'commit metrics'
-#(./scripts/commit_metrics.sh) || true
 
 echo 'bench servers will be shut down by EXIT trap'
 
@@ -151,6 +159,8 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+HOG_E2E_PAYMENT_MULTI_NODE_ASAN = "{{ .hog_e2e_payment_multi_node_asan }}"
+MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS = "{{ .mempool_multi_node_bench_skip_commit_metrics }}"
 
 [jobs.host]
 metrics_1 = "hog10"

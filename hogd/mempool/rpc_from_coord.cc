@@ -2020,6 +2020,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   size_t remove_from_scheduler_size = 0;
 
   auto nominated_guard = std::make_shared<x23::CoroGuard>();
+  auto validated_guard = std::make_shared<x23::CoroGuard>();
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   auto hog_age_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag commit_dag("schedulercoord_commit_block", default_threadpool());
@@ -2030,8 +2031,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         co_return;
       });
 
+  auto lock_validated_node = commit_dag.async<void>(
+      "lock validated block cache", [&, validated_guard]() -> x23::Async<void> {
+        co_await (*validated_guard)(validated_block_cache_lock_);
+        co_return;
+      });
+
   auto check_block_node = commit_dag.async<void>(
-      "check block exists", commit_dag.after(lock_nominated_node),
+      "check block exists",
+      commit_dag.after(lock_nominated_node, lock_validated_node),
       [&]() -> x23::Async<void> {
         if ((!nominated_block_cache_.block_id ||
              nominated_block_cache_.block_id != block_id) &&
@@ -2064,7 +2072,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // groups for an account that no longer has any hogs.
   auto lock_hog_age_node =
       commit_dag.async<void>("lock pending hog age update",
-                             commit_dag.after(lock_commit_node),
+                             commit_dag.after(check_block_node),
                              [&, hog_age_guard]() -> x23::Async<void> {
                                co_await (*hog_age_guard)(
                                    scheduler_->pending_hog_age_update_lock_);
@@ -2072,7 +2080,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                              });
 
   auto prepare_node = commit_dag.async<void>(
-      "prepare commit plan", commit_dag.after(lock_hog_age_node),
+      "prepare commit plan", commit_dag.after(check_block_node,
+                                              lock_commit_node),
       [&]() -> x23::Async<void> {
         commit_plan.abandon_block_ids.clear();
         if (nominated_block_cache_.block_id &&
@@ -2142,12 +2151,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         co_return;
       });
 
-  // There is no rollback path for scheduler mutations, so do not apply them
-  // until all external commit/abandon RPCs have succeeded.
+  // Scheduler updates only need the commit plan and hog-age lock. Run them in
+  // parallel with external commit/abandon RPCs so committed txs stop occupying
+  // scheduler capacity while those RPCs finish.
   auto scheduler_update_node = commit_dag.async<void>(
-      "update scheduler",
-      commit_dag.after(commit_block_node, abandon_snapshots_node,
-                       abandon_events_node),
+      "update scheduler", commit_dag.after(prepare_node, lock_hog_age_node),
       [&]() -> x23::Async<void> {
         clear_expired_failed_authentication_txs();
 
@@ -2227,11 +2235,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
               commit_plan.committed_cache->txs,
               commit_plan.committed_cache->db_tip.height);
         }
+        (*hog_age_guard).reset();
         co_return;
       });
 
   commit_dag.async<void>(
-      "finalize commit", commit_dag.after(scheduler_update_node),
+      "finalize commit",
+      commit_dag.after(scheduler_update_node, commit_block_node,
+                       abandon_snapshots_node, abandon_events_node),
       [&]() -> x23::Async<void> {
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
