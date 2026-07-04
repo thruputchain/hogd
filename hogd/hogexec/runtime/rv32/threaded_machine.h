@@ -89,12 +89,14 @@ static_assert(alignof(Slot) == 16);
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
-  // it is zero-padded out to total_memory_size, which is the machine's full
-  // memory size and must be <= kMaxMemoryBytes and >= memory.size().
+  // it is placed at data-space VA `memory_start`, with zeros filling [0,
+  // memory_start) and [memory_start+memory.size(), total_memory_size).
+  // `total_memory_size` is the machine's full memory size and must be <=
+  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-         uint32_t total_memory_size, bool trace);
+         uint32_t memory_start, uint32_t total_memory_size, bool trace);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -1714,6 +1716,7 @@ inline constexpr std::array<FusionRule, 9> kFusionRules = {
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
+                                        uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace)
 {
   const auto program = ThreadedProgram::create(code);
@@ -1722,12 +1725,12 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   }
 
   if (total_memory_size > kMaxMemoryBytes ||
-      total_memory_size < memory.size()) {
+      size_t{memory_start} + memory.size() > total_memory_size) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 
-  std::vector<uint8_t> initial_memory_image(memory.begin(), memory.end());
-  initial_memory_image.resize(total_memory_size);
+  std::vector<uint8_t> initial_memory_image(total_memory_size, 0);
+  std::ranges::copy(memory, initial_memory_image.begin() + memory_start);
 
   std::vector<Slot> exec;
   size_t n = program->instruction_count();

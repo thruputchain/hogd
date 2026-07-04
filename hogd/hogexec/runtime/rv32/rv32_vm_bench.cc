@@ -452,6 +452,7 @@ make_recursive_fibonacci_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -510,6 +511,7 @@ make_compute_loop_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -582,6 +584,7 @@ make_compute_loop_independent_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -825,6 +828,7 @@ bm_rv32_threaded_instantiate(benchmark::State &state)
   std::vector<uint8_t> initial_memory; // all zero initial memory
   const auto program =
       ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                              /*memory_start=*/0,
                                               kMaxMemoryBytes,
                                               /*trace=*/false)
           .value();
