@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 
+#include "db_conflict.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -44,14 +45,14 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
     if (after != nullptr) {
       int128_t delta_after = after->delta();
       if (delta_after < get_storage_cost_of_committed_value(ctx.cost_model)) {
-        return HogDBError{HogDBCode::kConflict};
+        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
       }
     }
   }
 
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
   }
 
   return 0;

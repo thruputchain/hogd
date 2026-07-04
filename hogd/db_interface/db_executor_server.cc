@@ -71,13 +71,14 @@ DbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
   return RPCError::kRPCNone;
 }
 
-RPCError
+TryPushSubtransactionResult
 DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                            StorageDeltaBatch const &batch)
 {
+  // test double: produces no diagnostics
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
-    return RPCError::kRPCBadBlockID;
+    return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
   }
 
   block_data->push_subtransaction(tx);
@@ -96,13 +97,13 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                            delta.flags)) {
       if (auto err = block_data->pop_subtransactions(tx, 1);
           err != RPCError::kRPCNone) {
-        return err;
+        return TryPushSubtransactionResult(err);
       }
-      return RPCError::kRPCStorageWriteFailed;
+      return TryPushSubtransactionResult(RPCError::kRPCStorageWriteFailed);
     }
   }
 
-  return RPCError::kRPCNone;
+  return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
 RPCError

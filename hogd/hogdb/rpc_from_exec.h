@@ -8,6 +8,7 @@
 #include <type_traits>
 
 // generated x23 headers
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -30,8 +31,9 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
-  RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                       StorageDeltaBatch const &batch);
+  TryPushSubtransactionResult
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch const &batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 
@@ -66,7 +68,8 @@ private:
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageDeltaFlagSet flags);
+                              StorageDeltaFlagSet flags,
+                              DbConflictCode *conflict_code);
 };
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);

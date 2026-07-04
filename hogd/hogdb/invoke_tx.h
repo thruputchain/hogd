@@ -4,12 +4,14 @@
 
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
@@ -21,8 +23,10 @@
 #include "hogd/hogdb/status.h"
 #include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -119,7 +123,43 @@ public:
 
   void assert_is_valid() const noexcept;
 
-  HogDBStatus<void> sync_balance_locks();
+  // Execution mode of the block this transaction runs in.
+  BlockExecutionMode execution_mode() const { return block_.get().mode(); }
+
+  // One failed balance-lock acquisition: the raw address whose balance
+  // could not be reconciled and the conflict reason.
+  struct BalanceConflict {
+    ContractAddress addr;
+    DbConflictCode reason;
+  };
+
+  // Synchronizes balance locks for all addresses touched at the current
+  // savepoint depth.
+  //
+  // On failure with [all_conflicts] null: aborts at the first failing
+  // address, reporting it via [first_conflicting_addr] if non-null.
+  // With [all_conflicts] non-null: keeps evaluating the remaining
+  // addresses best-effort, appending every conflict/overflow failure, and
+  // returns the first error; any non-conflict failure (e.g. stale block)
+  // aborts immediately without being appended. The conflict reason, if
+  // any, is recorded in last_conflict_reason().
+  HogDBStatus<void>
+  sync_balance_locks(ContractAddress *first_conflicting_addr = nullptr,
+                     std::vector<BalanceConflict> *all_conflicts = nullptr);
+
+  // Reason for the most recent kConflict returned by a request_* method or
+  // sync_balance_locks (#2759). Meaningful only immediately after a request
+  // that returned kConflict; a stale value may remain after other failures.
+  std::optional<DbConflictCode> last_conflict_reason() const
+  {
+    return last_conflict_reason_;
+  }
+
+  // Maps a failed request's error code to the DbConflictCode reported to
+  // the executor: kOverflow maps directly; kConflict reads the recorded
+  // reason. CHECK rather than assert: silently defaulting a missing reason
+  // would misreport the conflict type in release builds.
+  DbConflictCode conflict_reason_for(HogDBCode code) const;
 
 private:
   struct ItemVersion {
@@ -152,6 +192,7 @@ private:
 
   unsigned int tx_depth_{0};
   PerThreadARC<BlockTX> &block_;
+  std::optional<DbConflictCode> last_conflict_reason_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
   // combine it with the latest balance delta for that address.
