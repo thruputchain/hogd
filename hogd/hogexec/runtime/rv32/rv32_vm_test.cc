@@ -508,7 +508,7 @@ TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
   Machine machine(program, 4096, 10);
   EXPECT_EQ(machine.pc(), 0U);
   EXPECT_EQ(machine.reg(0), 0U);
-  EXPECT_EQ(machine.reg(2), 4096U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
 }
 
@@ -531,7 +531,7 @@ TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
   machine.reset(9);
   EXPECT_EQ(machine.pc(), 0U);
   EXPECT_EQ(machine.reg(1), 0U);
-  EXPECT_EQ(machine.reg(2), 16U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.gas_remaining(), 9U);
   EXPECT_EQ(machine.trap(), Trap::kNone);
 
@@ -836,11 +836,11 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
   }
 }
 
-TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_uses_aligned_stack)
+TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_seeds_sp_zero)
 {
   const auto program = make_program({addi(0, 0, 123), addi(1, 0, 7)});
   Machine machine(program, 31, 10);
-  EXPECT_EQ(machine.reg(2), 16U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
   EXPECT_EQ(machine.reg(0), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);

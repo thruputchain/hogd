@@ -244,9 +244,8 @@ public:
     memory_.bytes().assign(image.begin(), image.end());
 
     regs_.fill(0);
-    // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
-    // matches canonical Machine::reset and the old reset() path.
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
+    // Entry ABI v3: sp (x2) stays 0 from the fill above -- the guest owns
+    // stack placement (matches canonical Machine::reset).
 
     exec_ = std::span(pre_instantiation.exec_);
     max_pc_ = (exec_.size() - 1) * kInstructionBytes;
@@ -277,7 +276,6 @@ public:
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
   }

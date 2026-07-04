@@ -384,8 +384,7 @@ TEST(Rv32Threaded, jalLinksAndJumps)
 {
   using test_program::j_type;
   // jal x1,+8 writes link (pc+4=4) to x1 and jumps over the addi at pc=4.
-  // Use x4 for the skipped instruction (avoids x2=sp which is initialised to
-  // the stack pointer by the machine).
+  // Use x4 for the skipped instruction (x2 was avoided when sp seeded nonzero at entry; sp now seeds 0 but x4 keeps the test stable).
   const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
                                        addi(3, 0, 9)};
   auto program = threaded_from_words(words);
