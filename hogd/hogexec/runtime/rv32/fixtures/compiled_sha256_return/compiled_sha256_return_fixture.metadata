@@ -14,21 +14,22 @@
   "initial_memory_start": 216,
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
   "lowerer_metadata": {
-    "artifact_bytes": 567,
-    "artifact_format_fingerprint": "0x3aed01915d1a5e1d",
-    "artifact_sha256": "0bc371c14d798e6c2522be1714590a5a54996afe9f5aa5e705144c07277bf6f3",
+    "artifact_bytes": 347,
+    "artifact_format_fingerprint": "0x8e5caf3e9cd23b22",
+    "artifact_sha256": "d76a2eb6ca6d0a40830962b9de928d5eb1f0f477905c81adeb849e62941a5725",
     "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
     "code_bytes": 212,
     "code_sha256": "b36ad41e67a6dcc74033c03006b00a2f015f0d60edf9750645c4816ed72e1938",
     "elf_sha256": "e92d2ad88fef9e1fba0a82f66f14db210db63506936d732c6dd6e6fafb5dffa4",
-    "initial_memory_bytes": 223,
-    "initial_memory_sha256": "fbdc957c928d44264ae2a9b454b5f5dc32980bc65a290c6995e3d69dbab5fd09",
+    "initial_memory_bytes": 7,
+    "initial_memory_sha256": "976ad63be07aa8f9f1d50ec110693c0edcf5172b6245de4aa0e6482b875a9740",
+    "initial_memory_start": 216,
     "memory_bytes": 65536,
     "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
     "target_triple": "riscv32im-unknown-none-elf"
   },
   "lowering_tool": "rv32-lower",
-  "lowering_tool_version": "rv32-lower 0.5.11",
+  "lowering_tool_version": "rv32-lower 0.5.12",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
@@ -40,7 +41,7 @@
     "0xe8ccfc8ffc9e81b9",
     "0x2f2cb89270e38729"
   ],
-  "packaging_tool_sha256": "b4d2ca85c201e46356d9149cf7728b723c30454b9e01aa0cb7a7389e7cca704d",
+  "packaging_tool_sha256": "9842926426fd7a9b2bbede0c3217a200fabbcc64ce4fd363abc9d385e46da732",
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
   "source_sha256": "bf740faa7f03f4de35d9369da9fc7565804466425542ac10fb3206625e00b660",
   "target_triple": "riscv32im-unknown-none-elf"
