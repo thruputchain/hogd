@@ -2080,8 +2080,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                              });
 
   auto prepare_node = commit_dag.async<void>(
-      "prepare commit plan", commit_dag.after(check_block_node,
-                                              lock_commit_node),
+      "prepare commit plan",
+      commit_dag.after(check_block_node, lock_commit_node),
       [&]() -> x23::Async<void> {
         commit_plan.abandon_block_ids.clear();
         if (nominated_block_cache_.block_id &&
