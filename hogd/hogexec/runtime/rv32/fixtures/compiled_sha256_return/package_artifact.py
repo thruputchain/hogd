@@ -7,11 +7,17 @@ from pathlib import Path
 
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 4
-ARTIFACT_HEADER_BYTES = 132
+# rv32-lower 0.5.11 emits format v4 / entry ABI 2; package_artifact.py
+# validates that, then upgrades to the v5 format hogd loads (temporary until
+# a v5-emitting rv32-lower ships).
+LOWERER_ARTIFACT_FORMAT_VERSION = 4
+LOWERER_ARTIFACT_HEADER_BYTES = 132
+LOWERER_ARTIFACT_ENTRY_ABI_VERSION = 2
+ARTIFACT_FORMAT_VERSION = 5
+ARTIFACT_HEADER_BYTES = 128
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
 ARTIFACT_FLAGS_REQUIRED_VALUE = 0
-ARTIFACT_ENTRY_ABI_VERSION = 2
+ARTIFACT_ENTRY_ABI_VERSION = 3
 ARTIFACT_SYSCALL_ABI_VERSION = 1
 GAS_TABLE_VERSION = 3
 GAS_SCHEDULE_DIGEST = 0x918317C21C46BB60
@@ -176,7 +182,7 @@ def symbol_by_name(symbols, name):
 
 def parse_artifact(path):
     artifact = Path(path).read_bytes()
-    if len(artifact) < ARTIFACT_HEADER_BYTES:
+    if len(artifact) < LOWERER_ARTIFACT_HEADER_BYTES:
         raise FixtureError("artifact is shorter than the header")
     header = struct.unpack_from("<8sIIQIIIIQIIIII32s32s", artifact, 0)
     magic = header[0]
@@ -197,11 +203,11 @@ def parse_artifact(path):
     initial_memory_digest = header[15]
     if magic != ARTIFACT_MAGIC:
         raise FixtureError("artifact has wrong magic")
-    if format_version != ARTIFACT_FORMAT_VERSION:
+    if format_version != LOWERER_ARTIFACT_FORMAT_VERSION:
         raise FixtureError(
             f"unexpected artifact format version {format_version}"
         )
-    if header_bytes != ARTIFACT_HEADER_BYTES:
+    if header_bytes != LOWERER_ARTIFACT_HEADER_BYTES:
         raise FixtureError(f"unexpected artifact header size {header_bytes}")
     if vm_profile_digest != ARTIFACT_VM_PROFILE_DIGEST:
         raise FixtureError(
@@ -209,7 +215,7 @@ def parse_artifact(path):
         )
     if flags != ARTIFACT_FLAGS_REQUIRED_VALUE:
         raise FixtureError(f"unexpected artifact flags {flags}")
-    if entry_abi_version != ARTIFACT_ENTRY_ABI_VERSION:
+    if entry_abi_version != LOWERER_ARTIFACT_ENTRY_ABI_VERSION:
         raise FixtureError(f"unexpected entry ABI version {entry_abi_version}")
     if syscall_abi_version != ARTIFACT_SYSCALL_ABI_VERSION:
         raise FixtureError(
@@ -240,6 +246,40 @@ def parse_artifact(path):
     if initial_memory_digest != hashlib.sha256(memory).digest():
         raise FixtureError("initial memory section digest mismatch")
     return artifact, code, memory, memory_bytes
+
+
+def upgrade_artifact_to_v5(code, memory, memory_bytes):
+    """Rewrite the validated v4 sections as a v5 artifact.
+
+    v5 stores the image at data-space VA initial_memory_start instead of 0;
+    trim the leading zeros (the fixture's code-sized data shadow) into the
+    start offset. Deterministic: trim count is a pure function of the bytes.
+    """
+    start = 0
+    while start < len(memory) and memory[start] == 0:
+        start += 1
+    trimmed = memory[start:]
+    if not trimmed:
+        start = 0
+    header = struct.pack(
+        "<8sIIQIIIIQIIII32s32s",
+        ARTIFACT_MAGIC,
+        ARTIFACT_FORMAT_VERSION,
+        ARTIFACT_HEADER_BYTES,
+        ARTIFACT_VM_PROFILE_DIGEST,
+        ARTIFACT_FLAGS_REQUIRED_VALUE,
+        ARTIFACT_ENTRY_ABI_VERSION,
+        ARTIFACT_SYSCALL_ABI_VERSION,
+        GAS_TABLE_VERSION,
+        GAS_SCHEDULE_DIGEST,
+        memory_bytes,
+        len(code),
+        len(trimmed),
+        start,
+        hashlib.sha256(code).digest(),
+        hashlib.sha256(trimmed).digest(),
+    )
+    return header + code + trimmed, trimmed, start
 
 
 def extract_fixture_input(memory, sections, symbols):
@@ -286,6 +326,7 @@ namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {metadata['memory_bytes']};
 inline constexpr uint32_t kInitialMemoryBytes = {initial_memory_bytes};
+inline constexpr uint32_t kInitialMemoryStart = {metadata['initial_memory_start']};
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
@@ -325,12 +366,15 @@ def main():
 
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
-    artifact, code, memory, memory_bytes = parse_artifact(args.artifact)
+    _, code, memory, memory_bytes = parse_artifact(args.artifact)
     fixture_input_offset, fixture_input = extract_fixture_input(
         memory, sections, symbols
     )
+    artifact, stored_memory, initial_memory_start = upgrade_artifact_to_v5(
+        code, memory, memory_bytes
+    )
     lowerer_metadata = json.loads(Path(args.lowerer_metadata).read_text())
-    fixture_blob = code + memory
+    fixture_blob = code + stored_memory
     metadata = {
         "source_sha256": sha256_file(args.source),
         "linker_script_sha256": sha256_file(args.linker_script),
@@ -353,10 +397,11 @@ def main():
         "fixture_input_offset": fixture_input_offset,
         "fixture_input_sha256": sha256_bytes(fixture_input),
         "code_sha256": sha256_bytes(code),
-        "initial_memory_sha256": sha256_bytes(memory),
+        "initial_memory_sha256": sha256_bytes(stored_memory),
         "code_bytes": len(code),
         "memory_bytes": memory_bytes,
-        "initial_memory_bytes": len(memory),
+        "initial_memory_bytes": len(stored_memory),
+        "initial_memory_start": initial_memory_start,
         "rustc_version": args.rustc_version,
         "target_triple": args.target_triple,
         "build_flags": args.build_flags,

@@ -264,18 +264,20 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), compiled_sha256_return::kCodeBytes);
-  // v4: memory_bytes is the full data address space; the stored image is only
-  // the initialized prefix (Decision 5), zero-extended by the runtime.
+  // v5: the stored image is the initialized span [start, start+size); the runtime zero-fills around it.
   EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
             compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactInitialMemorySizeOffset),
-            compiled_sha256_return::kInitialMemoryBytes);
+                        kArtifactInitialMemoryStartOffset),
+            compiled_sha256_return::kInitialMemoryStart);
+  EXPECT_GT(compiled_sha256_return::kInitialMemoryStart, 0U);
   ASSERT_EQ(parsed->initial_memory.size(),
-            compiled_sha256_return::kInitialMemoryBytes);
-  EXPECT_LE(compiled_sha256_return::kInitialMemoryBytes,
+            compiled_sha256_return::kInitialMemoryStart +
+                compiled_sha256_return::kInitialMemoryBytes);
+  EXPECT_LE(compiled_sha256_return::kInitialMemoryStart +
+                compiled_sha256_return::kInitialMemoryBytes,
             compiled_sha256_return::kMemoryBytes);
   EXPECT_TRUE(std::ranges::equal(
       std::span<const uint8_t>(compiled_sha256_return::kInput),
