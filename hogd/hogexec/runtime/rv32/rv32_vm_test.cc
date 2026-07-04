@@ -264,7 +264,8 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), compiled_sha256_return::kCodeBytes);
-  // v5: the stored image is the initialized span [start, start+size); the runtime zero-fills around it.
+  // v5: the stored image is the initialized span [start, start+size);
+  // the runtime zero-fills around it.
   EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
@@ -463,10 +464,10 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
 
 TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
 {
-  // Decision 5: initial_memory_size may be < memory_bytes; the runtime
-  // zero-extends the tail. build_artifact stamps memory_bytes == the stored
-  // prefix, so bump the (non-digest-covered) memory_bytes field to a larger
-  // address space and confirm the shorter stored prefix still parses.
+  // initial_memory_size may be < memory_bytes; the runtime zero-extends the
+  // tail. build_artifact stamps memory_bytes == the stored prefix, so bump
+  // the (non-digest-covered) memory_bytes field to a larger address space
+  // and confirm the shorter stored prefix still parses.
   const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
   auto artifact =
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored);

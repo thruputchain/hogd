@@ -148,7 +148,7 @@ The artifact parser does not parse ELF. ELF is fixture/lowerer input only.
 
 ## Dispatch
 
-v4 uses guest-side dispatch:
+Guest-side dispatch (unchanged since v4):
 
 - the runtime always enters at PC 0 (`_start`);
 - the runtime seeds the invoked method id into `a0`/`a1`;
