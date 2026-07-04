@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <memory>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
+#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/hogexec/shared.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
@@ -24,9 +26,30 @@ namespace hogd {
 
 namespace {
 
+struct ParsedHostPort {
+  std::string host;
+  uint16_t port;
+};
+
+ParsedHostPort
+parse_host_port(const std::string &label, const std::string &address)
+{
+  x23::HostPort host_port;
+  if (!host_port.parse(address)) {
+    throw std::runtime_error(std::format("Invalid {}: {}", label, address));
+  }
+  return ParsedHostPort{
+      .host = std::string{host_port.host.begin(), host_port.host.end()},
+      .port = static_cast<uint16_t>(std::stoul(
+          std::string{host_port.port.begin(), host_port.port.end()}))};
+}
+
 int
 hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
-             int nthreads, uint16_t mempool_port, uint16_t metrics_port)
+             int nthreads, uint16_t mempool_port, uint16_t metrics_port,
+             const std::optional<std::string> &db_executor_addr,
+             const std::optional<std::string> &event_executor_addr,
+             std::optional<uint16_t> view_gateway_port)
 {
   init_hogexec_metrics();
 
@@ -36,23 +59,39 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT hogexec.metrics={}", actual_metrics_port);
 
-  x23::HostPort host_port;
-  if (!host_port.parse(coordinator_addr)) {
-    throw std::runtime_error(
-        std::format("Invalid coordinator address: {}", coordinator_addr));
+  const ParsedHostPort coordinator =
+      parse_host_port("coordinator address", coordinator_addr);
+
+  const bool view_gateway_configured =
+      db_executor_addr || event_executor_addr || view_gateway_port;
+  if (view_gateway_configured &&
+      (!db_executor_addr || !event_executor_addr || !view_gateway_port)) {
+    throw std::runtime_error("--db-executor-addr, --event-executor-addr, and "
+                             "--view-gateway-port must be provided together");
   }
-  const std::string coordinator_host = {host_port.host.begin(),
-                                        host_port.host.end()};
-  const uint16_t coordinator_port = static_cast<uint16_t>(
-      std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
   Executor executor(nthreads);
   const sockaddr_storage coordinator_sockaddr =
-      host_port_to_sockaddr(coordinator_host, coordinator_port);
+      host_port_to_sockaddr(coordinator.host, coordinator.port);
   uint16_t actual_mempool_port =
       executor.start(bind_ip, mempool_port, coordinator_sockaddr);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hogexec.mempool={}", actual_mempool_port);
+
+  std::unique_ptr<ViewGatewayServer> view_gateway_server;
+  if (view_gateway_configured) {
+    const ParsedHostPort event_executor =
+        parse_host_port("event executor address", *event_executor_addr);
+    view_gateway_server =
+        std::make_unique<ViewGatewayServer>(*db_executor_addr,
+                                            event_executor.host,
+                                            event_executor.port);
+    const uint16_t actual_view_gateway_port = view_gateway_server->start_server(
+        make_bind_host_port(bind_ip, *view_gateway_port));
+    CHECK(actual_view_gateway_port == *view_gateway_port ||
+          *view_gateway_port == 0);
+    info("PORT hogexec.view_gateway={}", actual_view_gateway_port);
+  }
 
   // block forever
   Health::instance().set_status(Health::Status::kOk)();
@@ -73,7 +112,10 @@ usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
                "[--nthreads <nthreads>] [--mempool-port <port>] "
-               "[--metrics-port <port>] [--version]",
+               "[--metrics-port <port>] "
+               "[--db-executor-addr <host:port> "
+               "--event-executor-addr <host:port> "
+               "--view-gateway-port <port>] [--version]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -107,6 +149,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::optional<int> nthreads;
   uint16_t mempool_port = 0;
   uint16_t metrics_port = 0;
+  std::optional<std::string> db_executor_addr;
+  std::optional<std::string> event_executor_addr;
+  std::optional<uint16_t> view_gateway_port;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -128,6 +173,18 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
       mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--db-executor-addr" && i + 1 < argc) {
+      db_executor_addr = argv[++i];
+      continue;
+    }
+    if (arg == "--event-executor-addr" && i + 1 < argc) {
+      event_executor_addr = argv[++i];
+      continue;
+    }
+    if (arg == "--view-gateway-port" && i + 1 < argc) {
+      view_gateway_port = parse_port(argv[++i]);
       continue;
     }
     if (arg == "-n" && i + 1 < argc) {
@@ -153,5 +210,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   return hogd::hogexec_init(coord_address, bind_ip, *nthreads, mempool_port,
-                            metrics_port);
+                            metrics_port, db_executor_addr, event_executor_addr,
+                            view_gateway_port);
 }
