@@ -115,7 +115,7 @@ mkdir -p ci_work_dir/
 
 echo 'run mempool benchmarks'
 set +e
-./scripts/ci/mempool_multi_node_bench.sh
+MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh
 mempool_bench_exit=$?
 set -e
 
