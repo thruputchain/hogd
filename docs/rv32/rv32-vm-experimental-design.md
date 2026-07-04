@@ -119,25 +119,30 @@ Host traps carry typed payloads:
 
 ## Artifact Format
 
-The current artifact format is v4:
+The current artifact format is v5:
 
 - magic: `GHRV32A1`
-- header bytes: `132`
+- header bytes: `128`
 - VM profile digest
-- entry ABI version: `2` (runtime enters at PC 0 and seeds method id in `a0`/`a1`)
+- entry ABI version: `3` (runtime enters at PC 0, seeds method id in `a0`/`a1`,
+  and seeds `sp` to 0 — the guest owns stack placement and must set `sp`
+  before touching the stack)
 - syscall ABI version: `1` (register-native: args in `a0`–`a7`, no frame/footer)
 - gas schedule version and digest
-- memory size, code size, initial memory size
-- offsets for code and initial memory
+- memory size, code size, initial memory size, initial memory start
 - SHA256 commitments for code and initial memory
 
 Parser rules:
 
 - little-endian explicit reads only;
 - no host struct overlays;
-- exact canonical layout: header, code, initial memory, no gaps/trailing bytes;
-- `initial_memory_size <= memory_bytes`; the runtime zero-extends the remaining
-  memory.
+- exact canonical layout: header, code, initial memory, no gaps/trailing
+  bytes; section file positions are derived from the canonical order, not
+  stored;
+- `initial_memory_start + initial_memory_size <= memory_bytes`; an empty
+  image must have `initial_memory_start == 0`. The stored image is placed at
+  data-space VA `initial_memory_start`; the runtime zero-fills below and
+  above it (a stack-first guest's stack region is the zeros below).
 
 The artifact parser does not parse ELF. ELF is fixture/lowerer input only.
 
