@@ -20,6 +20,14 @@ rustflags = [
     # The hogd rv32 VM permits unaligned data loads/stores, so let LLVM emit
     # them directly instead of byte-wise expansions.
     "-C", "target-feature=+unaligned-scalar-mem",
+    # 32K stack reserve (sdk default: 24K). dev_wallet's create_wallet path
+    # keeps ~7 ScratchBufs live across its transfer + deploy + initialize
+    # cross-calls; measured peak is 28-30K (bisected via the devnode
+    # BootstrapAccountCanCreateInitializedDevWallet test). Matches the
+    # 30000-byte wasm stack above. NOTE: lld only honors --defsym over the
+    # script's PROVIDE default when it appears BEFORE -T on the link line,
+    # so this must stay ahead of the -T flag below.
+    "-C", "link-arg=--defsym=__stack_size=0x8000",
     "-C", "link-arg=-Tgroundhog-rv32.ld",
     "-C", "link-arg=-static",
     "-C", "link-arg=--no-dynamic-linker",
