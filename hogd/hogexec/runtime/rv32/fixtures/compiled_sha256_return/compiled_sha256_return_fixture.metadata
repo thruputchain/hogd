@@ -41,7 +41,7 @@
     "0xe8ccfc8ffc9e81b9",
     "0x2f2cb89270e38729"
   ],
-  "packaging_tool_sha256": "9842926426fd7a9b2bbede0c3217a200fabbcc64ce4fd363abc9d385e46da732",
+  "packaging_tool_sha256": "d589531331fef095d938734c0041c2e98cac309625871ee46c43cc3bbaf610a2",
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: aarch64-apple-darwin;release: 1.95.0;LLVM version: 22.1.2;",
   "source_sha256": "bf740faa7f03f4de35d9369da9fc7565804466425542ac10fb3206625e00b660",
   "target_triple": "riscv32im-unknown-none-elf"

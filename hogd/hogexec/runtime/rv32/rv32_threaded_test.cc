@@ -1141,9 +1141,11 @@ TEST(Rv32Threaded, placesInitialMemoryAtStartOffset)
   using test_program::load;
   const std::vector<uint32_t> words = {load(1, 2, 0, 8), load(2, 2, 0, 0)};
   const std::array<uint8_t, 4> stored = {0x78, 0x56, 0x34, 0x12};
-  const auto created = ThreadedMachinePreInstantiation::create(
-      words_to_bytes(words), stored, /*memory_start=*/8,
-      /*total_memory_size=*/16, /*trace=*/false);
+  const auto created =
+      ThreadedMachinePreInstantiation::create(words_to_bytes(words), stored,
+                                              /*memory_start=*/8,
+                                              /*total_memory_size=*/16,
+                                              /*trace=*/false);
   ASSERT_TRUE(created.has_value());
   ThreadedMachine machine(*created, /*gas=*/100);
 
@@ -1159,9 +1161,10 @@ TEST(Rv32Threaded, createRejectsImagePastTotalMemory)
 {
   const std::vector<uint32_t> words = {addi(1, 0, 5)};
   const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
-  EXPECT_EQ(ThreadedMachinePreInstantiation::create(
-                words_to_bytes(words), stored, /*memory_start=*/13,
-                /*total_memory_size=*/16, /*trace=*/false)
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(words_to_bytes(words),
+                                                    stored, /*memory_start=*/13,
+                                                    /*total_memory_size=*/16,
+                                                    /*trace=*/false)
                 .error(),
             ProgramError::kMemoryTooLarge);
 }

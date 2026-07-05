@@ -224,7 +224,8 @@ def parse_artifact(path):
         raise FixtureError(f"unexpected memory size {memory_bytes}")
     # v5 derives section positions from the canonical order: the only
     # structural degree of freedom is total size.
-    if len(artifact) != ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes:
+    expected_size = ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes
+    if len(artifact) != expected_size:
         raise FixtureError("artifact size does not match header sections")
     if initial_memory_start + initial_memory_bytes > memory_bytes:
         raise FixtureError("initial memory extends past data memory")
@@ -277,6 +278,7 @@ def format_array(name, blob):
 
 def write_header(path, artifact, metadata):
     initial_memory_bytes = metadata["initial_memory_bytes"]
+    initial_memory_start = metadata["initial_memory_start"]
     sha256_repeated_id = f"0x{SHA256_REPEATED_METHOD_ID:016x}ULL"
     fixture_input_offset = metadata["fixture_input_offset"]
     body = f"""#pragma once
@@ -288,7 +290,7 @@ namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {metadata['memory_bytes']};
 inline constexpr uint32_t kInitialMemoryBytes = {initial_memory_bytes};
-inline constexpr uint32_t kInitialMemoryStart = {metadata['initial_memory_start']};
+inline constexpr uint32_t kInitialMemoryStart = {initial_memory_start};
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;

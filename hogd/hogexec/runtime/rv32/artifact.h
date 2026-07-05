@@ -242,8 +242,10 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
   digest = format_fingerprint_u64(digest, u8"code_size_nonzero", 1);
-  digest = format_fingerprint_u64(
-      digest, u8"initial_memory_start_plus_size_le_memory_bytes", 1);
+  digest =
+      format_fingerprint_u64(digest,
+                             u8"initial_memory_start_plus_size_le_memory_bytes",
+                             1);
   digest = format_fingerprint_u64(digest,
                                   u8"initial_memory_start_zero_when_empty", 1);
   digest = format_fingerprint_string(digest, u8"canonical_section_order",

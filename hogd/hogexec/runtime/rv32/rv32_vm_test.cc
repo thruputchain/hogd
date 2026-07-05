@@ -400,8 +400,8 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
   }
   {
     // Canonicality: an empty image must have start == 0.
-    auto artifact = test_artifact::build_artifact(
-        {addi(0, 0, 0), 0x00000073U}, std::span<const uint8_t>{});
+    auto artifact = test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U},
+                                                  std::span<const uint8_t>{});
     store_u32_at(artifact, kArtifactMemoryBytesOffset, 64);
     store_u32_at(artifact, kArtifactInitialMemoryStartOffset, 4);
     expect_artifact_error(std::move(artifact),
@@ -450,8 +450,9 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
     auto artifact = valid_artifact_bytes();
     const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
     artifact[kArtifactHeaderBytes] = 0;
-    const auto code = std::span<const uint8_t>(artifact).subspan(
-        kArtifactHeaderBytes, code_size);
+    const auto code =
+        std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
+                                                   code_size);
     store_digest_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
@@ -482,8 +483,9 @@ TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
 TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
 {
   const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
-  auto artifact = test_artifact::build_artifact(
-      {addi(0, 0, 0), 0x00000073U}, stored, /*initial_memory_start=*/8);
+  auto artifact =
+      test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored,
+                                    /*initial_memory_start=*/8);
 
   const auto parsed = parse_artifact(artifact);
   ASSERT_TRUE(parsed.has_value());

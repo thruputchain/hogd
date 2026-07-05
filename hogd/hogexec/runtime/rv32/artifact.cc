@@ -113,8 +113,8 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   // Canonical v5 layout: header || code || initial_memory, exactly. Section
   // positions are derived, so the only structural degree of freedom left is
   // total size.
-  if (bytes.size() != size_t{kArtifactHeaderBytes} + code_size +
-                          initial_memory_size) {
+  if (bytes.size() !=
+      size_t{kArtifactHeaderBytes} + code_size + initial_memory_size) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 
@@ -166,8 +166,8 @@ parse_artifact(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kInvalidProgram);
   }
 
-  std::vector<uint8_t> initial_memory(
-      size_t{results->initial_memory_start} + results->initial_memory.size());
+  std::vector<uint8_t> initial_memory(size_t{results->initial_memory_start} +
+                                      results->initial_memory.size());
   std::ranges::copy(results->initial_memory,
                     initial_memory.begin() + results->initial_memory_start);
 
