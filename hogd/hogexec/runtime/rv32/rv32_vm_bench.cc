@@ -426,13 +426,25 @@ recursive_fibonacci_words()
       // Entry ABI v3 seeds sp to 0; the program owns stack placement, so
       // start the stack at the top of bench memory.
       u_type(0x37, kSp, kBenchMemoryBytes),
-      addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
+      addi(kA0, 0, kFibInput),
+      j_type(kRa, 8),
+      0x00000073U,
 
-      addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
-      addi(kT0, 0, 2),         branch(4, kA0, kT0, 36), addi(kA0, kA0, -1),
-      j_type(kRa, -24),        store(kSp, kA0, 4, 2),   load(kA0, 2, kSp, 8),
-      addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, 2, kSp, 4),
-      op(kA0, kA0, kT1, 0, 0), load(kRa, 2, kSp, 12),   addi(kSp, kSp, 16),
+      addi(kSp, kSp, -16),
+      store(kSp, kRa, 12, 2),
+      store(kSp, kA0, 8, 2),
+      addi(kT0, 0, 2),
+      branch(4, kA0, kT0, 36),
+      addi(kA0, kA0, -1),
+      j_type(kRa, -24),
+      store(kSp, kA0, 4, 2),
+      load(kA0, 2, kSp, 8),
+      addi(kA0, kA0, -2),
+      j_type(kRa, -40),
+      load(kT1, 2, kSp, 4),
+      op(kA0, kA0, kT1, 0, 0),
+      load(kRa, 2, kSp, 12),
+      addi(kSp, kSp, 16),
       jalr(0, kRa, 0),
   };
 }
