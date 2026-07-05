@@ -53,6 +53,7 @@ using test_program::load;
 using test_program::make_program;
 using test_program::op;
 using test_program::store;
+using test_program::u_type;
 
 class HaltHost : public Host {
 public:
@@ -422,6 +423,9 @@ recursive_fibonacci_words()
   constexpr uint8_t kA0 = 10;
 
   return {
+      // Entry ABI v3 seeds sp to 0; the program owns stack placement, so
+      // start the stack at the top of bench memory.
+      u_type(0x37, kSp, kBenchMemoryBytes),
       addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
 
       addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
