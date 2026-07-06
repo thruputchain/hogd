@@ -43,7 +43,7 @@ dependencies = [
 [[package]]
 name = "bottle-test-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "sdk",
 ]
@@ -303,8 +303,8 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "erc20-native-test"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "erc20-test",
  "groundhog-erc20-if",
@@ -315,8 +315,8 @@ dependencies = [
 
 [[package]]
 name = "erc20-test"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-erc20-if",
  "sdk",
@@ -406,8 +406,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-spec"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-spec",
  "groundhog-xdr",
@@ -418,8 +418,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-util"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-xdr",
  "sha2 0.11.0",
@@ -429,7 +429,7 @@ dependencies = [
 [[package]]
 name = "groundhog-erc1271-if"
 version = "0.1.4"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "sdk",
  "thiserror",
@@ -438,7 +438,7 @@ dependencies = [
 [[package]]
 name = "groundhog-erc20-if"
 version = "0.1.4"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-xdr",
  "sdk",
@@ -447,8 +447,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-event"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -456,8 +456,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-macros"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "darling",
  "groundhog-contract-util",
@@ -470,8 +470,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-native-exec"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-event",
  "groundhog-storage-cost",
@@ -486,8 +486,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-rv32-runtime"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "linkme",
 ]
@@ -513,8 +513,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-storage-cost"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -522,8 +522,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-sys"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "fslock",
  "sha2 0.11.0",
@@ -561,8 +561,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-wasm-runtime"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-xdr",
  "heapless",
@@ -985,8 +985,8 @@ dependencies = [
 
 [[package]]
 name = "sdk"
-version = "0.16.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d712ed57a7483f96155f819bd69258d958ed15e0"
+version = "0.16.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a91a207426c31336525720365142e7cb0de46228"
 dependencies = [
  "groundhog-contract-spec",
  "groundhog-event",
