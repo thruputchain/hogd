@@ -15,6 +15,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
@@ -22,11 +23,14 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
+#include "x23/rpc_common.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1011,6 +1015,155 @@ TEST_F(EventTest, EventWithRevertingFrames)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+// Regression test for #2857: a validation-mode tx with enough consumed
+// RCQ-observation proposal data to overflow the event RPC once forwarded (the
+// cap is lowered so 16 observations suffice). Before the fix this threw
+// uncaught and terminated the executor; now emit_events fail-stops with a
+// structured Unrecoverable status.
+namespace {
+
+constexpr size_t kValidationProposalObservationCount = 16;
+constexpr size_t kValidationProposalEventRpcCap = 4096;
+constexpr ContractAddress kValidationProposalEventRpcAddress =
+    NativeContractTestFramework::make_contract_address(0xE2);
+
+StorageKeyContractData
+make_validation_proposal_observation_key(size_t index)
+{
+  auto key = NativeContractTestFramework::make_storage_key("event_rpc_poc");
+  key.back() = static_cast<uint8_t>(index);
+  return key;
+}
+
+Transaction
+make_validation_proposal_event_rpc_tx(NativeContractTestFramework &fw,
+                                      Runtime::MethodID method_id)
+{
+  return Transaction{
+      .invocation =
+          Invocation{.invoked_address = kValidationProposalEventRpcAddress,
+                     .entrypoint = entrypoint_from_method_id(method_id),
+                     .gas_limit = UINT64_MAX,
+                     .calldata = {}},
+      .uniquifier = fw.make_new_uniquifier(),
+  };
+}
+
+} // namespace
+
+TEST(EventRpcValidationProposalData,
+     OversizedConsumedProposalDataFailStopsInsteadOfCrashing)
+{
+  NativeContractTestFramework fw(
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
+      QueueEntry entry;
+      entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
+      auto status = ctx.handler().retrocausal_queue_insert(
+          make_validation_proposal_observation_key(i),
+          std::as_bytes(std::span(entry.data(), entry.size())));
+      if (!status.has_value()) {
+        return InvokeError{InvokeErrorCode::Unrecoverable};
+      }
+    }
+    return {};
+  });
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
+      RuntimeMemoryLength len = 0;
+      auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+          make_validation_proposal_observation_key(i), len);
+      if (!status.has_value()) {
+        return InvokeError{InvokeErrorCode::Unrecoverable};
+      }
+      if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+          len != kQueueEntryMaxLen) {
+        return InvokeError{InvokeErrorCode::Deterministic};
+      }
+    }
+    return {};
+  });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = NativeContractTestFramework::make_native_contract(0);
+  fw.write_contract(contract);
+  fw.write_deployment(kValidationProposalEventRpcAddress, contract);
+  fw.setup_grant_storage_token(kValidationProposalEventRpcAddress,
+                               1'000'000'000);
+
+  auto insert_tx = make_validation_proposal_event_rpc_tx(fw, 0);
+  auto consume_tx = make_validation_proposal_event_rpc_tx(fw, 1);
+
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto insert_handler = fw.make_new_system_call_handler(insert_tx, *context);
+    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    insert_proposal_data = insert_handler.get_proposal_data();
+    ASSERT_EQ(insert_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+
+    auto consume_handler =
+        fw.make_new_system_call_handler(consume_tx, *context);
+    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    consume_proposal_data = consume_handler.get_proposal_data();
+    ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
+              kValidationProposalObservationCount);
+    ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(),
+              kValidationProposalObservationCount);
+    ASSERT_EQ(consume_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+  }
+
+  fw.discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto insert_handler =
+        fw.make_new_system_call_handler_validation(insert_tx, *context,
+                                                   insert_proposal_data);
+    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+  }
+
+  auto capped_event_proxy = [&]() {
+    const std::size_t saved_max = x23::default_max_message_size;
+    x23::default_max_message_size = kValidationProposalEventRpcCap;
+    x23::Defer restore_max{
+        [saved_max] { x23::default_max_message_size = saved_max; }};
+    return std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", fw.get_event_exec_port()});
+  }();
+
+  SystemCallHandler consume_validation_handler(
+      consume_tx, *fw.get_storage_snapshot_cache(),
+      fw.make_new_per_tx_db_proxy(1001),
+      PerTransactionEventServerProxy(*capped_event_proxy, fw.get_block_number(),
+                                     1001),
+      ValidationModeCtor{consume_proposal_data}, *context);
+  ASSERT_TRUE(consume_validation_handler.root_invoke().is_root_success());
+  ASSERT_EQ(consume_validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
+
+  ProposedTransaction proposed_tx{
+      .signed_tx = SignedTransaction{.tx = consume_tx},
+      .nondeterministic_proposal_data = std::move(consume_proposal_data),
+  };
+  // With the emit_event fail-stop backstop (#2857), the oversized payload no
+  // longer escapes as an uncaught x23::XdrBadInput that would terminate the
+  // executor; emit_events completes with a structured Unrecoverable status.
+  auto status =
+      consume_validation_handler.emit_events(ExecResult::ExecResultOK,
+                                             std::move(proposed_tx))();
+  EXPECT_FALSE(status.has_value());
+}
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
