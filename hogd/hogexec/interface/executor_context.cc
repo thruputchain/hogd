@@ -22,10 +22,12 @@
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/view/view.h"
+#include "integration.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "view.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -153,6 +155,12 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
+  // Reject an over-cap body before execution so it can't overflow the event
+  // RPC (#2857); NonDeterministicError matches the sibling db-push reject.
+  if (x23::xdr_size(signed_tx) > kMaxBytesSignedTransaction) {
+    return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+  }
+
   auto proxy = make_per_tx_db_proxy(tx_id);
   // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
   // re-serializes the tx for sha256 (#1905); both are proportional to
@@ -241,6 +249,11 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
 {
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kValidating);
+  // Same cap as proposal, so a peer-proposed oversized tx is a deterministic
+  // reject rather than fail-stopping the validator (#2857).
+  if (x23::xdr_size(tx.signed_tx) > kMaxBytesSignedTransaction) {
+    return ExecResult::ExecResultTxNonDeterministicError;
+  }
   auto proxy = make_per_tx_db_proxy(tx_id);
   // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
   // re-serializes the tx for sha256 (#1905); both are proportional to
