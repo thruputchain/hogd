@@ -145,7 +145,9 @@ echo 'run e2e payment benchmark'
 mempool_bench_exit=$?
 
 echo 'run e2e payment multi-node benchmark'
-(./scripts/ci/mempool_multi_node_bench.sh) || true
+# Skip the per-benchmark metrics-history commit; the combined run makes a
+# single commit at the end via commit_metrics.sh.
+(MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh) || true
 mempool_multi_node_bench_exit=$?
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
