@@ -23,14 +23,15 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     }
 }
 
-// v4 guest-side dispatch. The runtime enters at _start (PC 0) with the invoked
-// method id seeded into a0 (low 32 bits) / a1 (high 32 bits). _start reads them
-// before any prologue runs, compares against the two method selectors, and tail
-// -calls the matching body; an unknown id falls through to canonical UNIMP, a
-// deterministic invalid-instruction trap. The selector low/high
-// halves below must match SHA256_METHOD_ID / SHA256_REPEATED_METHOD_ID in
-// package_artifact.py and the Sha256Wrapper entrypoint hashes the C++ parity test
-// pins.
+// Guest-side dispatch. Entry ABI v3 enters at _start (PC 0) with sp = 0 (the
+// guest owns stack placement); _start establishes sp at the top of the 64K data
+// space (0x10000) before dispatch. The method id is seeded into a0 (low 32
+// bits) / a1 (high 32 bits); _start compares against the two method selectors
+// and tail-calls the matching body; an unknown id falls through to canonical
+// UNIMP, a deterministic invalid-instruction trap. The selector low/high halves
+// below must match SHA256_METHOD_ID / SHA256_REPEATED_METHOD_ID in
+// package_artifact.py and the Sha256Wrapper entrypoint hashes the C++ parity
+// test pins.
 const SHA256_LO: i32 = 0xFC9E_81B9_u32 as i32; // SHA256_METHOD_ID & 0xFFFF_FFFF
 const SHA256_HI: i32 = 0xE8CC_FC8F_u32 as i32; // SHA256_METHOD_ID >> 32
 const SHA256_REPEATED_LO: i32 = 0x70E3_8729_u32 as i32;
@@ -41,6 +42,9 @@ global_asm!(
     ".globl _start",
     ".type _start, @function",
     "_start:",
+    // Entry ABI v3 seeds sp = 0 (the guest owns stack placement): establish
+    // the stack at the top of the 64K data space before anything else runs.
+    "  lui  sp, 16",
     "  li   t0, {sha_lo}",
     "  bne  a0, t0, 1f",
     "  li   t0, {sha_hi}",

@@ -46,11 +46,14 @@ using test_program::r_type;
 using test_program::s_type;
 using test_program::u_type;
 
+// Mutation-test base: a minimal valid artifact from the test builder, so
+// format-validation tests track the current format constants instead of the
+// compiled fixture's vintage.
 std::vector<uint8_t>
-compiled_artifact_bytes()
+valid_artifact_bytes()
 {
-  return std::vector<uint8_t>(compiled_sha256_return::kArtifact.begin(),
-                              compiled_sha256_return::kArtifact.end());
+  static constexpr std::array<uint8_t, 4> kStored = {1, 2, 3, 4};
+  return test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, kStored);
 }
 
 void
@@ -261,18 +264,21 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
   EXPECT_EQ(parsed->program->byte_size(), compiled_sha256_return::kCodeBytes);
-  // v4: memory_bytes is the full data address space; the stored image is only
-  // the initialized prefix (Decision 5), zero-extended by the runtime.
+  // v5: the stored image is the initialized span [start, start+size);
+  // the runtime zero-fills around it.
   EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
                         kArtifactMemoryBytesOffset),
             compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactInitialMemorySizeOffset),
-            compiled_sha256_return::kInitialMemoryBytes);
+                        kArtifactInitialMemoryStartOffset),
+            compiled_sha256_return::kInitialMemoryStart);
+  EXPECT_GT(compiled_sha256_return::kInitialMemoryStart, 0U);
   ASSERT_EQ(parsed->initial_memory.size(),
-            compiled_sha256_return::kInitialMemoryBytes);
-  EXPECT_LE(compiled_sha256_return::kInitialMemoryBytes,
+            compiled_sha256_return::kInitialMemoryStart +
+                compiled_sha256_return::kInitialMemoryBytes);
+  EXPECT_LE(compiled_sha256_return::kInitialMemoryStart +
+                compiled_sha256_return::kInitialMemoryBytes,
             compiled_sha256_return::kMemoryBytes);
   EXPECT_TRUE(std::ranges::equal(
       std::span<const uint8_t>(compiled_sha256_return::kInput),
@@ -284,30 +290,30 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
 {
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     artifact[0] ^= 0xffU;
     expect_artifact_error(std::move(artifact), ArtifactError::kBadMagic);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactFormatVersionOffset,
                  kArtifactFormatVersion + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedFormatVersion);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactHeaderSizeOffset, kArtifactHeaderBytes + 4);
     expect_artifact_error(std::move(artifact), ArtifactError::kBadHeaderSize);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u64_at(artifact, kArtifactVmProfileOffset, 0);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedVmProfile);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactFlagsOffset, 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedFlags);
@@ -317,14 +323,14 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
 TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
 {
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactEntryAbiOffset,
                  kArtifactEntryAbiVersion + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedEntryAbi);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactSyscallAbiOffset,
                  kArtifactSyscallAbiVersion + 1);
     expect_artifact_error(std::move(artifact),
@@ -335,103 +341,123 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
     // just unknown future versions: loading a v0 (memory-frame) artifact under
     // the v1 register-native bridge would silently mis-marshal syscall
     // arguments.
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactSyscallAbiOffset, 0);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedSyscallAbi);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactGasVersionOffset, kGasTableVersion + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kGasScheduleVersionMismatch);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u64_at(artifact, kArtifactGasDigestOffset, kGasScheduleDigest ^ 1ULL);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kGasScheduleDigestMismatch);
   }
 }
 
-TEST(Rv32ArtifactTest, rejectsBoundsAndOffsetErrors)
+TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
 {
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kMemorySizeInvalid);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactMemoryBytesOffset, 0);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kMemorySizeInvalid);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, 0);
     expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, kMaxCodeBytes + 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
                  kMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kInitialMemoryTooLarge);
   }
   {
-    auto artifact = compiled_artifact_bytes();
-    store_u32_at(artifact, kArtifactCodeOffsetOffset, kArtifactHeaderBytes - 1);
-    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+    // initial_memory_start pushes the image past memory_bytes.
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactInitialMemoryStartOffset, 1);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInitialMemoryTooLarge);
   }
   {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t code_offset =
-        load_u32_le(artifact, kArtifactCodeOffsetOffset);
-    store_u32_at(artifact, kArtifactInitialMemoryOffsetOffset, code_offset);
-    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+    // Canonicality: an empty image must have start == 0.
+    auto artifact = test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U},
+                                                  std::span<const uint8_t>{});
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, 64);
+    store_u32_at(artifact, kArtifactInitialMemoryStartOffset, 4);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInitialMemoryTooLarge);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    // Trailing byte breaks the exact header||code||initial_memory layout.
+    auto artifact = valid_artifact_bytes();
     artifact.push_back(0);
-    expect_artifact_error(std::move(artifact), ArtifactError::kInvalidOffsets);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInvalidSectionLayout);
+  }
+  {
+    // Truncated body.
+    auto artifact = valid_artifact_bytes();
+    artifact.pop_back();
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInvalidSectionLayout);
+  }
+  {
+    // code_size larger than the body actually carries.
+    auto artifact = valid_artifact_bytes();
+    const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
+    store_u32_at(artifact, kArtifactCodeSizeOffset, code_size + 4);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInvalidSectionLayout);
   }
 }
 
 TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
 {
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_digest_at(artifact, kArtifactCodeDigestOffset, ArtifactDigest{});
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kCodeDigestMismatch);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     store_digest_at(artifact, kArtifactInitialMemoryDigestOffset,
                     ArtifactDigest{});
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kInitialMemoryDigestMismatch);
   }
   {
-    auto artifact = compiled_artifact_bytes();
-    const uint32_t code_offset =
-        load_u32_le(artifact, kArtifactCodeOffsetOffset);
+    auto artifact = valid_artifact_bytes();
     const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
-    artifact[code_offset] = 0;
+    artifact[kArtifactHeaderBytes] = 0;
     const auto code =
-        std::span<const uint8_t>(artifact).subspan(code_offset, code_size);
+        std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
+                                                   code_size);
     store_digest_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
   {
-    auto artifact = compiled_artifact_bytes();
+    auto artifact = valid_artifact_bytes();
     artifact.resize(kArtifactHeaderBytes - 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
   }
@@ -439,10 +465,10 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
 
 TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
 {
-  // Decision 5: initial_memory_size may be < memory_bytes; the runtime
-  // zero-extends the tail. build_artifact stamps memory_bytes == the stored
-  // prefix, so bump the (non-digest-covered) memory_bytes field to a larger
-  // address space and confirm the shorter stored prefix still parses.
+  // initial_memory_size may be < memory_bytes; the runtime zero-extends the
+  // tail. build_artifact stamps memory_bytes == the stored prefix, so bump
+  // the (non-digest-covered) memory_bytes field to a larger address space
+  // and confirm the shorter stored prefix still parses.
   const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
   auto artifact =
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored);
@@ -454,13 +480,40 @@ TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
   EXPECT_TRUE(std::ranges::equal(parsed->initial_memory, stored));
 }
 
+TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
+{
+  const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
+  auto artifact =
+      test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored,
+                                    /*initial_memory_start=*/8);
+
+  const auto parsed = parse_artifact(artifact);
+  ASSERT_TRUE(parsed.has_value());
+  // build_artifact stamps memory_bytes = start + size.
+  EXPECT_EQ(parsed->memory_bytes, 12U);
+  // The copying path materializes the zero prefix: [0, start + size).
+  ASSERT_EQ(parsed->initial_memory.size(), 12U);
+  for (size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(parsed->initial_memory[i], 0U) << i;
+  }
+  EXPECT_TRUE(std::ranges::equal(
+      std::span<const uint8_t>(parsed->initial_memory).subspan(8), stored));
+
+  // The zero-copy path exposes the offset instead of materializing.
+  const auto threaded = parse_threaded_artifact(artifact);
+  ASSERT_TRUE(threaded.has_value());
+  EXPECT_EQ(threaded->initial_memory_start, 8U);
+  EXPECT_EQ(threaded->memory_bytes, 12U);
+  EXPECT_TRUE(std::ranges::equal(threaded->initial_memory, stored));
+}
+
 TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
 {
   const auto program = make_program({addi(0, 0, 0)});
   Machine machine(program, 4096, 10);
   EXPECT_EQ(machine.pc(), 0U);
   EXPECT_EQ(machine.reg(0), 0U);
-  EXPECT_EQ(machine.reg(2), 4096U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
 }
 
@@ -483,7 +536,7 @@ TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
   machine.reset(9);
   EXPECT_EQ(machine.pc(), 0U);
   EXPECT_EQ(machine.reg(1), 0U);
-  EXPECT_EQ(machine.reg(2), 16U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.gas_remaining(), 9U);
   EXPECT_EQ(machine.trap(), Trap::kNone);
 
@@ -788,11 +841,11 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
   }
 }
 
-TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_uses_aligned_stack)
+TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_seeds_sp_zero)
 {
   const auto program = make_program({addi(0, 0, 123), addi(1, 0, 7)});
   Machine machine(program, 31, 10);
-  EXPECT_EQ(machine.reg(2), 16U);
+  EXPECT_EQ(machine.reg(2), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
   EXPECT_EQ(machine.reg(0), 0U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);

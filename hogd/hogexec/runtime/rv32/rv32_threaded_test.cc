@@ -104,11 +104,12 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
   // at the memory arguments, so the memory image here is irrelevant.
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 std::vector<uint8_t>{0x13, 0x00, 0x00}, /*memory=*/{},
-                /*total_memory_size=*/256, /*trace=*/false)
+                /*memory_start=*/0, /*total_memory_size=*/256, /*trace=*/false)
                 .error(),
             ProgramError::kCodeSizeNotAligned);
   const std::vector<uint8_t> compressed = {0x01, 0x00, 0x00, 0x00};
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(compressed, /*memory=*/{},
+                                                    /*memory_start=*/0,
                                                     /*total_memory_size=*/256,
                                                     /*trace=*/false)
                 .error(),
@@ -116,6 +117,7 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
   std::vector<uint8_t> csr(4);
   store_u32_le(csr, 0, 0x00001073U);
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(csr, /*memory=*/{},
+                                                    /*memory_start=*/0,
                                                     /*total_memory_size=*/256,
                                                     /*trace=*/false)
                 .error(),
@@ -133,6 +135,7 @@ TEST(Rv32Threaded, createRejectsRunGasOverflow)
   ASSERT_TRUE(Program::create(bytes).has_value());
   auto threaded =
       ThreadedMachinePreInstantiation::create(bytes, /*memory=*/{},
+                                              /*memory_start=*/0,
                                               /*total_memory_size=*/256,
                                               /*trace=*/false);
   ASSERT_FALSE(threaded.has_value());
@@ -189,8 +192,8 @@ threaded_from_words(std::span<const uint32_t> words,
 {
   auto pre_instantiation =
       ThreadedMachinePreInstantiation::create(words_to_bytes(words),
-                                              /*memory=*/{}, total_memory_size,
-                                              trace);
+                                              /*memory=*/{}, /*memory_start=*/0,
+                                              total_memory_size, trace);
   EXPECT_TRUE(pre_instantiation.has_value());
   return std::make_shared<const ThreadedMachinePreInstantiation>(
       std::move(pre_instantiation.value()));
@@ -381,8 +384,8 @@ TEST(Rv32Threaded, jalLinksAndJumps)
 {
   using test_program::j_type;
   // jal x1,+8 writes link (pc+4=4) to x1 and jumps over the addi at pc=4.
-  // Use x4 for the skipped instruction (avoids x2=sp which is initialised to
-  // the stack pointer by the machine).
+  // Use x4 for the skipped instruction (x2 was avoided when sp seeded
+  // nonzero at entry; sp now seeds 0 but x4 keeps the test stable).
   const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
                                        addi(3, 0, 9)};
   auto program = threaded_from_words(words);
@@ -1129,6 +1132,41 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
   // The write happened before the OOG trap and is NOT rolled back.
   EXPECT_EQ(machine.memory()[4], 0xaaU);
   EXPECT_EQ(machine.memory()[7], 0xddU);
+}
+
+TEST(Rv32Threaded, placesInitialMemoryAtStartOffset)
+{
+  // lw x1, 8(x0); lw x2, 0(x0). No terminator: falls off the end into the
+  // bad-pc sentinel, same shape as the run-and-report tests above.
+  using test_program::load;
+  const std::vector<uint32_t> words = {load(1, 2, 0, 8), load(2, 2, 0, 0)};
+  const std::array<uint8_t, 4> stored = {0x78, 0x56, 0x34, 0x12};
+  const auto created =
+      ThreadedMachinePreInstantiation::create(words_to_bytes(words), stored,
+                                              /*memory_start=*/8,
+                                              /*total_memory_size=*/16,
+                                              /*trace=*/false);
+  ASSERT_TRUE(created.has_value());
+  ThreadedMachine machine(*created, /*gas=*/100);
+
+  RecordingHost host;
+  const StepResult result = machine.run(host);
+  EXPECT_EQ(result, StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  EXPECT_EQ(machine.reg(1), 0x12345678U); // image landed at VA 8
+  EXPECT_EQ(machine.reg(2), 0U);          // below start is zero-filled
+}
+
+TEST(Rv32Threaded, createRejectsImagePastTotalMemory)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5)};
+  const std::array<uint8_t, 4> stored = {1, 2, 3, 4};
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(words_to_bytes(words),
+                                                    stored, /*memory_start=*/13,
+                                                    /*total_memory_size=*/16,
+                                                    /*trace=*/false)
+                .error(),
+            ProgramError::kMemoryTooLarge);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

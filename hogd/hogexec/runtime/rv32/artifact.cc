@@ -18,23 +18,6 @@
 namespace hogd::rv32 {
 namespace {
 
-bool
-range_within(uint32_t offset, uint32_t size, size_t total)
-{
-  return size_t{offset} <= total && size_t{size} <= total - size_t{offset};
-}
-
-bool
-ranges_overlap(uint32_t left_offset, uint32_t left_size, uint32_t right_offset,
-               uint32_t right_size)
-{
-  const size_t left_begin = left_offset;
-  const size_t left_end = left_begin + left_size;
-  const size_t right_begin = right_offset;
-  const size_t right_end = right_begin + right_size;
-  return left_begin < right_end && right_begin < left_end;
-}
-
 ArtifactDigest
 load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
 {
@@ -47,6 +30,7 @@ load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
 struct ArtifactParseResults {
   std::span<const uint8_t> code;
   std::span<const uint8_t> initial_memory;
+  uint32_t initial_memory_start;
   uint32_t total_memory_bytes;
 };
 
@@ -79,9 +63,8 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   const uint32_t code_size = load_u32_le(bytes, kArtifactCodeSizeOffset);
   const uint32_t initial_memory_size =
       load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
-  const uint32_t code_offset = load_u32_le(bytes, kArtifactCodeOffsetOffset);
-  const uint32_t initial_memory_offset =
-      load_u32_le(bytes, kArtifactInitialMemoryOffsetOffset);
+  const uint32_t initial_memory_start =
+      load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
   const ArtifactDigest code_digest =
       load_artifact_digest(bytes, kArtifactCodeDigestOffset);
   const ArtifactDigest initial_memory_digest =
@@ -118,30 +101,27 @@ artifact_image_checks(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kCodeSizeInvalid);
   }
 
-  // Decision 5: the stored image is the initialized prefix [0, init_size) of
-  // the data address space; the runtime zero-fills [init_size, memory_bytes).
-  if (initial_memory_size > memory_bytes) {
+  // The stored image is placed at [start, start + size) in data space; the
+  // runtime zero-fills [0, start) and [start + size, memory_bytes).
+  if (size_t{initial_memory_start} + initial_memory_size > memory_bytes) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  const size_t code_end = size_t{code_offset} + code_size;
-  const size_t initial_memory_end =
-      size_t{initial_memory_offset} + initial_memory_size;
-  if (code_offset < header_size || initial_memory_offset < header_size ||
-      !range_within(code_offset, code_size, bytes.size()) ||
-      !range_within(initial_memory_offset, initial_memory_size, bytes.size()) ||
-      ranges_overlap(code_offset, code_size, initial_memory_offset,
-                     initial_memory_size)) {
-    return std::unexpected(ArtifactError::kInvalidOffsets);
+  // Canonicality: an empty image has exactly one encoding.
+  if (initial_memory_size == 0 && initial_memory_start != 0) {
+    return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // Canonical v4 layout: header, code, initial_memory, no hidden bytes.
-  if (code_offset != header_size || initial_memory_offset != code_end ||
-      initial_memory_end != bytes.size()) {
-    return std::unexpected(ArtifactError::kInvalidOffsets);
+  // Canonical v5 layout: header || code || initial_memory, exactly. Section
+  // positions are derived, so the only structural degree of freedom left is
+  // total size.
+  if (bytes.size() !=
+      size_t{kArtifactHeaderBytes} + code_size + initial_memory_size) {
+    return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 
-  const auto code = bytes.subspan(code_offset, code_size);
+  const auto code = bytes.subspan(kArtifactHeaderBytes, code_size);
   const auto initial_memory =
-      bytes.subspan(initial_memory_offset, initial_memory_size);
+      bytes.subspan(size_t{kArtifactHeaderBytes} + code_size,
+                    initial_memory_size);
   if (artifact_digest(code) != code_digest) {
     return std::unexpected(ArtifactError::kCodeDigestMismatch);
   }
@@ -152,6 +132,7 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   return ArtifactParseResults{
       .code = code,
       .initial_memory = initial_memory,
+      .initial_memory_start = initial_memory_start,
       .total_memory_bytes = memory_bytes,
   };
 }
@@ -185,12 +166,14 @@ parse_artifact(std::span<const uint8_t> bytes)
     return std::unexpected(ArtifactError::kInvalidProgram);
   }
 
-  auto initial_memory = results->initial_memory;
+  std::vector<uint8_t> initial_memory(size_t{results->initial_memory_start} +
+                                      results->initial_memory.size());
+  std::ranges::copy(results->initial_memory,
+                    initial_memory.begin() + results->initial_memory_start);
 
   return ArtifactImage{
       .program = std::make_shared<Program>(std::move(*program)),
-      .initial_memory =
-          std::vector<uint8_t>(initial_memory.begin(), initial_memory.end()),
+      .initial_memory = std::move(initial_memory),
       .memory_bytes = results->total_memory_bytes,
   };
 }
@@ -206,6 +189,7 @@ parse_threaded_artifact(std::span<const uint8_t> bytes)
   return ThreadedArtifactImage{
       .code = results->code,
       .initial_memory = results->initial_memory,
+      .initial_memory_start = results->initial_memory_start,
       .memory_bytes = results->total_memory_bytes,
   };
 }

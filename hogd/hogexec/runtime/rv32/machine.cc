@@ -58,7 +58,10 @@ Machine::reset(uint64_t gas)
     halted_ = true;
     return;
   }
-  registers_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+  // Entry ABI v3: sp (x2) is seeded to 0. The guest owns stack placement and
+  // must set sp itself; a stack touch before that computes 0 - frame, wraps,
+  // and traps OOB instead of silently running the stack somewhere valid.
+  registers_[2] = 0;
 }
 
 void

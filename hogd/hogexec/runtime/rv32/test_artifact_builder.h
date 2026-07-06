@@ -40,18 +40,17 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
-// Assemble a v4 artifact: header || code || initial_memory. memory_bytes is
-// stamped equal to the stored prefix size (callers that want a larger data
-// address space rewrite the memory_bytes header field, exercising the
-// Decision-5 initial_memory_size < memory_bytes path).
+// Assemble a v5 artifact: header || code || initial_memory, with the stored
+// image placed at data-space VA `initial_memory_start`. memory_bytes is
+// stamped as start + stored size (callers that want a larger data address
+// space rewrite the memory_bytes header field, exercising the zero-extended
+// tail path).
 inline std::vector<uint8_t>
 build_artifact(std::span<const uint32_t> words,
-               std::span<const uint8_t> initial_memory)
+               std::span<const uint8_t> initial_memory,
+               uint32_t initial_memory_start = 0)
 {
   const std::vector<uint8_t> code = test_program::code_from_words(words);
-  const uint32_t code_offset = kArtifactHeaderBytes;
-  const uint32_t memory_offset =
-      code_offset + static_cast<uint32_t>(code.size());
 
   std::vector<uint8_t> artifact;
   artifact.reserve(kArtifactHeaderBytes + code.size() + initial_memory.size());
@@ -64,11 +63,11 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, kArtifactSyscallAbiVersion);
   append_u32(artifact, kGasTableVersion);
   append_u64(artifact, kGasScheduleDigest);
-  append_u32(artifact, static_cast<uint32_t>(initial_memory.size()));
+  append_u32(artifact, initial_memory_start +
+                           static_cast<uint32_t>(initial_memory.size()));
   append_u32(artifact, static_cast<uint32_t>(code.size()));
   append_u32(artifact, static_cast<uint32_t>(initial_memory.size()));
-  append_u32(artifact, code_offset);
-  append_u32(artifact, memory_offset);
+  append_u32(artifact, initial_memory_start);
   append_digest(artifact, artifact_digest(code));
   append_digest(artifact, artifact_digest(initial_memory));
   append_bytes(artifact, code);
@@ -78,10 +77,11 @@ build_artifact(std::span<const uint32_t> words,
 
 inline std::vector<uint8_t>
 build_artifact(std::initializer_list<uint32_t> words,
-               std::span<const uint8_t> initial_memory)
+               std::span<const uint8_t> initial_memory,
+               uint32_t initial_memory_start = 0)
 {
   return build_artifact(std::span<const uint32_t>(words.begin(), words.size()),
-                        initial_memory);
+                        initial_memory, initial_memory_start);
 }
 
 } // namespace hogd::rv32::test_artifact

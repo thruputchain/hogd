@@ -36,7 +36,8 @@ Rv32Contract::create(ContractBlob const &contract_blob)
   }
 
   auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
-      artifact->code, artifact->initial_memory, artifact->memory_bytes, false);
+      artifact->code, artifact->initial_memory, artifact->initial_memory_start,
+      artifact->memory_bytes, false);
   if (!pre_instantiation.has_value()) {
     return std::nullopt;
   }

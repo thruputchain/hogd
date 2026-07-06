@@ -89,12 +89,14 @@ static_assert(alignof(Slot) == 16);
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
-  // it is zero-padded out to total_memory_size, which is the machine's full
-  // memory size and must be <= kMaxMemoryBytes and >= memory.size().
+  // it is placed at data-space VA `memory_start`, with zeros filling [0,
+  // memory_start) and [memory_start+memory.size(), total_memory_size).
+  // `total_memory_size` is the machine's full memory size and must be <=
+  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-         uint32_t total_memory_size, bool trace);
+         uint32_t memory_start, uint32_t total_memory_size, bool trace);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -242,9 +244,8 @@ public:
     memory_.bytes().assign(image.begin(), image.end());
 
     regs_.fill(0);
-    // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
-    // matches canonical Machine::reset and the old reset() path.
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
+    // Entry ABI v3: sp (x2) stays 0 from the fill above -- the guest owns
+    // stack placement (matches canonical Machine::reset).
 
     exec_ = std::span(pre_instantiation.exec_);
     max_pc_ = (exec_.size() - 1) * kInstructionBytes;
@@ -275,7 +276,6 @@ public:
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
   }
@@ -1714,6 +1714,7 @@ inline constexpr std::array<FusionRule, 9> kFusionRules = {
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
+                                        uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace)
 {
   const auto program = ThreadedProgram::create(code);
@@ -1722,12 +1723,12 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   }
 
   if (total_memory_size > kMaxMemoryBytes ||
-      total_memory_size < memory.size()) {
+      size_t{memory_start} + memory.size() > total_memory_size) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 
-  std::vector<uint8_t> initial_memory_image(memory.begin(), memory.end());
-  initial_memory_image.resize(total_memory_size);
+  std::vector<uint8_t> initial_memory_image(total_memory_size, 0);
+  std::ranges::copy(memory, initial_memory_image.begin() + memory_start);
 
   std::vector<Slot> exec;
   size_t n = program->instruction_count();

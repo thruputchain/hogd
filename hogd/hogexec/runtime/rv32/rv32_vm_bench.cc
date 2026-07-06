@@ -53,6 +53,7 @@ using test_program::load;
 using test_program::make_program;
 using test_program::op;
 using test_program::store;
+using test_program::u_type;
 
 class HaltHost : public Host {
 public:
@@ -422,13 +423,28 @@ recursive_fibonacci_words()
   constexpr uint8_t kA0 = 10;
 
   return {
-      addi(kA0, 0, kFibInput), j_type(kRa, 8),          0x00000073U,
+      // Entry ABI v3 seeds sp to 0; the program owns stack placement, so
+      // start the stack at the top of bench memory.
+      u_type(0x37, kSp, kBenchMemoryBytes),
+      addi(kA0, 0, kFibInput),
+      j_type(kRa, 8),
+      0x00000073U,
 
-      addi(kSp, kSp, -16),     store(kSp, kRa, 12, 2),  store(kSp, kA0, 8, 2),
-      addi(kT0, 0, 2),         branch(4, kA0, kT0, 36), addi(kA0, kA0, -1),
-      j_type(kRa, -24),        store(kSp, kA0, 4, 2),   load(kA0, 2, kSp, 8),
-      addi(kA0, kA0, -2),      j_type(kRa, -40),        load(kT1, 2, kSp, 4),
-      op(kA0, kA0, kT1, 0, 0), load(kRa, 2, kSp, 12),   addi(kSp, kSp, 16),
+      addi(kSp, kSp, -16),
+      store(kSp, kRa, 12, 2),
+      store(kSp, kA0, 8, 2),
+      addi(kT0, 0, 2),
+      branch(4, kA0, kT0, 36),
+      addi(kA0, kA0, -1),
+      j_type(kRa, -24),
+      store(kSp, kA0, 4, 2),
+      load(kA0, 2, kSp, 8),
+      addi(kA0, kA0, -2),
+      j_type(kRa, -40),
+      load(kT1, 2, kSp, 4),
+      op(kA0, kA0, kT1, 0, 0),
+      load(kRa, 2, kSp, 12),
+      addi(kSp, kSp, 16),
       jalr(0, kRa, 0),
   };
 }
@@ -452,6 +468,7 @@ make_recursive_fibonacci_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -510,6 +527,7 @@ make_compute_loop_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -582,6 +600,7 @@ make_compute_loop_independent_threaded_program()
   }
   std::vector<uint8_t> initial_memory; // all zero initial memory
   return ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                                 /*memory_start=*/0,
                                                  kBenchMemoryBytes,
                                                  /*trace=*/false)
       .value();
@@ -825,6 +844,7 @@ bm_rv32_threaded_instantiate(benchmark::State &state)
   std::vector<uint8_t> initial_memory; // all zero initial memory
   const auto program =
       ThreadedMachinePreInstantiation::create(bytes, initial_memory,
+                                              /*memory_start=*/0,
                                               kMaxMemoryBytes,
                                               /*trace=*/false)
           .value();
