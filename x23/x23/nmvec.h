@@ -234,9 +234,13 @@ public:
       size_t size = size_.load(std::memory_order_acquire);
     recheck:
       if (size == kLocked) {
+        // Acquire on failure: if the CAS fails because put_size just
+        // published a new size, that value can be returned below, and
+        // callers rely on size() synchronizing with the construction of
+        // all elements below the returned size.
         if (!size_.compare_exchange_weak(size, kLockedWantNotify,
                                          std::memory_order_relaxed,
-                                         std::memory_order_relaxed))
+                                         std::memory_order_acquire))
           goto recheck;
       }
       else if (size != kLockedWantNotify)

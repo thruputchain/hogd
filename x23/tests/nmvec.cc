@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <memory>
 #include <random>
 #include <ranges>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -519,6 +522,49 @@ TEST(NMVec, ExceptionSafetyResizeGrow)
   nm.resize(0);
   EXPECT_EQ(nm.size(), 0u);
   EXPECT_EQ(ThrowingT::live(), 0);
+}
+
+// Readers that observe an index via size() must also observe the
+// construction of the element at that index (size() must synchronize with
+// emplace_back's release of the size lock).  Regression test for a data
+// race where size(), after observing the resize lock, returned a value
+// obtained from a relaxed compare_exchange failure load, dropping the
+// happens-before edge with the concurrent emplace_back.  Run under TSAN.
+TEST(NMVec, ConcurrentSizeVsEmplaceBack)
+{
+  constexpr size_t kItems = 200000;
+  constexpr size_t kReaders = 4;
+
+  NMVec<std::unique_ptr<size_t>> v;
+  std::atomic<bool> done{false};
+
+  std::vector<std::jthread> readers;
+  std::vector<std::atomic<bool>> ok(kReaders);
+  for (size_t r = 0; r < kReaders; ++r)
+    readers.emplace_back([&v, &done, &ok, r]() {
+      bool all_ok = true;
+      while (!done.load(std::memory_order_relaxed)) {
+        size_t size = v.size();
+        if (size > 0) {
+          // Read both the unique_ptr object and its pointee; neither is
+          // atomic, so this is only safe if size() gave us a
+          // happens-before edge with the element's construction.
+          size_t *p = v[size - 1].get();
+          all_ok &= (p != nullptr && *p == size - 1);
+        }
+      }
+      ok[r].store(all_ok);
+    });
+
+  for (size_t i = 0; i < kItems; ++i)
+    v.emplace_back(std::make_unique<size_t>(i));
+
+  done.store(true, std::memory_order_relaxed);
+  readers.clear();
+
+  ASSERT_EQ(v.size(), kItems);
+  for (size_t r = 0; r < kReaders; ++r)
+    ASSERT_TRUE(ok[r].load()) << "reader " << r << " saw a torn element";
 }
 
 TEST(NMVec, MoveAssignDestroysOldElements)
