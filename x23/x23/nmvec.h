@@ -237,9 +237,11 @@ public:
         // Acquire on failure: if the CAS fails because put_size just
         // published a new size, that value can be returned below, and
         // callers rely on size() synchronizing with the construction of
-        // all elements below the returned size.
+        // all elements below the returned size.  (Success must be at
+        // least as strong as failure for GCC's -Winvalid-memory-model,
+        // even though the success path never returns a size.)
         if (!size_.compare_exchange_weak(size, kLockedWantNotify,
-                                         std::memory_order_relaxed,
+                                         std::memory_order_acquire,
                                          std::memory_order_acquire))
           goto recheck;
       }

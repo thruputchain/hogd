@@ -539,6 +539,7 @@ TEST(NMVec, ConcurrentSizeVsEmplaceBack)
   std::atomic<bool> done{false};
 
   std::vector<std::jthread> readers;
+  readers.reserve(kReaders);
   std::vector<std::atomic<bool>> ok(kReaders);
   for (size_t r = 0; r < kReaders; ++r)
     readers.emplace_back([&v, &done, &ok, r]() {
