@@ -20,24 +20,42 @@ after the failed attempt.
 
 ## Architecture (one line)
 
-Executor detects a 2PC failure with diagnostics → fire-and-forget RPC
-**direct to the indexer** (new internal `IndexerExec` service) → indexer
-holds `tx hash → diagnostic` in a short-lived in-memory cache → client's
-existing `get_transaction_info` returns a new "recent failure" outcome until
-the entry expires or the tx commits.
+Executor detects a 2PC failure with diagnostics → fire-and-forget report on
+its **existing event-server channel** (new `EventExecutor1` method) → event
+server immediately relays to **every registered indexer** (new
+`IndexerEvent1` method, existing connections) → indexer holds
+`tx hash → diagnostic` in a short-lived in-memory cache → client's existing
+`get_transaction_info` returns a new "recent failure" outcome until the
+entry expires or the tx commits.
 
-Everything is best-effort by construction: the executor drops reports rather
-than block the propose path; the indexer drops reports rather than grow
-unboundedly; expiry is passive.
+Everything is best-effort by construction: the executor and event server
+drop reports rather than block or buffer; the indexer drops reports rather
+than grow unboundedly; expiry is passive. No new connections, servers, or
+discovery anywhere — both hops ride wiring that already exists.
 
 ### Decisions made during brainstorming
 
 - **Cache lives in the indexer**, not the mempool or event server: the
   indexer is the existing client query surface for tx-by-hash.
-- **Executor → indexer direct connection**, not relayed via the event server
-  or mempool: the event server's contract is "committed data only", and a
-  dedicated producer→consumer channel is the right long-term shape. Cost:
-  a bit of discovery plumbing (below) so executors learn the address.
+- **Diagnostics route through the event server**, not executor→indexer
+  direct and not via the scheduler/mempool. A direct connection was
+  considered first, but it would have required introducing the indexer to
+  the scheduler — and the indexer is deliberately out of consensus. The
+  long-term plan is to shard the indexer (multiple machines/disks) with
+  instances coming on/offline freely; they must stay decoupled from
+  consensus components. The event server is already the indexer fan-out
+  point: it holds the only indexer registrations in the system
+  (`EventRPCContext::add_indexer`, `hogd/event/rpc_context.h` — already a
+  vector of clients). This also resolves the `TODO(jhumphri)` in
+  `hogd/event/rpc_from_indexer.h` ("should the indexer register with the
+  mempool instead?") — answer: no, event-only.
+- **Failure reports bypass the event server's block pipeline.** Committed
+  event data is buffered per block (`EventBlockContext`) and forwarded to
+  indexers at commit; a nondeterministically failed tx will never commit,
+  so its report is relayed immediately and touches no block state. Note
+  the executor never calls `eventexecutor_emit_event` for these txs
+  (`executor_context.cc` gates emission on OK/deterministic/reverted), so
+  a separate method is the honest shape — this is not committed data.
 - **Lookup via a new `TxInfoResult` arm** on `get_transaction_info`, not a
   separate method: one client call answers "where is my tx".
 - **Exactly one diagnostic per failure** on the wire and in the cache
@@ -45,84 +63,71 @@ unboundedly; expiry is passive.
   union). Release-build proposals already only produce
   `kDbDiagnosticFirst`; debug builds producing `kDbDiagnosticAll` send
   `conflicts[0]` and drop the rest. Reporting more diagnostics in local
-  testing is a later, additive change to the internal `.x` only.
-- **Service named `IndexerExec`** (not `IndexerExecDiag`) so future
-  executor→indexer needs can share it.
-- **Discovery via the intro-card flow, not a config flag**: the indexer
-  intros itself to the scheduler (mirroring `schedevent_intro_event`), and
-  the scheduler hands the indexer's address to executors as a new optional
-  field in `IntroExecResult`. Optional means nodes without an indexer — or
-  executors that intro before the indexer registers — simply run with
-  diagnostics off.
+  testing is a later, additive change.
+- **All XDR lands in the protocol submodule.** An earlier draft put a new
+  executor→indexer service in a hogd-internal `.x` under `hogd/xdr/`;
+  with the event-server route there is no new service — just one added
+  method on each of two existing protocol programs — so nothing internal
+  remains to split out.
 - **Attempt height** comes from the existing
   `SystemCallHandler::get_block_height()` (reads the db tip); no new
   plumbing.
 
 ## Components
 
-### 1. XDR / protocol changes
+### 1. Protocol changes (protocol submodule; one PR, then the groundhog-go bump flow)
 
-**New internal file `hogd/xdr/indexer_exec.x`** (hogd-internal, following the
-`event_cursor_internal.x` precedent; added to `hogd/xdr/CMakeLists.txt`):
-
-- `struct TxFailureDiagnostic { BlockHeight attempt_height;
-  DbConflictDiagnostic conflict; }` — fixed-size; types come from
-  `protocol/types.x` and `protocol/db_conflict.x`.
-- `program IndexerExec`, version `IndexerExec1`, method
-  `indexer_exec_report_tx_failure(SignedTransactionHash,
-  TxFailureDiagnostic)` returning void. Executor is the client, indexer the
-  server. Never exposed on the public gateway.
-
-**Protocol-submodule changes** (one protocol PR, then the groundhog-go bump
-flow):
-
+- `protocol/db_conflict.x`: new fixed-size
+  `struct TxFailureDiagnostic { BlockHeight attempt_height;
+  DbConflictDiagnostic conflict; }` — shared by both hops and the public
+  lookup arm.
+- `protocol/event_rpc.x`, `EventExecutor1`: new method
+  `eventexecutor_report_tx_failure(SignedTransactionHash,
+  TxFailureDiagnostic)` (exact signature may add BlockID/TransactionID for
+  tracing parity with `eventexecutor_emit_event`; decided in the plan).
 - `protocol/indexer.x`:
-  - `TxInfoOutcome` gains `TxInfoRecentFailure = 2`.
-  - `TxInfoResult` gains a `TxInfoRecentFailure` arm carrying
-    `{ BlockHeight attempt_height; DbConflictDiagnostic conflict; }` (a
-    struct defined in `indexer.x`; the internal `TxFailureDiagnostic` stays
-    internal).
+  - `IndexerEvent1`: new method
+    `indexer_event_report_tx_failure(SignedTransactionHash,
+    TxFailureDiagnostic)` — arrives on the indexer's existing event-facing
+    RPC server; no new port.
+  - `TxInfoOutcome` gains `TxInfoRecentFailure = 2`; `TxInfoResult` gains
+    a `TxInfoRecentFailure` arm carrying `TxFailureDiagnostic`.
   - Semantics documented in the `.x`: a committed record always wins (a tx
     that conflicted, was retried, and landed reports `TxInfoFound`); the
     failure arm appears only on a db miss with a cache hit; the payload is
     best-effort and advisory — absence proves nothing.
-- Discovery plumbing (see "Executor side" below):
-  - A card type for the indexer's `IndexerExec` server address, e.g.
-    `IndexerExecCard { Protocol protocol; ServerAddress address; }`.
-  - `IntroExecResult` in `protocol/sched_exec.x` gains an optional
-    `IndexerExecCard indexer<1>`.
-  - A new indexer→scheduler intro method (mirroring
-    `schedevent_intro_event(EventCard)`) so the scheduler learns the
-    address; stored in the scheduler's `Registration` singleton
-    (`hogd/mempool/registration.h`). Registration is optional and not
-    gated: executor intro does not wait for an indexer. This connection is
-    entirely new — today the indexer talks only to the event server
-    (`event_indexer_intro`, `hogd/indexer/indexer.cc`) and nothing in the
-    scheduler knows the indexer exists.
-  - The indexer binary gains an optional `--scheduler-addr` flag (next to
-    the existing `--event-addr`); omitted → no intro is sent and the
-    feature is off network-wide.
 
 ### 2. Executor side (`hogd/hogexec`)
 
-- The executor learns the indexer's `IndexerExec` address from the optional
-  card in its `IntroExecResult` (the same response that already delivers db
-  shards and the event server). Card absent → the whole feature is a no-op;
-  validators and test rigs need zero changes.
+- `EventServerProxy` (`hogd/hogexec/runtime/event_server_proxy.h`) gains
+  `report_tx_failure(...)`; the executor already holds this connection
+  from its intro (`EventCard`), so there are no config or discovery
+  changes of any kind.
 - At the propose-path points where `two_phase_commit_failed_` is set and
   `db_proxy_.last_push_conflict().level() != kDbDiagnosticNone` (exactly
-  where `log_db_conflict_diagnostic()` sits today), hand
-  `(signed tx hash, attempt height, first DbConflictDiagnostic)` to a
-  sender. Only proposal mode ever has a non-None level, so validation and
-  viewing paths are untouched by construction.
-- The sender is strictly non-blocking: bounded queue, drop-on-full,
-  drop-on-disconnect, never awaited on the propose path. A slow or dead
-  indexer costs nothing but dropped diagnostics.
-- The executor computes/obtains the `SignedTransactionHash` of the proposed
-  tx; the attempt height comes from the existing
-  `SystemCallHandler::get_block_height()` (db tip).
+  where `log_db_conflict_diagnostic()` sits today), send
+  `(signed tx hash, attempt height, first DbConflictDiagnostic)`. Only
+  proposal mode ever has a non-None level, so validation and viewing paths
+  are untouched by construction. The tx hash is already computed by
+  `SystemCallHandler` (#1905); the height comes from
+  `get_block_height()`.
+- The send is strictly fire-and-forget: detached, never awaited on the
+  propose path, **not** counted in `pending_event_calls_` (block
+  finish must not wait on diagnostics), errors trace-logged and dropped.
 
-### 3. Indexer side (`hogd/indexer`)
+### 3. Event server side (`hogd/event`)
+
+- The `EventExecutor1` handler (`rpc_from_exec.cc`) implements
+  `eventexecutor_report_tx_failure` by relaying the report to every client
+  in `EventRPCContext::indexers_`, fire-and-forget: no registered indexer →
+  drop; a send error → trace-log and drop (an offline indexer shard must
+  never disturb the event pipeline). No interaction with
+  `EventBlockContext` or the commit flow.
+- With multiple registered indexers (future sharding), broadcast is
+  correct and cheap: reports are single fixed-size messages, and each
+  indexer independently caches what it hears.
+
+### 4. Indexer side (`hogd/indexer`)
 
 - New `RecentTxFailureCache`, modeled on the mempool's
   `failed_authentication_txs_` (`hogd/mempool/rpc_from_coord.h`):
@@ -139,10 +144,9 @@ flow):
     conflict is the relevant one).
   - Global entry cap; new reports are dropped when full. Entries are
     fixed-size, so memory is strictly `cap × constant`.
-- New internal `RpcServer<...>` for `IndexerExec1` on its own port
-  (the indexer already stands up two RPC servers in
-  `hogd/indexer/indexer.cc`; this is a third). Same trust level as the
-  event-server channel: internal infrastructure only, no client input.
+- `IndexerEventRpc` (`rpc_from_event.h`) gains the
+  `indexer_event_report_tx_failure` handler writing into the cache — same
+  server, same port, same trust level as `indexer_event_process_events`.
 - `IndexerBlockExplorerRpc::get_transaction_info`
   (`hogd/indexer/rpc_from_block_explorer.h`): db lookup first; on miss,
   consult the cache; on cache hit return the `TxInfoRecentFailure` arm;
@@ -150,11 +154,12 @@ flow):
 
 ## Error handling & trust
 
-- No failure in this feature may affect execution, proposal, or indexing
-  correctness — every send/store/lookup degrades to "no diagnostic".
-- The report port is internal-only, same trust posture as
-  `indexer_event_process_events`. Bounds (global cap, fixed-size entries)
-  hold even against a buggy executor peer.
+- No failure in this feature may affect execution, proposal, event
+  pairing, or indexing correctness — every send/relay/store/lookup
+  degrades to "no diagnostic".
+- Reports travel only on existing internal channels
+  (executor→event→indexer), same trust posture as event emission itself.
+  Bounds (global cap, fixed-size entries) hold even against a buggy peer.
 
 ## Testing
 
@@ -165,12 +170,13 @@ flow):
   `TxInfoRecentFailure` arm with the right diagnostic; ingest the same tx
   committed → `TxInfoFound` wins; advance the watermark past expiry →
   `TxInfoNotFound`.
+- **Event server tests**: a report relays to all registered indexers;
+  with none registered it drops without error; an indexer send failure
+  does not propagate to the executor-facing response.
 - **Executor tests**: a failed 2PC push with diagnostics triggers exactly
-  one report to a test-double `IndexerExec` server; no report when the
-  level is `kDbDiagnosticNone` or no indexer card was delivered at intro;
-  the propose path completes normally with the sender's queue full.
-- **Scheduler tests**: indexer intro registers the card; `IntroExecResult`
-  carries it when present and an empty optional otherwise.
+  one report to a test-double event server; no report when the level is
+  `kDbDiagnosticNone`; block finish (`await_event_return`) does not wait
+  on in-flight diagnostic sends.
 
 ## Out of scope (deliberately)
 
@@ -178,7 +184,10 @@ flow):
   option to be added later).
 - Diagnostics for deterministic failures, auth failures, or validation
   failures.
-- Cross-node propagation: only the proposing node's indexer learns the
+- Indexer sharding itself — but the route is sharding-ready: reports fan
+  out to however many indexers are registered with the event server, and
+  indexer churn affects nothing outside the event server's client list.
+- Cross-node propagation: only the proposing node's indexer(s) learn the
   diagnostic; a client querying another node sees `TxInfoNotFound`.
   Acceptable under best-effort semantics.
 - HTTP surface: lookups remain XDR RPC via the existing gateway path.
