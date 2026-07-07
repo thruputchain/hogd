@@ -95,7 +95,13 @@ flow):
     `schedevent_intro_event(EventCard)`) so the scheduler learns the
     address; stored in the scheduler's `Registration` singleton
     (`hogd/mempool/registration.h`). Registration is optional and not
-    gated: executor intro does not wait for an indexer.
+    gated: executor intro does not wait for an indexer. This connection is
+    entirely new — today the indexer talks only to the event server
+    (`event_indexer_intro`, `hogd/indexer/indexer.cc`) and nothing in the
+    scheduler knows the indexer exists.
+  - The indexer binary gains an optional `--scheduler-addr` flag (next to
+    the existing `--event-addr`); omitted → no intro is sent and the
+    feature is off network-wide.
 
 ### 2. Executor side (`hogd/hogexec`)
 
