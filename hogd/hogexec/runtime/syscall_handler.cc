@@ -572,7 +572,7 @@ SystemCallHandler::try_commit_transaction()
                .try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
     auto abort_res = abort_transaction();
     if (!abort_res.has_value()) {
       return to_exec_result(abort_res.error().code());
@@ -584,7 +584,7 @@ SystemCallHandler::try_commit_transaction()
   // check if any of the 2pc database operations failed
   if (!result) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
 
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
@@ -708,7 +708,7 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   }
   if (!push_res.value()) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
       return to_exec_result(abort_status.error().code());
@@ -1048,13 +1048,38 @@ SystemCallHandler::get_trace() const
 }
 
 void
-SystemCallHandler::log_db_conflict_diagnostic() const
+SystemCallHandler::report_db_conflict_diagnostic() const
 {
   auto const &conflict = db_proxy_.last_push_conflict();
   if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticNone) {
     return;
   }
   trace("two-phase commit conflict diagnostics: {}", x23::show(conflict));
+
+  // The wire format carries exactly one diagnostic (memory-bounded end to
+  // end); under kDbDiagnosticAll (debug builds) send the first, drop the
+  // rest.
+  DbConflictDiagnostic const *first = nullptr;
+  if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst) {
+    first = &conflict.first();
+  }
+  else if (!conflict.conflicts().empty()) {
+    first = &conflict.conflicts()[0];
+  }
+  if (first == nullptr) {
+    return;
+  }
+
+  auto height = get_block_height();
+  if (!height.has_value()) {
+    // Tip read failed (block being torn down); drop the report.
+    return;
+  }
+  event_server_proxy_.report_tx_failure(get_source_tx_hash(),
+                                        TxFailureDiagnostic{.attempt_height =
+                                                                height.value(),
+                                                            .conflict =
+                                                                *first});
 }
 
 void

@@ -1,5 +1,10 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
+#include <chrono>
+#include <thread>
+#include <utility>
+
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "ffi_enums.hh"
@@ -118,6 +123,50 @@ PerTransactionEventServerProxy::emit_events(
   emitted_event_ = true;
   co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,
                                                     tx_event_log, proposed_tx);
+}
+
+EventServerProxy::~EventServerProxy()
+{
+  // Drain detached report coroutines (cf. ~EventRPCContext) so none touches
+  // a destroyed client_. Bounded: on the shutdown path with an unreachable
+  // event server a retrying send may never resolve; a leaked coroutine at
+  // process exit beats a shutdown hang.
+  for (int i = 0;
+       i < 2000 && pending_failure_reports_.load(std::memory_order_acquire) > 0;
+       i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (pending_failure_reports_.load(std::memory_order_acquire) > 0) {
+    warn("EventServerProxy destroyed with tx-failure reports still in flight");
+  }
+}
+
+void
+EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
+                                    TxFailureDiagnostic diag)
+{
+  // Drop rather than queue unboundedly when the event server is slow.
+  if (pending_failure_reports_.load(std::memory_order_acquire) >=
+      kMaxPendingFailureReports) {
+    return;
+  }
+  pending_failure_reports_.fetch_add(1, std::memory_order_release);
+  [](EventServerProxy &self, SignedTransactionHash hash,
+     TxFailureDiagnostic d) -> x23::Detached {
+    try {
+      RPCError r =
+          co_await self.client_.eventexecutor_report_tx_failure(hash, d);
+      if (r != RPCError::kRPCNone) {
+        warn("tx-failure report dropped by event server: {}", r);
+      }
+    } catch (x23::XdrException const &e) {
+      // Best-effort: an RPC-layer throw (#2857 containment pattern, cf.
+      // emit_event above) must never escape a detached coroutine.
+      warn("tx-failure report send failed: {}", e.what());
+    }
+    self.pending_failure_reports_.fetch_sub(1, std::memory_order_release);
+    co_return;
+  }(*this, std::move(tx_hash), std::move(diag));
 }
 
 } // namespace hogd

@@ -45,8 +45,15 @@ public:
 
     DatabaseIdentifier identifier{ShardedDB(exec_result)};
     auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
-    auto event_server_proxy = std::make_unique<EventServerProxy>(
-        EventServerProxy::make_from_exec_result(exec_result.event));
+    // EventServerProxy holds an atomic counter and a user-declared
+    // destructor (for the tx-failure-report drain), so it has neither an
+    // implicit copy nor an implicit move constructor. make_unique's
+    // forwarding-reference parameter would materialize the
+    // make_from_exec_result() prvalue into a temporary and then require a
+    // move to construct the new object; constructing via `new` directly
+    // from the prvalue is guaranteed-elided (C++17) instead.
+    std::unique_ptr<EventServerProxy> event_server_proxy(new EventServerProxy(
+        EventServerProxy::make_from_exec_result(exec_result.event)));
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
                                                std::move(event_server_proxy),

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <stdexcept>
+#include <utility>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
@@ -42,10 +45,30 @@ public:
              TxEventLog const &tx_event_log,
              ProposedTransaction const &proposed_tx);
 
+  // Fire-and-forget, best-effort report that [tx_hash] failed
+  // nondeterministically during 2pc, with the diagnostic hogdb attached.
+  // Returns immediately; a slow or dead event server costs nothing but the
+  // dropped report (errors are logged and swallowed -- diagnostics must
+  // never disturb execution). In-flight sends are capped at
+  // kMaxPendingFailureReports; excess reports are dropped, so a conflict
+  // storm against a slow event server cannot grow memory. The destructor
+  // drains in-flight sends (bounded) so a detached coroutine never touches
+  // a destroyed client_.
+  void report_tx_failure(SignedTransactionHash tx_hash,
+                         TxFailureDiagnostic diag);
+
+  ~EventServerProxy();
+
 private:
   using client_t =
       EventExecutor1::client<x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
   client_t client_;
+
+  // Soft bound on concurrently in-flight failure reports (racy over-admission
+  // by a few is fine); reports past the cap are dropped, keeping the
+  // fire-and-forget path memory-bounded even with an unresponsive server.
+  static constexpr ssize_t kMaxPendingFailureReports = 1024;
+  std::atomic<ssize_t> pending_failure_reports_ = 0;
 };
 
 class PerTransactionEventServerProxy {
@@ -66,6 +89,13 @@ public:
   x23::Async<SystemStatus<void>>
   emit_events(TxEventLog const &tx_event_log,
               ProposedTransaction const &proposed_tx);
+
+  // Fire-and-forget; see EventServerProxy::report_tx_failure.
+  void report_tx_failure(SignedTransactionHash tx_hash,
+                         TxFailureDiagnostic diag) const
+  {
+    event_server_proxy_.report_tx_failure(std::move(tx_hash), std::move(diag));
+  }
 
 private:
   EventServerProxy &event_server_proxy_;

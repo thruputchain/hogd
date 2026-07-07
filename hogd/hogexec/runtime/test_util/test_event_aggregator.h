@@ -2,6 +2,8 @@
 
 #include <map>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include "db_conflict.hh"
 #include "event.hh"
@@ -49,6 +51,16 @@ public:
   x23::Async<std::optional<TxEventLog>>
   get_events_by_hash(BlockID block_id, SHA256Hash const &tx_hash);
 
+  // Records a forwarded tx-failure diagnostic (executor -> event server).
+  x23::Async<RPCError> report_tx_failure(SignedTransactionHash tx_hash,
+                                         TxFailureDiagnostic diag);
+
+  // Blocks until at least [n] failure reports have arrived.
+  x23::Async<void> wait_for_failure_reports(int64_t n);
+
+  x23::Async<std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>>
+  get_failure_reports();
+
   // Blocking control: block emit_event calls until unblock_emit_events is
   // called
   void block_emit_events() { should_block_futex_.store(true); }
@@ -74,6 +86,9 @@ private:
 
   x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
+  x23::CoroFutex<int64_t> failure_report_count_{0};
+  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>
+      failure_reports_;
   // Track block lifecycle state (from sched side)
   std::map<BlockID, BlockState> block_states_;
   // Track executor handles per block (from exec side)
@@ -121,13 +136,12 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   x23::Async<RPCError>
-  eventexecutor_report_tx_failure(SignedTransactionHash const & /*tx_hash*/,
-                                  TxFailureDiagnostic const & /*diag*/)
+  eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+                                  TxFailureDiagnostic diag)
   {
-    // Recording lands with the executor forwarding work; accept and drop.
-    co_return RPCError::kRPCNone;
+    return event_aggregator_.report_tx_failure(std::move(tx_hash),
+                                               std::move(diag));
   }
 
 private:

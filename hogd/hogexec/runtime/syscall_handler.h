@@ -494,13 +494,17 @@ private:
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
 
-  // Trace-logs db_proxy_'s last_push_conflict() if hogdb captured
-  // diagnostics for the failed push; a no-op otherwise (kDbDiagnosticNone,
-  // e.g. validation/viewing blocks). Diagnostics arrive automatically for
-  // proposal blocks -- hogdb selects the level from the block's execution
-  // mode, so there is no seam to configure here. Called right after each
-  // 2pc push failure site sets two_phase_commit_failed_.
-  void log_db_conflict_diagnostic() const;
+  // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
+  // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
+  // executing block height) to the event server, which relays it to the
+  // indexers so clients can learn why the tx was excluded (see
+  // docs/superpowers/specs/2026-07-07-tx-failure-diagnostics-cache-design.md).
+  // A no-op when hogdb captured no diagnostics (kDbDiagnosticNone, e.g.
+  // validation/viewing blocks) -- hogdb selects the level from the block's
+  // execution mode, so there is no seam to configure here. Called right
+  // after each 2pc push failure site sets two_phase_commit_failed_. Never
+  // blocks and never fails.
+  void report_db_conflict_diagnostic() const;
 
   BlockExecutionMode get_block_execution_mode() const
   {

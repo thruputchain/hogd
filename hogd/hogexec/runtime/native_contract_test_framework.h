@@ -222,6 +222,13 @@ public:
   void block_emit_events() { event_server_.block_emit_events(); }
   void unblock_emit_events() { event_server_.unblock_emit_events(); }
 
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports() { return event_server_.get_failure_reports(); }
+
 private:
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =
@@ -580,6 +587,16 @@ public:
   }
 
   uint16_t get_event_exec_port() { return event_server_wrapper_.exec_port(); }
+
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_wrapper_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports()
+  {
+    return event_server_wrapper_.get_failure_reports();
+  }
 
   static DeployedContractHash
   make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
