@@ -128,9 +128,9 @@ struct ThreadedMemoryHost : Host {
 // calls it received. RecordingHost / ThreadedMemoryHost always report 0 host
 // gas, so they never exercise the ecall host-gas debit -- the charge that both
 // engines apply (canonical Machine::complete_ecall via consume_gas;
-// ThreadedMachine::apply_ecall via a direct gas_remaining_ debit) and that moves
-// the consensus-visible gas_remaining. GasHost fills that gap and lets a test
-// drive both engines through a resumed ecall with a nonzero host charge.
+// ThreadedMachine::apply_ecall via a direct gas_remaining_ debit) and that
+// moves the consensus-visible gas_remaining. GasHost fills that gap and lets a
+// test drive both engines through a resumed ecall with a nonzero host charge.
 struct GasHost final : Host {
   explicit GasHost(uint64_t gas_per_call) : gas_per_call_(gas_per_call) {}
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
@@ -2144,8 +2144,8 @@ TEST(Rv32ThreadedTrapGas, unimpGasParity)
 // consensus-visible gas_remaining, but every host in the corpus/differential
 // harness (RecordingHost, ThreadedMemoryHost) reports 0 host gas, so the debit
 // -- and the threaded engine's apply_ecall host-gas out-of-gas branch, and the
-// deficit a resumed run can fall into -- is otherwise untested. GasHost debits a
-// fixed cost per ecall so these pin cross-engine parity of that charge.
+// deficit a resumed run can fall into -- is otherwise untested. GasHost debits
+// a fixed cost per ecall so these pin cross-engine parity of that charge.
 
 // Drive `words` through the canonical Machine and both (untraced/traced)
 // ThreadedMachine instantiations under the SAME gas-consuming host, and require
@@ -2170,7 +2170,8 @@ expect_ecall_gas_parity(std::span<const uint32_t> words, uint64_t host_gas,
   EXPECT_EQ(tmachine.trap(), cmachine.trap()) << "gas_limit " << gas_limit;
   EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining())
       << "gas_limit " << gas_limit;
-  EXPECT_EQ(thost.call_count(), chost.call_count()) << "gas_limit " << gas_limit;
+  EXPECT_EQ(thost.call_count(), chost.call_count())
+      << "gas_limit " << gas_limit;
 
   auto traced = threaded_from_words(words, memory_bytes, /*trace=*/true);
   ThreadedMachine trmachine(*traced, gas_limit);
@@ -2188,9 +2189,9 @@ expect_ecall_gas_parity(std::span<const uint32_t> words, uint64_t host_gas,
 
 TEST(Rv32ThreadedTrapGas, hostConsumedGasChargedIdenticallyOnContinue)
 {
-  // a0=1 ; ecall (host debits 20, continues) ; a1=5 ; a2=7 -> fall off (bad pc).
-  // Charged: run1 [addi,ecall]=2, host=20, run2 [addi,addi]=2 -> 24 total. Both
-  // engines must reflect the host's 20 gas in the final gas_remaining.
+  // a0=1 ; ecall (host debits 20, continues) ; a1=5 ; a2=7 -> fall off (bad
+  // pc). Charged: run1 [addi,ecall]=2, host=20, run2 [addi,addi]=2 -> 24 total.
+  // Both engines must reflect the host's 20 gas in the final gas_remaining.
   const std::vector<uint32_t> words = {
       addi(10, 0, 1),
       kEcallWord,
