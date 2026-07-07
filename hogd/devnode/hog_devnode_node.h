@@ -26,6 +26,7 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -123,6 +124,7 @@ private:
   HogDevnodeTmpDir event_dir_;
   HogDevnodeTmpDir indexer_dir_;
   std::unique_ptr<IndexDB> indexer_db_;
+  RecentTxFailureCache indexer_failure_cache_;
   // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.
   std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
