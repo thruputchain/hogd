@@ -1862,7 +1862,7 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   ASSERT_NE(canonical, nullptr);
   auto threaded = threaded_from_words(words);
 
-  const uint64_t total = kDivCount * kDivInstructionGas + 1; // 65601 (+ ecall)
+  const uint64_t total = (kDivCount * kDivInstructionGas) + 1; // 65601 (+ ecall)
   const uint64_t budgets[] = {
       0,          1,          8,          9999,     10000,
       10001,      59999,      60000,      60001,    total - 1,
@@ -2380,7 +2380,7 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   // lw must refund NO suffix (its successor heads the next, uncharged chunk),
   // leaving the same 9993 charged. A non-Brk refund would credit the next
   // chunk's gas and over-refund.
-  constexpr size_t kLeadDivs = kMaxRunGas / kDivInstructionGas - 1; // 1249
+  constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01));     // valid divs
   words.push_back(load(4, 2, 0, 2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249)
   words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
@@ -2391,7 +2391,7 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
       ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, kLeadDivs),
       (&op_load<false, 4, false, true>));
 
-  const uint64_t charged = kLeadDivs * kDivInstructionGas + 1; // 9993
+  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/20000 - charged,
                          /*check_pc=*/true, /*gas_limit=*/20000);
@@ -2404,7 +2404,7 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   // As above, but the break carrier is a faulting sw. Same chunk arithmetic:
   // 1249 divs (9992) + sw (gas 1 -> acc 9993), then a div forces the break at
   // the sw. Charged 0..1249 = 9993; break-variant sw refunds no suffix.
-  constexpr size_t kLeadDivs = kMaxRunGas / kDivInstructionGas - 1; // 1249
+  constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01));     // valid divs
   words.push_back(store(0, 2, 2047, 2)); // sw x2, 2047(x0) -> OOB fault (slot 1249)
   words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
@@ -2415,7 +2415,7 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
       ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, kLeadDivs),
       (&op_store<false, 4, true>));
 
-  const uint64_t charged = kLeadDivs * kDivInstructionGas + 1; // 9993
+  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/20000 - charged,
                          /*check_pc=*/true, /*gas_limit=*/20000);
