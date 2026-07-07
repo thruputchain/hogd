@@ -1891,7 +1891,10 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     const Instr &d = *instruction;
     Slot &slot = exec[i];
 
-    // Gas + break placement, folded into this one backward pass. gas_to_run[i]
+    // Gas + break placement, folded into this one backward pass. KEEP THIS
+    // SINGLE-PASS: the break decision reads exec[i+1].gas_to_run, which this
+    // same backward pass already computed, so it needs no forward pre-pass and
+    // no per-slot is_break array -- do not reintroduce either. gas_to_run[i]
     // is the gas of the run starting at i, through its terminating barrier or
     // break carrier; each entry sees its successor's already-computed sum
     // (exec[i+1].gas_to_run; the i+1<n guard excludes the fall-off sentinel,
