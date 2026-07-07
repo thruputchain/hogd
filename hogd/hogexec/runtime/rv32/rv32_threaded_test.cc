@@ -227,22 +227,35 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
             ProgramError::kUnsupportedSystemInstruction);
 }
 
-TEST(Rv32Threaded, createRejectsRunGasOverflow)
+TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
 {
   using test_program::op;
-  constexpr size_t kOverflowingDivCount = (0xFFFFU / kDivInstructionGas) + 1;
-  const std::vector<uint32_t> words(kOverflowingDivCount,
+  // A single straight-line run whose total gas exceeds kMaxRunGas used to be
+  // rejected with kRunGasTooLarge; the lowering now splits it into chunks of
+  // <= kMaxRunGas, so it loads. div gas is 8; kMaxRunGas/8 = 1250 divs per
+  // chunk, so the first break carrier is slot 1249 (the 1251st div would push
+  // the chunk to 10008 > 10000).
+  constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas; // 1250
+  constexpr size_t kDivCount = kDivPerChunk + 8;                   // spills over
+  const std::vector<uint32_t> words(kDivCount,
                                     op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   const std::vector<uint8_t> bytes = words_to_bytes(words);
-
   ASSERT_TRUE(Program::create(bytes).has_value());
+
   auto threaded =
       ThreadedMachinePreInstantiation::create(bytes, /*memory=*/{},
                                               /*memory_start=*/0,
                                               /*total_memory_size=*/256,
                                               /*trace=*/false);
-  ASSERT_FALSE(threaded.has_value());
-  EXPECT_EQ(threaded.error(), ProgramError::kRunGasTooLarge);
+  ASSERT_TRUE(threaded.has_value());
+
+  // Slot 1249 is the break carrier: a plain (non-fused) div break variant.
+  // Slot 1248 stays the plain non-break div (fusion is blocked across the
+  // break boundary, so neither is folded into a fused pair).
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1249),
+            (&op_rr<false, div_signed, true>));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1248),
+            (&op_rr<false, div_signed, false>));
 }
 
 TEST(Rv32Threaded, breakVariantHandlersAreDistinctAndSelectable)

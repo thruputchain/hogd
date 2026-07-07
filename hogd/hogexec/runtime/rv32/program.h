@@ -22,7 +22,8 @@ enum class ProgramError {
   kCodeSizeNotAligned,
   kCodeTooLarge,
   kMemoryTooLarge,
-  kRunGasTooLarge,
+  kRunGasTooLarge, // no longer produced: the threaded lowering splits over-cap
+                   // runs at break carriers instead of rejecting them.
   kUnsupportedCompressedInstruction,
   kUnsupportedSystemInstruction,
   kUnsupportedInstruction,

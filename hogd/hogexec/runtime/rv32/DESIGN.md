@@ -82,8 +82,9 @@ gas at the run's exit seam, before any effect can escape the frame. The seams
 are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
 sees a syscall (a speculative syscall would have effects outside the frame),
 and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
-executes in deficit (every head settles first), bounding the overdraft by the
-lowering's uint16 run-gas cap.
+executes in deficit (every head settles first), bounding the overdraft by
+`kMaxRunGas` (the lowering's chunk cap; over-cap straight-line runs are split
+at mid-run break carriers rather than rejected).
 
 The invariant this buys: the consensus-visible pair (trap classification,
 `gas_remaining`) matches the canonical `Machine` at every budget and on every
