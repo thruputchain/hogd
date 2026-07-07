@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/shared.h"
@@ -46,8 +47,10 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   IndexDB &db = db_status.value();
   Health::instance().set_current_block_height(db.latest_block())();
 
+  RecentTxFailureCache failure_cache;
+
   // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpc> event(db);
+  RpcServer<IndexerEventRpc> event(db, failure_cache);
   event->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
@@ -64,7 +67,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   client.event_indexer_intro(card)();
 
   // Create the RPC server that the block explorers talk to.
-  RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
+  RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
   block_explorer->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
       make_bind_host_port(bind_ip, block_explorer_port));
