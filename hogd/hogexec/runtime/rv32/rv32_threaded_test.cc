@@ -124,6 +124,27 @@ struct ThreadedMemoryHost : Host {
   bool wrote = false;
 };
 
+// Continues on every ecall, debiting a fixed host gas cost and counting the
+// calls it received. RecordingHost / ThreadedMemoryHost always report 0 host
+// gas, so they never exercise the ecall host-gas debit -- the charge that both
+// engines apply (canonical Machine::complete_ecall via consume_gas;
+// ThreadedMachine::apply_ecall via a direct gas_remaining_ debit) and that
+// moves the consensus-visible gas_remaining. GasHost fills that gap and lets a
+// test drive both engines through a resumed ecall with a nonzero host charge.
+struct GasHost final : Host {
+  explicit GasHost(uint64_t gas_per_call) : gas_per_call_(gas_per_call) {}
+  HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
+  {
+    (void)view;
+    (void)args;
+    ++calls_;
+    return HostResult::continue_with(0, gas_per_call_);
+  }
+  [[nodiscard]] size_t call_count() const { return calls_; }
+  uint64_t gas_per_call_;
+  size_t calls_ = 0;
+};
+
 // Build a byte image (little-endian) from instruction words.
 std::vector<uint8_t>
 words_to_bytes(std::span<const uint32_t> words)
@@ -2114,6 +2135,161 @@ TEST(Rv32ThreadedTrapGas, unimpGasParity)
   };
   expect_trap_gas_parity(words, Trap::kInvalidInstruction,
                          /*expected_gas_remaining=*/98);
+}
+
+// --- Host-consumed ecall gas
+// ----------------------------------------------------
+//
+// The host's gas_consumed on an ecall is debited by BOTH engines and moves the
+// consensus-visible gas_remaining, but every host in the corpus/differential
+// harness (RecordingHost, ThreadedMemoryHost) reports 0 host gas, so the debit
+// -- and the threaded engine's apply_ecall host-gas out-of-gas branch, and the
+// deficit a resumed run can fall into -- is otherwise untested. GasHost debits
+// a fixed cost per ecall so these pin cross-engine parity of that charge.
+
+// Drive `words` through the canonical Machine and both (untraced/traced)
+// ThreadedMachine instantiations under the SAME gas-consuming host, and require
+// the consensus-visible outcome (result, trap, gas_remaining) and the host-call
+// count to agree.
+void
+expect_ecall_gas_parity(std::span<const uint32_t> words, uint64_t host_gas,
+                        uint64_t gas_limit, uint32_t memory_bytes = 256)
+{
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, memory_bytes, gas_limit);
+  GasHost chost(host_gas);
+  const StepResult cresult = cmachine.run(chost);
+
+  auto threaded = threaded_from_words(words, memory_bytes);
+  ThreadedMachine tmachine(*threaded, gas_limit);
+  GasHost thost(host_gas);
+  const StepResult tresult = tmachine.run(thost);
+
+  EXPECT_EQ(tresult, cresult) << "gas_limit " << gas_limit;
+  EXPECT_EQ(tmachine.trap(), cmachine.trap()) << "gas_limit " << gas_limit;
+  EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining())
+      << "gas_limit " << gas_limit;
+  EXPECT_EQ(thost.call_count(), chost.call_count())
+      << "gas_limit " << gas_limit;
+
+  auto traced = threaded_from_words(words, memory_bytes, /*trace=*/true);
+  ThreadedMachine trmachine(*traced, gas_limit);
+  GasHost trhost(host_gas);
+  TraceObserver tobs;
+  const StepResult trresult = trmachine.run(trhost, tobs);
+  EXPECT_EQ(trresult, cresult) << "traced gas_limit " << gas_limit;
+  EXPECT_EQ(trmachine.trap(), cmachine.trap())
+      << "traced gas_limit " << gas_limit;
+  EXPECT_EQ(trmachine.gas_remaining(), cmachine.gas_remaining())
+      << "traced gas_limit " << gas_limit;
+  EXPECT_EQ(trhost.call_count(), chost.call_count())
+      << "traced gas_limit " << gas_limit;
+}
+
+TEST(Rv32ThreadedTrapGas, hostConsumedGasChargedIdenticallyOnContinue)
+{
+  // a0=1 ; ecall (host debits 20, continues) ; a1=5 ; a2=7 -> fall off (bad
+  // pc). Charged: run1 [addi,ecall]=2, host=20, run2 [addi,addi]=2 -> 24 total.
+  // Both engines must reflect the host's 20 gas in the final gas_remaining.
+  const std::vector<uint32_t> words = {
+      addi(10, 0, 1),
+      kEcallWord,
+      addi(11, 0, 5),
+      addi(12, 0, 7),
+  };
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, 256, /*gas=*/100);
+  GasHost chost(/*gas_per_call=*/20);
+  EXPECT_EQ(cmachine.run(chost), StepResult::kTrap);
+  EXPECT_EQ(cmachine.trap(), Trap::kBadPc);
+  EXPECT_EQ(cmachine.gas_remaining(), 76U); // 100 - 24
+  EXPECT_EQ(chost.call_count(), 1U);
+
+  auto threaded = threaded_from_words(words);
+  ThreadedMachine tmachine(*threaded, /*gas=*/100);
+  GasHost thost(/*gas_per_call=*/20);
+  EXPECT_EQ(tmachine.run(thost), StepResult::kTrap);
+  EXPECT_EQ(tmachine.trap(), Trap::kBadPc);
+  EXPECT_EQ(tmachine.gas_remaining(), 76U); // must match: host gas debited too
+  EXPECT_EQ(thost.call_count(), 1U);
+}
+
+TEST(Rv32ThreadedTrapGas, hostGasExhaustionTrapsOutOfGasInBothEngines)
+{
+  // The budget covers run1 [addi,ecall]=2 and reaches the host, but not the
+  // host's 20-gas charge: both engines settle (kOutOfGas, 0) AFTER the one host
+  // call. This is the only test that hits ThreadedMachine::apply_ecall's
+  // host-gas out-of-gas branch (gas_remaining_ < result.gas_consumed).
+  const std::vector<uint32_t> words = {addi(10, 0, 1), kEcallWord,
+                                       addi(11, 0, 5)};
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, 256, /*gas=*/10);
+  GasHost chost(/*gas_per_call=*/20);
+  EXPECT_EQ(cmachine.run(chost), StepResult::kTrap);
+  EXPECT_EQ(cmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(cmachine.gas_remaining(), 0U);
+  EXPECT_EQ(chost.call_count(), 1U); // host was reached before it OOGed
+
+  auto threaded = threaded_from_words(words);
+  ThreadedMachine tmachine(*threaded, /*gas=*/10);
+  GasHost thost(/*gas_per_call=*/20);
+  EXPECT_EQ(tmachine.run(thost), StepResult::kTrap);
+  EXPECT_EQ(tmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(tmachine.gas_remaining(), 0U);
+  EXPECT_EQ(thost.call_count(), 1U);
+}
+
+TEST(Rv32ThreadedTrapGas, deficitRunAfterEcallResumeReportsOutOfGas)
+{
+  // The deficit machinery engaging on a run AFTER an ecall resume. run1
+  // [addi,ecall]=2 + host 20 = 22 consumed, leaving 1; the resumed run2
+  // [addi,addi] costs 2, so it is unaffordable. Canonical OOGs at run2's second
+  // addi; the threaded engine executes run2 in deficit and settles (kOutOfGas,
+  // 0) at the fall-off seam -- with the syscall already committed exactly once
+  // (the resumed run's deficit must not re-drive or suppress the prior ecall).
+  const std::vector<uint32_t> words = {
+      addi(10, 0, 1),
+      kEcallWord,
+      addi(11, 0, 5),
+      addi(12, 0, 7),
+  };
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, 256, /*gas=*/23);
+  GasHost chost(/*gas_per_call=*/20);
+  EXPECT_EQ(cmachine.run(chost), StepResult::kTrap);
+  EXPECT_EQ(cmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(cmachine.gas_remaining(), 0U);
+  EXPECT_EQ(chost.call_count(), 1U);
+
+  auto threaded = threaded_from_words(words);
+  ThreadedMachine tmachine(*threaded, /*gas=*/23);
+  GasHost thost(/*gas_per_call=*/20);
+  EXPECT_EQ(tmachine.run(thost), StepResult::kTrap);
+  EXPECT_EQ(tmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(tmachine.gas_remaining(), 0U);
+  EXPECT_EQ(thost.call_count(), 1U); // syscall committed once, not re-run
+}
+
+TEST(Rv32ThreadedTrapGas, hostConsumedGasParityBudgetSweep)
+{
+  // Sweep every budget across the ecall-continuing program with a 20-gas host:
+  // below the run-1 charge (deficit ecall, syscall suppressed), through the
+  // host-gas OOG window (one call, then kOutOfGas), through the post-resume
+  // deficit window, up to full completion (kBadPc). Every budget must match the
+  // canonical per-instruction ground truth.
+  const std::vector<uint32_t> words = {
+      addi(10, 0, 1),
+      kEcallWord,
+      addi(11, 0, 5),
+      addi(12, 0, 7),
+  };
+  for (uint64_t gas = 0; gas <= 28; ++gas) {
+    expect_ecall_gas_parity(words, /*host_gas=*/20, /*gas_limit=*/gas);
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
