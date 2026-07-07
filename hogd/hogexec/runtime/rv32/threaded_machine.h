@@ -37,14 +37,15 @@
 // run has already been charged past it, so trap_bad_memory refunds the run's
 // unexecuted suffix -- the trapped state charges exactly the instructions
 // through the faulting one, matching the per-instruction Machine. An
-// unaffordable run is charged anyway (the balance goes into deficit) and
-// executes speculatively; the deficit settles as kOutOfGas with zero gas at
-// the run's exit seam (enter_run / op_ecall / trap_at), before any effect can
-// escape the frame. The consensus-visible pair (trap classification,
-// gas_remaining) thus matches the per-instruction Machine at every budget;
-// the speculative run's register/memory writes and the trap pc are
-// frame-local state a trap discards and may differ (as may traced
-// intermediate gas past the OOG fence).
+// unaffordable run still executes, speculatively, on a zero balance with the
+// shortfall recorded out-of-band in gas_deficit_ (so budgets keep the full
+// uint64 domain); the deficit settles as kOutOfGas with zero gas at the run's
+// exit seam (enter_run / op_ecall / trap_at), before any effect can escape
+// the frame. The consensus-visible pair (trap classification, gas_remaining)
+// thus matches the per-instruction Machine at every budget; the speculative
+// run's register/memory writes and the trap pc are frame-local state a trap
+// discards and may differ (as may traced intermediate gas past the OOG
+// fence).
 //
 // Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
 // the executable Slot array is built (once, cached across reset()) with either
@@ -279,6 +280,7 @@ public:
                       memory_.bytes().begin());
     pc_ = 0;
     gas_remaining_ = gas;
+    gas_deficit_ = 0;
     trap_ = Trap::kNone;
     halted_ = false;
     halt_code_ = 0;
@@ -382,6 +384,13 @@ public:
   bool halted_ = false;
   const bool exec_traced_;
   uint32_t halt_code_ = 0;
+  // Unsettled overdraft of the (single) speculative run: enter_run_deficit
+  // records the shortfall here and runs the body on a zero balance; every run
+  // exit seam settles a nonzero value as (kOutOfGas, 0). Kept out-of-band so
+  // the uint64 balance keeps its full domain (callers pass UINT64_MAX
+  // budgets); bounded by the lowering's uint16 run-gas cap. Cold: written
+  // only on the deficit path, read at seams.
+  uint32_t gas_deficit_ = 0;
 };
 
 // Lock the cache-line layout the comments above call load-bearing. memory_ must
@@ -504,12 +513,14 @@ is_barrier(Op op)
 // matches a handler's, so fault sites HOGD_MUSTTAIL into it (a single
 // tail-branch, no frame). Spills the register-carried `gas` back to
 // gas_remaining_ first, so observable state at the trap is correct.
-// A negative balance means this trap was reached by a speculative (deficit)
-// run that canonical metering never finished: it stopped at the run's first
-// unpayable instruction, so the trap settles as kOutOfGas with zero gas
-// regardless of T. This one check covers every deficit-run trap exit --
-// ebreak, unimp, bad branch target, out-of-range jal/jalr, the fall-off
-// sentinel, and (via trap_bad_memory's refund) memory faults past the fence.
+// An unsettled gas_deficit_ means this trap was reached by a speculative
+// (deficit) run that canonical metering never finished: it stopped at the
+// run's first unpayable instruction, so the trap settles as kOutOfGas with
+// zero gas regardless of T. This one check covers every deficit-run trap exit
+// -- ebreak, unimp, bad branch target, out-of-range jal/jalr, and the
+// fall-off sentinel. (trap_bad_memory settles or clears the deficit itself
+// before tailing in, so a memory fault in the still-affordable prefix keeps
+// its kBadMemory class.)
 // cold+noinline: faults are off the hot path, and out-of-lining keeps the pc_of
 // divide and the pc_/trap_/halted_ stores out of every handler body.
 template<bool Trace, Trap T>
@@ -517,7 +528,8 @@ template<bool Trace, Trap T>
 trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
         [[maybe_unused]] uint32_t memsize, uint64_t gas)
 {
-  if (static_cast<int64_t>(gas) < 0) {
+  if (c.m->gas_deficit_ != 0) {
+    c.m->gas_deficit_ = 0;
     c.m->gas_remaining_ = 0;
     c.m->trap_ = Trap::kOutOfGas;
   }
@@ -539,44 +551,77 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // per-instruction Machine charges exactly that prefix). Every slot's
 // gas_to_run is the run gas from that slot through its barrier -- kept
 // per-slot for branch-in run heads -- so the faulting slot's successor holds
-// exactly the unexecuted suffix: refund it, then trap. Loads/stores are never
-// barriers, so ip+1 is a real slot or the fall-off sentinel (gas_to_run 0).
-// Memory faults only: at a barrier trap (bad branch target, ebreak, unimp),
-// ip+1 heads the *next* run, whose gas was never charged, and this refund
-// would over-credit.
+// exactly the unexecuted suffix: refund it, net of any deficit, then trap.
+// Loads/stores are never barriers, so ip+1 is a real slot or the fall-off
+// sentinel (gas_to_run 0). In a deficit run the refund decides the class: a
+// balance that covers the deficit means the fault sits in the prefix
+// canonical metering could afford (kBadMemory with the prefix charged); one
+// that does not means canonical ran dry first (kOutOfGas, zero). Memory
+// faults only: at a barrier trap (bad branch target, ebreak, unimp), ip+1
+// heads the *next* run, whose gas was never charged, and this refund would
+// over-credit.
 template<bool Trace>
 StepResult
 trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
                 uint64_t gas)
 {
-  gas += (ip + 1)->gas_to_run;
+  // No overflow: the suffix is part of the charge the entered run already
+  // paid (or capped by it in a deficit run), so balance <= the entry balance.
+  const uint64_t balance = gas + (ip + 1)->gas_to_run;
+  const uint32_t deficit = c.m->gas_deficit_;
+  if (balance < deficit) {
+    // trap_at's deficit branch settles this as (kOutOfGas, 0).
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         /*gas=*/0);
+  }
+  c.m->gas_deficit_ = 0;
   HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                        gas);
+                                                        balance - deficit);
+}
+
+// The run at `ip` does not fit the balance (enter_run's unlikely arm). If a
+// prior speculative run's deficit is still unsettled, settle it now as
+// (kOutOfGas, 0): its balance was zeroed, so it re-enters here for any
+// successor run (every instruction costs >= 1 gas). Otherwise record the
+// shortfall in gas_deficit_ and execute the run speculatively on a zero
+// balance; the deficit settles at the run's exit seam -- back here, op_ecall
+// before the host sees a syscall, or trap_at / trap_bad_memory at a trap.
+// Settling everywhere at (kOutOfGas, 0) makes the consensus-visible pair
+// (trap classification, gas_remaining) match per-instruction metering at
+// every budget: canonical stops at the run's first unpayable instruction with
+// zero gas, and no seam lets a deficit escape. The deficit is tracked
+// out-of-band (not encoded in the balance) so budgets keep the full uint64
+// domain -- callers pass UINT64_MAX -- and is bounded by one run (<= 65535,
+// the lowering's uint16 cap): at most one run ever executes in deficit.
+template<bool Trace>
+[[gnu::noinline, gnu::cold]] StepResult
+enter_run_deficit(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+                  uint64_t gas)
+{
+  if (c.m->gas_deficit_ != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         /*gas=*/0);
+  }
+  c.m->gas_deficit_ = ip->gas_to_run - static_cast<uint32_t>(gas);
+  HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, /*gas=*/0);
 }
 
 // Charge the gas for the whole run starting at `ip` -- its body through and
 // including its terminating barrier -- then dispatch to it. Called at every run
 // head: program start, every jump/branch target, and the instruction after each
 // barrier. This is the only place gas is charged; no instruction self-charges.
-// The charge is unconditional: an unaffordable run drives the balance negative
-// (a deficit) and executes speculatively; the deficit is settled as kOutOfGas
-// with zero gas at the run's exit seam -- the negative check here for the next
-// run head, op_ecall before the host sees a syscall, or trap_at /
-// trap_bad_memory at a trap. Settling everywhere at (kOutOfGas, 0) makes the
-// consensus-visible pair (trap classification, gas_remaining) match
-// per-instruction metering at every budget: canonical stops at the run's first
-// unpayable instruction with zero gas, and no seam lets a deficit escape. The
-// deficit is bounded by one run (<= 65535, the lowering's uint16 cap): every
-// head checks before charging, so at most one run ever executes in deficit.
+// An unaffordable run is not rejected: enter_run_deficit (cold) records the
+// shortfall and executes it speculatively -- see its comment for how the
+// deficit settles into canonical-exact (kOutOfGas, 0).
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  if (static_cast<int64_t>(gas) < 0) [[unlikely]] {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
-                                                         /*gas=*/0);
+  const uint32_t run_gas = ip->gas_to_run;
+  if (gas < run_gas) [[unlikely]] {
+    HOGD_MUSTTAIL return enter_run_deficit<Trace>(c, ip, mem, memsize, gas);
   }
-  gas -= ip->gas_to_run;
+  gas -= run_gas;
   HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, gas);
 }
 
@@ -1171,7 +1216,7 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   // syscall has effects outside the frame that canonical -- which stopped at
   // the run's first unpayable instruction -- never performs. Every other run
   // exit funnels through enter_run or trap_at, which carry the same check.
-  if (static_cast<int64_t>(gas) < 0) [[unlikely]] {
+  if (c.m->gas_deficit_ != 0) [[unlikely]] {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
                                                          /*gas=*/0);
   }

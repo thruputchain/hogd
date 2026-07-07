@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -1788,15 +1789,49 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
 // --- Deficit (overdraft) seams
 // -----------------------------------------------
 //
-// enter_run charges an unaffordable run anyway (the balance goes negative)
-// and the run executes speculatively; the deficit is settled at the next
-// seam: enter_run at the following run head, op_ecall before yielding to the
-// host, or trap_at / trap_bad_memory at a trap. Every seam must report
-// (kOutOfGas, 0) -- what the canonical Machine reported when it stopped at
-// the first unpayable instruction -- and, critically, a speculative run must
-// never leak a side effect past the frame (no syscall may reach the host).
-// Speculative register/memory writes and the trap pc are frame-local state a
-// trap discards; they intentionally differ from canonical.
+// enter_run enters an unaffordable run anyway (recording the shortfall as a
+// deficit) and the run executes speculatively; the deficit is settled at the
+// next seam: enter_run at the following run head, op_ecall before yielding
+// to the host, or trap_at / trap_bad_memory at a trap. Every seam must
+// report (kOutOfGas, 0) -- what the canonical Machine reported when it
+// stopped at the first unpayable instruction -- and, critically, a
+// speculative run must never leak a side effect past the frame (no syscall
+// may reach the host). Speculative register/memory writes and the trap pc
+// are frame-local state a trap discards; they intentionally differ from
+// canonical.
+
+TEST(Rv32ThreadedTrapGas, hugeGasBudgetRunsNormally)
+{
+  // Regression (#2888 CI): callers use UINT64_MAX as an effectively
+  // unlimited budget, so balances legitimately occupy the full uint64 range
+  // -- the deficit tracking must not repurpose the top bit (or any in-band
+  // range) of the balance as a sign. The program must halt via the host
+  // with exactly 3 gas consumed under budgets at and around 2^63.
+  const std::vector<uint32_t> words = {
+      addi(5, 0, 1), // x5 = 1
+      addi(6, 0, 2), // x6 = 2
+      kEcallWord,    // halts via RecordingHost
+  };
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  auto threaded = threaded_from_words(words);
+
+  const uint64_t budgets[] = {std::numeric_limits<uint64_t>::max(),
+                              uint64_t{1} << 63, (uint64_t{1} << 63) - 1};
+  for (const uint64_t budget : budgets) {
+    Machine cmachine(canonical, 256, budget);
+    RecordingHost chost;
+    EXPECT_EQ(cmachine.run(chost), StepResult::kHalted) << "budget " << budget;
+    EXPECT_EQ(cmachine.gas_remaining(), budget - 3) << "budget " << budget;
+    EXPECT_EQ(chost.call_count(), 1U) << "budget " << budget;
+
+    ThreadedMachine tmachine(*threaded, budget);
+    RecordingHost thost;
+    EXPECT_EQ(tmachine.run(thost), StepResult::kHalted) << "budget " << budget;
+    EXPECT_EQ(tmachine.gas_remaining(), budget - 3) << "budget " << budget;
+    EXPECT_EQ(thost.call_count(), 1U) << "budget " << budget;
+  }
+}
 
 TEST(Rv32ThreadedTrapGas, deficitRunEndingInEcallSuppressesSyscall)
 {
