@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -586,10 +587,20 @@ struct CapturingIndexerRpc {
     co_return;
   }
 
+  x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
+                                  const TxFailureDiagnostic &diag)
+  {
+    received_failure_reports.emplace_back(tx_hash, diag);
+    co_return;
+  }
+
   size_t received_batches = 0;
   BlockHeight last_block_height = -1;
   TxEventLogBatch received_events;
   ProposedTransactionBatch received_bodies;
+  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>
+      received_failure_reports;
 };
 static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
 

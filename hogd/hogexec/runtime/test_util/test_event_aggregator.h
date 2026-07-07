@@ -3,6 +3,7 @@
 #include <map>
 #include <optional>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
@@ -118,6 +119,15 @@ struct TestEventAggregatorExecRpc {
                            ProposedTransaction const & /*proposed_tx*/)
   {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
+  }
+
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  x23::Async<RPCError>
+  eventexecutor_report_tx_failure(SignedTransactionHash const & /*tx_hash*/,
+                                  TxFailureDiagnostic const & /*diag*/)
+  {
+    // Recording lands with the executor forwarding work; accept and drop.
+    co_return RPCError::kRPCNone;
   }
 
 private:

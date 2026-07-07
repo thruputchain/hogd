@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
@@ -71,6 +72,15 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
   }
 
   co_return ok ? RPCError::kRPCNone : RPCError::kRPCBadBlockID;
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+x23::Async<RPCError>
+EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash /*tx_hash*/,
+                                              TxFailureDiagnostic /*diag*/)
+{
+  // Relay to registered indexers lands in a later commit; accept and drop.
+  co_return RPCError::kRPCNone;
 }
 
 } // namespace hogd

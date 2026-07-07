@@ -1,5 +1,6 @@
 #pragma once
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/indexer/db.h"
 #include "hogd/metrics/health.h"
@@ -43,6 +44,15 @@ public:
     CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_.consume_events(block_height, tx_events, tx_bodies).has_value());
     co_await Health::instance().set_current_block_height(block_height);
+    co_return;
+  }
+
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
+                                  const TxFailureDiagnostic & /*diag*/)
+  {
+    // Cache lands in a later commit; accept and drop.
     co_return;
   }
 
