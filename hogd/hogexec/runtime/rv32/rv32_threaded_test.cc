@@ -232,12 +232,12 @@ TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
   using test_program::op;
   // A straight-line run whose total gas exceeds kMaxRunGas is split into chunks
   // of <= kMaxRunGas by the lowering (rather than metered as one run). div gas
-  // is 8; kMaxRunGas/8 = 1250 divs per chunk, so the first break carrier is slot
-  // 1249 (the 1251st div would push the chunk to 10008 > 10000). (A run that
-  // exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
+  // is 8; kMaxRunGas/8 = 1250 divs per chunk, so the first break carrier is
+  // slot 1249 (the 1251st div would push the chunk to 10008 > 10000). (A run
+  // that exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
   // splitRunBudgetSweepMatchesCanonical below.)
   constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas; // 1250
-  constexpr size_t kDivCount = kDivPerChunk + 8;                   // spills over
+  constexpr size_t kDivCount = kDivPerChunk + 8; // spills over
   const std::vector<uint32_t> words(kDivCount,
                                     op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   const std::vector<uint8_t> bytes = words_to_bytes(words);
@@ -253,9 +253,11 @@ TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
   // Slot 1249 is the break carrier: a plain (non-fused) div break variant.
   // Slot 1248 stays the plain non-break div (fusion is blocked across the
   // break boundary, so neither is folded into a fused pair).
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1249),
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                1249),
             (&op_rr<false, div_signed, true>));
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1248),
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                1248),
             (&op_rr<false, div_signed, false>));
 }
 
@@ -1846,14 +1848,14 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   using test_program::op;
   // A single straight-line run of divs (gas 8 each), long enough that its total
   // body gas (65600) exceeds the ORIGINAL uint16 run bound (65535) -- so this
-  // program was formerly rejected with kRunGasTooLarge and now loads, split into
-  // seven chunks (six of 10000 + a 5600 remainder), terminated by an ecall that
-  // halts via RecordingHost. The threaded engine meters per chunk; the canonical
-  // Machine meters per instruction with no chunks. Their visible (trap class,
-  // gas_remaining) must agree at every budget -- including budgets that run dry
-  // inside the first chunk, exactly at a chunk boundary, inside a later chunk,
-  // and at/after completion. threaded_from_words EXPECT_TRUEs has_value(), so a
-  // reappearance of the reject would fail here too.
+  // program was formerly rejected with kRunGasTooLarge and now loads, split
+  // into seven chunks (six of 10000 + a 5600 remainder), terminated by an ecall
+  // that halts via RecordingHost. The threaded engine meters per chunk; the
+  // canonical Machine meters per instruction with no chunks. Their visible
+  // (trap class, gas_remaining) must agree at every budget -- including budgets
+  // that run dry inside the first chunk, exactly at a chunk boundary, inside a
+  // later chunk, and at/after completion. threaded_from_words EXPECT_TRUEs
+  // has_value(), so a reappearance of the reject would fail here too.
   constexpr size_t kDivCount = 8200; // 65600 body gas (> 65535) -> 7 chunks
   std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   words.push_back(kEcallWord);                                  // halts
@@ -1862,11 +1864,11 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   ASSERT_NE(canonical, nullptr);
   auto threaded = threaded_from_words(words);
 
-  const uint64_t total = (kDivCount * kDivInstructionGas) + 1; // 65601 (+ ecall)
+  const uint64_t total =
+      (kDivCount * kDivInstructionGas) + 1; // 65601 (+ ecall)
   const uint64_t budgets[] = {
-      0,          1,          8,          9999,     10000,
-      10001,      59999,      60000,      60001,    total - 1,
-      total,      total + 1,  1'000'000'000ULL};
+      0,     1,     8,         9999,  10000,     10001,           59999,
+      60000, 60001, total - 1, total, total + 1, 1'000'000'000ULL};
   for (const uint64_t budget : budgets) {
     Machine cmachine(canonical, 256, budget);
     RecordingHost chost;
@@ -2381,15 +2383,16 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   // leaving the same 9993 charged. A non-Brk refund would credit the next
   // chunk's gas and over-refund.
   constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
-  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01));     // valid divs
-  words.push_back(load(4, 2, 0, 2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249)
+  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
+  words.push_back(
+      load(4, 2, 0, 2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249)
   words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
   words.push_back(op(3, 1, 2, 4, 0x01)); // padding (never reached)
 
   auto threaded = threaded_from_words(words);
-  EXPECT_EQ(
-      ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, kLeadDivs),
-      (&op_load<false, 4, false, true>));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                kLeadDivs),
+            (&op_load<false, 4, false, true>));
 
   const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
   expect_trap_gas_parity(words, Trap::kBadMemory,
@@ -2405,15 +2408,16 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   // 1249 divs (9992) + sw (gas 1 -> acc 9993), then a div forces the break at
   // the sw. Charged 0..1249 = 9993; break-variant sw refunds no suffix.
   constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
-  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01));     // valid divs
-  words.push_back(store(0, 2, 2047, 2)); // sw x2, 2047(x0) -> OOB fault (slot 1249)
+  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
+  words.push_back(
+      store(0, 2, 2047, 2)); // sw x2, 2047(x0) -> OOB fault (slot 1249)
   words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
   words.push_back(op(3, 1, 2, 4, 0x01)); // padding (never reached)
 
   auto threaded = threaded_from_words(words);
-  EXPECT_EQ(
-      ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, kLeadDivs),
-      (&op_store<false, 4, true>));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                kLeadDivs),
+            (&op_store<false, 4, true>));
 
   const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
   expect_trap_gas_parity(words, Trap::kBadMemory,

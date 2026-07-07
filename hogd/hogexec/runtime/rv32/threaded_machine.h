@@ -625,8 +625,9 @@ trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 // every budget: canonical stops at the run's first unpayable instruction with
 // zero gas, and no seam lets a deficit escape. The deficit is tracked
 // out-of-band (not encoded in the balance) so budgets keep the full uint64
-// domain -- callers pass UINT64_MAX -- and is bounded by one run (<= kMaxRunGas,
-// the lowering's chunk cap): at most one run ever executes in deficit.
+// domain -- callers pass UINT64_MAX -- and is bounded by one run (<=
+// kMaxRunGas, the lowering's chunk cap): at most one run ever executes in
+// deficit.
 template<bool Trace>
 [[gnu::noinline, gnu::cold]] StepResult
 enter_run_deficit(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
@@ -2001,8 +2002,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     bool fused_here = false;
     // Do not fuse across a chunk boundary: a fused handler skips the
     // intervening enter_run, so a pair may not straddle a break carrier
-    // (either as the pair's head or its tail). Break carriers are astronomically
-    // rare, so this costs no measurable coverage.
+    // (either as the pair's head or its tail). Break carriers are
+    // astronomically rare, so this costs no measurable coverage.
     if (i + 1 < n && !next_fused && is_break[i] == 0 && is_break[i + 1] == 0) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
