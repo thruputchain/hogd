@@ -1871,48 +1871,17 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   exec[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
                                   : &trap_at<false, Trap::kBadPc>};
 
-  // Forward pass: mark mid-run break carriers so no run's total gas exceeds
-  // kMaxRunGas. A break carrier is the last instruction of a sub-run; its slot
-  // gets a Brk=true handler that enters a fresh run at the successor (charging
-  // the next chunk). Barriers already end a run, so they reset the accumulator
-  // and are never carriers. A single instruction's gas is << kMaxRunGas, so a
-  // valid split always exists -- no program is rejected for run gas.
-  std::vector<uint8_t> is_break(n, 0);
-  {
-    uint32_t acc = 0;
-    for (size_t i = 0; i < n; ++i) {
-      const auto instruction = program->instruction_at(i);
-      if (!instruction.has_value()) {
-        return std::unexpected(instruction.error());
-      }
-      const Instr &d = *instruction;
-      const auto self_gas = static_cast<uint32_t>(d.gas);
-      assert(self_gas <= kMaxRunGas &&
-             "a single instruction's gas must fit within one run chunk");
-      if (is_barrier(d.op)) {
-        acc = 0;
-        continue;
-      }
-      if (acc + self_gas > kMaxRunGas) {
-        // Adding i would overflow the current chunk. acc > 0 here (a single
-        // instruction fits), so at least one non-barrier accumulated since the
-        // last reset; barriers reset-and-continue, so slot i-1 is that
-        // non-barrier -- the chunk's last instruction. Break after it.
-        assert(i > 0);
-        is_break[i - 1] = 1;
-        acc = 0;
-      }
-      acc += self_gas;
-    }
-  }
-
-  // Backward fusion carry: `next_op` is the instruction one slot ahead (i+1,
-  // processed on the previous iteration) and `next_fused` says whether that
-  // slot was itself consumed as a fusion tail, so it can't also head this
-  // pair -- a slot belongs to at most one pair. Seeded at the bottom of the
-  // loop.
+  // Single backward lowering pass: decode each instruction, place its gas and
+  // any mid-run break carrier, select its handler, resolve control targets, and
+  // fuse. Backward carries, seeded at the bottom of the loop: `next_op` is the
+  // instruction one slot ahead (i+1) and `next_fused` whether that slot was
+  // consumed as a fusion tail (so it can't also head this pair -- a slot
+  // belongs to at most one pair); `next_is_break` whether i+1 is a break
+  // carrier, so the fusion guard can reject a pair whose tail is a carrier
+  // without materializing a per-slot array.
   Instr next_op = {};
   bool next_fused = false;
+  bool next_is_break = false;
 
   for (size_t i = n; i-- > 0;) {
     const auto instruction = program->instruction_at(i);
@@ -1921,7 +1890,37 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
     const Instr &d = *instruction;
     Slot &slot = exec[i];
-    slot.handler = pick_handler(d.op, trace, is_break[i] != 0);
+
+    // Gas + break placement, folded into this one backward pass. gas_to_run[i]
+    // is the gas of the run starting at i, through its terminating barrier or
+    // break carrier; each entry sees its successor's already-computed sum
+    // (exec[i+1].gas_to_run; the i+1<n guard excludes the fall-off sentinel,
+    // gas 0). enter_run pre-charges this at every run head, so no instruction
+    // self-charges. A non-barrier normally extends into its successor's run --
+    // unless that would push the run past kMaxRunGas, in which case slot i
+    // becomes a break carrier: its Brk=true handler ends the run at its own gas
+    // and charges the next chunk via enter_run at i+1. Greedy from the tail
+    // keeps every chunk <= kMaxRunGas; a single instruction's gas is <<
+    // kMaxRunGas, so a valid split always exists and no program is rejected for
+    // run gas.
+    const auto self_gas = static_cast<uint32_t>(d.gas);
+    assert(self_gas <= kMaxRunGas &&
+           "a single instruction's gas must fit within one run chunk");
+    bool is_break_here = false;
+    uint32_t run_gas = self_gas;
+    if (!is_barrier(d.op) && i + 1 < n) {
+      const uint32_t candidate = self_gas + exec[i + 1].gas_to_run;
+      if (candidate <= kMaxRunGas) {
+        run_gas = candidate;
+      }
+      else {
+        is_break_here = true; // break carrier; run_gas stays self_gas
+      }
+    }
+    assert(run_gas <= kMaxRunGas);
+    slot.gas_to_run = static_cast<uint16_t>(run_gas);
+
+    slot.handler = pick_handler(d.op, trace, is_break_here);
 
     // x0 reads come from the always zero register at regs_[kRegisterCount].
     // writes go to trash at regs_[0].  This keeps the write-heavy actions
@@ -1974,25 +1973,6 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       }
     }
 
-    // fill in gas costs
-    // gas_to_run[i] = gas of the run starting at i, through and including its
-    // terminating barrier or break carrier; backward so each entry sees its
-    // successor's already-computed sum. enter_run pre-charges this at every run
-    // head, so no instruction self-charges. A barrier or break carrier ends its
-    // run, so its gas_to_run is just its own gas; a non-terminator always
-    // continues into its successor, and the sum stops naturally at the
-    // terminator. The i+1<n guard keeps the run from absorbing the fall-off
-    // sentinel (exec_[n], gas 0). The per-instruction op and gas come straight
-    // from `code` -- they are build-time inputs, not stored in the Slot. The
-    // forward pass (above) guarantees every chunk fits kMaxRunGas.
-    const auto self_gas = static_cast<uint32_t>(d.gas);
-    const bool ends_run = is_barrier(d.op) || is_break[i] != 0;
-    const uint32_t run_gas =
-        ends_run ? self_gas
-                 : self_gas + ((i + 1 < n) ? exec[i + 1].gas_to_run : 0U);
-    assert(run_gas <= kMaxRunGas && "forward pass must bound every chunk");
-    exec[i].gas_to_run = static_cast<uint16_t>(run_gas);
-
     // EXPERIMENT(fuse): collapse this slot and its successor into one fused
     // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
     // is a real instruction (not the fall-off sentinel) and was not itself
@@ -2004,7 +1984,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // intervening enter_run, so a pair may not straddle a break carrier
     // (either as the pair's head or its tail). Break carriers are
     // astronomically rare, so this costs no measurable coverage.
-    if (i + 1 < n && !next_fused && is_break[i] == 0 && is_break[i + 1] == 0) {
+    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
@@ -2020,6 +2000,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
     next_op = d;
     next_fused = fused_here;
+    next_is_break = is_break_here;
   }
 
   return ThreadedMachinePreInstantiation(std::move(exec),

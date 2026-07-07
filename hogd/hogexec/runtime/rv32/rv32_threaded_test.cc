@@ -231,13 +231,15 @@ TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
 {
   using test_program::op;
   // A straight-line run whose total gas exceeds kMaxRunGas is split into chunks
-  // of <= kMaxRunGas by the lowering (rather than metered as one run). div gas
-  // is 8; kMaxRunGas/8 = 1250 divs per chunk, so the first break carrier is
-  // slot 1249 (the 1251st div would push the chunk to 10008 > 10000). (A run
-  // that exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
+  // of <= kMaxRunGas by the lowering (rather than metered as one run, or
+  // rejected). div gas is 8; kMaxRunGas/8 = 1250 divs per chunk, so 1258 divs
+  // (10064 gas) form two chunks and thus exactly one break carrier. We assert
+  // the carrier *count* rather than a position, since the exact split point is
+  // an implementation detail (the lowering places breaks greedily). (A run that
+  // exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
   // splitRunBudgetSweepMatchesCanonical below.)
   constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas; // 1250
-  constexpr size_t kDivCount = kDivPerChunk + 8; // spills over
+  constexpr size_t kDivCount = kDivPerChunk + 8; // spills over -> 2 chunks
   const std::vector<uint32_t> words(kDivCount,
                                     op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   const std::vector<uint8_t> bytes = words_to_bytes(words);
@@ -250,15 +252,16 @@ TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
                                               /*trace=*/false);
   ASSERT_TRUE(threaded.has_value());
 
-  // Slot 1249 is the break carrier: a plain (non-fused) div break variant.
-  // Slot 1248 stays the plain non-break div (fusion is blocked across the
-  // break boundary, so neither is folded into a fused pair).
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
-                                                                1249),
-            (&op_rr<false, div_signed, true>));
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
-                                                                1248),
-            (&op_rr<false, div_signed, false>));
+  // Exactly one break carrier: a plain (non-fused, fusion is blocked across the
+  // break boundary) div break variant. Two chunks -> one boundary.
+  size_t break_carriers = 0;
+  for (size_t i = 0; i < kDivCount; ++i) {
+    if (ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, i) ==
+        (&op_rr<false, div_signed, true>)) {
+      ++break_carriers;
+    }
+  }
+  EXPECT_EQ(break_carriers, 1U);
 }
 
 TEST(Rv32Threaded, breakVariantHandlersAreDistinctAndSelectable)
@@ -2374,20 +2377,24 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
 {
   using test_program::load;
   using test_program::op;
-  // Build a chunk that reaches the cap boundary exactly at a load: 1249 divs
-  // (9992 gas) then a faulting lw (gas 1 -> chunk acc 9993), then a div whose
-  // gas (8) would push the chunk to 10001 > kMaxRunGas -- so the lw at slot
-  // 1249 is the break carrier. Slots 0..1248 (divs) execute; the lw at 1249
-  // faults. Canonical charges slots 0..1249 = 9993; the threaded break-variant
-  // lw must refund NO suffix (its successor heads the next, uncharged chunk),
-  // leaving the same 9993 charged. A non-Brk refund would credit the next
-  // chunk's gas and over-refund.
+  // Make a faulting lw the break carrier of its chunk. 1249 divs (9992 gas)
+  // then a faulting lw (gas 1) form a 9993-gas chunk; a FULL kMaxRunGas chunk
+  // (1250 divs = 10000) follows. The lowering places breaks greedily from the
+  // tail: the trailing 1250 divs fill one chunk, and the lw cannot fold into it
+  // (1 + 10000 > kMaxRunGas), so the lw at slot 1249 becomes the break carrier.
+  // Slots 0..1248 (divs) execute; the lw at 1249 faults. Canonical charges
+  // slots 0..1249 = 9993; the threaded break-variant lw must refund NO suffix
+  // (its successor heads the next, uncharged chunk), leaving the same 9993
+  // charged. A non-Brk refund would credit the next chunk's 10000 gas.
   constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
+  constexpr size_t kTrailDivs =
+      kMaxRunGas / kDivInstructionGas;                          // 1250 -> 10000
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
-      load(4, 2, 0, 2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249)
-  words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
-  words.push_back(op(3, 1, 2, 4, 0x01)); // padding (never reached)
+      load(4, 2, 0,
+           2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249 = carrier)
+  words.insert(words.end(), kTrailDivs,
+               op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
   auto threaded = threaded_from_words(words);
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
@@ -2405,14 +2412,19 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   using test_program::op;
   using test_program::store;
   // As above, but the break carrier is a faulting sw. Same chunk arithmetic:
-  // 1249 divs (9992) + sw (gas 1 -> acc 9993), then a div forces the break at
-  // the sw. Charged 0..1249 = 9993; break-variant sw refunds no suffix.
+  // 1249 divs (9992) + sw (gas 1 -> chunk 9993), then a FULL kMaxRunGas chunk
+  // (1250 divs) the tail-greedy lowering cannot fold the sw into, so the sw at
+  // slot 1249 is the break carrier. Charged 0..1249 = 9993; the break-variant
+  // sw refunds no suffix.
   constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
+  constexpr size_t kTrailDivs =
+      kMaxRunGas / kDivInstructionGas;                          // 1250 -> 10000
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
-      store(0, 2, 2047, 2)); // sw x2, 2047(x0) -> OOB fault (slot 1249)
-  words.push_back(op(3, 1, 2, 4, 0x01)); // div -> forces the break at slot 1249
-  words.push_back(op(3, 1, 2, 4, 0x01)); // padding (never reached)
+      store(0, 2, 2047,
+            2)); // sw x2, 2047(x0) -> OOB fault (slot 1249 = carrier)
+  words.insert(words.end(), kTrailDivs,
+               op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
   auto threaded = threaded_from_words(words);
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
