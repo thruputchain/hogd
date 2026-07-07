@@ -276,6 +276,34 @@ TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest,
+       DirectEntryParserFaultLeavesGuestMemoryUnchanged)
+{
+  std::vector<uint8_t> memory(256, 0xAA);
+  constexpr std::string_view input = "fault";
+  std::ranges::copy(input, memory.begin() + kInputAddress);
+  const std::vector<uint8_t> before = memory;
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  WasmContext wasm_context{
+      .memory = LinearMemorySlice{.mem = memory.data(), .sz = memory.size()},
+      .gas_remaining = kPlentyOfGas,
+  };
+  TrampolineResult result =
+      syscall_entry(&handler, wasm_context,
+                    static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
+                    static_cast<uint32_t>(input.size()),
+                    static_cast<uint32_t>(memory.size() - 1), 0, 0, 0, 0);
+  finish_frame(handler, std::move(stashed_trace));
+
+  EXPECT_EQ(result.panic,
+            std::to_underlying(HostFnErrorCode::NoneOrRecoverable));
+  EXPECT_EQ(result.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+  EXPECT_EQ(memory, before);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest,
        InvokeOutputsPointerFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(512, 0xBB);
