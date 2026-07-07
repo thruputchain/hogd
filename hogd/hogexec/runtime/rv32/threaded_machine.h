@@ -580,7 +580,10 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // per-slot for branch-in run heads -- so the faulting slot's successor holds
 // exactly the unexecuted suffix: refund it, net of any deficit, then trap.
 // Loads/stores are never barriers, so ip+1 is a real slot or the fall-off
-// sentinel (gas_to_run 0). In a deficit run the refund decides the class: a
+// sentinel (gas_to_run 0). Exception: when `Brk` is true the faulting slot
+// is a break carrier -- the last instruction of its chunk -- so ip+1 heads
+// the *next*, not-yet-charged chunk; its gas_to_run must NOT be credited, and
+// the suffix is 0. In a deficit run the refund decides the class: a
 // balance that covers the deficit means the fault sits in the prefix
 // canonical metering could afford (kBadMemory with the prefix charged); one
 // that does not means canonical ran dry first (kOutOfGas, zero). Memory
@@ -1982,9 +1985,6 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // from `code` -- they are build-time inputs, not stored in the Slot. The
     // forward pass (above) guarantees every chunk fits kMaxRunGas.
     const auto self_gas = static_cast<uint32_t>(d.gas);
-    // A run ends at a barrier or at a break carrier; either way run_gas is the
-    // gas from this slot through that terminator (its own gas for the
-    // terminator itself). The forward pass bounds every chunk by kMaxRunGas.
     const bool ends_run = is_barrier(d.op) || is_break[i] != 0;
     const uint32_t run_gas =
         ends_run ? self_gas
