@@ -37,7 +37,7 @@ unboundedly; expiry is passive.
 - **Executor → indexer direct connection**, not relayed via the event server
   or mempool: the event server's contract is "committed data only", and a
   dedicated producer→consumer channel is the right long-term shape. Cost:
-  executors gain one optional endpoint config.
+  a bit of discovery plumbing (below) so executors learn the address.
 - **Lookup via a new `TxInfoResult` arm** on `get_transaction_info`, not a
   separate method: one client call answers "where is my tx".
 - **Exactly one diagnostic per failure** on the wire and in the cache
@@ -48,6 +48,15 @@ unboundedly; expiry is passive.
   testing is a later, additive change to the internal `.x` only.
 - **Service named `IndexerExec`** (not `IndexerExecDiag`) so future
   executor→indexer needs can share it.
+- **Discovery via the intro-card flow, not a config flag**: the indexer
+  intros itself to the scheduler (mirroring `schedevent_intro_event`), and
+  the scheduler hands the indexer's address to executors as a new optional
+  field in `IntroExecResult`. Optional means nodes without an indexer — or
+  executors that intro before the indexer registers — simply run with
+  diagnostics off.
+- **Attempt height** comes from the existing
+  `SystemCallHandler::get_block_height()` (reads the db tip); no new
+  plumbing.
 
 ## Components
 
@@ -64,22 +73,36 @@ unboundedly; expiry is passive.
   TxFailureDiagnostic)` returning void. Executor is the client, indexer the
   server. Never exposed on the public gateway.
 
-**Small change to `protocol/indexer.x`** (protocol submodule — needs a
-protocol PR and the groundhog-go bump flow):
+**Protocol-submodule changes** (one protocol PR, then the groundhog-go bump
+flow):
 
-- `TxInfoOutcome` gains `TxInfoRecentFailure = 2`.
-- `TxInfoResult` gains a `TxInfoRecentFailure` arm carrying
-  `{ BlockHeight attempt_height; DbConflictDiagnostic conflict; }` (a struct
-  defined in `indexer.x`; the internal `TxFailureDiagnostic` stays internal).
-- Semantics documented in the `.x`: a committed record always wins (a tx
-  that conflicted, was retried, and landed reports `TxInfoFound`); the
-  failure arm appears only on a db miss with a cache hit; the payload is
-  best-effort and advisory — absence proves nothing.
+- `protocol/indexer.x`:
+  - `TxInfoOutcome` gains `TxInfoRecentFailure = 2`.
+  - `TxInfoResult` gains a `TxInfoRecentFailure` arm carrying
+    `{ BlockHeight attempt_height; DbConflictDiagnostic conflict; }` (a
+    struct defined in `indexer.x`; the internal `TxFailureDiagnostic` stays
+    internal).
+  - Semantics documented in the `.x`: a committed record always wins (a tx
+    that conflicted, was retried, and landed reports `TxInfoFound`); the
+    failure arm appears only on a db miss with a cache hit; the payload is
+    best-effort and advisory — absence proves nothing.
+- Discovery plumbing (see "Executor side" below):
+  - A card type for the indexer's `IndexerExec` server address, e.g.
+    `IndexerExecCard { Protocol protocol; ServerAddress address; }`.
+  - `IntroExecResult` in `protocol/sched_exec.x` gains an optional
+    `IndexerExecCard indexer<1>`.
+  - A new indexer→scheduler intro method (mirroring
+    `schedevent_intro_event(EventCard)`) so the scheduler learns the
+    address; stored in the scheduler's `Registration` singleton
+    (`hogd/mempool/registration.h`). Registration is optional and not
+    gated: executor intro does not wait for an indexer.
 
 ### 2. Executor side (`hogd/hogexec`)
 
-- New optional config (e.g. `--indexer-exec-endpoint`). Absent → the whole
-  feature is a no-op; validators and test rigs need zero changes.
+- The executor learns the indexer's `IndexerExec` address from the optional
+  card in its `IntroExecResult` (the same response that already delivers db
+  shards and the event server). Card absent → the whole feature is a no-op;
+  validators and test rigs need zero changes.
 - At the propose-path points where `two_phase_commit_failed_` is set and
   `db_proxy_.last_push_conflict().level() != kDbDiagnosticNone` (exactly
   where `log_db_conflict_diagnostic()` sits today), hand
@@ -90,7 +113,8 @@ protocol PR and the groundhog-go bump flow):
   drop-on-disconnect, never awaited on the propose path. A slow or dead
   indexer costs nothing but dropped diagnostics.
 - The executor computes/obtains the `SignedTransactionHash` of the proposed
-  tx; the attempt height comes from the block being proposed.
+  tx; the attempt height comes from the existing
+  `SystemCallHandler::get_block_height()` (db tip).
 
 ### 3. Indexer side (`hogd/indexer`)
 
@@ -137,8 +161,10 @@ protocol PR and the groundhog-go bump flow):
   `TxInfoNotFound`.
 - **Executor tests**: a failed 2PC push with diagnostics triggers exactly
   one report to a test-double `IndexerExec` server; no report when the
-  level is `kDbDiagnosticNone` or the endpoint is unconfigured; the propose
-  path completes normally with the sender's queue full.
+  level is `kDbDiagnosticNone` or no indexer card was delivered at intro;
+  the propose path completes normally with the sender's queue full.
+- **Scheduler tests**: indexer intro registers the card; `IntroExecResult`
+  carries it when present and an empty optional otherwise.
 
 ## Out of scope (deliberately)
 
