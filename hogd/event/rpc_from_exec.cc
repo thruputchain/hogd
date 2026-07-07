@@ -74,12 +74,12 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
   co_return ok ? RPCError::kRPCNone : RPCError::kRPCBadBlockID;
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 x23::Async<RPCError>
-EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash /*tx_hash*/,
-                                              TxFailureDiagnostic /*diag*/)
+EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+                                              TxFailureDiagnostic diag)
 {
-  // Relay to registered indexers lands in a later commit; accept and drop.
+  co_await ctx_.report_tx_failure_to_indexers(std::move(tx_hash),
+                                              std::move(diag));
   co_return RPCError::kRPCNone;
 }
 

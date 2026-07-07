@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
@@ -14,6 +15,7 @@
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -71,6 +73,14 @@ public:
     indexers_.push_back(std::move(indexer));
     co_await cg.reset_and_return();
   }
+
+  // Best-effort relay of a nondeterministic tx-failure diagnostic to every
+  // registered indexer. Bypasses the per-block commit pipeline entirely --
+  // the tx will never commit. One offline indexer's send error is logged and
+  // dropped so it never blocks the other indexers or errors toward the
+  // executor.
+  x23::Async<void> report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
+                                                 TxFailureDiagnostic diag);
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>

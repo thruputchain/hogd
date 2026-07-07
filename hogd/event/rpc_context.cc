@@ -382,4 +382,22 @@ EventRPCContext::get_context_slow(BlockID block_id)
   panic("unreachable");
 }
 
+x23::Async<void>
+EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
+                                               TxFailureDiagnostic diag)
+{
+  x23::CoroGuard cg;
+  co_await cg(indexers_lock_);
+  for (indexer_event_client_t &indexer : indexers_) {
+    try {
+      co_await indexer.indexer_event_report_tx_failure(tx_hash, diag);
+    } catch (std::exception const &e) {
+      // Best-effort: an offline indexer must not disturb the relay to the
+      // remaining indexers (or the executor-facing response).
+      warn("dropping tx-failure report to an indexer: {}", e.what());
+    }
+  }
+  co_await cg.reset_and_return();
+}
+
 } // namespace hogd
