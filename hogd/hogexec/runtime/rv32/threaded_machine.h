@@ -119,6 +119,7 @@ private:
   std::vector<uint8_t> initial_memory_image_;
   bool trace_ = false;
 
+  friend struct ThreadedMachinePreInstantiationTestPeer;
   friend class ThreadedMachine;
 };
 

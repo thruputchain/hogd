@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <random>
 #include <span>
 #include <utility>
 #include <vector>
@@ -22,6 +23,78 @@
 #include "hogd/hogexec/runtime/rv32/threaded_program.h"
 
 namespace hogd::rv32 {
+
+struct FusionCoverage {
+  size_t lui_addi = 0;
+  size_t auipc_jalr = 0;
+  size_t load_rr_rs1 = 0;
+  size_t load_rr_rs2 = 0;
+  size_t load_ri = 0;
+  size_t alu_alu_addi_addi = 0;
+  size_t alu_alu_addi_sll = 0;
+  size_t alu_alu_srl_addi = 0;
+  size_t alu_alu_sll_or = 0;
+  size_t alu_store = 0;
+  size_t alu_load = 0;
+  size_t store_alu = 0;
+  size_t load_store = 0;
+  size_t alu_branch = 0;
+};
+
+struct ThreadedMachinePreInstantiationTestPeer {
+  static FusionCoverage
+  fusion_coverage(const ThreadedMachinePreInstantiation &program)
+  {
+    FusionCoverage coverage;
+    for (const Slot &slot : program.exec_) {
+      const Handler handler = slot.handler;
+      if (handler == &op_lui_addi<true>) {
+        ++coverage.lui_addi;
+      }
+      if (handler == &op_auipc_jalr<true>) {
+        ++coverage.auipc_jalr;
+      }
+      if (handler == &op_load_rr<true, 4, false, true, add_op>) {
+        ++coverage.load_rr_rs1;
+      }
+      if (handler == &op_load_rr<true, 4, false, false, add_op>) {
+        ++coverage.load_rr_rs2;
+      }
+      if (handler == &op_load_ri<true, 4, false, add_op>) {
+        ++coverage.load_ri;
+      }
+      if (handler == alu_alu_handler<true>(Op::kAddi, Op::kAddi)) {
+        ++coverage.alu_alu_addi_addi;
+      }
+      if (handler == alu_alu_handler<true>(Op::kAddi, Op::kSll)) {
+        ++coverage.alu_alu_addi_sll;
+      }
+      if (handler == alu_alu_handler<true>(Op::kSrl, Op::kAddi)) {
+        ++coverage.alu_alu_srl_addi;
+      }
+      if (handler == alu_alu_handler<true>(Op::kSll, Op::kOr)) {
+        ++coverage.alu_alu_sll_or;
+      }
+      if (handler == alu_store_handler<true>(Op::kAddi, Op::kSw)) {
+        ++coverage.alu_store;
+      }
+      if (handler == alu_load_handler<true>(Op::kAddi, Op::kLw)) {
+        ++coverage.alu_load;
+      }
+      if (handler == store_alu_handler<true>(Op::kSw, Op::kAddi)) {
+        ++coverage.store_alu;
+      }
+      if (handler == &op_load_store<true, 4, false, 4>) {
+        ++coverage.load_store;
+      }
+      if (handler == alu_branch_handler<true>(Op::kAddi, Op::kBne)) {
+        ++coverage.alu_branch;
+      }
+    }
+    return coverage;
+  }
+};
+
 namespace {
 
 // Writes 4 bytes at a fixed offset through the view, then returns a
@@ -197,6 +270,38 @@ threaded_from_words(std::span<const uint32_t> words,
   EXPECT_TRUE(pre_instantiation.has_value());
   return std::make_shared<const ThreadedMachinePreInstantiation>(
       std::move(pre_instantiation.value()));
+}
+
+ExecTrace
+strip_trace_gas(ExecTrace trace)
+{
+  for (TraceStep &step : trace.steps) {
+    step.state.gas_remaining = 0;
+    step.state_before.gas_remaining = 0;
+  }
+  return trace;
+}
+
+void
+expect_engine_only_fusion_coverage(
+    const ThreadedMachinePreInstantiation &program, uint64_t seed)
+{
+  const FusionCoverage coverage =
+      ThreadedMachinePreInstantiationTestPeer::fusion_coverage(program);
+  EXPECT_GE(coverage.lui_addi, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.auipc_jalr, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_rr_rs1, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_rr_rs2, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_ri, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_alu_addi_addi, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_alu_addi_sll, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_alu_srl_addi, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_alu_sll_or, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_store, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_load, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.store_alu, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_store, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.alu_branch, 1U) << "engine seed " << seed;
 }
 
 TEST(Rv32Threaded, runsBasicArithmetic)
@@ -936,15 +1041,8 @@ TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
     // matches (gas charged up to any barrier is the same under either scheme).
     // So normalize intermediate gas_remaining out of the per-step comparison
     // and check the final gas_remaining separately.
-    auto strip_gas = [](ExecTrace t) {
-      for (TraceStep &s : t.steps) {
-        s.state.gas_remaining = 0;
-        s.state_before.gas_remaining = 0;
-      }
-      return t;
-    };
-    const ExecTrace cstripped = strip_gas(ctrace);
-    const ExecTrace tstripped = strip_gas(tobs.trace());
+    const ExecTrace cstripped = strip_trace_gas(ctrace);
+    const ExecTrace tstripped = strip_trace_gas(tobs.trace());
 
     EXPECT_EQ(describe_trace_divergence(cstripped, tstripped), "")
         << kind << " seed " << seed;
@@ -974,6 +1072,135 @@ TEST(Rv32Threaded, matchesCanonicalMachineOverCorpus)
           4096);
     check(test_corpus::generate_memory_program(seed, 96), seed, "mem",
           test_corpus::kCorpusMemoryBytes);
+  }
+}
+
+TEST(Rv32Threaded, matchesCanonicalMachineOverEngineOnlyCorpus)
+{
+  constexpr uint32_t kMemoryBytes = 4096;
+  auto check_exact = [](const std::vector<uint32_t> &words, uint64_t seed) {
+    const auto canonical =
+        make_program(std::span<const uint32_t>(words.data(), words.size()));
+    ASSERT_NE(canonical, nullptr) << "engine seed " << seed;
+    Machine cmachine(canonical, kMemoryBytes, kCorpusGasBudget);
+    RecordingHost chost(RecordingHost::OnEcall::kContinue);
+    const ExecTrace ctrace = trace_execution(cmachine, chost);
+
+    auto threaded = threaded_from_words(words, kMemoryBytes, /*trace=*/true);
+    expect_engine_only_fusion_coverage(*threaded, seed);
+    ThreadedMachine tmachine(*threaded, kCorpusGasBudget);
+    RecordingHost thost(RecordingHost::OnEcall::kContinue);
+    TraceObserver tobs;
+    tmachine.run(thost, tobs);
+
+    const ExecTrace cstripped = strip_trace_gas(ctrace);
+    const ExecTrace tstripped = strip_trace_gas(tobs.trace());
+
+    EXPECT_EQ(describe_trace_divergence(cstripped, tstripped), "")
+        << "engine seed " << seed;
+    ASSERT_EQ(tstripped.steps.size(), cstripped.steps.size())
+        << "engine seed " << seed;
+    for (size_t i = 0; i < cstripped.steps.size(); ++i) {
+      EXPECT_EQ(tstripped.steps[i].state_before,
+                cstripped.steps[i].state_before)
+          << "engine seed " << seed << " step " << i;
+    }
+    EXPECT_EQ(tobs.trace().steps.back().state.gas_remaining,
+              ctrace.steps.back().state.gas_remaining)
+        << "engine seed " << seed;
+    EXPECT_EQ(thost.call_count(), chost.call_count()) << "engine seed " << seed;
+  };
+
+  for (uint64_t seed = 0; seed < 64; ++seed) {
+    check_exact(test_corpus::generate_engine_only_program(seed), seed);
+  }
+}
+
+TEST(Rv32Threaded, engineOnlyCorpusGasBudgetSweep)
+{
+  constexpr uint32_t kMemoryBytes = 4096;
+  auto add_budget = [](std::vector<uint64_t> &budgets, uint64_t budget) {
+    if (std::ranges::find(budgets, budget) == budgets.end()) {
+      budgets.push_back(budget);
+    }
+  };
+
+  auto check_budget = [](const std::vector<uint32_t> &words,
+                         const ThreadedMachinePreInstantiation &threaded,
+                         uint64_t seed, uint64_t budget) {
+    const auto canonical =
+        make_program(std::span<const uint32_t>(words.data(), words.size()));
+    ASSERT_NE(canonical, nullptr) << "engine seed " << seed;
+    Machine cmachine(canonical, kMemoryBytes, budget);
+    RecordingHost chost(RecordingHost::OnEcall::kContinue);
+    const ExecTrace ctrace = trace_execution(cmachine, chost);
+
+    ThreadedMachine tmachine(threaded, budget);
+    RecordingHost thost(RecordingHost::OnEcall::kContinue);
+    TraceObserver tobs;
+    const StepResult tresult = tmachine.run(thost, tobs);
+
+    const bool canonical_oog = cmachine.trap() == Trap::kOutOfGas;
+    const bool threaded_oog = tmachine.trap() == Trap::kOutOfGas;
+    EXPECT_EQ(threaded_oog, canonical_oog)
+        << "engine seed " << seed << " gas budget " << budget;
+    if (canonical_oog || threaded_oog) {
+      if (threaded_oog) {
+        EXPECT_EQ(tmachine.gas_remaining(), 0U)
+            << "engine seed " << seed << " gas budget " << budget;
+      }
+      EXPECT_EQ(ctrace.final_result, StepResult::kTrap)
+          << "engine seed " << seed << " gas budget " << budget;
+      EXPECT_EQ(tresult, StepResult::kTrap)
+          << "engine seed " << seed << " gas budget " << budget;
+      return;
+    }
+
+    const ExecTrace cstripped = strip_trace_gas(ctrace);
+    const ExecTrace tstripped = strip_trace_gas(tobs.trace());
+    EXPECT_EQ(describe_trace_divergence(cstripped, tstripped), "")
+        << "engine seed " << seed << " gas budget " << budget;
+    EXPECT_EQ(tobs.trace().steps.back().state.gas_remaining,
+              ctrace.steps.back().state.gas_remaining)
+        << "engine seed " << seed << " gas budget " << budget;
+    EXPECT_EQ(thost.call_count(), chost.call_count())
+        << "engine seed " << seed << " gas budget " << budget;
+  };
+
+  for (uint64_t seed = 0; seed < 32; ++seed) {
+    const std::vector<uint32_t> words =
+        test_corpus::generate_engine_only_program(seed);
+    auto threaded = threaded_from_words(words, kMemoryBytes, /*trace=*/true);
+    expect_engine_only_fusion_coverage(*threaded, seed);
+
+    const auto canonical =
+        make_program(std::span<const uint32_t>(words.data(), words.size()));
+    ASSERT_NE(canonical, nullptr) << "engine seed " << seed;
+    Machine full_machine(canonical, kMemoryBytes, kCorpusGasBudget);
+    RecordingHost full_host(RecordingHost::OnEcall::kContinue);
+    const ExecTrace full_trace = trace_execution(full_machine, full_host);
+    ASSERT_FALSE(full_trace.steps.empty()) << "engine seed " << seed;
+    const uint64_t full_cost =
+        kCorpusGasBudget - full_trace.steps.back().state.gas_remaining;
+
+    std::vector<uint64_t> budgets;
+    add_budget(budgets, 0);
+    add_budget(budgets, 1);
+    add_budget(budgets, full_cost / 2);
+    if (full_cost > 0) {
+      add_budget(budgets, full_cost - 1);
+    }
+    add_budget(budgets, full_cost);
+    add_budget(budgets, full_cost + 1);
+
+    std::mt19937_64 rng(seed ^ 0x9e3779b97f4a7c15ULL);
+    for (size_t i = 0; i < 8; ++i) {
+      add_budget(budgets, rng() % (full_cost + 16));
+    }
+
+    for (uint64_t budget : budgets) {
+      check_budget(words, *threaded, seed, budget);
+    }
   }
 }
 
