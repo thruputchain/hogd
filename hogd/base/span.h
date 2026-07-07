@@ -60,9 +60,8 @@ operator==(const std::span<const std::byte> lhs,
     return true;
   if consteval {
     return std::ranges::equal(lhs, rhs);
-  } else {
-    return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
   }
+  return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
 }
 
 // OwningSpan adds ownership or a cleanup task to a std::span.
