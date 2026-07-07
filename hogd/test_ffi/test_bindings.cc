@@ -805,8 +805,9 @@ try_commit_transaction(void *syscall_handler) noexcept
         kTestFFIErrorCodeInvalidPointer);
   }
 
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
   try {
-    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     // Reject a repeat commit (or a commit after a prior abort) on a still-live
     // handle. Like the abort path, SystemCallHandler::try_commit_transaction()
     // treats finalization as single-use and asserts
@@ -852,6 +853,9 @@ try_commit_transaction(void *syscall_handler) noexcept
     return ForeignTryCommitResult{.result_code = std::to_underlying(res)};
   } catch (std::exception const &e) {
     log_error("error during try_commit_transaction: {}", e);
+    // Backstop: mark the handle terminal so a retry can't re-enter the
+    // single-use core commit and re-push the replay-cache delta (#2595).
+    context->mark_committed_or_aborted();
     return kUnrecoverableError;
   }
 }
