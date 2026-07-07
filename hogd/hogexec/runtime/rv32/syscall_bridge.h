@@ -24,7 +24,10 @@ namespace hogd::rv32 {
 // The syscall ABI version is validated at artifact load time, so no per-call
 // version register is needed. Results: the syscall return code is delivered in
 // a0 and any output buffers/lengths are written into guest memory through the
-// pointers the guest supplied; there is no result footer.
+// pointers the guest supplied; there is no result footer. This canonical-test
+// bridge stages those writes through scratch memory before committing. The
+// production threaded runtime calls syscall_entry with live guest memory
+// instead.
 class SyscallBridgeHost final : public Host {
 public:
   SyscallBridgeHost(ExternHostCallContext context, HostFn8 entry);

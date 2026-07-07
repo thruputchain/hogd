@@ -92,11 +92,14 @@ number in `a0`, up to seven argument words in `a1..a7`, and executes `ecall`.
 The shared syscall parser interprets those words as pointers, lengths, scalars,
 enums, and optional sentinels.
 
-Production currently drives the `ecall` loop in `rv32_contract.cc` against live
-guest memory. `SyscallBridgeHost` exists as the testable host seam for the same
-ABI. If these paths are consolidated, preserve host error classification and
-the guest-memory atomicity guarantees before routing production through a shared
-bridge.
+Production drives the `ecall` loop in `rv32_contract.cc` against live guest
+memory for performance: syscall output spans point directly into the active
+`ThreadedMachine` memory. Syscall handlers that need atomic output behavior must
+stage internally before writing to those spans. `SyscallBridgeHost` is a
+canonical-test seam for the same register ABI; it intentionally runs
+`syscall_entry` against scratch memory so tests can inspect faults/OOG without
+committing partial writes to `Machine` memory. Do not infer production output
+rollback semantics from the bridge.
 
 ## Testing
 

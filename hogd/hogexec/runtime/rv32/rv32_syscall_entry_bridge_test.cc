@@ -21,6 +21,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
@@ -358,6 +359,39 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
   EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
   EXPECT_EQ(memory, before);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
+{
+  // Rv32Runtime::invoke_internal calls syscall_entry with WasmContext.memory
+  // backed directly by ThreadedMachine memory; unlike SyscallBridgeHost, there
+  // is no scratch copy between output spans and guest memory.
+  std::vector<uint8_t> memory(256, 0xCC);
+  constexpr std::string_view input = "out of gas";
+  std::ranges::copy(input, memory.begin() + kInputAddress);
+  const std::vector<uint8_t> before = memory;
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  WasmContext wasm_context{
+      .memory = LinearMemorySlice{.mem = memory.data(), .sz = memory.size()},
+      .gas_remaining = 0,
+  };
+  TrampolineResult result =
+      syscall_entry(&handler, wasm_context,
+                    static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
+                    static_cast<uint32_t>(input.size()), kOutputAddress, 0, 0,
+                    0, 0);
+  finish_frame(handler, std::move(stashed_trace),
+               std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
+
+  EXPECT_EQ(result.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
+  EXPECT_EQ(result.gas_consumed, 0U);
+  EXPECT_NE(memory, before);
+  const SHA256Hash expected = sha256(input);
+  EXPECT_TRUE(
+      std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
+                                       kOutputAddress, expected.size())));
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
