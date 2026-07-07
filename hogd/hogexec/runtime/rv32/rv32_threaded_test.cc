@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
 #include "hogd/hogexec/runtime/rv32/host.h"
+#include "hogd/hogexec/runtime/rv32/isa_ops.h"
 #include "hogd/hogexec/runtime/rv32/machine.h"
 #include "hogd/hogexec/runtime/rv32/musttail.h"
 #include "hogd/hogexec/runtime/rv32/program.h"
