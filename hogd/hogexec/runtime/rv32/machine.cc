@@ -83,6 +83,7 @@ bool
 Machine::consume_gas(uint64_t amount)
 {
   if (gas_remaining_ < amount) {
+    gas_remaining_ = 0;
     set_trap(Trap::kOutOfGas);
     return false;
   }
@@ -238,8 +239,9 @@ Machine::complete_ecall(const HostResult &result)
     halted_ = true;
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
-    // Host OOG keeps ECALL + reported host gas charged and pc advanced; host
-    // memory writes persist (no per-ecall rollback).
+    // Host OOG keeps pc advanced and host memory writes persist (no per-ecall
+    // rollback), but all OOG paths saturate remaining gas to zero.
+    gas_remaining_ = 0;
     set_trap(Trap::kOutOfGas);
     return StepResult::kTrap;
   case HostStatus::kTrap:

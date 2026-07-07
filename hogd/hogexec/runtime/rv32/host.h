@@ -152,9 +152,9 @@ struct HostResult {
     return HostResult(HostStatus::kHalt, gas_consumed,
                       HostHaltPayload{.code = code});
   }
-  // Host OutOfGas keeps the already-executed ECALL charged and pc advanced.
-  // Host guest-memory writes persist (no per-ecall rollback); transaction-level
-  // abort is the runtime layer's responsibility.
+  // Host OutOfGas keeps pc advanced and guest-memory writes persist (no
+  // per-ecall rollback), but all engine OOG paths leave gas_remaining at zero;
+  // transaction-level abort is the runtime layer's responsibility.
   static HostResult out_of_gas(uint64_t gas_consumed = 0)
   {
     return HostResult(HostStatus::kOutOfGas, gas_consumed,

@@ -74,6 +74,10 @@ once before executing the run body. Control-flow and host boundary instructions
 are barriers. Loads and stores remain in straight-line runs for performance, so
 a memory trap can occur after the run has already been charged.
 
+All `Trap::kOutOfGas` paths saturate `gas_remaining` to zero in the canonical
+engine, production threaded engine, and independent spec model. Non-OOG traps
+may still observe charged-but-nonzero gas according to where the trap fires.
+
 Do not infer trap-time gas semantics from the canonical engine alone. Any
 consensus-visible trap gas behavior should be pinned by focused tests and
 documented at the code path that implements it.

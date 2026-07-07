@@ -1145,6 +1145,10 @@ TEST(Rv32Threaded, engineOnlyCorpusGasBudgetSweep)
     EXPECT_EQ(threaded_oog, canonical_oog)
         << "engine seed " << seed << " gas budget " << budget;
     if (canonical_oog || threaded_oog) {
+      if (canonical_oog) {
+        EXPECT_EQ(cmachine.gas_remaining(), 0U)
+            << "engine seed " << seed << " gas budget " << budget;
+      }
       if (threaded_oog) {
         EXPECT_EQ(tmachine.gas_remaining(), 0U)
             << "engine seed " << seed << " gas budget " << budget;
@@ -1355,6 +1359,7 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
 
   EXPECT_EQ(result, StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.gas_remaining(), 0U);
   EXPECT_TRUE(host.wrote);
   // The write happened before the OOG trap and is NOT rolled back.
   EXPECT_EQ(machine.memory()[4], 0xaaU);
