@@ -76,14 +76,14 @@ a memory trap can fire after the run has already been charged past it;
 `trap_bad_memory` refunds the run's unexecuted suffix so the trapped state
 keeps exactly the instructions through the faulting one charged.
 
-An unaffordable run is charged anyway -- the balance goes into deficit -- and
-executes speculatively; the deficit settles as `kOutOfGas` with zero gas at
-the run's exit seam, before any effect can escape the frame. The seams are
-exhaustive: `enter_run` at the next run head, `op_ecall` before the host sees
-a syscall (a speculative syscall would have effects outside the frame), and
-`trap_at` / `trap_bad_memory` at every trap. At most one run ever executes in
-deficit (every head settles first), bounding the overdraft by the lowering's
-uint16 run-gas cap.
+An unaffordable run still executes speculatively on a zero balance with the
+shortfall recorded out-of-band; the deficit settles as `kOutOfGas` with zero
+gas at the run's exit seam, before any effect can escape the frame. The seams
+are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
+sees a syscall (a speculative syscall would have effects outside the frame),
+and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
+executes in deficit (every head settles first), bounding the overdraft by the
+lowering's uint16 run-gas cap.
 
 The invariant this buys: the consensus-visible pair (trap classification,
 `gas_remaining`) matches the canonical `Machine` at every budget and on every

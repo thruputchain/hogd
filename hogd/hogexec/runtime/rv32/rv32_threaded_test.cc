@@ -557,10 +557,10 @@ TEST(Rv32Threaded, outOfGasMidRunSettlesAtNextSeam)
   using test_program::branch;
   // Run head at pc=0: [addi x5 (body), beq x0,x0,+8 (barrier)] -> target pc=12.
   // Every instruction costs 1 gas, so the run (body + barrier) costs 2. With a
-  // budget of 1 the run does not fit: enter_run charges it anyway (gas goes
-  // into deficit), the run executes speculatively, and the next seam -- the
-  // enter_run at the branch target -- sees the negative balance and reports
-  // OOG with zero gas. The consensus-visible pair (classification, gas)
+  // budget of 1 the run does not fit: enter_run records a gas_deficit_ and
+  // executes the run speculatively. The next seam -- the enter_run at the
+  // branch target -- settles the deficit and reports OOG with zero gas. The
+  // consensus-visible pair (classification, gas)
   // matches the canonical Machine exactly; trap pc and the speculative body's
   // register writes are frame-local state a trap discards, and differ.
   const std::vector<uint32_t> words = {addi(5, 0, 1), branch(0, 0, 0, 8),
