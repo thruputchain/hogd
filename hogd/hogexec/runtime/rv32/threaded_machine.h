@@ -1952,6 +1952,7 @@ ThreadedMachine::apply_ecall(const HostResult &result)
     }
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
+    gas_remaining_ = 0;
     return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,
                                            gas_remaining_);
   case HostStatus::kTrap:

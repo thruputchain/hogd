@@ -88,6 +88,7 @@ TEST(Rv32IsaCore, outOfGasTrapsDeterministicallyStandalone)
 
   EXPECT_EQ(machine.step(), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.gas_remaining(), 0U);
 }
 
 TEST(Rv32IsaCore, outOfBoundsStoreTrapsOnCoreMemoryModel)

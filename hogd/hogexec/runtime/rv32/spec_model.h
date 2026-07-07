@@ -244,6 +244,7 @@ step_spec(SpecState &state, std::span<const SpecInstruction> instructions)
   const SpecInstruction &instruction =
       instructions[state.pc / kInstructionBytes];
   if (state.gas_remaining < instruction.gas) {
+    state.gas_remaining = 0;
     set_trap(state, Trap::kOutOfGas);
     return StepResult::kTrap;
   }

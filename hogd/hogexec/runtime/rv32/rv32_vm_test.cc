@@ -1364,6 +1364,38 @@ TEST(Rv32ExecutionTest, debits_gas_before_later_traps_and_mutation)
   }
 }
 
+TEST(Rv32GasTest, out_of_gas_saturates_remaining_gas_to_zero)
+{
+  {
+    const auto program = make_program({addi(1, 0, 1)});
+    Machine machine(program, 1024, 0);
+    EXPECT_EQ(machine.step(), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
+    EXPECT_EQ(machine.reg(1), 0U);
+  }
+  {
+    struct ExpensiveContinueHost : Host {
+      HostResult ecall(MachineView view,
+                       const EcallArgs &args) noexcept override
+      {
+        (void)view;
+        (void)args;
+        return HostResult::continue_with(123, 10);
+      }
+    };
+
+    const auto program = make_program({0x00000073U});
+    Machine machine(program, 1024, 10);
+    ExpensiveContinueHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
+    EXPECT_EQ(machine.pc(), 4U);
+    EXPECT_EQ(machine.reg(10), 0U);
+  }
+}
+
 TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
 {
   struct Case {
@@ -1394,7 +1426,7 @@ TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
       EXPECT_EQ(machine.step(), StepResult::kTrap);
       EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
       EXPECT_EQ(machine.reg(3), 0U);
-      EXPECT_EQ(machine.gas_remaining(), test_case.cost - 1);
+      EXPECT_EQ(machine.gas_remaining(), 0U);
     }
     {
       Machine machine(program, 1024, test_case.cost);
@@ -1468,7 +1500,7 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
     EXPECT_EQ(machine.reg(10), 7U);
     EXPECT_EQ(machine.pc(), 4U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
     EXPECT_FALSE(machine.pending_ecall().has_value());
   }
   {
@@ -1482,7 +1514,7 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     EXPECT_EQ(machine.memory()[4], 0xaaU); // host writes persist on host-OOG
     EXPECT_EQ(machine.memory()[7], 0xddU); // (matches host-trap; no rollback)
     EXPECT_EQ(machine.pc(), 4U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
     EXPECT_FALSE(machine.pending_ecall().has_value());
   }
   {
@@ -1500,7 +1532,7 @@ TEST(Rv32ExecutionTest, handles_ecall_step_completion_and_run)
     EXPECT_EQ(machine.memory()[4], 0xaaU); // no rollback
     EXPECT_EQ(machine.memory()[7], 0xddU);
     EXPECT_EQ(machine.pc(), 4U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 0U);
     EXPECT_FALSE(machine.pending_ecall().has_value());
   }
   {

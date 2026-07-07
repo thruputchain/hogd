@@ -553,6 +553,17 @@ TEST(Rv32Threaded, outOfGasMidRunTrapsAtRunHead)
   // pc=0 and the body never executes.
   const std::vector<uint32_t> words = {addi(5, 0, 1), branch(0, 0, 0, 8),
                                        addi(6, 0, 99), addi(7, 0, 42)};
+  const auto canonical =
+      make_program(std::span<const uint32_t>(words.data(), words.size()));
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, 1024, /*gas=*/1);
+  RecordingHost chost;
+  EXPECT_EQ(cmachine.run(chost), StepResult::kTrap);
+  EXPECT_EQ(cmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(cmachine.pc(), 4U); // affordable prefix ran, then beq OOGed
+  EXPECT_EQ(cmachine.gas_remaining(), 0U);
+  EXPECT_EQ(cmachine.reg(5), 1U);
+
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, /*gas=*/1);
   RecordingHost host;
@@ -1145,6 +1156,10 @@ TEST(Rv32Threaded, engineOnlyCorpusGasBudgetSweep)
     EXPECT_EQ(threaded_oog, canonical_oog)
         << "engine seed " << seed << " gas budget " << budget;
     if (canonical_oog || threaded_oog) {
+      if (canonical_oog) {
+        EXPECT_EQ(cmachine.gas_remaining(), 0U)
+            << "engine seed " << seed << " gas budget " << budget;
+      }
       if (threaded_oog) {
         EXPECT_EQ(tmachine.gas_remaining(), 0U)
             << "engine seed " << seed << " gas budget " << budget;
@@ -1355,6 +1370,7 @@ TEST(Rv32ThreadedYieldApi, hostMemoryWritePersistsOnOutOfGas)
 
   EXPECT_EQ(result, StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(machine.gas_remaining(), 0U);
   EXPECT_TRUE(host.wrote);
   // The write happened before the OOG trap and is NOT rolled back.
   EXPECT_EQ(machine.memory()[4], 0xaaU);
