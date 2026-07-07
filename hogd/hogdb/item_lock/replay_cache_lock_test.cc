@@ -869,4 +869,26 @@ TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
   EXPECT_EQ(20U, out->nonces[0]);
 }
 
+// #2663: the conflict-set hash must mix the high (expiry) limb, not just the
+// low (nonce) limb the way std::hash<uint128_t> does on libstdc++. Same-nonce
+// keys that differ only in expiry must land in different buckets so an
+// attacker cannot pack the probe table.
+TEST(ReplayConflictSetTraitsTest, HashMixesExpiryLimb)
+{
+  constexpr uint64_t kNonce = 0xDEADBEEFCAFEBABEULL;
+  auto packed = [](uint64_t expiry, uint64_t n) {
+    return (static_cast<uint128_t>(expiry) << 64) | n;
+  };
+
+  auto h50 = ReplayConflictSetTraits::hash(packed(50, kNonce));
+  auto h51 = ReplayConflictSetTraits::hash(packed(51, kNonce));
+  auto h52 = ReplayConflictSetTraits::hash(packed(52, kNonce));
+  EXPECT_NE(h50, h51);
+  EXPECT_NE(h51, h52);
+  EXPECT_NE(h50, h52);
+
+  // Stable within a process (same key hashes the same).
+  EXPECT_EQ(h50, ReplayConflictSetTraits::hash(packed(50, kNonce)));
+}
+
 } // namespace hogd
