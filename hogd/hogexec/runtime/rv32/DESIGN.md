@@ -72,18 +72,33 @@ schedule, so artifacts built against a different gas table are rejected.
 the lowering step records the total gas for a run, and `enter_run()` charges it
 once before executing the run body. Control-flow and host boundary instructions
 are barriers. Loads and stores remain in straight-line runs for performance, so
-a memory trap can occur after the run has already been charged.
+a memory trap can fire after the run has already been charged past it;
+`trap_bad_memory` refunds the run's unexecuted suffix so the trapped state
+keeps exactly the instructions through the faulting one charged.
 
-All `Trap::kOutOfGas` paths saturate `gas_remaining` to zero in the canonical
-engine, production threaded engine, and independent spec model. Non-OOG traps
-may still observe charged-but-nonzero gas according to where the trap fires.
-On mid-run OOG, `ThreadedMachine` can abort at the run head while `Machine` has
-already executed the affordable prefix; the shared invariant is the OOG
-classification and zero remaining gas, not trap-time pc or partial state.
+An unaffordable run still executes speculatively on a zero balance with the
+shortfall recorded out-of-band; the deficit settles as `kOutOfGas` with zero
+gas at the run's exit seam, before any effect can escape the frame. The seams
+are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
+sees a syscall (a speculative syscall would have effects outside the frame),
+and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
+executes in deficit (every head settles first), bounding the overdraft by the
+lowering's uint16 run-gas cap.
 
-Do not infer trap-time gas semantics from the canonical engine alone. Any
-consensus-visible trap gas behavior should be pinned by focused tests and
-documented at the code path that implements it.
+The invariant this buys: the consensus-visible pair (trap classification,
+`gas_remaining`) matches the canonical `Machine` at every budget and on every
+trap class -- every instruction through and including the trapping one is
+charged, nothing after it, and all `Trap::kOutOfGas` paths saturate
+`gas_remaining` to zero in the canonical engine, production threaded engine,
+and independent spec model. This pair is consensus-visible because
+`rv32_contract.cc` reports `gas_limit - gas_remaining` to the caller as the
+frame's consumption, and a TryInvoke parent continues executing with the
+remainder. NOT invariant (frame-local state a trap discards): the trap pc, a
+speculative run's register/memory writes, and traced intermediate gas past
+the OOG fence. `Rv32ThreadedTrapGas` pins engine parity for every trap class
+-- including each fused handler's fault paths and every deficit seam -- and
+`Rv32Threaded.outOfGasMidRunSettlesAtNextSeam` pins the speculative
+semantics.
 
 ## Syscalls
 
