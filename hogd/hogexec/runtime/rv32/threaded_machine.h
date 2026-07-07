@@ -57,6 +57,14 @@ struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
                                uint64_t);
 
+// Maximum gas any single run (chunk) may total. The lowering splits longer
+// straight-line runs at mid-run break carriers so no run's gas_to_run exceeds
+// this, which (a) keeps gas_to_run within its uint16 field and (b) bounds the
+// maximum speculative overdraft a deficit run can incur (enter_run_deficit),
+// since at most one run ever runs in deficit. A single instruction's gas is
+// <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
+inline constexpr uint32_t kMaxRunGas = 10000;
+
 // Executable instruction, packed to 16 bytes (alignas(16) -- a power of two, so
 // `ip - base` (pc_of) and `ip + imm` (branch/jump targets) still lower to a
 // shift, and the exec_ array is half the size of the old 32-byte slot). Layout:
@@ -508,6 +516,24 @@ is_barrier(Op op)
     HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize, gas);     \
   } while (false)
 
+// Continue after a non-barrier instruction. `Brk` (the enclosing handler's
+// template parameter) is false for the common in-run step (thread to the next
+// slot, no gas work) and true only at a mid-run split point the lowering
+// inserted to keep a run's gas within kMaxRunGas: there the slot ends its
+// (sub-)run, so control enters a fresh run at the successor, charging the next
+// chunk. `if constexpr` keeps Brk==false byte-identical to a bare
+// HOGD_THREAD_NEXT (zero hot-path cost); the Brk==true instantiations are cold,
+// baked only into the rare split slots.
+#define HOGD_STEP_NEXT(c, next)                                                \
+  do {                                                                         \
+    if constexpr (Brk) {                                                       \
+      HOGD_ENTER_RUN((c), (next));                                             \
+    }                                                                          \
+    else {                                                                     \
+      HOGD_THREAD_NEXT((c), (next));                                           \
+    }                                                                          \
+  } while (false)
+
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
 // a template parameter (compile-time literal at every call site). Its signature
 // matches a handler's, so fault sites HOGD_MUSTTAIL into it (a single
@@ -560,14 +586,18 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // faults only: at a barrier trap (bad branch target, ebreak, unimp), ip+1
 // heads the *next* run, whose gas was never charged, and this refund would
 // over-credit.
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
                 uint64_t gas)
 {
   // No overflow: the suffix is part of the charge the entered run already
   // paid (or capped by it in a deficit run), so balance <= the entry balance.
-  const uint64_t balance = gas + (ip + 1)->gas_to_run;
+  // Brk (a break carrier): ip is the last instruction of its chunk, so its
+  // in-run suffix is empty -- the successor heads the *next*, not-yet-charged
+  // chunk, so refunding its gas_to_run would over-credit. Refund 0 instead.
+  const uint64_t suffix = Brk ? uint64_t{0} : uint64_t{(ip + 1)->gas_to_run};
+  const uint64_t balance = gas + suffix;
   const uint32_t deficit = c.m->gas_deficit_;
   if (balance < deficit) {
     // trap_at's deficit branch settles this as (kOutOfGas, 0).
@@ -678,43 +708,43 @@ sltu_op(uint32_t a, uint32_t b)
 }
 // --- Non-barrier handlers: no gas work (the run was pre-charged) ------------
 
-template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2]);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = bits_from_i32(ip->imm);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = pc_of(c, ip) + bits_from_i32(ip->imm);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
 // --- Barrier handlers: self-charge gas, end the run -------------------------
@@ -895,28 +925,28 @@ try_store(uint8_t *mem, uint32_t memsize, uint32_t base, int32_t imm,
 // Loads/stores are non-barriers: no self-charge (their gas is in the run total
 // pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
 // still fault (oob), which is terminal.
-template<bool Trace, uint32_t Width, bool SignExtend>
+template<bool Trace, uint32_t Width, bool SignExtend, bool Brk = false>
 StepResult
 op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   uint32_t v;
   if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
                                    v)) {
-    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace, Brk>(c, ip, mem, memsize, gas);
   }
   c.m->regs_[ip->rd] = v;
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace, uint32_t Width>
+template<bool Trace, uint32_t Width, bool Brk = false>
 StepResult
 op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   if (!try_store<Width>(mem, memsize, c.m->regs_[ip->rs1], ip->rb.imm16,
                         c.m->regs_[ip->rb.rs2])) {
-    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace, Brk>(c, ip, mem, memsize, gas);
   }
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
 // EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
@@ -1244,7 +1274,7 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // rather than going through a forwarding handler (see
 // handler_for/PreInstantiation::create).
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 Handler
 handler_for(Op op)
 {
@@ -1266,81 +1296,81 @@ handler_for(Op op)
   case Op::kBgeu:
     return &op_branch<Trace, bgeu_cmp>;
   case Op::kLui:
-    return &op_lui<Trace>;
+    return &op_lui<Trace, Brk>;
   case Op::kAuipc:
-    return &op_auipc<Trace>;
+    return &op_auipc<Trace, Brk>;
   case Op::kAddi:
-    return &op_ri<Trace, add_op>;
+    return &op_ri<Trace, add_op, Brk>;
   case Op::kSlti:
-    return &op_ri<Trace, slt_op>;
+    return &op_ri<Trace, slt_op, Brk>;
   case Op::kSltiu:
-    return &op_ri<Trace, sltu_op>;
+    return &op_ri<Trace, sltu_op, Brk>;
   case Op::kXori:
-    return &op_ri<Trace, xor_op>;
+    return &op_ri<Trace, xor_op, Brk>;
   case Op::kOri:
-    return &op_ri<Trace, or_op>;
+    return &op_ri<Trace, or_op, Brk>;
   case Op::kAndi:
-    return &op_ri<Trace, and_op>;
+    return &op_ri<Trace, and_op, Brk>;
   case Op::kSlli:
-    return &op_ri<Trace, sll_op>;
+    return &op_ri<Trace, sll_op, Brk>;
   case Op::kSrli:
-    return &op_ri<Trace, srl_op>;
+    return &op_ri<Trace, srl_op, Brk>;
   case Op::kSrai:
-    return &op_ri<Trace, sra_op>;
+    return &op_ri<Trace, sra_op, Brk>;
   case Op::kAdd:
-    return &op_rr<Trace, add_op>;
+    return &op_rr<Trace, add_op, Brk>;
   case Op::kSub:
-    return &op_rr<Trace, sub_op>;
+    return &op_rr<Trace, sub_op, Brk>;
   case Op::kSll:
-    return &op_rr<Trace, sll_op>;
+    return &op_rr<Trace, sll_op, Brk>;
   case Op::kSlt:
-    return &op_rr<Trace, slt_op>;
+    return &op_rr<Trace, slt_op, Brk>;
   case Op::kSltu:
-    return &op_rr<Trace, sltu_op>;
+    return &op_rr<Trace, sltu_op, Brk>;
   case Op::kXor:
-    return &op_rr<Trace, xor_op>;
+    return &op_rr<Trace, xor_op, Brk>;
   case Op::kSrl:
-    return &op_rr<Trace, srl_op>;
+    return &op_rr<Trace, srl_op, Brk>;
   case Op::kSra:
-    return &op_rr<Trace, sra_op>;
+    return &op_rr<Trace, sra_op, Brk>;
   case Op::kOr:
-    return &op_rr<Trace, or_op>;
+    return &op_rr<Trace, or_op, Brk>;
   case Op::kAnd:
-    return &op_rr<Trace, and_op>;
+    return &op_rr<Trace, and_op, Brk>;
   case Op::kMul:
-    return &op_rr<Trace, mul_low>;
+    return &op_rr<Trace, mul_low, Brk>;
   case Op::kMulh:
-    return &op_rr<Trace, mulh>;
+    return &op_rr<Trace, mulh, Brk>;
   case Op::kMulhsu:
-    return &op_rr<Trace, mulhsu>;
+    return &op_rr<Trace, mulhsu, Brk>;
   case Op::kMulhu:
-    return &op_rr<Trace, mulhu>;
+    return &op_rr<Trace, mulhu, Brk>;
   case Op::kDiv:
-    return &op_rr<Trace, div_signed>;
+    return &op_rr<Trace, div_signed, Brk>;
   case Op::kDivu:
-    return &op_rr<Trace, div_unsigned>;
+    return &op_rr<Trace, div_unsigned, Brk>;
   case Op::kRem:
-    return &op_rr<Trace, rem_signed>;
+    return &op_rr<Trace, rem_signed, Brk>;
   case Op::kRemu:
-    return &op_rr<Trace, rem_unsigned>;
+    return &op_rr<Trace, rem_unsigned, Brk>;
   case Op::kLb:
-    return &op_load<Trace, 1, true>;
+    return &op_load<Trace, 1, true, Brk>;
   case Op::kLh:
-    return &op_load<Trace, 2, true>;
+    return &op_load<Trace, 2, true, Brk>;
   case Op::kLw:
-    return &op_load<Trace, 4, false>;
+    return &op_load<Trace, 4, false, Brk>;
   case Op::kLbu:
-    return &op_load<Trace, 1, false>;
+    return &op_load<Trace, 1, false, Brk>;
   case Op::kLhu:
-    return &op_load<Trace, 2, false>;
+    return &op_load<Trace, 2, false, Brk>;
   case Op::kSb:
-    return &op_store<Trace, 1>;
+    return &op_store<Trace, 1, Brk>;
   case Op::kSh:
-    return &op_store<Trace, 2>;
+    return &op_store<Trace, 2, Brk>;
   case Op::kSw:
-    return &op_store<Trace, 4>;
+    return &op_store<Trace, 4, Brk>;
   case Op::kFence:
-    return &op_fence<Trace>;
+    return &op_fence<Trace, Brk>;
   case Op::kEbreak:
     // ebreak's gas is charged at the run head; the handler is a pure trap, so
     // dispatch straight to trap_at (it has the handler signature).
@@ -1356,6 +1386,17 @@ handler_for(Op op)
     // ops); the defensive default traps kInvalidInstruction directly.
     return &trap_at<Trace, Trap::kInvalidInstruction>;
   }
+}
+
+// Select a handler from the runtime (trace, brk) pair. brk is set only for a
+// mid-run break carrier (a non-barrier slot ending a chunk).
+inline Handler
+pick_handler(Op op, bool trace, bool brk)
+{
+  if (brk) {
+    return trace ? handler_for<true, true>(op) : handler_for<false, true>(op);
+  }
+  return trace ? handler_for<true, false>(op) : handler_for<false, false>(op);
 }
 
 // Selects the out-of-range branch handler with the same Cmp handler_for bakes

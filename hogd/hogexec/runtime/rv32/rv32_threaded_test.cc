@@ -245,6 +245,26 @@ TEST(Rv32Threaded, createRejectsRunGasOverflow)
   EXPECT_EQ(threaded.error(), ProgramError::kRunGasTooLarge);
 }
 
+TEST(Rv32Threaded, breakVariantHandlersAreDistinctAndSelectable)
+{
+  // The Brk=true instantiation of a non-barrier handler is a distinct symbol
+  // from the Brk=false one, and handler_for forwards Brk. These are the cold
+  // handlers the lowering installs at mid-run split points.
+  EXPECT_NE((&op_ri<false, add_op, true>), (&op_ri<false, add_op, false>));
+  EXPECT_EQ((handler_for<false, true>(Op::kAddi)),
+            (&op_ri<false, add_op, true>));
+  EXPECT_EQ((handler_for<false, false>(Op::kAddi)),
+            (&op_ri<false, add_op, false>));
+  EXPECT_EQ((handler_for<false, true>(Op::kLw)),
+            (&op_load<false, 4, false, true>));
+  EXPECT_EQ((handler_for<false, true>(Op::kSw)), (&op_store<false, 4, true>));
+  // Barriers ignore Brk (they already end a run): same handler either way.
+  EXPECT_EQ((handler_for<false, true>(Op::kJal)),
+            (handler_for<false, false>(Op::kJal)));
+  // kMaxRunGas is the chunk cap and comfortably fits uint16.
+  EXPECT_LE(kMaxRunGas, 0xFFFFU);
+}
+
 TEST(Rv32Threaded, containsPcBoundsAtInstructionCountNotByteCount)
 {
   // Regression: code_ holds a byte span, so contains_pc must bound pc by the
