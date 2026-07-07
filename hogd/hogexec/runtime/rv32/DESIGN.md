@@ -77,6 +77,9 @@ a memory trap can occur after the run has already been charged.
 All `Trap::kOutOfGas` paths saturate `gas_remaining` to zero in the canonical
 engine, production threaded engine, and independent spec model. Non-OOG traps
 may still observe charged-but-nonzero gas according to where the trap fires.
+On mid-run OOG, `ThreadedMachine` can abort at the run head while `Machine` has
+already executed the affordable prefix; the shared invariant is the OOG
+classification and zero remaining gas, not trap-time pc or partial state.
 
 Do not infer trap-time gas semantics from the canonical engine alone. Any
 consensus-visible trap gas behavior should be pinned by focused tests and
