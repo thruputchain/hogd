@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,6 +21,17 @@
 #include "x23/testlock.h"
 
 namespace hogd {
+
+// Hash traits for the replay-cache conflict set. Runs the full 128-bit
+// (expiry_height, nonce) key through the process-wide keyed SipHash24 rather
+// than std::hash<uint128_t>, which is implementation-defined and on libstdc++
+// hashes only the low (nonce) limb, so distinct-expiry same-nonce entries all
+// collapse into one bucket. (#2663)
+struct ReplayConflictSetTraits {
+  static constexpr uint128_t kEmpty = uint128_t{};
+  static constexpr uint128_t kTombstone = ~uint128_t{};
+  static size_t hash(const uint128_t &v);
+};
 
 class ReplayCacheLock {
 public:
@@ -62,7 +74,7 @@ private:
   mutable std::once_flag meta_once_flag_;
   mutable bool meta_poisoned_{false};
 
-  mutable ConcurrentSet<uint128_t> conflicts_;
+  mutable ConcurrentSet<uint128_t, ReplayConflictSetTraits> conflicts_;
   mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};

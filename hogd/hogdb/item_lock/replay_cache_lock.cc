@@ -15,6 +15,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -30,6 +31,12 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+size_t
+ReplayConflictSetTraits::hash(const uint128_t &v)
+{
+  return SipHash24::get_default()(std::as_bytes(std::span(&v, 1)));
+}
 
 HogDBStatus<ReplayCacheMetadata *>
 ReplayCacheLock::get_meta(const LockContext *ctx) const
