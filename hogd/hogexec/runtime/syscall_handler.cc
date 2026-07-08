@@ -1056,9 +1056,6 @@ SystemCallHandler::report_db_conflict_diagnostic() const
   }
   trace("two-phase commit conflict diagnostics: {}", x23::show(conflict));
 
-  // The wire format carries exactly one diagnostic (memory-bounded end to
-  // end); under kDbDiagnosticAll (debug builds) send the first, drop the
-  // rest.
   // Exactly one diagnostic goes on the wire (memory-bounded end to end); under
   // kDbDiagnosticAll (debug builds) take the first. hogdb only ever sets a
   // non-None level together with a conflict, so a missing one is an invariant

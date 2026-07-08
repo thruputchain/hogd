@@ -586,11 +586,13 @@ struct CapturingIndexerRpc {
     co_return;
   }
 
-  x23::Async<void>
-  indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
-                                  const TxFailureDiagnostic &diag)
+  // Required for is_IndexerEvent1 conformance; the failure-relay path is
+  // covered by FailureCapturingIndexerRpc in event_rpc_test.cc, so this file's
+  // tests don't record reports.
+  static x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
+                                  const TxFailureDiagnostic & /*diag*/)
   {
-    received_failure_reports.emplace_back(tx_hash, diag);
     co_return;
   }
 
@@ -598,8 +600,6 @@ struct CapturingIndexerRpc {
   BlockHeight last_block_height = -1;
   TxEventLogBatch received_events;
   ProposedTransactionBatch received_bodies;
-  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>
-      received_failure_reports;
 };
 static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
 

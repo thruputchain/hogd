@@ -7,10 +7,10 @@
 #include <vector>
 
 #include "db_conflict.hh"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -37,10 +37,17 @@ class RecentTxFailureCache {
 public:
   static constexpr BlockHeight kDefaultExpiryDelta = 5;
   static constexpr size_t kDefaultMaxEntries = 1 << 16;
+  // This cache is tiny (only nondeterministic failures, expiring in a few
+  // blocks) and low-QPS, and prune() scans every shard each block -- so a
+  // modest fixed shard count beats SynchronizedMap's default (hundreds to
+  // thousands of shards, sized to core count), which would tax every prune
+  // with no concurrency benefit here.
+  static constexpr size_t kShardCount = 64;
 
   explicit RecentTxFailureCache(BlockHeight expiry_delta = kDefaultExpiryDelta,
                                 size_t max_entries = kDefaultMaxEntries)
-    : expiry_delta_(expiry_delta), max_entries_(max_entries)
+    : expiry_delta_(expiry_delta), max_entries_(max_entries),
+      entries_(kShardCount)
   {}
 
   // Best-effort insert.  The latest attempt (highest attempt_height) wins for

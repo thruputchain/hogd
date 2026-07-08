@@ -217,8 +217,7 @@ read_metadata_file(std::filesystem::path const &path)
                     kMaxDataDirMetadataBytes));
   }
 
-  File file = require_io(File::open(path.string(),
-                                    O_RDONLY), // NOLINT(misc-include-cleaner)
+  File file = require_io(File::open(path.string(), O_RDONLY),
                          "open hog-devnode data metadata");
 
   std::string bytes(size, '\0');
