@@ -538,7 +538,7 @@ RCQBenchmark::run_sequential()
         delta.insert.added_entries.push_back(
             make_rcq_entry(static_cast<uint32_t>(i)));
         if (auto ret = tx.request_retrocausal_queue(
-                queue_keys_[i % num_queues_], delta,
+                queue_keys_[i % num_queues_], std::move(delta),
                 std::to_underlying(StorageDeltaFlags::None));
             !ret)
           fail(ret.error());
@@ -620,7 +620,7 @@ RCQBenchmark::run_sequential()
                 },
         });
         if (auto ret =
-                tx.request_retrocausal_queue(queue_keys_[q], delta,
+                tx.request_retrocausal_queue(queue_keys_[q], std::move(delta),
                                              std::to_underlying(
                                                  StorageDeltaFlags::None));
             !ret)
@@ -713,10 +713,9 @@ RCQBenchmark::run_concurrent()
             RetrocausalQueueDelta delta;
             delta.insert.added_entries.push_back(
                 make_rcq_entry(static_cast<uint32_t>(i)));
-            if (auto ret =
-                    tx.request_retrocausal_queue(queue_keys_[q], delta,
-                                                 std::to_underlying(
-                                                     StorageDeltaFlags::None));
+            if (auto ret = tx.request_retrocausal_queue(
+                    queue_keys_[q], std::move(delta),
+                    std::to_underlying(StorageDeltaFlags::None));
                 !ret)
               fail(ret.error());
             if (auto ret = tx.sync_balance_locks(); !ret)
@@ -784,10 +783,9 @@ RCQBenchmark::run_concurrent()
               consume->current_block_consumed.push_back(std::move(e));
             delta.consume.reset(consume);
 
-            if (auto ret =
-                    tx.request_retrocausal_queue(queue_keys_[q], delta,
-                                                 std::to_underlying(
-                                                     StorageDeltaFlags::None));
+            if (auto ret = tx.request_retrocausal_queue(
+                    queue_keys_[q], std::move(delta),
+                    std::to_underlying(StorageDeltaFlags::None));
                 !ret)
               fail(ret.error());
             if (auto ret = tx.sync_balance_locks(); !ret)

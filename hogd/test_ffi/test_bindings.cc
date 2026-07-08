@@ -805,10 +805,12 @@ try_commit_transaction(void *syscall_handler) noexcept
         kTestFFIErrorCodeInvalidPointer);
   }
 
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
   // Hoisted before try{} so the catch block can free it if emit_events throws.
   FFIDataBuffer serialized_conflict = kNullBuffer;
+
   try {
-    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     // Reject a repeat commit (or a commit after a prior abort) on a still-live
     // handle. Like the abort path, SystemCallHandler::try_commit_transaction()
     // treats finalization as single-use and asserts
@@ -878,6 +880,9 @@ try_commit_transaction(void *syscall_handler) noexcept
   } catch (std::exception const &e) {
     hogd::free_ffi_data_buffer(serialized_conflict);
     log_error("error during try_commit_transaction: {}", e);
+    // Backstop: mark the handle terminal so a retry can't re-enter the
+    // single-use core commit and re-push the replay-cache delta (#2595).
+    context->mark_committed_or_aborted();
     return kUnrecoverableError;
   }
 }

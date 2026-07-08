@@ -114,10 +114,11 @@ public:
                                                StorageDeltaFlagSet flags);
 
   // request_retrocausal_queue requests to apply a retrocausal queue delta.
-  HogDBStatus<void>
-  request_retrocausal_queue(const ItemKey &key,
-                            const RetrocausalQueueDelta &delta,
-                            StorageDeltaFlagSet flags);
+  // The delta is moved into the resulting ItemChange; callers that still need
+  // their delta afterwards must pass a copy.
+  HogDBStatus<void> request_retrocausal_queue(const ItemKey &key,
+                                              RetrocausalQueueDelta &&delta,
+                                              StorageDeltaFlagSet flags);
 
   bool release_blocktx_reference() { return block_.release_reference(); }
 
