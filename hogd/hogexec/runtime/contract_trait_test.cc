@@ -43,6 +43,20 @@ TEST(ContractTraitTest, MethodIDDerivation)
   ASSERT_NE(z_alpha, z_plain);
   // Golden vector: preimage "hogd::0.0.0-alpha::abc".
   ASSERT_EQ(z_alpha, Runtime::MethodID{0x99b536b207ea02cfULL});
+
+  // major > 0: fold keeps only the major component (ignores minor/patch), so
+  // preimage is "hogd::2::abc".
+  auto maj = sdk_method_id("hogd", "2.5.7", "abc");
+  ASSERT_EQ(maj, sdk_method_id("hogd", "2.9.9", "abc"));
+  ASSERT_NE(maj, sdk_method_id("hogd", "3.0.0", "abc"));
+  ASSERT_EQ(maj, Runtime::MethodID{0x69e35d2fdb6e7e55ULL});
+
+  // major == minor == 0, patch > 0: fold keeps "0.0.PATCH" and drops any
+  // -prerelease/+build, so preimage is "hogd::0.0.7::abc".
+  auto pat = sdk_method_id("hogd", "0.0.7", "abc");
+  ASSERT_EQ(pat, sdk_method_id("hogd", "0.0.7-rc.1", "abc"));
+  ASSERT_NE(pat, sdk_method_id("hogd", "0.0.8", "abc"));
+  ASSERT_EQ(pat, Runtime::MethodID{0xa6e0c6d93a7f2c46ULL});
 }
 
 TEST(ContractTraitTest, EntrypointFromMethodID)
@@ -60,16 +74,18 @@ static_assert(
 // uint32_t>);
 
 // Regression for #2898: the assertion-enabled entrypoint() debug cross-check
-// must hash the charset-independent u8"" preimage twins, not the ordinary
-// literals whose bytes depend on -fexec-charset.
+// must hash the charset-independent, already-folded u8"" preimage the generator
+// emits, not re-fold ordinary literals through the semver parser (whose regex
+// and "0" literals depend on -fexec-charset).
 //
 // This toolchain's clang only accepts -fexec-charset=UTF-8, so we can't produce
 // a genuine non-UTF-8 ordinary literal. Instead we model the exact divergence a
 // non-UTF-8 build creates: the ordinary kTraitName/kVersion are deliberately
-// corrupted so their rehash differs from the UTF-8-derived kEntrypoints, while
-// the u8"" twins hold the correct UTF-8 preimage. kLookupIndex still matches
-// "transfer" within this TU (kExportNames is unchanged), exactly as it would in
-// a real -fexec-charset build. Reproduces on any execution charset.
+// corrupted so re-folding them differs from the UTF-8-derived kEntrypoints,
+// while kEntrypointPreimagesUtf8 holds the correct folded UTF-8 preimage.
+// kLookupIndex still matches "transfer" within this TU (kExportNames is
+// unchanged), exactly as it would in a real -fexec-charset build. Reproduces on
+// any execution charset.
 namespace {
 struct Utf8CrossCheckTrait {
   // Corrupted ordinary literals: stand in for non-UTF-8 execution-charset
@@ -83,35 +99,32 @@ struct Utf8CrossCheckTrait {
   constexpr static auto kEntrypoints =
       std::array<uint64_t, 1>{0x63285b3523f9dc3fULL};
 
-  // Correct UTF-8 twins (what generate_header.py now emits).
-  constexpr static std::u8string_view kTraitNameUtf8 = u8"ERC20";
-  constexpr static std::u8string_view kVersionUtf8 = u8"0.1.4";
-  constexpr static auto kExportNamesUtf8 =
-      std::array<std::u8string_view, 1>{u8"transfer"};
+  // Correct folded UTF-8 preimage (what generate_header.py now emits).
+  constexpr static auto kEntrypointPreimagesUtf8 =
+      std::array<std::u8string_view, 1>{u8"ERC20::0.1::transfer"};
 
   using export_types = std::tuple<void (*)()>;
 };
 } // namespace
 
-TEST(ContractTraitTest, EntrypointDebugCrossCheckUsesUtf8Twins)
+TEST(ContractTraitTest, EntrypointDebugCrossCheckUsesUtf8Preimage)
 {
   using meta = ContractTraitMeta<Utf8CrossCheckTrait>;
   auto canonical =
       entrypoint_from_method_id(Utf8CrossCheckTrait::kEntrypoints[0]);
 
-  // Precondition: the ordinary-literal rehash (what the pre-#2898 cross-check
-  // hashed) diverges from the UTF-8-derived kEntrypoints. This is the exact
-  // condition a non-UTF-8 -fexec-charset build produces.
+  // Precondition: re-folding the ordinary literals (what the pre-#2898
+  // cross-check did) diverges from the UTF-8-derived kEntrypoints. This is the
+  // exact condition a non-UTF-8 -fexec-charset build produces.
   ASSERT_NE(canonical,
             sdk_entrypoint_derivation(Utf8CrossCheckTrait::kTraitName,
                                       Utf8CrossCheckTrait::kVersion,
                                       "transfer"));
 
-  // The u8"" twins reproduce the canonical id independent of execution charset.
-  ASSERT_EQ(canonical, sdk_entrypoint_derivation(
-                           Utf8CrossCheckTrait::kTraitNameUtf8,
-                           Utf8CrossCheckTrait::kVersionUtf8,
-                           Utf8CrossCheckTrait::kExportNamesUtf8[0]));
+  // Hashing the folded u8"" preimage reproduces the canonical id independent of
+  // execution charset and of the semver parser.
+  ASSERT_EQ(canonical, entrypoint_id_from_utf8_preimage(
+                           Utf8CrossCheckTrait::kEntrypointPreimagesUtf8[0]));
 
   // Therefore entrypoint() no longer aborts on the debug cross-check and
   // returns the canonical id. Against the pre-#2898 code this call SIGABRTs.

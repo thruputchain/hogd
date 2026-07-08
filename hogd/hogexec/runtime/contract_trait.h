@@ -37,13 +37,13 @@ ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
                           std::string_view method_name);
-// UTF-8 overload: the u8string_view bytes are hashed as-is (they are the UTF-8
-// preimage the SDK/generate_header.py used), independent of the ordinary
-// execution charset. Used by the entrypoint() debug cross-check. See #2898.
+// Hash a fully-folded UTF-8 entrypoint preimage
+// (`interface::major_version::method`) into its ContractEntrypointID. The
+// `u8""` bytes are hashed as-is, so the result is independent of the ordinary
+// execution charset (`-fexec-charset`). Used by the entrypoint() debug
+// cross-check against a generator-emitted preimage. See #2898.
 ContractEntrypointID
-sdk_entrypoint_derivation(std::u8string_view identifier_name,
-                          std::u8string_view identifier_version,
-                          std::u8string_view method_name);
+entrypoint_id_from_utf8_preimage(std::u8string_view preimage);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // `T` is a compile-time tag. XDR/TXS/CXS: 0 bytes (same as void / empty struct
@@ -235,22 +235,18 @@ public:
       // hogd issue #2678.
       auto canonical = entrypoint_from_method_id(
           ContractTrait::kEntrypoints[kLookupIndex<Name>]);
-      // Cross-check the generated constant against the host derivation, but
-      // hash the UTF-8 preimage twins (u8"" literals) rather than the ordinary
-      // kTraitName/kVersion/Name literals: under a non-UTF-8 -fexec-charset the
-      // ordinary bytes diverge from the UTF-8-derived kEntrypoints and abort an
-      // honest build. Skipped for traits that only expose kEntrypoints without
-      // the UTF-8 twins (e.g. hand-written test traits). See hogd issue #2898.
-      if constexpr (requires {
-                      ContractTrait::kTraitNameUtf8;
-                      ContractTrait::kVersionUtf8;
-                      ContractTrait::kExportNamesUtf8;
-                    }) {
-        x23assert(canonical ==
-                  sdk_entrypoint_derivation(
-                      ContractTrait::kTraitNameUtf8,
-                      ContractTrait::kVersionUtf8,
-                      ContractTrait::kExportNamesUtf8[kLookupIndex<Name>]));
+      // Cross-check the generated constant against the host hash, but hash the
+      // generator-emitted UTF-8 preimage (`u8""`) rather than the ordinary
+      // kTraitName/kVersion/Name literals: under a non-UTF-8 -fexec-charset
+      // those ordinary bytes diverge from the UTF-8-derived kEntrypoints and
+      // abort an honest build. Skipped for traits that expose kEntrypoints
+      // without the preimage (e.g. hand-written test traits). See hogd issue
+      // #2898.
+      if constexpr (requires { ContractTrait::kEntrypointPreimagesUtf8; }) {
+        x23assert(
+            canonical ==
+            entrypoint_id_from_utf8_preimage(
+                ContractTrait::kEntrypointPreimagesUtf8[kLookupIndex<Name>]));
       }
       return canonical;
     }

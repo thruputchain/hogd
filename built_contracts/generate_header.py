@@ -115,12 +115,15 @@ def generate_interface_struct(interface, wasm_file=None):
     ]
 
     export_names_str = ",\n            ".join(f'"{name}"' for name in export_names)
-    # UTF-8 (u8"") twins of the preimage components. Their bytes are the UTF-8
-    # encoding regardless of the C++ ordinary execution charset (-fexec-charset),
-    # so the host debug cross-check in ContractTraitMeta::entrypoint() can rehash
-    # them and match the UTF-8-derived kEntrypoints constants. See hogd #2898.
-    export_names_utf8_str = ",\n            ".join(
-        f'u8"{name}"' for name in export_names
+    # Fully-folded UTF-8 (u8"") entrypoint preimages: exactly the bytes hashed to
+    # produce kEntrypoints (interface :: major_version :: method). u8"" bytes are
+    # the UTF-8 encoding regardless of the C++ ordinary execution charset
+    # (-fexec-charset), so the host debug cross-check in
+    # ContractTraitMeta::entrypoint() can hash them and match the UTF-8-derived
+    # kEntrypoints constants. See hogd #2898.
+    mv = major_version(version)
+    entrypoint_preimages_utf8_str = ",\n            ".join(
+        f'u8"{interface_name}::{mv}::{name}"' for name in export_names
     )
     entrypoints_str = ",\n            ".join(f"0x{ep:016x}ULL" for ep in entrypoints)
 
@@ -161,13 +164,12 @@ struct {interface_name} {{
             {export_names_str}
         }};
 
-    // UTF-8 twins of kTraitName/kVersion/kExportNames used only by the
-    // assertion-enabled entrypoint() debug cross-check, so it hashes
-    // charset-independent u8"" bytes instead of ordinary literals. See #2898.
-    constexpr static std::u8string_view kTraitNameUtf8 = u8"{interface_name}";
-    constexpr static std::u8string_view kVersionUtf8 = u8"{version}";
-    constexpr static auto kExportNamesUtf8 = std::array<std::u8string_view, {len(export_names)}>{{
-            {export_names_utf8_str}
+    // Fully-folded UTF-8 preimages (interface::major_version::method), ordered
+    // like kExportNames/kEntrypoints. Used only by the assertion-enabled
+    // entrypoint() debug cross-check so it hashes charset-independent u8"" bytes
+    // instead of ordinary literals. See #2898.
+    constexpr static auto kEntrypointPreimagesUtf8 = std::array<std::u8string_view, {len(export_names)}>{{
+            {entrypoint_preimages_utf8_str}
         }};
 
     constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
