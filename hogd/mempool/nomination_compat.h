@@ -6,6 +6,7 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(bugprone-exception-escape,readability-identifier-naming)
 struct Nomination {
   ValidatorPublicInfo proposer;
   BlockHeight block_height = 0;
@@ -52,5 +53,6 @@ private:
   SchedulerNominationOutcome outcome_;
   SchedulerNominatedBlock nominated_block_;
 };
+// NOLINTEND(bugprone-exception-escape,readability-identifier-naming)
 
 } // namespace hogd
