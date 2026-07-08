@@ -622,7 +622,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     if (syscall_result.has_value() &&
         !is_allowed_error_code<SyscallMeta>(*syscall_result)) {
       panic("Syscall {} returned undocumented error code {}",
-            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+            SyscallMeta::kSyscallNo, std::to_underlying(*syscall_result));
     }
   }
 
@@ -672,7 +672,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
         try {
           trace("Syscall {} attempted to return an error code {} but cannot "
                 "return",
-                SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+                SyscallMeta::kSyscallNo, std::to_underlying(*syscall_result));
         } catch (std::exception const &e) {
           report_dropped_syscall_trace(e.what());
         }
