@@ -122,6 +122,7 @@ TEST(TestBindingsTest, NonRootChildFinishHandsOffOutputThenParentCommits)
 
   // The child output was handed back, so commit proceeds normally.
   auto commit = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit.result_code, std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
@@ -174,6 +175,7 @@ TEST(TestBindingsTest, RootMockFinishWithReturnBufferHandsOffOutputThenCommits)
   free_ffi_data_buffer(finish_res.serialized_events);
 
   auto commit = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit.result_code, std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
@@ -284,6 +286,7 @@ TEST(TestBindingsTest, RootInvokeWithEventHandsOffEventsThenCommits)
   free_ffi_data_buffer(result.serialized_events);
 
   auto commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit.result_code, std::to_underlying(ExecResult::ExecResultOK));
 }

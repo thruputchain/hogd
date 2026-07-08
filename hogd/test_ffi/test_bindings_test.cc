@@ -224,6 +224,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
             0);
 
   auto commit_res = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
@@ -430,6 +431,7 @@ TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
   free_ffi_data_buffer(result.serialized_events);
 
   auto commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit.result_code,
             std::to_underlying(ExecResult::ExecResultTxValidationFailure));
@@ -499,6 +501,7 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
 
   // Normal workflow: try_commit drains events and handles the abort internally.
   auto commit_res = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -2478,6 +2481,7 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -2543,6 +2547,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -3101,6 +3106,7 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
   x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
 
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
