@@ -408,10 +408,20 @@ EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
   // throw from disturbing the others or the executor-facing response.
   // bad_alloc and other non-RPC throws are genuine bugs and still terminate
   // (cf. EventServerProxy::emit_event's #2857 containment).
+  //
+  // x23::Async is eager (initial_suspend is suspend_never), so the dispatch
+  // call itself runs the send up to its first suspension and can throw
+  // synchronously (e.g. XdrBadInput on an over-cap payload) -- guard the
+  // dispatch loop too, not just the await loop, or one bad indexer would
+  // abort the fan-out before the others are even dispatched.
   std::vector<x23::Async<void>> handles;
   handles.reserve(indexers_snapshot.size());
   for (indexer_event_client_t &indexer : indexers_snapshot) {
-    handles.push_back(indexer.indexer_event_report_tx_failure(tx_hash, diag));
+    try {
+      handles.push_back(indexer.indexer_event_report_tx_failure(tx_hash, diag));
+    } catch (x23::XdrException const &e) {
+      warn("dropping tx-failure report to an indexer (dispatch): {}", e.what());
+    }
   }
   for (x23::Async<void> &handle : handles) {
     try {
@@ -421,6 +431,23 @@ EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
     }
   }
   co_return;
+}
+
+void
+EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
+                                        TxFailureDiagnostic diag)
+{
+  // Fire-and-forget: the executor-facing report RPC hands the relay off to a
+  // detached coroutine and returns immediately, so a slow indexer never holds
+  // the executor's in-flight-report slot (or the RPC dispatch thread) hostage.
+  // Tracked by pending_detached_coroutines_ so ~EventRPCContext drains it.
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  [](EventRPCContext &self, SignedTransactionHash hash,
+     TxFailureDiagnostic d) -> x23::Detached {
+    co_await self.report_tx_failure_to_indexers(std::move(hash), std::move(d));
+    self.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+    co_return;
+  }(*this, std::move(tx_hash), std::move(diag));
 }
 
 } // namespace hogd

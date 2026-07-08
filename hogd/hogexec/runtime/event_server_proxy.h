@@ -1,7 +1,5 @@
 #pragma once
 
-#include <atomic>
-#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -28,10 +26,6 @@ public:
   EventServerProxy(x23::HostPort const &host_port,
                    x23::CpuMap const &map = *x23::llc_map);
 
-  EventServerProxy(EventServerProxy const &) = delete;
-  EventServerProxy &operator=(EventServerProxy const &) = delete;
-  EventServerProxy(EventServerProxy &&) = default;
-
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
     // TODO(geoff): validate the other fields in event card.
@@ -51,33 +45,21 @@ public:
              TxEventLog const &tx_event_log,
              ProposedTransaction const &proposed_tx);
 
-  // Fire-and-forget, best-effort report that [tx_hash] failed
-  // nondeterministically during 2pc, with the diagnostic hogdb attached.
-  // Returns immediately; a slow or dead event server costs nothing but the
-  // dropped report (errors are logged and swallowed -- diagnostics must
-  // never disturb execution). The detached report coroutine owns a
-  // refcounted copy of client_ (client_t wraps a refcounted ClientRef, cf.
-  // x23::RpcMulticlient::ClientRef) and a shared_ptr to the pending-count
-  // atomic, so it never dereferences this EventServerProxy and destroying
-  // the proxy can never race an in-flight send. In-flight sends are capped
-  // at kMaxPendingFailureReports; excess reports are dropped, so a conflict
-  // storm against a slow event server cannot grow memory.
-  void report_tx_failure(SignedTransactionHash tx_hash,
-                         TxFailureDiagnostic diag);
+  // Best-effort report that [tx_hash] failed nondeterministically during 2pc,
+  // with the diagnostic hogdb attached. Awaitable; callers fire-and-forget it
+  // (see report_db_conflict_diagnostic, which spawns it detached the same way
+  // ExecutorContext spawns emit_events). The coroutine copies client_ up front
+  // (client_t wraps a refcounted ClientRef), so a spawned send is
+  // self-contained and can safely outlive this proxy; a slow or dead event
+  // server costs nothing but the dropped report -- RPC errors are logged and
+  // swallowed, because a diagnostic must never disturb execution.
+  x23::Async<void> report_tx_failure(SignedTransactionHash tx_hash,
+                                     TxFailureDiagnostic diag);
 
 private:
   using client_t =
       EventExecutor1::client<x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
   client_t client_;
-
-  // Soft bound on concurrently in-flight failure reports (racy over-admission
-  // by a few is fine); reports past the cap are dropped, keeping the
-  // fire-and-forget path memory-bounded even with an unresponsive server.
-  // Held via shared_ptr so the detached report coroutine can keep its own
-  // refcounted handle on the counter after this proxy is destroyed.
-  static constexpr ssize_t kMaxPendingFailureReports = 1024;
-  std::shared_ptr<std::atomic<ssize_t>> pending_failure_reports_ =
-      std::make_shared<std::atomic<ssize_t>>(0);
 };
 
 class PerTransactionEventServerProxy {
@@ -99,11 +81,13 @@ public:
   emit_events(TxEventLog const &tx_event_log,
               ProposedTransaction const &proposed_tx);
 
-  // Fire-and-forget; see EventServerProxy::report_tx_failure.
-  void report_tx_failure(SignedTransactionHash tx_hash,
-                         TxFailureDiagnostic diag) const
+  // Awaitable; see EventServerProxy::report_tx_failure. Callers
+  // fire-and-forget.
+  x23::Async<void> report_tx_failure(SignedTransactionHash tx_hash,
+                                     TxFailureDiagnostic diag) const
   {
-    event_server_proxy_.report_tx_failure(std::move(tx_hash), std::move(diag));
+    return event_server_proxy_.report_tx_failure(std::move(tx_hash),
+                                                 std::move(diag));
   }
 
 private:

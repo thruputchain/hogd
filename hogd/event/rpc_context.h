@@ -81,9 +81,16 @@ public:
   // registered indexer. Bypasses the per-block commit pipeline entirely --
   // the tx will never commit. One offline indexer's send error is logged and
   // dropped so it never blocks the other indexers or errors toward the
-  // executor.
+  // executor. Awaitable (drives the sends to completion) -- used directly by
+  // tests; production uses spawn_tx_failure_relay to fire it and forget.
   x23::Async<void> report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
                                                  TxFailureDiagnostic diag);
+
+  // Fire-and-forget wrapper around report_tx_failure_to_indexers: launches it
+  // as a detached, drained-at-shutdown coroutine and returns at once, so the
+  // executor's report RPC never waits on the indexer relay.
+  void spawn_tx_failure_relay(SignedTransactionHash tx_hash,
+                              TxFailureDiagnostic diag);
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>

@@ -1067,19 +1067,32 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
   if (first == nullptr) {
+    // A non-None level with no conflict payload is unexpected (hogdb selected
+    // a reporting level but attached nothing). Nothing to send; say so rather
+    // than dropping silently.
+    warn("dropping tx-failure diagnostic: level {} carried no conflict",
+         x23::show(conflict.level()));
     return;
   }
 
   auto height = get_block_height();
   if (!height.has_value()) {
-    // Tip read failed (block being torn down); drop the report.
+    // Best-effort report, but a tip read failing (e.g. the block is being torn
+    // down) is worth surfacing rather than swallowing.
+    warn("dropping tx-failure diagnostic: could not read executing block "
+         "height (db tip unavailable)");
     return;
   }
-  event_server_proxy_.report_tx_failure(get_source_tx_hash(),
-                                        TxFailureDiagnostic{.attempt_height =
-                                                                height.value(),
-                                                            .conflict =
-                                                                *first});
+  // Fire-and-forget: drive the async send in a detached coroutine so execution
+  // never waits on it (the same detached-await shape as the event server's own
+  // detached sends). report_tx_failure copies the client, so the send is
+  // self-contained and safe to outlive us.
+  [](x23::Async<void> send) -> x23::Detached {
+    co_await send;
+  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
+                                          TxFailureDiagnostic{
+                                              .attempt_height = height.value(),
+                                              .conflict = *first}));
 }
 
 void

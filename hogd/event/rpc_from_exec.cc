@@ -78,8 +78,9 @@ x23::Async<RPCError>
 EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
                                               TxFailureDiagnostic diag)
 {
-  co_await ctx_.report_tx_failure_to_indexers(std::move(tx_hash),
-                                              std::move(diag));
+  // Fire-and-forget: hand the relay to a detached coroutine and ack the
+  // executor immediately, rather than waiting on the indexer sends.
+  ctx_.spawn_tx_failure_relay(std::move(tx_hash), std::move(diag));
   co_return RPCError::kRPCNone;
 }
 

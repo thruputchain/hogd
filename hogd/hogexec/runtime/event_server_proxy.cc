@@ -1,7 +1,5 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
-#include <atomic>
-#include <memory>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -126,40 +124,31 @@ PerTransactionEventServerProxy::emit_events(
                                                     tx_event_log, proposed_tx);
 }
 
-void
+x23::Async<void>
 EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
-  // Reserve a slot with a single RMW; release it and drop the report if we
-  // were already at the cap. Dropping (rather than queueing unboundedly) keeps
-  // the fire-and-forget path memory-bounded when the event server is slow.
-  if (pending_failure_reports_->fetch_add(1, std::memory_order_acq_rel) >=
-      kMaxPendingFailureReports) {
-    pending_failure_reports_->fetch_sub(1, std::memory_order_release);
-    return;
-  }
-  // The coroutine below takes a refcounted copy of client_ and a shared_ptr
-  // to the pending-count atomic (not `this`/`&self`), so it never touches
-  // this EventServerProxy and can safely outlive it.
-  [](client_t client, std::shared_ptr<std::atomic<ssize_t>> pending,
-     SignedTransactionHash hash, TxFailureDiagnostic d) -> x23::Detached {
-    try {
-      RPCError r = co_await client.eventexecutor_report_tx_failure(hash, d);
-      if (r != RPCError::kRPCNone) {
-        warn("tx-failure report dropped by event server: {}", r);
-      }
-    } catch (x23::XdrException const &e) {
-      // Best-effort: the RPC client can throw (XdrBadInput / XdrCallFailed)
-      // instead of returning a status; swallow the RPC-layer throw so it never
-      // escapes this detached coroutine, and let the pending-count decrement
-      // below run so the slot is freed. Anything else (e.g. bad_alloc) is a
-      // genuine bug and still terminates -- matching emit_event's #2857
-      // containment above.
-      warn("tx-failure report send failed: {}", e.what());
+  // Copy the client up front (before the first co_await, so it happens while
+  // the caller still owns the proxy): a fire-and-forget send then owns its own
+  // refcounted ClientRef and can safely outlive this proxy. Unlike
+  // emit_events, nothing drains these at finish_block, so the send must not
+  // depend on `this`.
+  client_t client = client_;
+  try {
+    RPCError r =
+        co_await client.eventexecutor_report_tx_failure(std::move(tx_hash),
+                                                        std::move(diag));
+    if (r != RPCError::kRPCNone) {
+      warn("tx-failure report dropped by event server: {}", r);
     }
-    pending->fetch_sub(1, std::memory_order_release);
-    co_return;
-  }(client_, pending_failure_reports_, std::move(tx_hash), std::move(diag));
+  } catch (x23::XdrException const &e) {
+    // Best-effort: the RPC client can throw (XdrBadInput / XdrCallFailed)
+    // instead of returning a status; swallow the RPC-layer throw so it never
+    // escapes. Anything else (e.g. bad_alloc) is a genuine bug and still
+    // terminates -- matching emit_event's #2857 containment above.
+    warn("tx-failure report send failed: {}", e.what());
+  }
+  co_return;
 }
 
 } // namespace hogd
