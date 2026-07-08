@@ -13,6 +13,7 @@
 
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"

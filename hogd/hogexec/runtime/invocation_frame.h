@@ -313,7 +313,8 @@ public:
   // try_invoke, it is set to the frame's post-acquire two-phase-commit conflict
   // (kDbDiagnosticNone on a successful acquire).
   SystemStatus<std::pair<InvokeResult, bool>>
-  finish_frame(InvokeStatus<void> result, ExecutionModeData &execution_mode_data,
+  finish_frame(InvokeStatus<void> result,
+               ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);
 
   void log_trace_finish(InvocationFrameTrace &trace);

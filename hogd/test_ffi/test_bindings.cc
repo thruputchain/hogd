@@ -841,18 +841,19 @@ try_commit_transaction(void *syscall_handler) noexcept
     auto res = context->to_handler().try_commit_transaction();
     context->mark_committed_or_aborted();
 
-    // Always serialize the full DbConflictResult (including the None arm) so the
-    // caller gets a well-formed, self-describing value: a wrong discriminant or
-    // a format drift is visible rather than masquerading as "no conflict". Best-
-    // effort: a serialization failure degrades to a null buffer (reserved for
-    // "serialization failed", distinct from the None arm) rather than turning a
-    // real commit result into an FFI error.
+    // Always serialize the full DbConflictResult (including the None arm) so
+    // the caller gets a well-formed, self-describing value; a wrong
+    // discriminant or a format drift is then visible instead of masquerading as
+    // "no conflict". This is best-effort: a serialization failure degrades to a
+    // null buffer (reserved for "serialization failed", distinct from the None
+    // arm) rather than turning a real commit result into an FFI error.
     {
       auto s = serialize_to_ffi_data_buffer(
           context->to_handler().last_commit_conflict());
       if (s.has_value()) {
         serialized_conflict = s.value();
-      } else {
+      }
+      else {
         best_effort_log([] {
           error("try_commit_transaction: failed to serialize conflict "
                 "diagnostic");

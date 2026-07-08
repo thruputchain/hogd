@@ -120,11 +120,11 @@ struct ForeignHostFnResult {
 struct ForeignTryCommitResult {
   int32_t result_code; // ExecResult
 
-  // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic. Always
-  // populated with the whole union (the kDbDiagnosticNone arm when there was no
-  // conflict) so the caller always deserializes a well-formed, self-describing
-  // value. Null only if serialization itself failed. Must be freed with
-  // free_ffi_data_buffer().
+  // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic.
+  // Always populated with the whole union (the kDbDiagnosticNone arm when there
+  // was no conflict) so the caller always deserializes a well-formed,
+  // self-describing value. Null only if serialization itself failed. Must be
+  // freed with free_ffi_data_buffer().
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation

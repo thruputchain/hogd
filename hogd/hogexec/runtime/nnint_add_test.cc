@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -352,7 +353,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   // sum < min(base,0)) and returns a conflict error.
   if (GetParam() == TestDB::kMockInMemory) {
     ASSERT_EQ(commit_res2, ExecResult::ExecResultOK);
-  } else {
+  }
+  else {
     ASSERT_EQ(commit_res2, ExecResult::ExecResultTxNonDeterministicError);
   }
 
@@ -368,7 +370,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto nnint_item = read_res.value().nnint();
   if (GetParam() == TestDB::kMockInMemory) {
     ASSERT_EQ(from_xdr(nnint_item), 100);
-  } else {
+  }
+  else {
     ASSERT_EQ(from_xdr(nnint_item), 200);
   }
 

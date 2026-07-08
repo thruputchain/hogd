@@ -42,6 +42,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
