@@ -107,8 +107,7 @@ diagnostic_level_for(BlockExecutionMode mode)
 
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
-                              StorageDelta const &delta,
-                              StorageDeltaFlagSet flags,
+                              StorageDelta &&delta, StorageDeltaFlagSet flags,
                               DbConflictCode *conflict_code)
 {
   auto finish = [&tx, conflict_code](HogDBStatus<void> ret) {
@@ -153,9 +152,11 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     return finish(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
-    return finish(tx.request_retrocausal_queue(make_item_key(addrkey),
-                                               delta.retrocausal_queue(),
-                                               flags));
+    // delta is a batch element we own (moved in from the deserialized RPC
+    // args), so move its queue delta into the move-only request API instead of
+    // deep-copying the x23 vectors.
+    return finish(tx.request_retrocausal_queue(
+        make_item_key(addrkey), std::move(delta.retrocausal_queue()), flags));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
@@ -234,7 +235,7 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 
 TryPushSubtransactionResult
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch const &batch)
+                                              StorageDeltaBatch batch)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -279,19 +280,28 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   };
 
   RPCError first_err = RPCError::kRPCNone;
-  for (auto const &delta : batch) {
+  // batch is owned (moved in from the deserialized RPC args), so request_one
+  // takes each delta by rvalue and moves owned payloads (e.g. RCQ x23 vectors)
+  // instead of deep-copying them at the request boundary.
+  for (auto &delta : batch) {
+    // request_one takes the delta by rvalue and may move-consume its payload
+    // (e.g. RCQ x23 vectors), so render it here -- while it is still intact --
+    // for the failure trace below. Debug-only, and trace() is compiled out in
+    // release, so this render never runs in a release build.
+    std::string shown;
     if constexpr (is_debug_build()) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
       assert(is_valid_delta(delta.delta));
+      shown = x23::show(delta);
     }
     DbConflictCode conflict_code{};
-    RPCError err = request_one(*itx, delta.addrkey, delta.delta, delta.flags,
-                               &conflict_code);
+    RPCError err = request_one(*itx, delta.addrkey, std::move(delta.delta),
+                               delta.flags, &conflict_code);
     if (err == RPCError::kRPCNone) {
       continue;
     }
     if constexpr (is_debug_build()) {
-      trace("Failed to request delta: {} {}", x23::show(delta), err);
+      trace("Failed to request delta: {} {}", shown, err);
     }
     if (err != RPCError::kRPCStorageWriteFailed) {
       // Non-conflict failure (stale block, executor misbehavior, ...):
