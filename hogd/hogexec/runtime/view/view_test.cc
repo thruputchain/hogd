@@ -1468,7 +1468,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
-  StorageSnapshotCache snapshot_cache(snapshot.block_id,
+  StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1480,7 +1480,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 
   auto result = View::run_view_transaction(
       snapshot_cache,
-      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(),
+                                  snapshot.viewing_block_id,
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
@@ -1488,8 +1489,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
-  auto close_res =
-      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
+      snapshot.viewing_block_id);
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1548,11 +1549,11 @@ TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
   ASSERT_TRUE(res.has_value());
 
   auto &snapshot = res.value();
-  EXPECT_NE(snapshot.block_id, 0U);
+  EXPECT_NE(snapshot.viewing_block_id, 0U);
   EXPECT_GE(snapshot.tip.value.proposal_header.block_height, 0);
 
-  auto close_res =
-      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
+      snapshot.viewing_block_id);
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1583,7 +1584,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
 
   framework_.advance_block();
 
-  StorageSnapshotCache snapshot_cache(snapshot.block_id,
+  StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1595,7 +1596,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
 
   auto result = View::run_view_transaction(
       snapshot_cache,
-      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(),
+                                  snapshot.viewing_block_id,
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
@@ -1603,8 +1605,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 
-  auto close_res =
-      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
+      snapshot.viewing_block_id);
   EXPECT_TRUE(close_res.has_value());
 }
 

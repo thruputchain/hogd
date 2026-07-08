@@ -512,18 +512,24 @@ submit_and_commit(sched_coord_client_t &scheduler,
     ADD_FAILURE() << "schedcoord_get_tip did not return OK";
     return {};
   }
-  SchedulerNominationResult nomination =
-      scheduler.schedulercoord_nominate(tip.db_tip())();
-  if (nomination.outcome() !=
-      SchedulerNominationOutcome::SchedulerNominationOK) {
-    ADD_FAILURE() << "schedulercoord_nominate did not return OK";
+  SchedulerProposalResult proposal =
+      scheduler.schedulercoord_propose_block(tip.db_tip().id,
+                                             ProposalContext{})();
+  if (proposal.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
+    ADD_FAILURE() << "schedulercoord_propose_block did not return OK";
     return {};
   }
+  const SchedulerProposedBlock &proposed = proposal.proposed_block();
+  SignedTransactionBatch proposed_txs;
+  EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
   SignedTransactionHashBatch tx_hashes;
-  EXPECT_TRUE(parallel_batch_to_t(
-      nomination.nominated_block().nomination.transactions_hash, tx_hashes)());
-  if (scheduler.schedulercoord_commit_block(
-          nomination.nominated_block().block_id)() !=
+  tx_hashes.reserve(proposed_txs.size());
+  for (const SignedTransaction &tx : proposed_txs) {
+    tx_hashes.push_back(sha256(tx.tx));
+  }
+  ConsensusValue value{};
+  value.proposal_header = proposed.proposal.header;
+  if (scheduler.schedulercoord_commit_block(proposed.block_id, value)() !=
       SchedulerCommitOutcome::SchedulerCommitOK) {
     ADD_FAILURE() << "schedulercoord_commit_block did not return OK";
     return {};

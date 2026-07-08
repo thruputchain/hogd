@@ -533,7 +533,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   // and abandons it WITHOUT committing, so the committed tip is unchanged and
   // validation replays against the same pre-state -- consuming the same replay
   // nonces fresh rather than colliding with a committed proposal block.
-  DbHash proposal_hash =
+  StorageShortHash proposal_hash =
       discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // === Validation: replay with captured proposal data ===
@@ -553,7 +553,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   // the validation block yields its trie root for comparison. Both blocks were
   // built from the same pre-state with the same transactions and replay nonces,
   // so the roots must match. (Only HogDB computes real trie roots.)
-  DbHash validation_hash =
+  StorageShortHash validation_hash =
       discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
   if (GetParam() == TestDB::kHogDB) {
     EXPECT_EQ(proposal_hash, validation_hash)
