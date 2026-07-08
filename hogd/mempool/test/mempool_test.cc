@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "header.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
