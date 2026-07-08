@@ -132,7 +132,7 @@ private:
   // in ~CoroSleep.  Even though we don't care what value load returns
   // in that situation, the spec says any such data race has undefined
   // behavior.
-  std::atomic_bool done_;
+  std::atomic_bool done_{};
 
   // All sleeping coroutines, indexed by wake time
   std::multimap<clock::time_point, Job> waiters_;
