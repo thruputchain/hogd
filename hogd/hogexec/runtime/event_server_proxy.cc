@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
+#include <exception>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -143,9 +144,10 @@ EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
       if (r != RPCError::kRPCNone) {
         warn("tx-failure report dropped by event server: {}", r);
       }
-    } catch (x23::XdrException const &e) {
-      // Best-effort: an RPC-layer throw (#2857 containment pattern, cf.
-      // emit_event above) must never escape a detached coroutine.
+    } catch (std::exception const &e) {
+      // Best-effort: any throw (#2857 containment pattern, cf. emit_event
+      // above) must never escape a detached coroutine, and the
+      // pending-count decrement below must still run so the slot is freed.
       warn("tx-failure report send failed: {}", e.what());
     }
     pending->fetch_sub(1, std::memory_order_release);

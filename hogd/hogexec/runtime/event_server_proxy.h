@@ -27,6 +27,10 @@ public:
   EventServerProxy(x23::HostPort const &host_port,
                    x23::CpuMap const &map = *x23::llc_map);
 
+  EventServerProxy(EventServerProxy const &) = delete;
+  EventServerProxy &operator=(EventServerProxy const &) = delete;
+  EventServerProxy(EventServerProxy &&) = default;
+
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
     // TODO(geoff): validate the other fields in event card.

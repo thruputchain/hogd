@@ -124,6 +124,9 @@ private:
   HogDevnodeTmpDir event_dir_;
   HogDevnodeTmpDir indexer_dir_;
   std::unique_ptr<IndexDB> indexer_db_;
+  // Declaration order matters: the indexer RPC servers below borrow
+  // indexer_failure_cache_ by reference, so it must be declared before (and
+  // thus outlive) them.
   RecentTxFailureCache indexer_failure_cache_;
   // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.

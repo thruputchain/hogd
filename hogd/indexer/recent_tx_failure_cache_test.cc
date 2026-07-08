@@ -89,6 +89,30 @@ TEST(RecentTxFailureCacheTest, ReReportExtendsLifetime)
   EXPECT_FALSE(cache.lookup(hash).has_value());
 }
 
+TEST(RecentTxFailureCacheTest, SameHeightReReportUpdatesPayloadAndExpiresOnce)
+{
+  RecentTxFailureCache cache(/*expiry_delta=*/5);
+  const auto hash = make_hash(0x01);
+  cache.report(hash, make_diag(100, DbConflictCode::kDbConflictValueMismatch));
+  // Re-report at the SAME attempt height with a different conflict code: the
+  // payload updates in place and no second expiry row is created.
+  cache.report(hash, make_diag(100, DbConflictCode::kDbConflictOverflow));
+
+  auto found = cache.lookup(hash);
+  ASSERT_TRUE(found.has_value());
+  EXPECT_EQ(found->attempt_height, 100);
+  EXPECT_EQ(found->conflict.code, DbConflictCode::kDbConflictOverflow);
+  EXPECT_EQ(cache.size(), 1);
+
+  // A single expiry row at 100 + 5 expires it exactly once; no duplicate row
+  // keeps it alive past the delta.
+  cache.prune(104);
+  EXPECT_TRUE(cache.lookup(hash).has_value());
+  cache.prune(105);
+  EXPECT_FALSE(cache.lookup(hash).has_value());
+  EXPECT_EQ(cache.size(), 0);
+}
+
 TEST(RecentTxFailureCacheTest, CapDropsNewReportsButUpdatesExisting)
 {
   RecentTxFailureCache cache(/*expiry_delta=*/5, /*max_entries=*/2);
