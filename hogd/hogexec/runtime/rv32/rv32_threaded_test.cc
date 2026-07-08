@@ -1889,6 +1889,41 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   }
 }
 
+TEST(Rv32ThreadedTrapGas, chunkAtCapBeforeBarrierDoesNotExceedCap)
+{
+  using test_program::op;
+  // Regression: a maximal non-barrier run of EXACTLY kMaxRunGas (1250 divs =
+  // 10000) immediately followed by a barrier (ecall, +1 gas) is a 10001-gas
+  // run. The lowering must still split it so no slot's gas_to_run exceeds
+  // kMaxRunGas (the chunk cap / max deficit bound); the backward-greedy pass
+  // breaks the first div into its own chunk, leaving the [rest + ecall] chunk
+  // at 9993. Gas must match the canonical Machine at and around completion.
+  constexpr size_t kDivCount = kMaxRunGas / kDivInstructionGas; // 1250 -> 10000
+  std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
+  words.push_back(kEcallWord); // barrier (halts via RecordingHost)
+
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  auto threaded = threaded_from_words(words); // create() must not trip on cap
+
+  const uint64_t total = (kDivCount * kDivInstructionGas) + 1; // 10001
+  const uint64_t budgets[] = {total - 1, total, total + 5};
+  for (const uint64_t budget : budgets) {
+    Machine cmachine(canonical, 256, budget);
+    RecordingHost chost;
+    const StepResult cresult = cmachine.run(chost);
+
+    ThreadedMachine tmachine(*threaded, budget);
+    RecordingHost thost;
+    const StepResult tresult = tmachine.run(thost);
+
+    EXPECT_EQ(tresult, cresult) << "budget " << budget;
+    EXPECT_EQ(tmachine.trap(), cmachine.trap()) << "budget " << budget;
+    EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining())
+        << "budget " << budget;
+  }
+}
+
 // --- Deficit (overdraft) seams
 // -----------------------------------------------
 //
