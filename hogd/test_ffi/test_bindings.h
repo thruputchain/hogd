@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 19
-#define TEST_FFI_VERSION_PATCH 1
+#define TEST_FFI_VERSION_MINOR 20
+#define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
 // ==================
@@ -119,6 +119,13 @@ struct ForeignHostFnResult {
 // Translation of try_commit_transaction result into an FFI-safe type.
 struct ForeignTryCommitResult {
   int32_t result_code; // ExecResult
+
+  // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic. Always
+  // populated with the whole union (the kDbDiagnosticNone arm when there was no
+  // conflict) so the caller always deserializes a well-formed, self-describing
+  // value. Null only if serialization itself failed. Must be freed with
+  // free_ffi_data_buffer().
+  struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.
