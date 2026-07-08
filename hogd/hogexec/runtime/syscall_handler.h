@@ -199,7 +199,12 @@ public:
   // replay path), at the DbDiagnosticLevel the database selected from the block
   // mode. The kDbDiagnosticNone arm if the last push succeeded. Valid after
   // try_commit_transaction() returns: abort_transaction() does not reset it.
-  // Intended for SDK / test surfacing.
+  // Intended for SDK / test surfacing. Note: on outcomes that abort without a
+  // commit push (System/Unrecoverable errors, or an expired-uniquifier
+  // ValidationFailure), this may reflect an earlier in-body try_invoke conflict
+  // rather than None — abort_transaction() does not reset it, so consumers
+  // should key on the returned ExecResult (a genuine commit conflict is
+  // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
 
   SystemStatus<void> abort_transaction();

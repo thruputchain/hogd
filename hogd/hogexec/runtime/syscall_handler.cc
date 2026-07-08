@@ -941,16 +941,13 @@ SystemCallHandler::finish_frame(
     last_frame_finished_ = true;
   }
 
-  // Record the conflict on this frame's trace. Best-effort: copying the All arm
-  // allocates, and finish_frame() is noexcept and reachable from the test FFI
-  // mock path, so a std::bad_alloc drops the diagnostic rather than terminating.
+  // Record the conflict on this frame's trace. The default-constructed field is
+  // already the kDbDiagnosticNone arm, so only a real try_invoke conflict
+  // overwrites it. DbConflictResult's move-assignment is noexcept, safe in this
+  // noexcept function.
   if (invocation_frame_trace_ &&
       try_invoke_conflict.level() != DbDiagnosticLevel::kDbDiagnosticNone) {
-    try {
-      invocation_frame_trace_->commit_conflict = std::move(try_invoke_conflict);
-    } catch (std::exception &e) {
-      report_dropped_log(e.what());
-    }
+    invocation_frame_trace_->commit_conflict = std::move(try_invoke_conflict);
   }
 
   // Restore parent trace and attach child
