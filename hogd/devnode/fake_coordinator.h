@@ -2,7 +2,7 @@
 
 #include "coord_sched.hh"
 #include "hogd/base/types.h"
-#include "nomination.hh"
+#include "proposal.hh"
 #include "transaction.hh"
 #include "x23/async.h"
 

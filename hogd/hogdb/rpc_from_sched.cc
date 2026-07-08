@@ -12,7 +12,6 @@
 // generated x23 headers
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "block.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -20,6 +19,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -107,7 +107,7 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
   if (!tip || tip->id != block_id) {
     co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
   }
-  const BlockHeight committed_height = tip->height;
+  const BlockHeight committed_height = tip->value.proposal_header.block_height;
 
   DbAddressAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
   ret.address_auth_data_batch().reserve(accounts.size());
@@ -132,9 +132,8 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 }
 
 HogDBStatus<void>
-HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
-                            SHA256Hash events_hash, PerThreadARC<BlockTX> *btx,
-                            const DbHash &db_hash)
+HogDBSchedRpc::commit_block(BlockID id, ConsensusValue value,
+                            PerThreadARC<BlockTX> *btx, const DbHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -179,7 +178,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
       return HogDBError(HogDBCode::kInternal);
     }
 
-    ret = ctx_.update_dbtip(id, block_hash, events_hash, db_hash);
+    ret = ctx_.update_dbtip(id, value, db_hash);
     if (!ret)
       return ret.error();
   }
@@ -190,13 +189,15 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
     return lsn.error();
 
   DbTip committed_tip = ctx_.get_tip();
-  info("committed block {}: block_hash='{}' events_hash='{}', db_hash='{}', "
+  auto committed_txs_hash = committed_tip.value.proposal_header.txs_hash;
+  auto committed_events_hash = committed_tip.value.proposal_header.events_hash;
+  info("committed block {}: txs_hash='{}' events_hash='{}', db_hash='{}', "
        "height='{}', lsn='{}",
-       id, encode_base64(std::as_bytes(std::span(committed_tip.block_hash))),
-       encode_base64(std::as_bytes(std::span(committed_tip.events_hash))),
-       encode_base64(std::as_bytes(std::span(committed_tip.db_hash))),
-       committed_tip.height, *lsn);
-  CHECK_NE(committed_tip.height, -1);
+       id, encode_base64(std::as_bytes(std::span(committed_txs_hash))),
+       encode_base64(std::as_bytes(std::span(committed_events_hash))),
+       encode_base64(std::as_bytes(std::span(committed_tip.storage_long_hash))),
+       committed_tip.value.proposal_header.block_height, *lsn);
+  CHECK_NE(committed_tip.value.proposal_header.block_height, -1);
   return {};
 }
 
@@ -218,8 +219,7 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
-                                       SHA256Hash events_hash)
+HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
@@ -237,15 +237,15 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  HogDBStatus<void> ret =
-      commit_block(id, block_hash, events_hash, btx, *db_hash);
+  HogDBStatus<void> ret = commit_block(id, value, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
+  co_await Health::instance().set_current_block_height(
+      ctx_.get_tip().value.proposal_header.block_height);
 
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
-  result.db_hash() = ctx_.get_tip().db_hash;
+  result.storage_hash() = ctx_.get_tip().value.proposal_header.storage_hash;
   co_return result;
 }
 
@@ -284,13 +284,14 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  auto db_hash_result = btx->get().close(/*base_hash=*/ctx_.get_tip().db_hash);
+  auto db_hash_result =
+      btx->get().close(/*base_hash=*/ctx_.get_tip().storage_long_hash);
   if (!db_hash_result) [[unlikely]] {
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
   ctx_.cache_db_hash(id, *db_hash_result);
-  ret.db_hash() = *db_hash_result;
+  ret.storage_hash() = sha256(std::as_bytes(std::span(*db_hash_result)));
   co_return ret;
 }
 
@@ -309,11 +310,10 @@ sys_getsockname(int sockfd, T &val)
 
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration genesis_configuration, uint64_t network_id,
-    SHA256Hash txset_hash, SHA256Hash events_hash)
+    GenesisConfiguration genesis_configuration, ConsensusValue value)
 {
   constexpr static BlockID kGenesisBlockID = 0;
-  if (ctx_.get_tip().height != -1) {
+  if (ctx_.get_tip().value.proposal_header.block_height != -1) {
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
@@ -450,20 +450,13 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   DbHash db_hash = *db_hash_result;
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
-  // Since the genesis block is the first block, we set [prev_block_hash] to
-  // null.
-  constexpr BlockHash kNullBlockHash{};
-  const BlockHeader header{.network_id = network_id,
-                           .block_height = 0,
-                           .txset_hash = txset_hash,
-                           .db_hash = db_hash,
-                           .events_hash = events_hash,
-                           .prev_block_hash = kNullBlockHash};
+  value.proposal_header.storage_hash =
+      sha256(std::as_bytes(std::span(db_hash)));
   auto ret =
-      to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
-                                events_hash, r.value(), db_hash));
+      to_db_result(commit_block(kGenesisBlockID, value, r.value(), db_hash));
   if (ret == DbSchedResult::DbSchedResultOK) {
-    co_await Health::instance().set_current_block_height(ctx_.get_tip().height);
+    co_await Health::instance().set_current_block_height(
+        ctx_.get_tip().value.proposal_header.block_height);
   }
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.

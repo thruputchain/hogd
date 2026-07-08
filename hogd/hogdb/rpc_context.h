@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -67,7 +68,7 @@ public:
       // committed to the db. If [ret.has_value()] is false, then no blocks have
       // been committed yet.
       *tip_.take() = *ret;
-      current_committed_height_ = ret->height;
+      current_committed_height_ = ret->value.proposal_header.block_height;
     }
   }
 
@@ -76,7 +77,10 @@ public:
   // getters.
   HogDBDAO &get_db() { return db_; }
   DbTip get_tip() { return *tip_.take(); }
-  static bool has_committed_tip(DbTip const &tip) { return tip.height >= 0; }
+  static bool has_committed_tip(DbTip const &tip)
+  {
+    return tip.value.proposal_header.block_height >= 0;
+  }
   bool has_committed_tip() { return has_committed_tip(get_tip()); }
   void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
@@ -134,8 +138,8 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
-  HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash,
-                                 SHA256Hash events_hash, const DbHash &db_hash);
+  HogDBStatus<void> update_dbtip(BlockTXID bid, ConsensusValue value,
+                                 const DbHash &db_hash);
 
   void cache_db_hash(BlockTXID bid, const DbHash &db_hash)
   {
@@ -187,7 +191,9 @@ public:
       return true;
     }
     DbTip tip = get_tip();
-    return tip.id != snapshot.id || tip.height != snapshot.height;
+    return tip.id != snapshot.id ||
+           tip.value.proposal_header.block_height !=
+               snapshot.value.proposal_header.block_height;
   }
 
   // Block until no commit is mid-publication, so a committed-tip reader can
@@ -223,7 +229,13 @@ private:
 
   // the database used to persist state.
   HogDBDAO db_;
-  x23::MVar<DbTip> tip_{DbTip{.height = -1, .id = UINT64_MAX}};
+  x23::MVar<DbTip> tip_{[] {
+    ConsensusValue value{};
+    value.proposal_header.block_height = -1;
+    return DbTip{.id = std::numeric_limits<BlockTXID>::max(),
+                 .storage_long_hash = {},
+                 .value = std::move(value)};
+  }()};
   std::atomic<BlockHeight> current_committed_height_{-1};
   // the storage cost model for computing storage costs at the current block
   // height.

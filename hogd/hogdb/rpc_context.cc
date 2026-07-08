@@ -29,11 +29,12 @@ HogDBStatus<PerThreadARC<BlockTX> *>
 RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
 {
   // create the block tx.
-  auto [it, inserted] =
-      block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
-                          std::forward_as_tuple(get_db(), get_cost_model(),
-                                                background_commit_worker_,
-                                                get_tip().height + 1, mode));
+  auto [it, inserted] = block_txes_.emplace(
+      std::piecewise_construct, std::forward_as_tuple(bid),
+      std::forward_as_tuple(get_db(), get_cost_model(),
+                            background_commit_worker_,
+                            get_tip().value.proposal_header.block_height + 1,
+                            mode));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);
@@ -68,7 +69,7 @@ RPCContext::open_viewing_snapshot(BlockTXID bid)
       std::scoped_lock g(lock_);
       if (!commit_publishing_.load(std::memory_order_acquire)) {
         DbTip tip = get_tip();
-        if (!has_committed_tip(tip)) {
+        if (tip.value.proposal_header.block_height < 0) {
           return HogDBError(HogDBCode::kNotFound);
         }
         auto res = open_block_tx_locked(
@@ -78,7 +79,7 @@ RPCContext::open_viewing_snapshot(BlockTXID bid)
         }
 
         ViewingSnapshot snapshot;
-        snapshot.block_id = bid;
+        snapshot.viewing_block_id = bid;
         snapshot.tip = std::move(tip);
         return snapshot;
       }
@@ -219,19 +220,17 @@ RPCContext::CommitPublicationGuard::~CommitPublicationGuard()
 }
 
 HogDBStatus<void>
-RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash,
-                         SHA256Hash events_hash, const DbHash &db_hash)
+RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
+                         const DbHash &db_hash)
 {
   DbTip new_tip;
   tip_.with([&](DbTip &tip) {
-    tip.block_hash = block_hash;
-    tip.events_hash = events_hash;
-    tip.db_hash = db_hash;
-    tip.height = tip.height + 1;
+    tip.value = std::move(value);
+    tip.storage_long_hash = db_hash;
     tip.id = bid;
     new_tip = tip;
   });
-  current_committed_height_.store(new_tip.height);
+  current_committed_height_.store(new_tip.value.proposal_header.block_height);
   return get_db().write_dbtip(new_tip);
 }
 

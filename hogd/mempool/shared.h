@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "auth_rpc.hh"
-#include "block.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
@@ -19,6 +18,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/metrics/metrics.h"
+#include "hogd/protocol/block_compat.h"
 #include "loadgen.hh"
 #include "parallel.hh"
 #include "sched_coord.hh"

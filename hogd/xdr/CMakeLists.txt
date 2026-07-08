@@ -6,7 +6,6 @@ add_xdr(
   ../../protocol/auth_claim.x
   ../../protocol/auth_rpc.x
   ../../protocol/batch.x
-  ../../protocol/block.x
   ../../protocol/catchup.x
   ../../protocol/ci_server.x
   ../../protocol/consensus.x
@@ -29,11 +28,11 @@ add_xdr(
   ../../protocol/invoke_args.x
   ../../protocol/loadgen.x
   ../../protocol/network.x
-  ../../protocol/nomination.x
   ../../protocol/pagination.x
   ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
+  ../../protocol/proposal.x
   ../../protocol/rpc_types.x
   ../../protocol/scp.x
   ../../protocol/sc_types.x

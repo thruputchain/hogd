@@ -2039,11 +2039,12 @@ SystemCallHandler::get_block_height() const
   }
   // The contract-visible current block height is the *executing* block height,
   // which is the parent tip's height + 1: HogDB opens the BlockTX at
-  // get_tip().height + 1 (see RPCContext::open_block_tx_locked) and
+  // get_tip().value.proposal_header.block_height + 1 (see
+  // RPCContext::open_block_tx_locked) and
   // get_db_tip() returns the parent tip for an open block. Contract-facing
   // height-gated logic (auth-token expiry, timelocks) must observe the
   // executing height, matching the replay-cache expiry check.
-  return tip.value()->height + 1;
+  return tip.value()->value.proposal_header.block_height + 1;
 }
 
 // == Auth token syscalls ==

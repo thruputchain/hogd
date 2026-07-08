@@ -24,6 +24,7 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "hogd/protocol/block_compat.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"

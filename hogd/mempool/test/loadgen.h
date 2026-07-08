@@ -19,7 +19,7 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"
-#include "nomination.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"

@@ -181,7 +181,7 @@ HogDBGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     DbTip tip = ctx_.get_tip();
 
     DbGatewayPayload payload;
-    payload.block_height = tip.height;
+    payload.block_height = tip.value.proposal_header.block_height;
     payload.items.reserve(batch.size());
     for (AddressAndKey const &k : batch)
       payload.items.push_back(read_one_item(db, k));
