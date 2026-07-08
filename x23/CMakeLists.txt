@@ -236,9 +236,14 @@ add_subdirectory(x23c)
 add_subdirectory(x23)
 add_subdirectory(tests)
 
+set(X23_CMAKE_ECHO_COLOR_ARGS --cyan)
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  list(PREPEND X23_CMAKE_ECHO_COLOR_ARGS "--switch=$(COLOR)")
+endif()
+
 add_custom_target(check
   DEPENDS build_tests
-  COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
+  COMMAND ${CMAKE_COMMAND} -E cmake_echo_color ${X23_CMAKE_ECHO_COLOR_ARGS} "Running tests..."
   COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure --parallel
   COMMENT "Building and running tests"
 )

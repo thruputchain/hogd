@@ -68,8 +68,8 @@ if(ENABLE_TEST_FFI)
 endif()
 
 # Set up compiler flags for release and debug build types
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
@@ -87,9 +87,9 @@ endif()
 message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
 message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
-set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
+set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0 -g")
 set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
-set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0 -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
 message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
@@ -156,7 +156,7 @@ option(BENCHMARK_ENABLE_TESTING "" OFF)
 option(BENCHMARK_ENABLE_WERROR "" OFF)
 
 # BUILD_BENCHMARKS turns on or off the hogd benchmarks
-option(BUILD_BENCHMARKS "" ON)
+option(BUILD_BENCHMARKS "" OFF)
 
 if(BUILD_BENCHMARKS)
 add_subdirectory(external/benchmark)

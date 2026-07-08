@@ -49,6 +49,7 @@ BUILD_TYPE=Release
 CMAKE_FLAGS=()
 DISABLE_CCACHE=
 BUILD_JOBS=
+GENERATOR_FLAGS=()
 
 print_usage() {
   printf "usage: scripts/build.sh [OPTION]...\n"
@@ -101,7 +102,32 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
 fi
 
-if test -z "$DISABLE_CCACHE" && command -v ccache 2>/dev/null; then
+if command -v ninja >/dev/null 2>&1; then
+  HAS_GENERATOR_FLAG=
+  for flag in "${CMAKE_FLAGS[@]}"; do
+    if [[ "$flag" == -G* ]]; then
+      HAS_GENERATOR_FLAG=1
+      break
+    fi
+  done
+  if test -z "$HAS_GENERATOR_FLAG"; then
+    GENERATOR_FLAGS=(-G Ninja)
+  fi
+fi
+
+HAS_COLOR_DIAGNOSTICS_FLAG=
+for flag in "${CMAKE_FLAGS[@]}"; do
+  if [[ "$flag" == -DCMAKE_COLOR_DIAGNOSTICS=* ]]; then
+    HAS_COLOR_DIAGNOSTICS_FLAG=1
+    break
+  fi
+done
+if test -z "$HAS_COLOR_DIAGNOSTICS_FLAG"; then
+  CMAKE_FLAGS+=(-DCMAKE_COLOR_DIAGNOSTICS=ON)
+fi
+
+if test -z "$DISABLE_CCACHE" && command -v ccache >/dev/null 2>&1; then
+  ccache --max-size="${HOGD_CCACHE_MAXSIZE:-50G}"
   CMAKE_FLAGS+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 fi
@@ -111,6 +137,7 @@ mkdir -p "$BUILD_DIR"
 CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   -B "$BUILD_DIR" \
+  "${GENERATOR_FLAGS[@]}" \
   "${CMAKE_INJECT[@]}" \
   "${CMAKE_FLAGS[@]}" \
   "$ROOT_DIR"
@@ -120,5 +147,9 @@ if test -z "$NO_MAKE"; then
     BUILD_JOBS="$NPROC"
   fi
 
-  exec make -j "$BUILD_JOBS" -C "$BUILD_DIR" "$@"
+  BUILD_ARGS=(--build "$BUILD_DIR" --parallel "$BUILD_JOBS")
+  if (($#)); then
+    BUILD_ARGS+=(--target "$@")
+  fi
+  exec $CMAKE "${BUILD_ARGS[@]}"
 fi

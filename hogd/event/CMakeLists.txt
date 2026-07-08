@@ -67,21 +67,23 @@ target_link_libraries(
 )
 gtest_discover_tests(event_test)
 
-add_executable(
-  event_server_bench
-  event_server_bench.cc
-)
-target_link_libraries(
-  event_server_bench
-  event
-  hogd
-  protocol
-)
+if(BUILD_BENCHMARKS)
+  add_executable(
+    event_server_bench
+    event_server_bench.cc
+  )
+  target_link_libraries(
+    event_server_bench
+    event
+    hogd
+    protocol
+  )
 
-target_include_directories(
-  event_server_bench
-  PRIVATE
-  ${CMAKE_BINARY_DIR}
-)
+  target_include_directories(
+    event_server_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
 
-set_property(TARGET event_server_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET event_server_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
