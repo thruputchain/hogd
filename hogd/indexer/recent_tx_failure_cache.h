@@ -47,23 +47,25 @@ public:
   {
     const std::lock_guard<std::mutex> guard(mtx_);
     auto it = entries_.find(tx_hash);
-    if (it == entries_.end()) {
+    if (it != entries_.end()) {
+      if (diag.attempt_height < it->second.attempt_height) {
+        // Stale report: keep the newer entry untouched.
+        return;
+      }
+      const bool extends_expiry =
+          diag.attempt_height > it->second.attempt_height;
+      it->second = diag;
+      if (!extends_expiry) {
+        // Same height: the existing expiry row already references this hash,
+        // so refresh the payload without growing the expiry index.
+        return;
+      }
+    }
+    else {
       if (entries_.size() >= max_entries_) {
         return;
       }
       entries_.emplace(tx_hash, diag);
-    }
-    else if (diag.attempt_height > it->second.attempt_height) {
-      it->second = diag;
-    }
-    else if (diag.attempt_height == it->second.attempt_height) {
-      // Same expiry bucket already references this hash; refresh the payload
-      // without growing the expiry index.
-      it->second = diag;
-      return;
-    }
-    else {
-      return;
     }
     expiry_index_[diag.attempt_height + expiry_delta_].push_back(tx_hash);
   }

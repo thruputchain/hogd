@@ -25,6 +25,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
+#include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/init.h"
 #include "indexer.hh"
 #include "transaction.hh"
@@ -603,16 +604,6 @@ struct CapturingIndexerRpc {
       received_failure_reports;
 };
 static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
-
-indexer_event_client_t
-make_socketpair_indexer_client(CapturingIndexerRpc *server)
-{
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  x23::rpc_stream_logged(default_coropoll(), fds[1], -1)->server(server);
-  auto client_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  return client_stream->client<IndexerEvent1>();
-}
 
 ProposedTransaction
 make_distinct_body(uint64_t nonce)

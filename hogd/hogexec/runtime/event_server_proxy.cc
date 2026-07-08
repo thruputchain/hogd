@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
-#include <exception>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -128,12 +127,14 @@ void
 EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
-  // Drop rather than queue unboundedly when the event server is slow.
-  if (pending_failure_reports_->load(std::memory_order_acquire) >=
+  // Reserve a slot with a single RMW; release it and drop the report if we
+  // were already at the cap. Dropping (rather than queueing unboundedly) keeps
+  // the fire-and-forget path memory-bounded when the event server is slow.
+  if (pending_failure_reports_->fetch_add(1, std::memory_order_acq_rel) >=
       kMaxPendingFailureReports) {
+    pending_failure_reports_->fetch_sub(1, std::memory_order_release);
     return;
   }
-  pending_failure_reports_->fetch_add(1, std::memory_order_release);
   // The coroutine below takes a refcounted copy of client_ and a shared_ptr
   // to the pending-count atomic (not `this`/`&self`), so it never touches
   // this EventServerProxy and can safely outlive it.
@@ -144,10 +145,13 @@ EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
       if (r != RPCError::kRPCNone) {
         warn("tx-failure report dropped by event server: {}", r);
       }
-    } catch (std::exception const &e) {
-      // Best-effort: any throw (#2857 containment pattern, cf. emit_event
-      // above) must never escape a detached coroutine, and the
-      // pending-count decrement below must still run so the slot is freed.
+    } catch (x23::XdrException const &e) {
+      // Best-effort: the RPC client can throw (XdrBadInput / XdrCallFailed)
+      // instead of returning a status; swallow the RPC-layer throw so it never
+      // escapes this detached coroutine, and let the pending-count decrement
+      // below run so the slot is freed. Anything else (e.g. bad_alloc) is a
+      // genuine bug and still terminates -- matching emit_event's #2857
+      // containment above.
       warn("tx-failure report send failed: {}", e.what());
     }
     pending->fetch_sub(1, std::memory_order_release);

@@ -58,6 +58,15 @@ block_explorer_init(const std::string &indexer_server_addr,
     info("hash = {}", *tx_hash_raw);
     info("block_height = {}", tx_info.height);
   }
+  else if (tx_info_res.outcome() == TxInfoOutcome::TxInfoRecentFailure) {
+    // Best-effort diagnostic for a tx that failed nondeterministically at
+    // proposal time and never committed (expires after a few blocks).
+    const TxFailureDiagnostic &diag = tx_info_res.recent_failure();
+    info("tx recently failed (nondeterministic conflict; not committed):");
+    info("hash = {}", *tx_hash_raw);
+    info("attempted at block_height = {}", diag.attempt_height);
+    info("conflict code = {}", x23::show(diag.conflict.code));
+  }
   else {
     info("could not find tx (hash = {}).", *tx_hash_raw);
   }

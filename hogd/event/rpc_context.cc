@@ -21,6 +21,7 @@
 #include "x23/corosync.h"
 #include "x23/debug.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -386,18 +387,37 @@ x23::Async<void>
 EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
                                                TxFailureDiagnostic diag)
 {
-  x23::CoroGuard cg;
-  co_await cg(indexers_lock_);
-  for (indexer_event_client_t &indexer : indexers_) {
+  // Snapshot the registered indexer clients under the lock, then release it
+  // BEFORE any network send. indexer_event_client_t is a refcounted ClientRef,
+  // so each copy keeps its stream alive independently. Holding indexers_lock_
+  // across the sends would let one slow or half-open indexer stall
+  // commit_block(), which acquires the same lock every block -- and this
+  // best-effort diagnostic path must never disturb the commit pipeline.
+  std::vector<indexer_event_client_t> indexers_snapshot;
+  {
+    x23::CoroGuard cg;
+    co_await cg(indexers_lock_);
+    indexers_snapshot = indexers_;
+  }
+
+  // Fan out concurrently (dispatch all, then await), like
+  // send_events_to_indexers; a per-indexer catch keeps one indexer's RPC-layer
+  // throw from disturbing the others or the executor-facing response.
+  // bad_alloc and other non-RPC throws are genuine bugs and still terminate
+  // (cf. EventServerProxy::emit_event's #2857 containment).
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(indexers_snapshot.size());
+  for (indexer_event_client_t &indexer : indexers_snapshot) {
+    handles.push_back(indexer.indexer_event_report_tx_failure(tx_hash, diag));
+  }
+  for (x23::Async<void> &handle : handles) {
     try {
-      co_await indexer.indexer_event_report_tx_failure(tx_hash, diag);
-    } catch (std::exception const &e) {
-      // Best-effort: an offline indexer must not disturb the relay to the
-      // remaining indexers (or the executor-facing response).
+      co_await handle;
+    } catch (x23::XdrException const &e) {
       warn("dropping tx-failure report to an indexer: {}", e.what());
     }
   }
-  co_await cg.reset_and_return();
+  co_return;
 }
 
 } // namespace hogd
