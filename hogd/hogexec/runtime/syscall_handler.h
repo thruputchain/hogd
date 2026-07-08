@@ -16,6 +16,7 @@
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -192,6 +193,20 @@ public:
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
   ExecResult try_commit_transaction();
+
+  // The two-phase-commit conflict diagnostic from the most recent failed commit
+  // push (the root lock-acquire / 2pc push, or the commit_body_discarded RCQ /
+  // replay path), at the DbDiagnosticLevel the database selected from the block
+  // mode. The kDbDiagnosticNone arm if the last push succeeded. Valid after
+  // try_commit_transaction() returns: abort_transaction() does not reset it.
+  // Intended for SDK / test surfacing. Note: on outcomes that abort without a
+  // commit push (System/Unrecoverable errors, or an expired-uniquifier
+  // ValidationFailure), this may reflect an earlier in-body try_invoke conflict
+  // rather than None — abort_transaction() does not reset it, so consumers
+  // should key on the returned ExecResult (a genuine commit conflict is
+  // ExecResultTxNonDeterministicError) before interpreting this value.
+  DbConflictResult const &last_commit_conflict() const;
+
   SystemStatus<void> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the

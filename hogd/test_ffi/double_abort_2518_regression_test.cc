@@ -94,11 +94,13 @@ TEST(TestBindingsTest, DoubleCommitTransactionReturnsErrorInsteadOfAsserting)
 
   // The first commit finalizes the transaction.
   auto first = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(first.serialized_conflict);
   EXPECT_EQ(first.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(first.result_code, std::to_underlying(ExecResult::ExecResultOK));
 
   // The second commit is rejected rather than re-entering the core assert.
   auto second = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(second.serialized_conflict);
   EXPECT_EQ(second.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
@@ -129,6 +131,7 @@ TEST(TestBindingsTest, CommitAfterAbortReturnsErrorInsteadOfAsserting)
 
   // A commit on the now-terminal handle is rejected, not asserted.
   auto commit = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
