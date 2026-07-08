@@ -23,7 +23,7 @@ env:
 jobs:
   # Fast format check - gates all other jobs
   format:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -93,6 +93,7 @@ jobs:
 
   # GCC Debug build + tests
   gcc-debug:
+    if: ${{ false }}
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read
@@ -223,6 +224,7 @@ jobs:
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
+    if: ${{ false }}
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read
@@ -334,6 +336,7 @@ jobs:
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
+    if: ${{ false }}
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read

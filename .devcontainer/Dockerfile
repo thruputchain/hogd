@@ -40,6 +40,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     build-essential \
     cmake \
     make \
+    ninja-build \
     ccache \
     flex \
     bison \
@@ -123,18 +124,28 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     && cargo install --locked --version 0.29.2 cbindgen \
     && $SUDO chmod -R a+rwx /usr/local/rustup /usr/local/cargo
 
-# Create non-root user for local development
-RUN useradd -m -s /bin/bash builder \
-    && mkdir -p /home/builder/.cache/ccache /home/builder/.ssh \
-    && ssh-keyscan github.com >> /home/builder/.ssh/known_hosts 2>/dev/null \
-    && chmod 700 /home/builder/.ssh \
-    && chmod 600 /home/builder/.ssh/known_hosts || true \
-    && chown -R builder:builder /home/builder
+# Create the local devcontainer user only for root-based local builds. Namespace
+# custom runner images build as the existing runner user, so useradd/chown would
+# fail there and are unnecessary.
+RUN if [ "$(id -u)" = "0" ]; then \
+        useradd -m -s /bin/bash builder \
+        && mkdir -p /home/builder/.cache/ccache /home/builder/.ssh \
+        && ssh-keyscan github.com >> /home/builder/.ssh/known_hosts 2>/dev/null \
+        && chmod 700 /home/builder/.ssh \
+        && chmod 600 /home/builder/.ssh/known_hosts \
+        && chown -R builder:builder /home/builder; \
+    fi
 
-# Add GitHub to known_hosts for root
+# Add GitHub to known_hosts for the current build user.
 RUN mkdir -p ~/.ssh \
     && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null \
     && chmod 700 ~/.ssh && chmod 600 ~/.ssh/known_hosts
+
+# Ubuntu 26.04's python3-flake8 package exposes the module but not the legacy
+# flake8 executable that scripts/tidy.sh expects.
+RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
+    printf '#!/bin/sh\nexec python3 -m flake8 "$@"\n' | $SUDO tee /usr/local/bin/flake8 >/dev/null \
+    && $SUDO chmod 755 /usr/local/bin/flake8
 
 # Set working directory
 WORKDIR /workspace
