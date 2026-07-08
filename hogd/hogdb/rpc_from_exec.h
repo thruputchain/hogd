@@ -33,7 +33,7 @@ public:
   RPCError abort_transaction(BlockID block, TransactionID tx);
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch);
+                              StorageDeltaBatch batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 
@@ -67,8 +67,7 @@ private:
   RPCContext &ctx_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
-                              StorageDelta const &delta,
-                              StorageDeltaFlagSet flags,
+                              StorageDelta &&delta, StorageDeltaFlagSet flags,
                               DbConflictCode *conflict_code);
 };
 static_assert(
