@@ -1059,20 +1059,18 @@ SystemCallHandler::report_db_conflict_diagnostic() const
   // The wire format carries exactly one diagnostic (memory-bounded end to
   // end); under kDbDiagnosticAll (debug builds) send the first, drop the
   // rest.
+  // Exactly one diagnostic goes on the wire (memory-bounded end to end); under
+  // kDbDiagnosticAll (debug builds) take the first. hogdb only ever sets a
+  // non-None level together with a conflict, so a missing one is an invariant
+  // violation, not a runtime condition -- fail fast rather than paper over it.
   DbConflictDiagnostic const *first = nullptr;
   if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst) {
     first = &conflict.first();
   }
-  else if (!conflict.conflicts().empty()) {
+  else {
+    CHECK(conflict.level() == DbDiagnosticLevel::kDbDiagnosticAll);
+    CHECK(!conflict.conflicts().empty());
     first = conflict.conflicts().data();
-  }
-  if (first == nullptr) {
-    // A non-None level with no conflict payload is unexpected (hogdb selected
-    // a reporting level but attached nothing). Nothing to send; say so rather
-    // than dropping silently.
-    warn("dropping tx-failure diagnostic: level {} carried no conflict",
-         x23::show(conflict.level()));
-    return;
   }
 
   auto height = get_block_height();
