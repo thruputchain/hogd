@@ -35,6 +35,8 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
+#include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

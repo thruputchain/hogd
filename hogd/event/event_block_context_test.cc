@@ -8,7 +8,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -32,7 +31,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fileio.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"

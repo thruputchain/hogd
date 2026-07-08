@@ -5,6 +5,7 @@
 #include <string>
 #include <unistd.h> // NOLINT(misc-include-cleaner)
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
@@ -15,6 +16,7 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 

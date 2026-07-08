@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "db_conflict.hh"
+#include "hogd/base/types.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -38,8 +39,10 @@ TEST(RecentTxFailureCacheTest, ReportThenLookup)
 
   auto found = cache.lookup(hash);
   ASSERT_TRUE(found.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 100);
   EXPECT_EQ(found->conflict.code, DbConflictCode::kDbConflictValueMismatch);
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_FALSE(cache.lookup(make_hash(0x02)).has_value());
 }
 
@@ -54,8 +57,10 @@ TEST(RecentTxFailureCacheTest, LatestAttemptWins)
 
   auto found = cache.lookup(hash);
   ASSERT_TRUE(found.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 12);
   EXPECT_EQ(found->conflict.code, DbConflictCode::kDbConflictOverflow);
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_EQ(cache.size(), 1);
 }
 
@@ -100,8 +105,10 @@ TEST(RecentTxFailureCacheTest, SameHeightReReportUpdatesPayloadAndExpiresOnce)
 
   auto found = cache.lookup(hash);
   ASSERT_TRUE(found.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 100);
   EXPECT_EQ(found->conflict.code, DbConflictCode::kDbConflictOverflow);
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_EQ(cache.size(), 1);
 
   // A single expiry row at 100 + 5 expires it exactly once; no duplicate row
@@ -130,7 +137,9 @@ TEST(RecentTxFailureCacheTest, CapDropsNewReportsButUpdatesExisting)
                make_diag(101, DbConflictCode::kDbConflictOverflow));
   auto found = cache.lookup(make_hash(0x01));
   ASSERT_TRUE(found.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 101);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RecentTxFailureCacheTest, PruneOnEmptyCacheIsNoop)

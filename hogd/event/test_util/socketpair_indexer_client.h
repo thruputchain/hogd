@@ -6,7 +6,7 @@
 #include "hogd/base/log.h"
 #include "hogd/event/event_block_context.h"
 #include "indexer.hh"
-#include "x23/srpc.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 

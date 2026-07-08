@@ -16,6 +16,7 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/event/event_block_context.h"
@@ -26,7 +27,9 @@
 #include "indexer.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
+#include "x23/rpc.h"
 #include "x23/srpc.h"
 
 namespace hogd {
@@ -50,7 +53,7 @@ namespace {
 struct FailureCapturingIndexerRpc {
   using rpc_service = IndexerEvent1;
 
-  x23::Async<void>
+  static x23::Async<void>
   indexer_event_process_events(BlockHeight /*block_height*/,
                                const TxEventLogBatch & /*tx_events*/,
                                const ProposedTransactionBatch & /*tx_bodies*/)

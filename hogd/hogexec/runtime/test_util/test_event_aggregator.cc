@@ -2,13 +2,16 @@
 
 #include <optional>
 #include <utility>
+#include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"

@@ -1,11 +1,15 @@
 #pragma once
 
 #include <string_view>
+#include <utility>
 
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
+#include "hogd/indexer/status.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "network.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 
 namespace hogd {

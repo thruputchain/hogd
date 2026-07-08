@@ -11,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

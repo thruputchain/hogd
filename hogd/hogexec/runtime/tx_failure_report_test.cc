@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -8,7 +9,6 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -16,10 +16,11 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 

@@ -1,5 +1,7 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
+#include <atomic>
+#include <memory>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -8,6 +10,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
