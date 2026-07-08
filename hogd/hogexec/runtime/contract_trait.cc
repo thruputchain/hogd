@@ -78,51 +78,36 @@ major_version(std::string_view version)
 } // namespace
 
 ContractEntrypointID
-sdk_entrypoint_derivation(std::string_view identifier_name,
-                          std::string_view identifier_version,
-                          std::string_view method_name)
+sdk_entrypoint_derivation(std::u8string_view identifier_name,
+                          std::u8string_view identifier_version,
+                          std::u8string_view method_name)
 {
+  // Inputs are `u8""` bytes, so the preimage (and therefore the id) is the
+  // UTF-8 encoding independent of the ordinary execution charset
+  // (`-fexec-charset`). Reinterpreting to narrow bytes is byte-identical;
+  // major_version keys only off raw byte values. See hogd issue #2898.
+  auto as_bytes = [](std::u8string_view s) {
+    return std::string_view(reinterpret_cast<const char *>(s.data()), s.size());
+  };
+
   // Components are joined with a "::" domain separator so that distinct
-  // (name, version, method) triples cannot collide on the same preimage.
-  //
-  // The separator is a `u8"..."` literal so its bytes are the UTF-8 encoding
-  // (0x3a 0x3a) mandated by the standard, independent of the ordinary execution
-  // character set (`-fexec-charset`). An ordinary `"::"` literal would hash
-  // implementation-defined code units, so two honest validators built with
-  // different execution charsets could derive divergent ids. See hogd issue
-  // #2573.
+  // (name, version, method) triples cannot collide on the same preimage. The
+  // separator bytes are the UTF-8 encoding (0x3a 0x3a), matching the SDK and
+  // generate_header.py. See hogd issue #2573.
   constexpr std::u8string_view kSeparator = u8"::";
-  const auto *sep = reinterpret_cast<const char *>(kSeparator.data());
 
   std::string method_name_preimage;
-  method_name_preimage.append(identifier_name);
-  method_name_preimage.append(sep, kSeparator.size());
-  method_name_preimage.append(major_version(identifier_version));
-  method_name_preimage.append(sep, kSeparator.size());
-  method_name_preimage.append(method_name);
+  method_name_preimage.append(as_bytes(identifier_name));
+  method_name_preimage.append(as_bytes(kSeparator));
+  method_name_preimage.append(major_version(as_bytes(identifier_version)));
+  method_name_preimage.append(as_bytes(kSeparator));
+  method_name_preimage.append(as_bytes(method_name));
 
   auto h = sha256(method_name_preimage);
 
   ContractEntrypointID out{};
   auto *out_ptr = reinterpret_cast<uint8_t *>(&out);
   std::memcpy(out_ptr, h.data(), 8);
-  static_assert(sizeof(out) == 8);
-  return out;
-}
-
-ContractEntrypointID
-entrypoint_id_from_utf8_preimage(std::u8string_view preimage)
-{
-  // Hash an already-folded UTF-8 preimage (`interface::major_version::method`).
-  // The `u8""` bytes are UTF-8 regardless of `-fexec-charset`, so
-  // reinterpreting them to narrow bytes is byte-identical to what the
-  // SDK/generate_header.py hashed. See hogd issue #2898.
-  std::string bytes(reinterpret_cast<const char *>(preimage.data()),
-                    preimage.size());
-  auto h = sha256(bytes);
-
-  ContractEntrypointID out{};
-  std::memcpy(reinterpret_cast<uint8_t *>(&out), h.data(), 8);
   static_assert(sizeof(out) == 8);
   return out;
 }
