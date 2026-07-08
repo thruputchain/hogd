@@ -1064,7 +1064,7 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = &conflict.first();
   }
   else if (!conflict.conflicts().empty()) {
-    first = &conflict.conflicts()[0];
+    first = conflict.conflicts().data();
   }
   if (first == nullptr) {
     return;

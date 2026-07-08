@@ -1,7 +1,5 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
-#include <chrono>
-#include <thread>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -125,37 +123,23 @@ PerTransactionEventServerProxy::emit_events(
                                                     tx_event_log, proposed_tx);
 }
 
-EventServerProxy::~EventServerProxy()
-{
-  // Drain detached report coroutines (cf. ~EventRPCContext) so none touches
-  // a destroyed client_. Bounded: on the shutdown path with an unreachable
-  // event server a retrying send may never resolve; a leaked coroutine at
-  // process exit beats a shutdown hang.
-  for (int i = 0;
-       i < 2000 && pending_failure_reports_.load(std::memory_order_acquire) > 0;
-       i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  if (pending_failure_reports_.load(std::memory_order_acquire) > 0) {
-    warn("EventServerProxy destroyed with tx-failure reports still in flight");
-  }
-}
-
 void
 EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
   // Drop rather than queue unboundedly when the event server is slow.
-  if (pending_failure_reports_.load(std::memory_order_acquire) >=
+  if (pending_failure_reports_->load(std::memory_order_acquire) >=
       kMaxPendingFailureReports) {
     return;
   }
-  pending_failure_reports_.fetch_add(1, std::memory_order_release);
-  [](EventServerProxy &self, SignedTransactionHash hash,
-     TxFailureDiagnostic d) -> x23::Detached {
+  pending_failure_reports_->fetch_add(1, std::memory_order_release);
+  // The coroutine below takes a refcounted copy of client_ and a shared_ptr
+  // to the pending-count atomic (not `this`/`&self`), so it never touches
+  // this EventServerProxy and can safely outlive it.
+  [](client_t client, std::shared_ptr<std::atomic<ssize_t>> pending,
+     SignedTransactionHash hash, TxFailureDiagnostic d) -> x23::Detached {
     try {
-      RPCError r =
-          co_await self.client_.eventexecutor_report_tx_failure(hash, d);
+      RPCError r = co_await client.eventexecutor_report_tx_failure(hash, d);
       if (r != RPCError::kRPCNone) {
         warn("tx-failure report dropped by event server: {}", r);
       }
@@ -164,9 +148,9 @@ EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
       // emit_event above) must never escape a detached coroutine.
       warn("tx-failure report send failed: {}", e.what());
     }
-    self.pending_failure_reports_.fetch_sub(1, std::memory_order_release);
+    pending->fetch_sub(1, std::memory_order_release);
     co_return;
-  }(*this, std::move(tx_hash), std::move(diag));
+  }(client_, pending_failure_reports_, std::move(tx_hash), std::move(diag));
 }
 
 } // namespace hogd

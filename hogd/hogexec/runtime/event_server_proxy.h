@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -49,15 +50,15 @@ public:
   // nondeterministically during 2pc, with the diagnostic hogdb attached.
   // Returns immediately; a slow or dead event server costs nothing but the
   // dropped report (errors are logged and swallowed -- diagnostics must
-  // never disturb execution). In-flight sends are capped at
-  // kMaxPendingFailureReports; excess reports are dropped, so a conflict
-  // storm against a slow event server cannot grow memory. The destructor
-  // drains in-flight sends (bounded) so a detached coroutine never touches
-  // a destroyed client_.
+  // never disturb execution). The detached report coroutine owns a
+  // refcounted copy of client_ (client_t wraps a refcounted ClientRef, cf.
+  // x23::RpcMulticlient::ClientRef) and a shared_ptr to the pending-count
+  // atomic, so it never dereferences this EventServerProxy and destroying
+  // the proxy can never race an in-flight send. In-flight sends are capped
+  // at kMaxPendingFailureReports; excess reports are dropped, so a conflict
+  // storm against a slow event server cannot grow memory.
   void report_tx_failure(SignedTransactionHash tx_hash,
                          TxFailureDiagnostic diag);
-
-  ~EventServerProxy();
 
 private:
   using client_t =
@@ -67,8 +68,11 @@ private:
   // Soft bound on concurrently in-flight failure reports (racy over-admission
   // by a few is fine); reports past the cap are dropped, keeping the
   // fire-and-forget path memory-bounded even with an unresponsive server.
+  // Held via shared_ptr so the detached report coroutine can keep its own
+  // refcounted handle on the counter after this proxy is destroyed.
   static constexpr ssize_t kMaxPendingFailureReports = 1024;
-  std::atomic<ssize_t> pending_failure_reports_ = 0;
+  std::shared_ptr<std::atomic<ssize_t>> pending_failure_reports_ =
+      std::make_shared<std::atomic<ssize_t>>(0);
 };
 
 class PerTransactionEventServerProxy {
