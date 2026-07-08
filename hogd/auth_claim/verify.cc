@@ -50,7 +50,7 @@ valid_pk_bitmap(BitMap bitmap)
 {
   // no pk has an index higher than kMaxSigners
   static_assert(kMaxSigners <= 32);
-  return (bitmap & (0xFFFF'FFFF << (kMaxSigners))) == 0;
+  return (bitmap & (0xFFFF'FFFF << kMaxSigners)) == 0;
 }
 
 [[nodiscard]] constexpr bool

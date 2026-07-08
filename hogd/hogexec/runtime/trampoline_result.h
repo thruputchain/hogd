@@ -14,7 +14,7 @@ to_trampoline_result(HostFnStatus<SyscallErrorCode> status,
                      GasAmount gas_consumed) noexcept
 {
   if (status) {
-    return {.result_code = std::to_underlying(status.value()),
+    return {.result_code = std::to_underlying(*status),
             .panic = 0,
             .gas_consumed = gas_consumed};
   }

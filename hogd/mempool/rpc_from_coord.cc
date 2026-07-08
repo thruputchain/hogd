@@ -2106,7 +2106,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   };
 
   co_await close_validation_gate();
-  x23::Defer reopen_validation_gate([this] { open_validation_gate(); });
+  x23::Defer reopen_validation_gate([this]() noexcept {
+    try {
+      open_validation_gate();
+    } catch (...) {
+      std::terminate();
+    }
+  });
 
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};

@@ -4,17 +4,18 @@
 #include <cstdlib>
 #include <format>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
@@ -22,10 +23,10 @@
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
