@@ -248,7 +248,8 @@ public:
                     }) {
         x23assert(canonical ==
                   sdk_entrypoint_derivation(
-                      ContractTrait::kTraitNameUtf8, ContractTrait::kVersionUtf8,
+                      ContractTrait::kTraitNameUtf8,
+                      ContractTrait::kVersionUtf8,
                       ContractTrait::kExportNamesUtf8[kLookupIndex<Name>]));
       }
       return canonical;

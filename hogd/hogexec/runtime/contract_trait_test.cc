@@ -72,7 +72,8 @@ static_assert(
 // a real -fexec-charset build. Reproduces on any execution charset.
 namespace {
 struct Utf8CrossCheckTrait {
-  // Corrupted ordinary literals: stand in for non-UTF-8 execution-charset bytes.
+  // Corrupted ordinary literals: stand in for non-UTF-8 execution-charset
+  // bytes.
   constexpr static std::string_view kTraitName = "XRC20";
   constexpr static std::string_view kVersion = "9.9.9";
   constexpr static auto kExportNames =
@@ -107,10 +108,10 @@ TEST(ContractTraitTest, EntrypointDebugCrossCheckUsesUtf8Twins)
                                       "transfer"));
 
   // The u8"" twins reproduce the canonical id independent of execution charset.
-  ASSERT_EQ(canonical,
-            sdk_entrypoint_derivation(Utf8CrossCheckTrait::kTraitNameUtf8,
-                                      Utf8CrossCheckTrait::kVersionUtf8,
-                                      Utf8CrossCheckTrait::kExportNamesUtf8[0]));
+  ASSERT_EQ(canonical, sdk_entrypoint_derivation(
+                           Utf8CrossCheckTrait::kTraitNameUtf8,
+                           Utf8CrossCheckTrait::kVersionUtf8,
+                           Utf8CrossCheckTrait::kExportNamesUtf8[0]));
 
   // Therefore entrypoint() no longer aborts on the debug cross-check and
   // returns the canonical id. Against the pre-#2898 code this call SIGABRTs.
