@@ -48,6 +48,10 @@ cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnin
 # loss of coverage on production code.
 cd ${ROOT_DIR}
 ALL_FILES=$(find ${CODE_DIR} -name '*.h' -o -name '*.cc')
+CLANG_TIDY_JOBS=${CLANG_TIDY_JOBS:-${NPROC}}
+if [ "$CLANG_TIDY_JOBS" -gt 32 ]; then
+  CLANG_TIDY_JOBS=32
+fi
 EE_EXEMPT='_tests?\.(cc|h)$|_bench\.(cc|h)$|/contract_tests/|/direct_rpc_tests/|/test/|/test_ffi/|/test_util/|/bench/|/loadgen/|test_framework|/hogdb/hogdb\.cc$'
 EXEMPT_CHECKS='-checks=-bugprone-exception-escape,-bugprone-random-generator-seed,-bugprone-throwing-static-initialization,-misc-include-cleaner,-misc-multiple-inheritance,-misc-override-with-different-visibility,-misc-use-internal-linkage,-modernize-use-designated-initializers'
 PROD_FILES=$(echo "$ALL_FILES" | grep -vE "$EE_EXEMPT")
@@ -55,7 +59,7 @@ EXEMPT_FILES=$(echo "$ALL_FILES" | grep -E "$EE_EXEMPT")
 
 tidy_pass() {
   # Reads file list on stdin; $1 is any extra clang-tidy args for this pass.
-  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
+  xargs ${CLANG_TIDY} -j"$CLANG_TIDY_JOBS" -use-color -p "${BUILD_DIR}" \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG} $1
 }
 

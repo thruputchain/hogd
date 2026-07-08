@@ -67,7 +67,7 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
   if (!r.has_value()) {
     return {r.error().code(), WrappedGasAmount{0}};
   }
-  output_output = r.value();
+  output_output = *r;
   if (auto *trace_data =
           handler.get_syscall_trace_data<SyscallNo::kSHA256Finalize>()) {
     try {

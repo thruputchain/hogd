@@ -1134,8 +1134,7 @@ SystemCallHandler::~SystemCallHandler()
               transaction_committed_or_aborted_);
       }
     }
-    if (last_frame_.has_value() &&
-        !last_frame_.value().extract_events().empty() &&
+    if (last_frame_.has_value() && !last_frame_->extract_events().empty() &&
         root_invoke_succeeded_ && !two_phase_commit_failed_) {
       panic("SystemCallHandler destroyed with events to emit");
     }

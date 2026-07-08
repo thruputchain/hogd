@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <set>
 #include <span>
 #include <string>
@@ -540,9 +541,13 @@ HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
   PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block);
-  x23::Defer _d([&]() {
-    if (btx && btx->release_reference()) {
-      ctx_.remove_shutdown_block_tx(block);
+  x23::Defer _d([&]() noexcept {
+    try {
+      if (btx && btx->release_reference()) {
+        ctx_.remove_shutdown_block_tx(block);
+      }
+    } catch (...) {
+      std::terminate();
     }
   });
   if (!btx || btx->get().is_invalidated()) [[unlikely]] {
