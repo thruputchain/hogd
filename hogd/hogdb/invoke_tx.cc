@@ -545,10 +545,10 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
 
 HogDBStatus<void>
 InvokeTX::request_retrocausal_queue(const ItemKey &key,
-                                    const RetrocausalQueueDelta &delta,
+                                    RetrocausalQueueDelta &&delta,
                                     StorageDeltaFlagSet flags)
 {
-  auto change = ItemChange(RetrocausalQueueIt(delta));
+  auto change = ItemChange(RetrocausalQueueIt(std::move(delta)));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }

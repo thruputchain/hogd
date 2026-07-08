@@ -3,8 +3,8 @@
 #pragma once
 
 #include <algorithm>
-#include <compare>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -44,21 +44,24 @@ writable_byte_view(char *buf, size_t len)
   return {reinterpret_cast<std::byte *>(buf), len};
 }
 
-// enable <=> comparisons between const byte spans.
-constexpr std::strong_ordering
-operator<=>(const std::span<const std::byte> lhs,
-            const std::span<const std::byte> rhs)
-{
-  return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(),
-                                                rhs.begin(), rhs.end());
-}
-
 // enable == comparisons between const byte spans.
+//
+// libstdc++/libc++ gate their memcmp fast path on a "memcmpable" trait that
+// requires an integral type, so std::byte (a scoped enum) falls back to an
+// element-wise loop in std::ranges::equal. Dispatch to std::memcmp explicitly
+// for non-empty runtime spans, keeping the constexpr fallback.
 constexpr bool
 operator==(const std::span<const std::byte> lhs,
            const std::span<const std::byte> rhs)
 {
-  return std::ranges::equal(lhs, rhs);
+  if (lhs.size() != rhs.size())
+    return false;
+  if (lhs.empty())
+    return true;
+  if consteval {
+    return std::ranges::equal(lhs, rhs);
+  }
+  return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
 }
 
 // OwningSpan adds ownership or a cleanup task to a std::span.

@@ -31,10 +31,11 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   // ABI version is checked at artifact load time, so no per-call version
   // register is needed.
   //
-  // syscall_entry mutates WasmContext.memory in place, so run it against a
-  // scratch copy of guest data memory. A parser/output fault can then be
-  // rejected without committing partial writes, matching the WASM path's
-  // atomicity, and the scratch is committed back only on success.
+  // syscall_entry mutates WasmContext.memory in place. This canonical-test
+  // bridge runs it against scratch memory so faults/OOG can be observed without
+  // committing partial writes to Machine memory. The production threaded
+  // runtime intentionally skips this copy and exposes live guest memory to
+  // syscall_entry.
   const std::span<const uint8_t> view_memory = view.memory();
   std::vector<uint8_t> scratch;
   try {

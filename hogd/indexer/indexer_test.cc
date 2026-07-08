@@ -461,6 +461,104 @@ TEST_F(IndexerTest, UnknownTxStillNotFound)
   EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
 }
 
+// WAI / regression lock for #2851. Out-of-order ingest persists a tx-index row
+// for a height above the contiguous serving watermark before latest_block()
+// advances (consume_events writes the SST rows, then record_height() buffers
+// the gapped height in pending_heights_). Such a row is intentionally served by
+// the direct point lookup -- the caller supplied the exact hash and gets the tx
+// with its true height -- but is deliberately hidden from every paginated scan,
+// which clamps iteration to latest_block() so pages stay gapless as the lower
+// gap fills. Returning NotFound from the point lookup instead would be a false
+// negative (the row is genuinely stored) that silently flips to Found once the
+// gap fills. This pins that divergence across all four public surfaces: the
+// point lookup finds the pending tx; get_events, get_transactions, and the
+// indexed get_transactions_by_address all hide it.
+TEST_F(IndexerTest, PendingTxServedByPointLookupButHiddenFromScans)
+{
+  // One address is both the event emitter and the root invoked_address, so it
+  // is the single discriminator for the event index, the tx list, and the
+  // address index alike.
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  SHA256Hash tx10, tx12;
+  std::ranges::fill(tx10, 0x10);
+  std::ranges::fill(tx12, 0x12);
+
+  auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
+    TxEventLog log;
+    log.proposed_tx_hash = tx;
+    TxEmittedEvent ev;
+    ev.contract_address = addr;
+    ev.num_topics = 0;
+    ev.serialized_event.resize(4);
+    log.events.push_back(std::move(ev));
+
+    ProposedTransaction body;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+
+    event_->indexer_event_process_events(height, TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
+  };
+
+  // Block 10 is contiguous; block 12 arrives before block 11, so it is
+  // ingested but held behind the watermark at 10.
+  ingest_at(10, tx10);
+  ingest_at(12, tx12);
+  ASSERT_EQ(db().latest_block(), 10);
+
+  // Point lookup: the pending block-12 tx IS served, with its true height.
+  TxInfoResult pending = block_explorer_->get_transaction_info(tx12)();
+  ASSERT_EQ(pending.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(pending.info().height, 12);
+
+  // The block-10 tx below the watermark is servable too (positive control).
+  TxInfoResult settled = block_explorer_->get_transaction_info(tx10)();
+  ASSERT_EQ(settled.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(settled.info().height, 10);
+
+  // Scan 1 -- events by address: only the block-10 event is served.
+  EventQuery event_query{};
+  EventFilter filter{};
+  filter.contract_addresses.push_back(addr);
+  event_query.filters.push_back(std::move(filter));
+  event_query.order = IterationOrder::IterationOrderAscending;
+  event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  event_query.limit = 0;
+
+  EventPage event_page = block_explorer_->get_events(event_query)();
+  EXPECT_EQ(event_page.latest_block, 10);
+  ASSERT_EQ(event_page.events.size(), 1);
+  EXPECT_EQ(event_page.events[0].block_height, 10);
+  EXPECT_EQ(event_page.events[0].proposed_tx_hash, tx10);
+
+  // Scan 2 -- unfiltered transaction list: only block 10 appears.
+  TransactionQuery tx_query{};
+  tx_query.order = IterationOrder::IterationOrderAscending;
+  tx_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  tx_query.limit = 0;
+
+  TransactionPage tx_page = block_explorer_->get_transactions(tx_query)();
+  EXPECT_EQ(tx_page.latest_block, 10);
+  ASSERT_EQ(tx_page.transactions.size(), 1);
+  EXPECT_EQ(tx_page.transactions[0].height, 10);
+
+  // Scan 3 -- indexed address query (get_transactions_by_address): the pending
+  // block-12 ref is hidden even though its tx is point-lookup visible.
+  AddressTransactionQuery addr_query{};
+  addr_query.address = addr;
+  addr_query.order = IterationOrder::IterationOrderAscending;
+  addr_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  addr_query.limit = 0;
+
+  TransactionRefPage addr_page =
+      block_explorer_->get_transactions_by_address(addr_query)();
+  EXPECT_EQ(addr_page.latest_block, 10);
+  ASSERT_EQ(addr_page.refs.size(), 1);
+  EXPECT_EQ(addr_page.refs[0].tx_hash, tx10);
+  EXPECT_EQ(addr_page.refs[0].height, 10);
+}
+
 } // namespace hogd
 
 int

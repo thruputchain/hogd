@@ -268,6 +268,18 @@ trace_execution(Machine &machine, Host &host, size_t max_steps = 4096)
   return trace;
 }
 
+// Zero per-step gas_remaining so block-metered threaded traces compare against
+// per-instruction canonical traces. Final gas is checked separately by callers.
+inline ExecTrace
+strip_trace_gas(ExecTrace trace)
+{
+  for (TraceStep &step : trace.steps) {
+    step.state.gas_remaining = 0;
+    step.state_before.gas_remaining = 0;
+  }
+  return trace;
+}
+
 // Empty string if the two traces match step for step, otherwise the index of
 // the first diverging step and the field that differs -- the primary output a
 // Machine-vs-oracle differential run reports.

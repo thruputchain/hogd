@@ -72,18 +72,34 @@ schedule, so artifacts built against a different gas table are rejected.
 the lowering step records the total gas for a run, and `enter_run()` charges it
 once before executing the run body. Control-flow and host boundary instructions
 are barriers. Loads and stores remain in straight-line runs for performance, so
-a memory trap can occur after the run has already been charged.
+a memory trap can fire after the run has already been charged past it;
+`trap_bad_memory` refunds the run's unexecuted suffix so the trapped state
+keeps exactly the instructions through the faulting one charged.
 
-All `Trap::kOutOfGas` paths saturate `gas_remaining` to zero in the canonical
-engine, production threaded engine, and independent spec model. Non-OOG traps
-may still observe charged-but-nonzero gas according to where the trap fires.
-On mid-run OOG, `ThreadedMachine` can abort at the run head while `Machine` has
-already executed the affordable prefix; the shared invariant is the OOG
-classification and zero remaining gas, not trap-time pc or partial state.
+An unaffordable run still executes speculatively on a zero balance with the
+shortfall recorded out-of-band; the deficit settles as `kOutOfGas` with zero
+gas at the run's exit seam, before any effect can escape the frame. The seams
+are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
+sees a syscall (a speculative syscall would have effects outside the frame),
+and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
+executes in deficit (every head settles first), bounding the overdraft by
+`kMaxRunGas` (the lowering's chunk cap; over-cap straight-line runs are split
+at mid-run break carriers rather than rejected).
 
-Do not infer trap-time gas semantics from the canonical engine alone. Any
-consensus-visible trap gas behavior should be pinned by focused tests and
-documented at the code path that implements it.
+The invariant this buys: the consensus-visible pair (trap classification,
+`gas_remaining`) matches the canonical `Machine` at every budget and on every
+trap class -- every instruction through and including the trapping one is
+charged, nothing after it, and all `Trap::kOutOfGas` paths saturate
+`gas_remaining` to zero in the canonical engine, production threaded engine,
+and independent spec model. This pair is consensus-visible because
+`rv32_contract.cc` reports `gas_limit - gas_remaining` to the caller as the
+frame's consumption, and a TryInvoke parent continues executing with the
+remainder. NOT invariant (frame-local state a trap discards): the trap pc, a
+speculative run's register/memory writes, and traced intermediate gas past
+the OOG fence. `Rv32ThreadedTrapGas` pins engine parity for every trap class
+-- including each fused handler's fault paths and every deficit seam -- and
+`Rv32Threaded.outOfGasMidRunSettlesAtNextSeam` pins the speculative
+semantics.
 
 ## Syscalls
 
@@ -92,11 +108,14 @@ number in `a0`, up to seven argument words in `a1..a7`, and executes `ecall`.
 The shared syscall parser interprets those words as pointers, lengths, scalars,
 enums, and optional sentinels.
 
-Production currently drives the `ecall` loop in `rv32_contract.cc` against live
-guest memory. `SyscallBridgeHost` exists as the testable host seam for the same
-ABI. If these paths are consolidated, preserve host error classification and
-the guest-memory atomicity guarantees before routing production through a shared
-bridge.
+Production drives the `ecall` loop in `rv32_contract.cc` against live guest
+memory for performance: syscall output spans point directly into the active
+`ThreadedMachine` memory. Syscall handlers that need atomic output behavior must
+stage internally before writing to those spans. `SyscallBridgeHost` is a
+canonical-test seam for the same register ABI; it intentionally runs
+`syscall_entry` against scratch memory so tests can inspect faults/OOG without
+committing partial writes to `Machine` memory. Do not infer production output
+rollback semantics from the bridge.
 
 ## Testing
 
@@ -114,3 +133,14 @@ The test strategy is deliberately redundant:
 
 For consensus-sensitive changes, prefer a narrow regression test near the
 changed layer plus at least one cross-engine check.
+
+Two local-only libFuzzer targets live under `fuzz/` (built with
+`-DBUILD_FUZZERS=ON`, excluded from CI). `rv32_fuzz_artifact` drives the
+attacker-facing deploy path -- raw bytes through `parse_artifact` /
+`parse_threaded_artifact` for the rejection paths, and a fixed-up well-formed
+artifact through lowering and machine construction to reach decode/fusion/image
+staging past the SHA256 digest wall. `rv32_fuzz_engine_diff` extends the
+canonical-vs-threaded differential beyond the fixed-seed corpora, asserting
+exact-`ProgramError` decoder parity and execution parity (OOG class and
+`gas_remaining==0` first; full trace parity only when neither engine runs out of
+gas). See `fuzz/README.md`.
