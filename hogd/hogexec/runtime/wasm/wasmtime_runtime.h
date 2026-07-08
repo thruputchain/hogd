@@ -103,10 +103,11 @@ public:
   // Get module statistics (e.g., serialized module size)
   bool get_module_stats(WasmtimeModuleStats *stats_out) const noexcept;
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
+private:
   // manipulated in rust
   void *wasmtime_runtime_ptr_;
 };

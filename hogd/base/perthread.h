@@ -214,7 +214,7 @@ public:
 
   T *operator->() const { return storage_.get(idx_); }
 
-  typename std::add_lvalue_reference_t<T> operator*() const
+  std::add_lvalue_reference_t<T> operator*() const
   {
     return *storage_.get(idx_);
   }

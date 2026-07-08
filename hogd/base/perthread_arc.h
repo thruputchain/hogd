@@ -77,7 +77,7 @@ public:
   }
 
   // Returns true if the value should be destroyed.
-  bool release_reference() noexcept
+  bool release_reference()
   {
     // The fast path: Decrease the current threadlocal count by 1.
     // If the threadlocal count is still positive, then shutdown has not yet
@@ -196,7 +196,7 @@ private:
   // Wrap atomic<int64_t> to force initialization to 0.
   // PerThread<T> requires movable types.
   struct Refcount {
-    Refcount() : count_((kUninitializedValue)) {}
+    Refcount() : count_(kUninitializedValue) {}
     // Why is this ok?
     // The threadlocal vector inside PerThread<T> is only ever modified if the
     // PerThread lock is held. That's the lock returned by

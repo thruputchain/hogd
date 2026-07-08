@@ -128,10 +128,11 @@ public:
 
   ~NativeRuntime() override = default;
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
+private:
   NativeContract &contract_;
 };
 

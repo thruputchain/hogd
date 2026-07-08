@@ -7,7 +7,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "hogd/base/bits.h"
@@ -19,20 +18,24 @@ namespace hogd {
 
 namespace {
 
-using Unit = std::pair<std::string, size_t>;
-
-const Unit iec_byte_units[] = {
-    {"PiB", 1UL << 50}, {"TiB", 1UL << 40}, {"GiB", 1UL << 30},
-    {"MiB", 1UL << 20}, {"KiB", 1UL << 10}, {"B", 1},
+struct Unit {
+  std::string_view name;
+  size_t size;
 };
 
-const Unit si_byte_units[] = {
-    {"PB", 1'000'000'000'000'000},
-    {"TB", 1'000'000'000'000},
-    {"GB", 1'000'000'000},
-    {"MB", 1'000'000},
-    {"KB", 1'000},
-    {"B", 1},
+constexpr Unit kIecByteUnits[] = {
+    {.name = "PiB", .size = 1UL << 50}, {.name = "TiB", .size = 1UL << 40},
+    {.name = "GiB", .size = 1UL << 30}, {.name = "MiB", .size = 1UL << 20},
+    {.name = "KiB", .size = 1UL << 10}, {.name = "B", .size = 1},
+};
+
+constexpr Unit kSiByteUnits[] = {
+    {.name = "PB", .size = 1'000'000'000'000'000},
+    {.name = "TB", .size = 1'000'000'000'000},
+    {.name = "GB", .size = 1'000'000'000},
+    {.name = "MB", .size = 1'000'000},
+    {.name = "KB", .size = 1'000},
+    {.name = "B", .size = 1},
 };
 
 template<size_t N>
@@ -60,7 +63,7 @@ encode_basen(std::span<const std::byte> buf)
   constexpr uint32_t kMask = kDictionary.size() - 1;
 
   std::string out;
-  out.reserve((buf.size() * kBitsPerByte + kBits - 1) / kBits);
+  out.reserve(((buf.size() * kBitsPerByte) + kBits - 1) / kBits);
 
   int bits_left = 0;
   uint32_t tmp = 0;
@@ -107,13 +110,13 @@ hex_digit_to_nibble(char c)
 std::string
 print_iec_bytes(size_t val, bool add_space)
 {
-  return pretty_print(iec_byte_units, val, add_space);
+  return pretty_print(kIecByteUnits, val, add_space);
 }
 
 std::string
 print_si_bytes(size_t val, bool add_space)
 {
-  return pretty_print(si_byte_units, val, add_space);
+  return pretty_print(kSiByteUnits, val, add_space);
 }
 
 std::string
