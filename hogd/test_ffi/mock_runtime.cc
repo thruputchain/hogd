@@ -15,6 +15,7 @@
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "types.hh"
 #include "x23/cleanup.h"
 
 namespace hogd {

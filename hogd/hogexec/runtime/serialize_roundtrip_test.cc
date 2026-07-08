@@ -35,6 +35,7 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
+// NOLINTNEXTLINE(misc-multiple-inheritance,misc-use-internal-linkage)
 class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                public NativeContractTestFramework {
 public:

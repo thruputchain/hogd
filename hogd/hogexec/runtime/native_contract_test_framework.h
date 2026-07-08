@@ -255,7 +255,7 @@ public:
   static bool do_logging_env() noexcept
   {
     if (char *p = getenv("HOGEXEC_TRACE")) {
-      if (long n = std::strtol(p, nullptr, 10); n > 0) {
+      if (int64_t n = std::strtol(p, nullptr, 10); n > 0) {
         return true;
       }
     }
