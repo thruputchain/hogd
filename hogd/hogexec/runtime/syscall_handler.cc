@@ -595,19 +595,32 @@ SystemCallHandler::try_commit_transaction()
     return ExecResult::ExecResultTxNonDeterministicError;
   }
 
-  auto new_contract_hashes =
-      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .get_committed_contracts();
-  auto res = db_proxy_.commit_transaction(
-      BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
-  if (!res.has_value()) {
+  // Abort on a throw here rather than let it escape with the tx still open: a
+  // retry would re-push the replay-cache delta and hard-abort at narrow
+  // (#2595).
+  try {
+    auto new_contract_hashes =
+        last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+            .value()
+            .get_committed_contracts();
+    auto res = db_proxy_.commit_transaction(
+        BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
+    if (!res.has_value()) {
+      two_phase_commit_failed_ = true;
+      auto abort_res = abort_transaction();
+      if (!abort_res.has_value()) {
+        return to_exec_result(abort_res.error().code());
+      }
+      return to_exec_result(res.error().code());
+    }
+  } catch (std::exception const &e) {
+    error("try_commit_transaction: commit preparation threw: {}", e.what());
     two_phase_commit_failed_ = true;
     auto abort_res = abort_transaction();
     if (!abort_res.has_value()) {
       return to_exec_result(abort_res.error().code());
     }
-    return to_exec_result(res.error().code());
+    return ExecResult::ExecResultUnrecoverable;
   }
 
   // This is past the point of successful commitment;
