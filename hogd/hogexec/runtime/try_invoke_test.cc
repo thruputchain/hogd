@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -41,6 +42,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -1149,12 +1151,42 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
+  handler2.enable_tracing();
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
   auto commit_res2 = handler2.try_commit_transaction();
   // transaction should not commit
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultTxDeterministicError);
+
+  // The failing try_invoke child frame's trace carries the 2pc conflict.
+  auto const *trace2 = handler2.get_trace();
+  ASSERT_NE(trace2, nullptr);
+  SyscallTrace const *invoke_sc = nullptr;
+  for (auto const &sc : trace2->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke_sc = &sc;
+      break;
+    }
+  }
+  ASSERT_NE(invoke_sc, nullptr);
+  auto const &invoke_trace = invoke_sc->body.invoke();
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+  auto const &child_trace = *invoke_trace.outputs->child_trace;
+  // Debug build + HogDB => full vector of conflicts (kDbDiagnosticAll).
+  // MockInMemory does not populate conflict diagnostics; skip that assertion.
+  if (GetParam() == TestDB::kHogDB) {
+    ASSERT_EQ(child_trace.commit_conflict.level(),
+              DbDiagnosticLevel::kDbDiagnosticAll);
+    bool found_excl = false;
+    for (auto const &c : child_trace.commit_conflict.conflicts()) {
+      if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
+        found_excl = true;
+      }
+    }
+    ASSERT_TRUE(found_excl);
+  }
 
   // Now commit the first transaction (should succeed)
   auto commit_res1 = handler1.try_commit_transaction();

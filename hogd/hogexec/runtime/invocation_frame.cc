@@ -13,6 +13,7 @@
 
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -278,7 +279,8 @@ InvocationFrameStack::start_frame(
 
 SystemStatus<std::pair<InvokeResult, bool>>
 InvocationFrameStack::finish_frame(InvokeStatus<void> result,
-                                   ExecutionModeData &execution_mode_data)
+                                   ExecutionModeData &execution_mode_data,
+                                   DbConflictResult *try_invoke_conflict_out)
 {
   InvokeResult frame_result = {
       .result_ = result,
@@ -316,6 +318,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
           return acq_res.error();
         }
         acq_success = acq_res.value();
+
+        // Hand the just-attempted push's conflict diagnostic back to the caller
+        // so it can be recorded on this frame's trace. None on a successful
+        // acquire (last_push_conflict_ is reset at the start of every push).
+        if (try_invoke_conflict_out) {
+          *try_invoke_conflict_out = db_proxy_.last_push_conflict();
+        }
 
         std::get<ProposalModeData>(execution_mode_data)
             .log_nondeterministic_bit(acq_success);
