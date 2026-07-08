@@ -13,8 +13,8 @@
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/protocol/block_compat.h"
 #include "rpc_types.hh"
-#include "types.hh"
 
 namespace hogd {
 

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "exec_result.hh"

@@ -20,6 +20,7 @@
 
 #include <getopt.h> // NOLINT(misc-include-cleaner)
 
+#include "consensus.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -34,13 +35,13 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 

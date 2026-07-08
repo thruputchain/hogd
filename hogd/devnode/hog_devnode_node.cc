@@ -27,6 +27,7 @@
 #include "db_sched.hh"
 #include "event.hh"
 #include "genesis.hh"
+#include "header.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "built_contracts/syscall_misc_tests.h"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"

@@ -1,10 +1,9 @@
 #include "hogd/db_interface/db_sched_server.h"
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/base/types.h"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {

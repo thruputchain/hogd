@@ -5,6 +5,7 @@
 #include <set>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"

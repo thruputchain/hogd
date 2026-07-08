@@ -12,6 +12,7 @@
 // generated x23 headers
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -30,13 +31,13 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/metrics/health.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -178,7 +179,7 @@ HogDBSchedRpc::commit_block(BlockID id, ConsensusValue value,
       return HogDBError(HogDBCode::kInternal);
     }
 
-    ret = ctx_.update_dbtip(id, value, db_hash);
+    ret = ctx_.update_dbtip(id, std::move(value), db_hash);
     if (!ret)
       return ret.error();
   }

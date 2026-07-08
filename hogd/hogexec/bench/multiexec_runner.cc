@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "ci_server.hh"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
@@ -42,7 +43,6 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
