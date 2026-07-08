@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "address_auth.hh"
-#include "db_conflict.hh"
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"

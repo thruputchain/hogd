@@ -29,6 +29,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class NNIntAddTest : public ::testing::TestWithParam<TestDB>,
                      public NativeContractTestFramework {
 public:
@@ -412,7 +413,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
 
   // The getter surfaces the same diagnostic the FFI serializes out. handler4's
   // add conflicts: handler3 committed set=0 (locking base_=0 in HogDB), but
-  // handler4's executor sees snapshot base=100, so the push is rejected with
+  // handler4's executor sees snapshot base=200, so the push is rejected with
   // kDbConflictValueMismatch.
   if (GetParam() == TestDB::kHogDB) {
     ASSERT_EQ(handler4.last_commit_conflict().level(),
