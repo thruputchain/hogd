@@ -37,6 +37,13 @@ ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
                           std::string_view method_name);
+// UTF-8 overload: the u8string_view bytes are hashed as-is (they are the UTF-8
+// preimage the SDK/generate_header.py used), independent of the ordinary
+// execution charset. Used by the entrypoint() debug cross-check. See #2898.
+ContractEntrypointID
+sdk_entrypoint_derivation(std::u8string_view identifier_name,
+                          std::u8string_view identifier_version,
+                          std::u8string_view method_name);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // `T` is a compile-time tag. XDR/TXS/CXS: 0 bytes (same as void / empty struct
@@ -228,9 +235,22 @@ public:
       // hogd issue #2678.
       auto canonical = entrypoint_from_method_id(
           ContractTrait::kEntrypoints[kLookupIndex<Name>]);
-      x23assert(canonical ==
-                sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                          ContractTrait::kVersion, Name.get()));
+      // Cross-check the generated constant against the host derivation, but
+      // hash the UTF-8 preimage twins (u8"" literals) rather than the ordinary
+      // kTraitName/kVersion/Name literals: under a non-UTF-8 -fexec-charset the
+      // ordinary bytes diverge from the UTF-8-derived kEntrypoints and abort an
+      // honest build. Skipped for traits that only expose kEntrypoints without
+      // the UTF-8 twins (e.g. hand-written test traits). See hogd issue #2898.
+      if constexpr (requires {
+                      ContractTrait::kTraitNameUtf8;
+                      ContractTrait::kVersionUtf8;
+                      ContractTrait::kExportNamesUtf8;
+                    }) {
+        x23assert(canonical ==
+                  sdk_entrypoint_derivation(
+                      ContractTrait::kTraitNameUtf8, ContractTrait::kVersionUtf8,
+                      ContractTrait::kExportNamesUtf8[kLookupIndex<Name>]));
+      }
       return canonical;
     }
     else {

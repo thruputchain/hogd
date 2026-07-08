@@ -105,6 +105,23 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
   return out;
 }
 
+ContractEntrypointID
+sdk_entrypoint_derivation(std::u8string_view identifier_name,
+                         std::u8string_view identifier_version,
+                         std::u8string_view method_name)
+{
+  // Reinterpret the UTF-8 code units as narrow bytes (byte-identical) and reuse
+  // the narrow derivation. Because the source literals are u8"", these bytes are
+  // exactly the UTF-8 preimage the SDK/generate_header.py hashed, independent of
+  // -fexec-charset; the narrow implementation's separator is likewise u8"::".
+  auto as_bytes = [](std::u8string_view s) {
+    return std::string_view(reinterpret_cast<const char *>(s.data()), s.size());
+  };
+  return sdk_entrypoint_derivation(as_bytes(identifier_name),
+                                   as_bytes(identifier_version),
+                                   as_bytes(method_name));
+}
+
 Runtime::MethodID
 sdk_method_id(ContractEntrypointID entry_point_id)
 {

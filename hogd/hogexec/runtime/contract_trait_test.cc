@@ -1,4 +1,8 @@
+#include <array>
 #include <concepts>
+#include <string_view>
+#include <tuple>
+
 #include <gtest/gtest.h>
 
 #include "built_contracts/fibonacci.h"
@@ -54,5 +58,63 @@ static_assert(
 // static_assert that "invalid_fibonacci" is not a valid method name
 // static_assert(!std::same_as<fibonacci_client_t::return_t<"invalid_fibonacci">,
 // uint32_t>);
+
+// Regression for #2898: the assertion-enabled entrypoint() debug cross-check
+// must hash the charset-independent u8"" preimage twins, not the ordinary
+// literals whose bytes depend on -fexec-charset.
+//
+// This toolchain's clang only accepts -fexec-charset=UTF-8, so we can't produce
+// a genuine non-UTF-8 ordinary literal. Instead we model the exact divergence a
+// non-UTF-8 build creates: the ordinary kTraitName/kVersion are deliberately
+// corrupted so their rehash differs from the UTF-8-derived kEntrypoints, while
+// the u8"" twins hold the correct UTF-8 preimage. kLookupIndex still matches
+// "transfer" within this TU (kExportNames is unchanged), exactly as it would in
+// a real -fexec-charset build. Reproduces on any execution charset.
+namespace {
+struct Utf8CrossCheckTrait {
+  // Corrupted ordinary literals: stand in for non-UTF-8 execution-charset bytes.
+  constexpr static std::string_view kTraitName = "XRC20";
+  constexpr static std::string_view kVersion = "9.9.9";
+  constexpr static auto kExportNames =
+      std::array<std::string_view, 1>{"transfer"};
+
+  // UTF-8-derived source of truth: sha256("ERC20::0.1::transfer")[:8].
+  constexpr static auto kEntrypoints =
+      std::array<uint64_t, 1>{0x63285b3523f9dc3fULL};
+
+  // Correct UTF-8 twins (what generate_header.py now emits).
+  constexpr static std::u8string_view kTraitNameUtf8 = u8"ERC20";
+  constexpr static std::u8string_view kVersionUtf8 = u8"0.1.4";
+  constexpr static auto kExportNamesUtf8 =
+      std::array<std::u8string_view, 1>{u8"transfer"};
+
+  using export_types = std::tuple<void (*)()>;
+};
+} // namespace
+
+TEST(ContractTraitTest, EntrypointDebugCrossCheckUsesUtf8Twins)
+{
+  using meta = ContractTraitMeta<Utf8CrossCheckTrait>;
+  auto canonical =
+      entrypoint_from_method_id(Utf8CrossCheckTrait::kEntrypoints[0]);
+
+  // Precondition: the ordinary-literal rehash (what the pre-#2898 cross-check
+  // hashed) diverges from the UTF-8-derived kEntrypoints. This is the exact
+  // condition a non-UTF-8 -fexec-charset build produces.
+  ASSERT_NE(canonical,
+            sdk_entrypoint_derivation(Utf8CrossCheckTrait::kTraitName,
+                                      Utf8CrossCheckTrait::kVersion,
+                                      "transfer"));
+
+  // The u8"" twins reproduce the canonical id independent of execution charset.
+  ASSERT_EQ(canonical,
+            sdk_entrypoint_derivation(Utf8CrossCheckTrait::kTraitNameUtf8,
+                                      Utf8CrossCheckTrait::kVersionUtf8,
+                                      Utf8CrossCheckTrait::kExportNamesUtf8[0]));
+
+  // Therefore entrypoint() no longer aborts on the debug cross-check and
+  // returns the canonical id. Against the pre-#2898 code this call SIGABRTs.
+  ASSERT_EQ(meta::entrypoint<"transfer">(), canonical);
+}
 
 } // namespace hogd

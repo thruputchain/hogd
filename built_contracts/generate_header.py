@@ -115,6 +115,13 @@ def generate_interface_struct(interface, wasm_file=None):
     ]
 
     export_names_str = ",\n            ".join(f'"{name}"' for name in export_names)
+    # UTF-8 (u8"") twins of the preimage components. Their bytes are the UTF-8
+    # encoding regardless of the C++ ordinary execution charset (-fexec-charset),
+    # so the host debug cross-check in ContractTraitMeta::entrypoint() can rehash
+    # them and match the UTF-8-derived kEntrypoints constants. See hogd #2898.
+    export_names_utf8_str = ",\n            ".join(
+        f'u8"{name}"' for name in export_names
+    )
     entrypoints_str = ",\n            ".join(f"0x{ep:016x}ULL" for ep in entrypoints)
 
     # Function signatures
@@ -152,6 +159,15 @@ struct {interface_name} {{
     // These will be sorted before being passed as indices to method id derivation.
     constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{
             {export_names_str}
+        }};
+
+    // UTF-8 twins of kTraitName/kVersion/kExportNames used only by the
+    // assertion-enabled entrypoint() debug cross-check, so it hashes
+    // charset-independent u8"" bytes instead of ordinary literals. See #2898.
+    constexpr static std::u8string_view kTraitNameUtf8 = u8"{interface_name}";
+    constexpr static std::u8string_view kVersionUtf8 = u8"{version}";
+    constexpr static auto kExportNamesUtf8 = std::array<std::u8string_view, {len(export_names)}>{{
+            {export_names_utf8_str}
         }};
 
     constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
