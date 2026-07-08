@@ -25,12 +25,12 @@ struct BlockHeader {
   BlockHash prev_block_hash;
 
   bool operator==(const BlockHeader &) const noexcept = default;
-  friend std::partial_ordering
-  operator<=>(const BlockHeader &, const BlockHeader &) noexcept;
+  friend std::partial_ordering operator<=>(const BlockHeader &,
+                                           const BlockHeader &) noexcept;
 };
 
-template<size_t I, x23::references<BlockHeader> T>
-requires(I < 6) decltype(auto)
+template<size_t I, x23::references<BlockHeader> T> requires (I < 6)
+decltype(auto)
 get(T &&t)
 {
   if constexpr (I == 0)
@@ -53,19 +53,18 @@ template<>
 struct std::tuple_size<hogd::BlockHeader>
   : std::integral_constant<std::size_t, 6> {};
 
-template<std::size_t I>
-requires(I < 6) struct std::tuple_element<I, hogd::BlockHeader> {
+template<std::size_t I> requires (I < 6)
+struct std::tuple_element<I, hogd::BlockHeader> {
   using struct_type = hogd::BlockHeader;
   using type = decltype(auto(get<I>(struct_type{})));
 };
 
-template<>
-struct x23::xdr_meta<hogd::BlockHeader> {
+template<> struct x23::xdr_meta<hogd::BlockHeader> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "BlockHeader";
   static constexpr std::array<std::string_view, 6> field_names{
-    "network_id", "block_height", "txset_hash",
-    "db_hash",    "events_hash",  "prev_block_hash",
+      "network_id", "block_height", "txset_hash",
+      "db_hash",    "events_hash",  "prev_block_hash",
   };
 };
 

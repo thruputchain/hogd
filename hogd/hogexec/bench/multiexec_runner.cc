@@ -258,11 +258,10 @@ close_block(db_sched_client_t &db_sched_client,
     throw std::runtime_error("Failed to close snapshot");
   }
   auto close_time = x23::fastclock::get_ns();
+  ConsensusValue value{};
+  value.proposal_header.block_height = block_number;
   auto commit_res =
-      // NOLINTBEGIN(bugprone-argument-comment)
-      db_sched_client.dbsched_commit_snapshot(block_number, /*block_hash=*/{},
-                                              /*events_hash=*/{});
-  // NOLINTEND(bugprone-argument-comment)
+      db_sched_client.dbsched_commit_snapshot(block_number, value);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
@@ -454,11 +453,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   auto write_genesis_configuration =
       [&](const GenesisConfiguration &genesis_configuration) {
-        uint64_t network_id = 0x0;
-        SHA256Hash txset_hash{};
-        SHA256Hash events_hash{};
+        ConsensusValue genesis_value{};
+        genesis_value.proposal_header.block_height = 0;
         auto res = db_sched_client.dbsched_load_genesis_configuration(
-            genesis_configuration, network_id, txset_hash, events_hash);
+            genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {
           throw std::runtime_error("Failed to write genesis block");
         }

@@ -68,11 +68,11 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
 
   GenesisConfiguration genesis_configuration{.initial_config = {},
                                              .storage_cost_model = cost_model};
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
-  auto res = db_sched_client_.dbsched_load_genesis_configuration(
-      genesis_configuration, network_id, txset_hash, events_hash);
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  auto res =
+      db_sched_client_.dbsched_load_genesis_configuration(genesis_configuration,
+                                                          genesis_value);
   if (res != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "DBContext: dbsched_load_genesis_configuration failed");
@@ -91,9 +91,9 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_close_snapshot failed");
     }
 
-    res = db_sched_client_.dbsched_commit_snapshot(current_block_id_,
-                                                   /*block_hash=*/{},
-                                                   /*events_hash=*/{});
+    ConsensusValue value{};
+    value.proposal_header.block_height = current_block_id_;
+    res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
           "advance_new_block: dbsched_commit_block failed");

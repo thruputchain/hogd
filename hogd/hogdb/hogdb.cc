@@ -113,12 +113,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    if (db_hash != tip->db_hash) {
+    if (db_hash != tip->storage_long_hash) {
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
     ctx.set_tip(*tip);
-    Health::instance().set_current_block_height(tip->height)();
+    Health::instance().set_current_block_height(
+        tip->value.proposal_header.block_height)();
     if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
       ctx.initialize_cost_model(*cost_model);
     }
@@ -129,8 +130,11 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
   else {
     CHECK_EQ(db_hash, DbHash{});
-    ctx.set_tip(
-        DbTip{.height = -1, .id = std::numeric_limits<BlockTXID>::max()});
+    ConsensusValue value{};
+    value.proposal_header.block_height = -1;
+    ctx.set_tip(DbTip{.id = std::numeric_limits<BlockTXID>::max(),
+                      .storage_long_hash = {},
+                      .value = std::move(value)});
     Health::instance().set_current_block_height(-1)();
   }
 

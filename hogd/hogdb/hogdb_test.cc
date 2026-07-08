@@ -382,10 +382,13 @@ TEST_F(HogDBTest, DataAccessObject)
   //
 
   // test db tip
-  DbTip tip{.height = 10,
-            .block_hash = sha256(std::as_bytes(std::span("foo"))),
-            .db_hash = db_hash_from_buf(std::as_bytes(std::span("foo"))),
-            .id = 30};
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = 10;
+  tip_value.proposal_header.txs_hash = sha256(std::as_bytes(std::span("foo")));
+  DbTip tip{.id = 30,
+            .storage_long_hash =
+                db_hash_from_buf(std::as_bytes(std::span("foo"))),
+            .value = std::move(tip_value)};
   EXPECT_TRUE(db_.write_dbtip(tip));
   HogDBStatus<DbTip> rtip = db_.read_dbtip();
   EXPECT_TRUE(rtip);

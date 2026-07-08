@@ -69,10 +69,9 @@ public:
     auto close = get_coord_client().dbsched_close_snapshot(block);
     EXPECT_EQ(close.result(), DbSchedResult::DbSchedResultOK);
 
-    auto commit = get_coord_client().dbsched_commit_snapshot(
-        block,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+    ConsensusValue value{};
+    value.proposal_header.block_height = block;
+    auto commit = get_coord_client().dbsched_commit_snapshot(block, value);
     EXPECT_EQ(commit.result(), DbSchedResult::DbSchedResultOK);
   }
 
@@ -327,10 +326,9 @@ TEST_F(DirectStalenessTest, CommitInvalidatedBlockReturnsError)
   auto close_b = get_coord_client().dbsched_close_snapshot(block_b);
   EXPECT_EQ(close_b.result(), DbSchedResult::DbSchedResultOK);
 
-  auto commit_b = get_coord_client().dbsched_commit_snapshot(
-      block_b,
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+  ConsensusValue value_b{};
+  value_b.proposal_header.block_height = block_b;
+  auto commit_b = get_coord_client().dbsched_commit_snapshot(block_b, value_b);
   EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
 }
 

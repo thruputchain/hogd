@@ -80,12 +80,12 @@ public:
     // one block back.
     ExpectedDBTip out;
     out.error(RPCError::kRPCNone);
-    out.db_tip() = DbTip{
-        .height = static_cast<BlockHeight>(block_id_) - 1,
-        .block_hash = sha256(block_id_),
-        .db_hash = {},
-        .id = block_id_ - 1,
-    };
+    ConsensusValue value{};
+    value.proposal_header.block_height =
+        static_cast<BlockHeight>(block_id_) - 1;
+    value.proposal_header.txs_hash = sha256(block_id_);
+    out.db_tip() =
+        DbTip{.id = block_id_ - 1, .storage_long_hash = {}, .value = value};
     return out;
   }
 

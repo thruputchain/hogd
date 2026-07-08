@@ -1617,7 +1617,7 @@ TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
 
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 0);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
     EXPECT_EQ(tip.db_tip().id, 0UL);
   }
 
@@ -1940,7 +1940,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
                                        /*retry=*/true)();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
@@ -1984,7 +1984,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
                                        /*retry=*/true)();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
 
     int status = process.terminate();
     std::string stderr_output = process.read_remaining_stderr();

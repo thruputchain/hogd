@@ -231,9 +231,9 @@ TEST(HogDBGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
   DbTip before = ctx.get_tip();
   EXPECT_FALSE(ctx.is_committed_read_stale(before));
 
-  ASSERT_TRUE(
-      ctx.update_dbtip(BlockTXID{7}, BlockHash{}, SHA256Hash{}, DbHash{})
-          .has_value());
+  ConsensusValue value{};
+  value.proposal_header.block_height = 7;
+  ASSERT_TRUE(ctx.update_dbtip(BlockTXID{7}, value, DbHash{}).has_value());
 
   // The pre-advance snapshot is now stale; the current tip is not.
   EXPECT_TRUE(ctx.is_committed_read_stale(before));

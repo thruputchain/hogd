@@ -1398,7 +1398,8 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
       NativeContractTestFramework::make_contract_address(20);
 
   framework_.advance_block();
-  auto const expired_height = BlockHeight{framework_.get_db_tip().height - 1};
+  auto const expired_height = BlockHeight{
+      framework_.get_db_tip().value.proposal_header.block_height - 1};
 
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -1548,7 +1549,7 @@ TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
 
   auto &snapshot = res.value();
   EXPECT_NE(snapshot.block_id, 0U);
-  EXPECT_GE(snapshot.tip.height, 0);
+  EXPECT_GE(snapshot.tip.value.proposal_header.block_height, 0);
 
   auto close_res =
       framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);

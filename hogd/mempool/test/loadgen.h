@@ -86,10 +86,11 @@ public:
       size_t num_nominated_txs = 0;
       SchedulerNominatedBlock nomination{};
       while (num_nominated_txs < init_tx.size()) {
-        DbTip db_tip{.height = nomination.nomination.block_height,
-                     .block_hash = nomination.nomination.block_hash,
-                     .db_hash = {},
-                     .id = nomination.block_id};
+        ConsensusValue value{};
+        value.proposal_header.block_height = nomination.nomination.block_height;
+        DbTip db_tip{.id = nomination.block_id,
+                     .storage_long_hash = {},
+                     .value = std::move(value)};
         auto res_nominate =
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
@@ -109,10 +110,11 @@ public:
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
 
-      ret = {.height = nomination.nomination.block_height,
-             .block_hash = nomination.nomination.block_hash,
-             .db_hash = {},
-             .id = nomination.block_id};
+      ConsensusValue value{};
+      value.proposal_header.block_height = nomination.nomination.block_height;
+      ret = {.id = nomination.block_id,
+             .storage_long_hash = {},
+             .value = std::move(value)};
     }
 
     info("Initialized loadgen experiment with context_id {}", context_id_);
@@ -205,10 +207,11 @@ public:
         num_txs = tx_hashes.size();
       }
 
-      db_tip = {.height = nomination.block_height,
-                .block_hash = nomination.block_hash,
-                .db_hash = {},
-                .id = res_nominate.nominated_block().block_id};
+      ConsensusValue value{};
+      value.proposal_header.block_height = nomination.block_height;
+      db_tip = {.id = res_nominate.nominated_block().block_id,
+                .storage_long_hash = {},
+                .value = std::move(value)};
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.

@@ -293,9 +293,9 @@ public:
   };
 
   // Commits the current block and creates a new one. Returns the committed
-  // block's resulting trie root hash (captured at close), so callers can
+  // block's resulting storage hash (captured at close), so callers can
   // compare committed-block state (mirrors discard_block).
-  DbHash advance_block(
+  StorageShortHash advance_block(
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       DbSchedResult expected_dbsched_commit_snapshot_result =
           DbSchedResult::DbSchedResultOK);
@@ -307,12 +307,13 @@ public:
                         BlockExecutionMode::kBlockExecutionModeProposal);
 
   // Discards the current block and creates a new one. Returns the discarded
-  // block's resulting trie root hash (captured at close, before abandoning),
+  // block's resulting storage hash (captured at close, before abandoning),
   // so callers can compare what state the block would have produced -- e.g. a
   // proposal block against its validation-mode replay -- without committing it,
   // leaving the next block to replay against the same pre-block state.
-  DbHash discard_block(BlockExecutionMode mode =
-                           BlockExecutionMode::kBlockExecutionModeProposal);
+  StorageShortHash
+  discard_block(BlockExecutionMode mode =
+                    BlockExecutionMode::kBlockExecutionModeProposal);
 
   [[deprecated("use the Transaction version instead")]] SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
@@ -684,11 +685,10 @@ private:
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
       };
-      uint64_t network_id = 0x0;
-      SHA256Hash txset_hash{};
-      SHA256Hash events_hash{};
+      ConsensusValue genesis_value{};
+      genesis_value.proposal_header.block_height = 0;
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
-          genesis_configuration, network_id, txset_hash, events_hash);
+          genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
             "initialize: dbsched_load_genesis_configuration failed");

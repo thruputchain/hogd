@@ -20,13 +20,10 @@ DbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-DbSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
-                                    SHA256Hash events_hash)
+DbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
 {
   if (block_manager_->commit_block(id)) {
-    //(geoff) TODO: Replace with actual BlockHash if available
     DbBlockResult result(DbSchedResult::DbSchedResultOK);
-    // result.block_hash = ...; // Set block_hash if available
     co_return result;
   }
   DbBlockResult result(DbSchedResult::DbSchedResultError);
@@ -60,8 +57,7 @@ DbSchedRpc::dbsched_abandon_snapshot(BlockID id)
 
 x23::Async<DbSchedResult>
 DbSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration const &genesis_configuration, uint64_t network_id,
-    SHA256Hash txset_hash, SHA256Hash events_hash)
+    GenesisConfiguration genesis_configuration, ConsensusValue value)
 {
   if (block_manager_->initialize_genesis_configuration(genesis_configuration)) {
     co_return DbSchedResult::DbSchedResultOK;

@@ -116,7 +116,9 @@ protected:
     ASSERT_TRUE(db_.write_address_auth_data(addr, old_auth_data));
     grant_storage_token(addr, 1'000'000);
 
-    DbTip tip{.height = kAcceptedHeight, .id = 0};
+    ConsensusValue tip_value{};
+    tip_value.proposal_header.block_height = kAcceptedHeight;
+    DbTip tip{.id = 0, .storage_long_hash = {}, .value = tip_value};
     ASSERT_TRUE(db_.write_dbtip(tip));
 
     ctx_opt_.emplace(std::move(db_), nullptr);
@@ -148,7 +150,8 @@ protected:
     PerThreadARC<BlockTX> *block_tx = ctx.get_block_tx(kBlockId, false);
     ASSERT_NE(block_tx, nullptr);
     ASSERT_EQ(block_tx->get().get_height(), kNextHeight);
-    HogDBStatus<DbHash> db_hash = block_tx->get().close(ctx.get_tip().db_hash);
+    HogDBStatus<DbHash> db_hash =
+        block_tx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(db_hash.has_value());
     ASSERT_TRUE(block_tx->get().commit().has_value());
 
@@ -670,7 +673,10 @@ TEST_F(AuthSubscriptionTest, IntroHeightCoversAlreadyPublishedHeight)
   constexpr BlockHeight kPublishedHeight = kCommittedHeight + 1;
 
   // The committed tip is H-1: this is what the racing intro reads.
-  ASSERT_TRUE(db_.write_dbtip(DbTip{.height = kCommittedHeight, .id = 0}));
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = kCommittedHeight;
+  ASSERT_TRUE(db_.write_dbtip(
+      DbTip{.id = 0, .storage_long_hash = {}, .value = tip_value}));
   RPCContext ctx(std::move(db_), nullptr);
   ASSERT_EQ(ctx.get_height_threadsafe(), kCommittedHeight);
 

@@ -269,15 +269,14 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
   GenesisConfiguration genesis_configuration{};
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
 
   auto r = get_coord_client().dbsched_load_genesis_configuration(
-      genesis_configuration, network_id, txset_hash, events_hash);
+      genesis_configuration, genesis_value);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
   r = get_coord_client().dbsched_load_genesis_configuration(
-      genesis_configuration, network_id, txset_hash, events_hash);
+      genesis_configuration, genesis_value);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 

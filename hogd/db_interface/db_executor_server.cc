@@ -249,12 +249,11 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
   // tip whose id equals the requested block).
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
-  out.db_tip() = DbTip{
-      .height = -1,
-      .block_hash = {},
-      .db_hash = {},
-      .id = block_manager_->committed_tip_id(),
-  };
+  ConsensusValue value{};
+  value.proposal_header.block_height = -1;
+  out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
+                       .storage_long_hash = {},
+                       .value = value};
   return out;
 }
 
