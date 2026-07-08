@@ -43,6 +43,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
