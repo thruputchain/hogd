@@ -342,16 +342,6 @@ threaded_from_words(std::span<const uint32_t> words,
       std::move(pre_instantiation.value()));
 }
 
-ExecTrace
-strip_trace_gas(ExecTrace trace)
-{
-  for (TraceStep &step : trace.steps) {
-    step.state.gas_remaining = 0;
-    step.state_before.gas_remaining = 0;
-  }
-  return trace;
-}
-
 void
 expect_engine_only_fusion_coverage(
     const ThreadedMachinePreInstantiation &program, uint64_t seed)
