@@ -135,7 +135,8 @@ struct ArtifactFixup {
 // Layout: [u32 start][u32 mem_len][u32 extra][payload...]. The payload is split
 // into initial_memory (clamped to fit both kMaxMemoryBytes and the remaining
 // bytes) followed by code, which is forced non-empty and 4-aligned so the fixup
-// reaches decode. memory_bytes is start+size plus a fuzzer-chosen headroom, to
+// reaches decode. The empty initial-memory image has a single canonical start
+// encoding (0), and memory_bytes is floor plus fuzzer-chosen headroom to
 // exercise the zero-extended tail. nullopt if the payload is empty.
 inline std::optional<ArtifactFixup>
 carve_artifact_fixup(std::span<const uint8_t> data)
@@ -157,6 +158,9 @@ carve_artifact_fixup(std::span<const uint8_t> data)
   ArtifactFixup fixup;
   fixup.initial_memory_start = start;
   fixup.initial_memory.assign(tail.begin(), tail.begin() + mem_len);
+  if (fixup.initial_memory.empty()) {
+    fixup.initial_memory_start = 0;
+  }
 
   const std::span<const uint8_t> code_tail = tail.subspan(mem_len);
   for (std::size_t i = 0; i + kInstructionBytes <= code_tail.size();
@@ -167,8 +171,8 @@ carve_artifact_fixup(std::span<const uint8_t> data)
     fixup.code_words.push_back(test_program::addi(1, 0, 0));
   }
 
-  const uint32_t floor =
-      start + static_cast<uint32_t>(fixup.initial_memory.size());
+  const uint32_t floor = fixup.initial_memory_start +
+                         static_cast<uint32_t>(fixup.initial_memory.size());
   const uint32_t min_memory = std::max<uint32_t>(1, floor);
   const uint32_t room = kMaxMemoryBytes - min_memory;
   fixup.memory_bytes = min_memory + (room == 0 ? 0U : extra_knob % (room + 1));

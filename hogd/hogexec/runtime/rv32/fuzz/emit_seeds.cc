@@ -59,9 +59,10 @@ main(int argc, char **argv)
   std::filesystem::create_directories(engine_dir);
 
   // Artifact seeds: one valid, plus two near-misses.
+  const std::vector<uint8_t> valid_memory = {0};
   const std::vector<uint8_t> valid =
       test_artifact::build_artifact({test_program::addi(1, 0, 5), 0x00000073U},
-                                    {});
+                                    valid_memory);
   write_file(artifact_dir / "valid.bin", valid);
 
   std::vector<uint8_t> bad_magic = valid;

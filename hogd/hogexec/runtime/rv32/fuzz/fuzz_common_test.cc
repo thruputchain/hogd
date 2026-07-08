@@ -149,5 +149,23 @@ TEST(Rv32FuzzCarveArtifact, ReturnsNulloptWhenNoPayload)
   EXPECT_FALSE(carve_artifact_fixup(data).has_value());
 }
 
+TEST(Rv32FuzzCarveArtifact, EmptyInitialMemoryUsesCanonicalStartZero)
+{
+  std::vector<uint8_t> data;
+  const std::array<uint8_t, 4> start = {5, 0, 0, 0};
+  const std::array<uint8_t, 4> zero = {0, 0, 0, 0};
+  data.insert(data.end(), start.begin(), start.end()); // nonzero start knob
+  data.insert(data.end(), zero.begin(), zero.end());   // mem_len = 0
+  data.insert(data.end(), zero.begin(), zero.end());   // extra = 0
+  data.insert(data.end(), {0x13, 0x00, 0x00, 0x00});   // one code word
+
+  const auto fx = carve_artifact_fixup(data);
+  ASSERT_TRUE(fx.has_value());
+  EXPECT_TRUE(fx->initial_memory.empty());
+  EXPECT_EQ(fx->initial_memory_start, 0U);
+  EXPECT_GE(fx->memory_bytes, 1U);
+  EXPECT_FALSE(fx->code_words.empty());
+}
+
 } // namespace
 } // namespace hogd::rv32::fuzz
