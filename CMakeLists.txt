@@ -195,6 +195,11 @@ cmake_policy(SET CMP0114 NEW)
 if (HAS_CI_FAIL_LOG)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
   set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+  set(HOGD_RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+  set(HOGD_RULE_LAUNCH_LINK "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+else()
+  set(HOGD_RULE_LAUNCH_COMPILE "")
+  set(HOGD_RULE_LAUNCH_LINK "")
 endif()
 
 
@@ -285,6 +290,11 @@ endif()
 # Fix for macOS/LLVM: atomic operations are built-in, no need for -latomic
 set(BUILTIN_ATOMIC ON CACHE BOOL "" FORCE)
 add_subdirectory(external/rocksdb EXCLUDE_FROM_ALL)
+# RocksDB's CMakeLists globally installs ccache as RULE_LAUNCH_* when ccache is
+# present. The wrapper already configures ccache through CMAKE_*_COMPILER_LAUNCHER,
+# and leaving both enabled generates nested `ccache ccache ...` Ninja commands.
+set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${HOGD_RULE_LAUNCH_COMPILE}")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${HOGD_RULE_LAUNCH_LINK}")
 set(ROCKSDB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rocksdb/include")
 include_directories(${ROCKSDB_SOURCE_DIR})
 
