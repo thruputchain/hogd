@@ -38,6 +38,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/materialized_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"

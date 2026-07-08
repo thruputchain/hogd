@@ -10,6 +10,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
 #include "built_contracts/manual_revert_test.h"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "genesis.hh"

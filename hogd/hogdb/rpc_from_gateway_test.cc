@@ -10,6 +10,7 @@
 #include <utility>
 
 // xdr types
+#include "consensus.hh"
 #include "db_gateway.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -29,6 +30,7 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_gateway.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"

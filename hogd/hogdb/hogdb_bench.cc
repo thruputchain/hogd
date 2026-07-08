@@ -21,6 +21,7 @@
 #include <getopt.h> // NOLINT(misc-include-cleaner)
 
 #include "consensus.hh"
+#include "header.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"

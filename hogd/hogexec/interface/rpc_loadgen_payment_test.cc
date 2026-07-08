@@ -4,6 +4,7 @@
 #include <memory>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
@@ -26,7 +27,6 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"

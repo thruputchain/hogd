@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"

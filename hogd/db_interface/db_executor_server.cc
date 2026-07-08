@@ -1,5 +1,6 @@
 #include "hogd/db_interface/db_executor_server.h"
 
+#include "consensus.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"

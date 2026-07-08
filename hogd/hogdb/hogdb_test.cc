@@ -16,6 +16,7 @@
 // xdr types
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -57,6 +58,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/common/limits.h"
 #include "hogd/init.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"

@@ -5,6 +5,7 @@
 #include <span>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -14,6 +15,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
