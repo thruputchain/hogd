@@ -927,6 +927,32 @@ SystemCallHandler::finish_frame(
     }
   }
 
+  // Finish the frame on the stack first, capturing any try_invoke two-phase-
+  // commit conflict. This must run after log_trace_finish() above (which reads
+  // the finishing frame) and before the parent-trace restore below, so the
+  // conflict can be recorded on this (still-current) child frame's trace.
+  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
+  DbConflictResult try_invoke_conflict{DbDiagnosticLevel::kDbDiagnosticNone};
+  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_,
+                                                  &try_invoke_conflict);
+  size_t stack_size_after = invocation_frame_stack_.size();
+  assert(stack_size_after == stack_size - 1);
+  if (stack_size_after == 0) {
+    last_frame_finished_ = true;
+  }
+
+  // Record the conflict on this frame's trace. Best-effort: copying the All arm
+  // allocates, and finish_frame() is noexcept and reachable from the test FFI
+  // mock path, so a std::bad_alloc drops the diagnostic rather than terminating.
+  if (invocation_frame_trace_ &&
+      try_invoke_conflict.level() != DbDiagnosticLevel::kDbDiagnosticNone) {
+    try {
+      invocation_frame_trace_->commit_conflict = std::move(try_invoke_conflict);
+    } catch (std::exception &e) {
+      report_dropped_log(e.what());
+    }
+  }
+
   // Restore parent trace and attach child
   if (stashed_parent_trace) {
     auto child_trace = std::move(invocation_frame_trace_);
@@ -956,13 +982,6 @@ SystemCallHandler::finish_frame(
     }
   }
 
-  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
-  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_);
-  size_t stack_size_after = invocation_frame_stack_.size();
-  assert(stack_size_after == stack_size - 1);
-  if (stack_size_after == 0) {
-    last_frame_finished_ = true;
-  }
   return res;
 }
 

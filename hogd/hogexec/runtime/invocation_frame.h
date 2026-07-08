@@ -15,6 +15,7 @@
 
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -308,9 +309,12 @@ public:
                    std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
+  // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
+  // try_invoke, it is set to the frame's post-acquire two-phase-commit conflict
+  // (kDbDiagnosticNone on a successful acquire).
   SystemStatus<std::pair<InvokeResult, bool>>
-  finish_frame(InvokeStatus<void> result,
-               ExecutionModeData &execution_mode_data);
+  finish_frame(InvokeStatus<void> result, ExecutionModeData &execution_mode_data,
+               DbConflictResult *try_invoke_conflict_out = nullptr);
 
   void log_trace_finish(InvocationFrameTrace &trace);
 
