@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <expected>
 #include <optional>
 #include <random>
@@ -651,81 +652,87 @@ InvokeTX::assert_is_valid() const noexcept
   assert(tx_depth_ >= 0);
   assert(tx_depth_ <= kMaxSavepointDepth);
   if constexpr (is_debug_build()) {
-    std::unordered_map<Address, int128_t> balance_deltas;
-    for (const auto &[key, vec] : changes_) {
-      [[maybe_unused]] unsigned int depth = 0;
-      for (const ItemVersion &item : vec) {
-        assert(item.tx_depth >= depth);
-        assert(item.tx_depth <= tx_depth_);
-        depth = item.tx_depth + 1;
+    try {
+      std::unordered_map<Address, int128_t> balance_deltas;
+      for (const auto &[key, vec] : changes_) {
+        [[maybe_unused]] unsigned int depth = 0;
+        for (const ItemVersion &item : vec) {
+          assert(item.tx_depth >= depth);
+          assert(item.tx_depth <= tx_depth_);
+          depth = item.tx_depth + 1;
+        }
+        if (!vec.empty()) {
+          balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+        }
       }
-      if (!vec.empty()) {
-        balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+      for (const auto &[addr, vec] : balance_deltas_) {
+        if (!vec.empty()) {
+          assert(vec.back().total_locked_storage_amount ==
+                 balance_deltas[addr]);
+        }
+        else {
+          assert(balance_deltas[addr] == 0);
+        }
       }
-    }
-    for (const auto &[addr, vec] : balance_deltas_) {
-      if (!vec.empty()) {
-        assert(vec.back().total_locked_storage_amount == balance_deltas[addr]);
-      }
-      else {
-        assert(balance_deltas[addr] == 0);
-      }
-    }
 
-    // Verify that balance changes in changes_ match what's expected from
-    // balance_deltas_
-    for (const auto &[key, vec] : changes_) {
-      if (key.is_address_balance() && !vec.empty()) {
-        const ItemVersion &item = vec.back();
-        assert(item.change.is_balance());
-        [[maybe_unused]]
-        auto balance = item.change.to_balance();
-        assert(balance);
+      // Verify that balance changes in changes_ match what's expected from
+      // balance_deltas_
+      for (const auto &[key, vec] : changes_) {
+        if (key.is_address_balance() && !vec.empty()) {
+          const ItemVersion &item = vec.back();
+          assert(item.change.is_balance());
+          [[maybe_unused]]
+          auto balance = item.change.to_balance();
+          assert(balance);
 
-        Address addr = key.get_address();
-        auto bal_it = balance_deltas_.find(addr);
-        if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
-          const auto &bal = bal_it->second.back();
+          Address addr = key.get_address();
+          auto bal_it = balance_deltas_.find(addr);
+          if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
+            const auto &bal = bal_it->second.back();
+            [[maybe_unused]]
+            const int128_t expected_delta =
+                bal.manual_transfer_amount - bal.total_locked_storage_amount;
+            assert(balance->delta() == expected_delta);
+          }
+          else {
+            // No balance_deltas_ entry means no storage costs or transfers
+            assert(balance->delta() == 0);
+          }
+        }
+      }
+
+      // Verify the reverse: for every address in balance_deltas_, there should
+      // be a corresponding balance item in changes_ with the correct delta
+      for (const auto &[addr, vec] : balance_deltas_) {
+        if (!vec.empty()) {
+          auto key = make_address_balance_item_key(addr);
+          auto it = changes_.find(key);
+          if (it == changes_.end() || it->second.empty()) {
+            [[maybe_unused]]
+            auto const &bal = vec.back();
+            assert(bal.manual_transfer_amount -
+                       bal.total_locked_storage_amount ==
+                   0);
+            continue;
+          }
+          assert(it != changes_.end());
+          assert(!it->second.empty());
+
+          const ItemVersion &item = it->second.back();
+          assert(item.change.is_balance());
+          [[maybe_unused]]
+          auto balance = item.change.to_balance();
+          assert(balance);
+
+          const auto &bal = vec.back();
           [[maybe_unused]]
           const int128_t expected_delta =
               bal.manual_transfer_amount - bal.total_locked_storage_amount;
           assert(balance->delta() == expected_delta);
         }
-        else {
-          // No balance_deltas_ entry means no storage costs or transfers
-          assert(balance->delta() == 0);
-        }
       }
-    }
-
-    // Verify the reverse: for every address in balance_deltas_, there should
-    // be a corresponding balance item in changes_ with the correct delta
-    for (const auto &[addr, vec] : balance_deltas_) {
-      if (!vec.empty()) {
-        auto key = make_address_balance_item_key(addr);
-        auto it = changes_.find(key);
-        if (it == changes_.end() || it->second.empty()) {
-          [[maybe_unused]]
-          auto const &bal = vec.back();
-          assert(bal.manual_transfer_amount - bal.total_locked_storage_amount ==
-                 0);
-          continue;
-        }
-        assert(it != changes_.end());
-        assert(!it->second.empty());
-
-        const ItemVersion &item = it->second.back();
-        assert(item.change.is_balance());
-        [[maybe_unused]]
-        auto balance = item.change.to_balance();
-        assert(balance);
-
-        const auto &bal = vec.back();
-        [[maybe_unused]]
-        const int128_t expected_delta =
-            bal.manual_transfer_amount - bal.total_locked_storage_amount;
-        assert(balance->delta() == expected_delta);
-      }
+    } catch (...) {
+      std::terminate();
     }
   }
 }

@@ -844,6 +844,8 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   CHECK(proposal.outcome() == SchedulerProposalOutcome::SchedulerProposalOK);
   ConsensusValue value{};
   value.proposal_header = proposal.proposed_block().proposal.header;
+  value.proposal_txs_hash =
+      sha256(proposal.proposed_block().proposal.transactions);
   CHECK(client.schedulercoord_commit_block(proposal.proposed_block().block_id,
                                            value)() ==
         SchedulerCommitOutcome::SchedulerCommitOK);

@@ -246,7 +246,9 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
       ctx_.get_tip().value.proposal_header.block_height);
 
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
-  result.storage_hash() = ctx_.get_tip().value.proposal_header.storage_hash;
+  DbTip tip = ctx_.get_tip();
+  result.block().storage_hash = tip.value.proposal_header.storage_hash;
+  result.block().storage_long_hash = tip.storage_long_hash;
   co_return result;
 }
 
@@ -292,7 +294,8 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   }
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
   ctx_.cache_db_hash(id, *db_hash_result);
-  ret.storage_hash() = sha256(std::as_bytes(std::span(*db_hash_result)));
+  ret.block().storage_hash = sha256(std::as_bytes(std::span(*db_hash_result)));
+  ret.block().storage_long_hash = *db_hash_result;
   co_return ret;
 }
 

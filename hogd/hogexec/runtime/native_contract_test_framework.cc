@@ -38,7 +38,7 @@ NativeContractTestFramework::advance_block(
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
-    closed_hash = r.storage_hash();
+    closed_hash = r.block().storage_hash;
   }
   {
     ConsensusValue value{};
@@ -144,7 +144,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("discard_block: dbsched_close_snapshot failed");
     }
-    closed_hash = r.storage_hash();
+    closed_hash = r.block().storage_hash;
   }
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);

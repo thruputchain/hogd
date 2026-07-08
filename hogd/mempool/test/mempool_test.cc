@@ -59,6 +59,14 @@ make_amount(uint128_t amount)
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
 
+ValidatorID
+make_validator_id(uint8_t value)
+{
+  ValidatorID validator_id{};
+  validator_id.fill(value);
+  return validator_id;
+}
+
 } // namespace
 
 // TODO(jhumphri): Update this test once we implement authentication and
@@ -1119,6 +1127,171 @@ TEST(Mempool, ValidateCommit)
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, NominationHashUsesClosedStorageRoot)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  SchedulerNominationResult res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(parent_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+  const Nomination nomination = res_nominate.nominated_block().nomination;
+
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(
+          res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip committed_tip = get_tip.db_tip();
+
+  SignedTransactionHashBatch tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+  const ProposalHeaderHash expected_block_hash = sha256(BlockHeader{
+      .network_id = MempoolTestInfra::kNetworkId,
+      .block_height = nomination.block_height,
+      .txset_hash = MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+      .db_hash = committed_tip.storage_long_hash,
+      .events_hash = committed_tip.value.proposal_header.events_hash,
+      .prev_block_hash = parent_tip.value.proposal_header.txs_hash});
+
+  EXPECT_EQ(nomination.block_hash, expected_block_hash);
+}
+
+TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  ProposalContext context{.proposer = make_validator_id(0x42),
+                          .block_timepoint = 123456789};
+  SchedulerProposalResult res_propose =
+      server.mempool_coord_rpc().schedulercoord_propose_block(parent_tip.id,
+                                                              context)();
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_propose.proposed_block();
+
+  EXPECT_EQ(proposed.proposal.header.proposer, context.proposer);
+  EXPECT_EQ(proposed.proposal.header.block_timepoint, context.block_timepoint);
+  EXPECT_NE(proposed.proposal.header.storage_hash, StorageShortHash{});
+
+  ConsensusValue value{};
+  value.proposal_header = proposed.proposal.header;
+  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(proposed.block_id,
+                                                             value)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header, proposed.proposal.header);
+}
+
+TEST(Mempool, CommitBlockRejectsMismatchedConsensusValue)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  SchedulerProposalResult res_propose =
+      server.mempool_coord_rpc().schedulercoord_propose_block(
+          parent_tip.id, ProposalContext{})();
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_propose.proposed_block();
+
+  ConsensusValue value{};
+  value.proposal_header = proposed.proposal.header;
+  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+  value.proposal_header.events_hash[0] ^= 0xff;
+
+  SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(proposed.block_id,
+                                                             value)();
+  EXPECT_EQ(res_commit,
+            SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, parent_tip.id);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            parent_tip.value.proposal_header.block_height);
+}
+
+TEST(Mempool, ValidateBlockRejectsTamperedHeaderRoots)
+{
+  auto expect_tampered_root_rejected = [](auto tamper) {
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    const SignedTransactionBatch txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
+
+    MempoolTestInfra server;
+
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const DbTip parent_tip = get_tip.db_tip();
+
+    SchedulerProposalResult res_propose =
+        server.mempool_coord_rpc().schedulercoord_propose_block(
+            parent_tip.id, ProposalContext{})();
+    ASSERT_EQ(res_propose.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    Proposal proposal = res_propose.proposed_block().proposal;
+    tamper(proposal.header);
+
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+    SchedulerValidationResult res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate_block(parent_tip.id,
+                                                                 proposal)();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationInvalid);
+  };
+
+  expect_tampered_root_rejected(
+      [](ProposalHeader &header) { header.storage_hash[0] ^= 0xff; });
+  expect_tampered_root_rejected(
+      [](ProposalHeader &header) { header.events_hash[0] ^= 0xff; });
 }
 
 TEST(Mempool, ValidateTwo)

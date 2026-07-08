@@ -531,6 +531,7 @@ submit_and_commit(sched_coord_client_t &scheduler,
   }
   ConsensusValue value{};
   value.proposal_header = proposed.proposal.header;
+  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
   if (scheduler.schedulercoord_commit_block(proposed.block_id, value)() !=
       SchedulerCommitOutcome::SchedulerCommitOK) {
     ADD_FAILURE() << "schedulercoord_commit_block did not return OK";
