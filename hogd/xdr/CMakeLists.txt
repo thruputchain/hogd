@@ -13,6 +13,7 @@ add_xdr(
   ../../protocol/contract.x
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x
+  ../../protocol/db_conflict.x
   ../../protocol/discovery.x
   ../../protocol/event.x
   ../../protocol/event_rpc.x
@@ -23,6 +24,7 @@ add_xdr(
   ../../protocol/genesis.x
   ../../protocol/hogexec_constants.x
   ../../protocol/indexer.x
+  ../../protocol/integration.x
   ../../protocol/invoke_flag.x
   ../../protocol/invoke_args.x
   ../../protocol/loadgen.x

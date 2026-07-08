@@ -36,7 +36,8 @@ Rv32Contract::create(ContractBlob const &contract_blob)
   }
 
   auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
-      artifact->code, artifact->initial_memory, artifact->memory_bytes, false);
+      artifact->code, artifact->initial_memory, artifact->initial_memory_start,
+      artifact->memory_bytes, false);
   if (!pre_instantiation.has_value()) {
     return std::nullopt;
   }
@@ -101,6 +102,10 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
     ExternHostCallContext host_fn_ctx = syscall_handler_;
     assert(host_fn_ctx != nullptr);
 
+    // Production RV32 intentionally exposes live guest memory to syscall_entry:
+    // generated syscall output spans write directly into the ThreadedMachine's
+    // memory for speed. Syscall handlers that need all-or-nothing output
+    // semantics must stage internally before touching those spans.
     WasmContext wasm_context = {
         .memory = LinearMemorySlice{.mem = machine.memory().data(),
                                     .sz = machine.memory().size()},

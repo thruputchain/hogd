@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -73,9 +74,13 @@ public:
                                          AddressAndKey const &addrkey,
                                          uint32_t index);
 
+  // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
+  // non-null it receives the conflict diagnostics hogdb built at the level
+  // it selected from the block's execution mode.
   SystemStatus<bool>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                              StorageDeltaBatch const &delta_batch);
+                              StorageDeltaBatch const &delta_batch,
+                              DbConflictResult *conflict_out = nullptr);
 
   SystemStatus<void>
   commit_transaction(BlockID block_id, TransactionID tx_id,
@@ -121,6 +126,14 @@ public:
                                                std::move(delta), flags);
   }
 
+  // Conflict diagnostics from the most recent failed push, at the level
+  // the database selected from the block mode; the None arm if the last
+  // push succeeded or the block is not a proposal.
+  DbConflictResult const &last_push_conflict() const
+  {
+    return last_push_conflict_;
+  }
+
   SystemStatus<bool> try_push_current_subtransaction()
   {
     if constexpr (is_debug_build()) {
@@ -140,9 +153,12 @@ public:
                    std::mt19937{std::random_device{}()});
     }
 
+    last_push_conflict_ =
+        DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
     auto r =
         db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
-                                              current_subtransaction_batch_);
+                                              current_subtransaction_batch_,
+                                              &last_push_conflict_);
     current_subtransaction_batch_.clear();
     return r;
   }
@@ -177,5 +193,6 @@ private:
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
+  DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
 };
 } // namespace hogd

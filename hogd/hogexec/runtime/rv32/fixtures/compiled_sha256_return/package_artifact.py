@@ -7,11 +7,11 @@ from pathlib import Path
 
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 4
-ARTIFACT_HEADER_BYTES = 132
+ARTIFACT_FORMAT_VERSION = 5
+ARTIFACT_HEADER_BYTES = 128
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
 ARTIFACT_FLAGS_REQUIRED_VALUE = 0
-ARTIFACT_ENTRY_ABI_VERSION = 2
+ARTIFACT_ENTRY_ABI_VERSION = 3
 ARTIFACT_SYSCALL_ABI_VERSION = 1
 GAS_TABLE_VERSION = 3
 GAS_SCHEDULE_DIGEST = 0x918317C21C46BB60
@@ -178,7 +178,7 @@ def parse_artifact(path):
     artifact = Path(path).read_bytes()
     if len(artifact) < ARTIFACT_HEADER_BYTES:
         raise FixtureError("artifact is shorter than the header")
-    header = struct.unpack_from("<8sIIQIIIIQIIIII32s32s", artifact, 0)
+    header = struct.unpack_from("<8sIIQIIIIQIIII32s32s", artifact, 0)
     magic = header[0]
     format_version = header[1]
     header_bytes = header[2]
@@ -191,10 +191,9 @@ def parse_artifact(path):
     memory_bytes = header[9]
     code_bytes = header[10]
     initial_memory_bytes = header[11]
-    code_offset = header[12]
-    initial_memory_offset = header[13]
-    code_digest = header[14]
-    initial_memory_digest = header[15]
+    initial_memory_start = header[12]
+    code_digest = header[13]
+    initial_memory_digest = header[14]
     if magic != ARTIFACT_MAGIC:
         raise FixtureError("artifact has wrong magic")
     if format_version != ARTIFACT_FORMAT_VERSION:
@@ -223,26 +222,25 @@ def parse_artifact(path):
         )
     if memory_bytes != K_MAX_MEMORY_BYTES:
         raise FixtureError(f"unexpected memory size {memory_bytes}")
-    if code_offset + code_bytes > len(artifact):
-        raise FixtureError("code section extends past artifact end")
-    if initial_memory_offset + initial_memory_bytes > len(artifact):
-        raise FixtureError("initial memory section extends past artifact end")
-    if initial_memory_offset != code_offset + code_bytes:
-        raise FixtureError("artifact sections are not contiguous")
-    if initial_memory_offset + initial_memory_bytes != len(artifact):
-        raise FixtureError("artifact has trailing bytes")
-    code = artifact[code_offset:code_offset + code_bytes]
-    memory = artifact[
-        initial_memory_offset:initial_memory_offset + initial_memory_bytes
-    ]
+    # v5 derives section positions from the canonical order: the only
+    # structural degree of freedom is total size.
+    expected_size = ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes
+    if len(artifact) != expected_size:
+        raise FixtureError("artifact size does not match header sections")
+    if initial_memory_start + initial_memory_bytes > memory_bytes:
+        raise FixtureError("initial memory extends past data memory")
+    if initial_memory_bytes == 0 and initial_memory_start != 0:
+        raise FixtureError("empty initial memory must have start 0")
+    code = artifact[ARTIFACT_HEADER_BYTES:ARTIFACT_HEADER_BYTES + code_bytes]
+    memory = artifact[ARTIFACT_HEADER_BYTES + code_bytes:]
     if code_digest != hashlib.sha256(code).digest():
         raise FixtureError("code section digest mismatch")
     if initial_memory_digest != hashlib.sha256(memory).digest():
         raise FixtureError("initial memory section digest mismatch")
-    return artifact, code, memory, memory_bytes
+    return artifact, code, memory, memory_bytes, initial_memory_start
 
 
-def extract_fixture_input(memory, sections, symbols):
+def extract_fixture_input(memory, memory_start, sections, symbols):
     symbol = symbol_by_name(symbols, FIXTURE_INPUT_SYMBOL)
     if symbol is None:
         raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} symbol is missing")
@@ -255,11 +253,16 @@ def extract_fixture_input(memory, sections, symbols):
         )
     if symbol.size == 0:
         raise FixtureError(f"{FIXTURE_INPUT_SYMBOL} must have nonzero size")
-    if symbol.value + symbol.size > len(memory):
+    # `memory` is the stored image, staged at data-space VA `memory_start`;
+    # translate the symbol's VA into an index within the stored span. The
+    # returned offset stays the VA (the C++ test indexes the materialized
+    # from-zero image).
+    begin = symbol.value - memory_start
+    if begin < 0 or symbol.value + symbol.size > memory_start + len(memory):
         raise FixtureError(
             f"{FIXTURE_INPUT_SYMBOL} exceeds initialized memory"
         )
-    return symbol.value, memory[symbol.value:symbol.value + symbol.size]
+    return symbol.value, memory[begin:begin + symbol.size]
 
 
 def format_array(name, blob):
@@ -275,6 +278,7 @@ def format_array(name, blob):
 
 def write_header(path, artifact, metadata):
     initial_memory_bytes = metadata["initial_memory_bytes"]
+    initial_memory_start = metadata["initial_memory_start"]
     sha256_repeated_id = f"0x{SHA256_REPEATED_METHOD_ID:016x}ULL"
     fixture_input_offset = metadata["fixture_input_offset"]
     body = f"""#pragma once
@@ -286,6 +290,7 @@ namespace hogd::rv32::fixtures::compiled_sha256_return {{
 
 inline constexpr uint32_t kMemoryBytes = {metadata['memory_bytes']};
 inline constexpr uint32_t kInitialMemoryBytes = {initial_memory_bytes};
+inline constexpr uint32_t kInitialMemoryStart = {initial_memory_start};
 inline constexpr uint32_t kCodeBytes = {metadata['code_bytes']};
 inline constexpr uint32_t kArtifactBytes = {len(artifact)};
 inline constexpr uint64_t kSha256MethodId = 0x{SHA256_METHOD_ID:016x}ULL;
@@ -325,9 +330,11 @@ def main():
 
     data, sections = parse_elf(args.elf)
     symbols = parse_symbols(data, sections)
-    artifact, code, memory, memory_bytes = parse_artifact(args.artifact)
+    artifact, code, memory, memory_bytes, initial_memory_start = (
+        parse_artifact(args.artifact)
+    )
     fixture_input_offset, fixture_input = extract_fixture_input(
-        memory, sections, symbols
+        memory, initial_memory_start, sections, symbols
     )
     lowerer_metadata = json.loads(Path(args.lowerer_metadata).read_text())
     fixture_blob = code + memory
@@ -357,6 +364,7 @@ def main():
         "code_bytes": len(code),
         "memory_bytes": memory_bytes,
         "initial_memory_bytes": len(memory),
+        "initial_memory_start": initial_memory_start,
         "rustc_version": args.rustc_version,
         "target_triple": args.target_triple,
         "build_flags": args.build_flags,

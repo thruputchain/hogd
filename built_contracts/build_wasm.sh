@@ -9,7 +9,7 @@
 set -e
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.5.7"
+EXPECTED_VERSION="groundhog 0.5.12"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
     echo "error: expected '$EXPECTED_VERSION', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
@@ -49,7 +49,7 @@ INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 # bin perturbs the shared lib compilation -- changing the cdylib's codegen (and
 # thus gas) for an unrelated target. `--lib` keeps the wasm output independent of
 # the RV32 scaffolding.
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline --lib "$@")
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --target wasm --optimize --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline --lib "$@")
 
 # Parse output paths from JSON
 WASM_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.wasm')

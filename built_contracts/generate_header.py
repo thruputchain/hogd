@@ -71,7 +71,7 @@ def map_type(ty):
     elif kind == "address":
         return "ContractAddress"
     elif kind == "vec":
-        inner = map_type(ty["inner"])
+        inner = map_type(ty["element"])
         max_len = ty["max_len"]
         return f"x23::Vec<{inner}, {max_len}>"
     elif kind == "array":
@@ -114,14 +114,19 @@ def generate_interface_struct(interface, wasm_file=None):
         compute_entrypoint_id(interface_name, version, name) for name in export_names
     ]
 
-    export_names_str = ",\n            ".join(f'"{name}"' for name in export_names)
+    # Export names are `u8""` so their bytes are the UTF-8 encoding regardless of
+    # the C++ ordinary execution charset (-fexec-charset). The host entrypoint-id
+    # derivation hashes these bytes, so it matches the UTF-8-derived kEntrypoints
+    # on any execution charset. See hogd #2898. (kTraitName/kVersion are u8"" for
+    # the same reason.)
+    export_names_str = ",\n            ".join(f'u8"{name}"' for name in export_names)
     entrypoints_str = ",\n            ".join(f"0x{ep:016x}ULL" for ep in entrypoints)
 
     # Function signatures
     function_signatures = []
     for method in methods:
         return_type = map_type(method["return_type"])
-        args = [map_type(arg["ty"]) for arg in method["args"]]
+        args = [map_type(arg["type"]) for arg in method["args"]]
 
         if exception_types:
             exn_args = ", ".join(exception_types)
@@ -143,14 +148,16 @@ def generate_interface_struct(interface, wasm_file=None):
 
     return f"""
 struct {interface_name} {{
-    constexpr static std::string_view kTraitName = "{interface_name}";
-    constexpr static std::string_view kVersion = "{version}";
+    // kTraitName/kVersion/kExportNames are u8"" so the host entrypoint-id
+    // derivation hashes UTF-8 bytes independent of -fexec-charset. See #2898.
+    constexpr static std::u8string_view kTraitName = u8"{interface_name}";
+    constexpr static std::u8string_view kVersion = u8"{version}";
     {wasm_str}
 
     constexpr static std::string_view kSerializationFormat = "cxs";
 
     // These will be sorted before being passed as indices to method id derivation.
-    constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{
+    constexpr static auto kExportNames = std::array<std::u8string_view, {len(export_names)}>{{
             {export_names_str}
         }};
 

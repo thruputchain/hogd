@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <span>
 
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
@@ -19,12 +20,12 @@ namespace hogd {
 HogDBStatus<int128_t>
 NewContractLock::try_atomic_change_lock(const NewContractData *before,
                                         const NewContractData *after,
-                                        const LockContext & /*ctx*/)
+                                        const LockContext &ctx)
 {
   assert(before == nullptr || before->new_contract() == contract_);
 
   if (after != nullptr && after->new_contract() != contract_) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
   }
 
   // pay on contract deployment, not contract create

@@ -11,9 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -29,6 +31,12 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+size_t
+ReplayConflictSetTraits::hash(const uint128_t &v)
+{
+  return SipHash24::get_default()(std::as_bytes(std::span(&v, 1)));
+}
 
 HogDBStatus<ReplayCacheMetadata *>
 ReplayCacheLock::get_meta(const LockContext *ctx) const
@@ -164,7 +172,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
     if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
       pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
     }
     entry = std::make_unique<ActiveHeight>();
   }
@@ -213,7 +221,7 @@ ReplayCacheLock::try_atomic_change_lock(
 {
   // No single transaction is allowed to add to the replay cache twice.
   if (before != nullptr && after != nullptr) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
   // Need to remove a previously added Uniquifier (e.g. if a tx aborts).
@@ -235,7 +243,7 @@ ReplayCacheLock::try_atomic_change_lock(
   if (addition.block_expiry_height < ctx.block_height) {
     trace("attempted to consume {}.{} at height {}",
           addition.block_expiry_height, addition.nonce, ctx.block_height);
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
   auto addition_key = UniquifierHelper::to_uint128(addition);
@@ -251,7 +259,7 @@ ReplayCacheLock::try_atomic_change_lock(
                                  base.data.nonces.end(), addition.nonce)) {
     trace("attempted to consume {}.{} but it was already the base cache",
           addition.block_expiry_height, addition.nonce);
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
   // Reserve slot
@@ -261,12 +269,12 @@ ReplayCacheLock::try_atomic_change_lock(
   // Check limit
   if (base.data.nonces.size() + additions + 1 > kReplayCacheNoncesMaxLen) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
 
   if (!conflicts_.try_insert(addition_key)) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
   auto meta = get_meta(&ctx);

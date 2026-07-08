@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
@@ -39,6 +40,7 @@ public:
   // getters
   HogDBDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
+  BlockExecutionMode mode() const { return mode_; }
 
   void invalidate() { invalidated_.store(true, std::memory_order_release); }
   bool is_invalidated() const
@@ -56,14 +58,17 @@ public:
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> lock(const ItemKey &key, ItemChange &change);
+  HogDBStatus<int128_t>
+  lock(const ItemKey &key, ItemChange &change,
+       std::optional<DbConflictCode> *conflict_reason = nullptr);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
   // It returns an amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> modify_lock(const ItemKey &key,
-                                    const ItemChange &old_change,
-                                    const ItemChange &new_change);
+  HogDBStatus<int128_t>
+  modify_lock(const ItemKey &key, const ItemChange &old_change,
+              const ItemChange &new_change,
+              std::optional<DbConflictCode> *conflict_reason = nullptr);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -33,10 +34,14 @@ namespace hogd {
 
 // Common utilities for building preset contracts
 
+// Trait metadata (kTraitName/kVersion/kExportNames) is `u8""`, so entrypoint-id
+// derivation hashes UTF-8 bytes regardless of the ordinary execution charset
+// (`-fexec-charset`) and matches the UTF-8-derived kEntrypoints on any build.
+// See #2898.
 ContractEntrypointID
-sdk_entrypoint_derivation(std::string_view identifier_name,
-                          std::string_view identifier_version,
-                          std::string_view method_name);
+sdk_entrypoint_derivation(std::u8string_view identifier_name,
+                          std::u8string_view identifier_version,
+                          std::u8string_view method_name);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // `T` is a compile-time tag. XDR/TXS/CXS: 0 bytes (same as void / empty struct
@@ -79,8 +84,9 @@ namespace hogd {
 // Get the method ID for a given method,
 // at which contracts using the SDK will expect to find it.
 inline Runtime::MethodID
-sdk_method_id(std::string_view identifier_name,
-              std::string_view identifier_version, std::string_view method_name)
+sdk_method_id(std::u8string_view identifier_name,
+              std::u8string_view identifier_version,
+              std::u8string_view method_name)
 {
   return sdk_method_id(sdk_entrypoint_derivation(identifier_name,
                                                  identifier_version,
@@ -107,12 +113,14 @@ constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 2>
 
 template<typename T>
 concept is_contract_trait = requires {
-  { T::kTraitName } -> std::convertible_to<std::string_view>;
-  { T::kVersion } -> std::convertible_to<std::string_view>;
+  // Trait metadata is u8"" so entrypoint-id derivation is charset-independent
+  // (see #2898).
+  { T::kTraitName } -> std::convertible_to<std::u8string_view>;
+  { T::kVersion } -> std::convertible_to<std::u8string_view>;
   {
     T::kExportNames
-  }
-  -> std::convertible_to<std::array<std::string_view, T::kExportNames.size()>>;
+  } -> std::convertible_to<
+      std::array<std::u8string_view, T::kExportNames.size()>>;
   {
     std::tuple_size_v<typename T::export_types>
   } -> std::convertible_to<size_t>;
@@ -162,7 +170,14 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   template<StringLiteral Name>
   constexpr static size_t kLookupIndex = [] {
     for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
-      if (ContractTrait::kExportNames[i] == Name.get()) {
+      // Name is a char selector; kExportNames is u8. Compare as unsigned bytes
+      // (char is signed on this target, so a bare `char == char8_t` would
+      // integer-promote and mismatch code units >= 0x80).
+      if (std::ranges::equal(Name.get(), ContractTrait::kExportNames[i],
+                             [](char a, char8_t b) {
+                               return static_cast<unsigned char>(a) ==
+                                      static_cast<unsigned char>(b);
+                             })) {
         return i;
       }
     }
@@ -218,24 +233,27 @@ public:
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
-      // The generated kEntrypoints constants are the charset-independent source
-      // of truth: the SDK derives them from the UTF-8 method-name preimages, so
-      // they do not depend on the C++ ordinary execution character set
-      // (`-fexec-charset`). Convert the canonical Runtime::MethodID back to a
-      // ContractEntrypointID instead of returning the re-hash of ordinary
-      // kTraitName/kVersion/Name literal bytes, which can diverge across honest
-      // builds. The re-derivation is retained only as a debug cross-check. See
-      // hogd issue #2678.
+      // The generated kEntrypoints constants are the source of truth: the SDK
+      // derives them from the UTF-8 method-name preimages. Convert the
+      // canonical Runtime::MethodID back to a ContractEntrypointID and return
+      // that; the re-derivation below is retained only as a debug cross-check.
+      // See hogd issue #2678.
       auto canonical = entrypoint_from_method_id(
           ContractTrait::kEntrypoints[kLookupIndex<Name>]);
+      // Debug cross-check: the host independently re-derives from the trait's
+      // u8"" metadata and must match the generated kEntrypoints. Both hash the
+      // same UTF-8 bytes (kTraitName/kVersion/kExportNames are u8""), so this
+      // holds regardless of -fexec-charset. See hogd issue #2678, #2898.
       x23assert(canonical ==
-                sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                          ContractTrait::kVersion, Name.get()));
+                sdk_entrypoint_derivation(
+                    ContractTrait::kTraitName, ContractTrait::kVersion,
+                    ContractTrait::kExportNames[kLookupIndex<Name>]));
       return canonical;
     }
     else {
-      return sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                       ContractTrait::kVersion, Name.get());
+      return sdk_entrypoint_derivation(
+          ContractTrait::kTraitName, ContractTrait::kVersion,
+          ContractTrait::kExportNames[kLookupIndex<Name>]);
     }
   }
 
@@ -243,13 +261,8 @@ public:
   //
   // When the generated trait exposes numeric `kEntrypoints` constants, those
   // are the source of truth: the SDK derives them from the UTF-8 method-name
-  // preimages, so they are independent of the C++ ordinary execution character
-  // set (`-fexec-charset`). Re-deriving the id here by hashing
-  // `kTraitName`/`kVersion`/`Name` would instead hash implementation-defined
-  // ordinary-literal bytes, which can diverge across honest builds. See hogd
-  // issue #2579. (`kLookupIndex` only *matches* the requested name against
-  // `kExportNames` within a single translation unit, so the index it picks is
-  // charset-safe even though the names are ordinary literals.)
+  // preimages. Returning the constant directly avoids re-hashing at every call.
+  // See hogd issue #2579.
   template<StringLiteral Name> static Runtime::MethodID method_id()
   {
     if constexpr (requires { ContractTrait::kEntrypoints; }) {

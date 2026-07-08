@@ -11,7 +11,9 @@
 #include <variant>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -27,8 +29,11 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
+#include "x23/rpc_msg.hh"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
+#include "x23/x23.h" // x23::union_visit_arm
 
 namespace hogd {
 
@@ -259,11 +264,176 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
+// A transaction's r/w footprint must never encode to a StorageDeltaBatch push
+// that overflows the executor->HogDB RPC -- that surfaces as a node-
+// unrecoverable error. try_push_new_subtransaction below sums a conservative
+// per-delta footprint over the batch and rejects an over-cap push as a
+// concurrency-control conflict before it is sent, covering every way a push can
+// grow: many keys, many/large bytestrings, and RCQ observations. The footprint
+// is computed from delta field LENGTHS, never the serializer, so the gate is
+// not coupled to ser/des; x23::xdr_size is used only in a debug assert
+// (stripped in release) to prove each bound is a true upper bound and catch
+// layout drift.
+namespace {
+
+// Maximum XDR-encoded size of a type, derived from its layout rather than from
+// hand-written constants, so a protocol field/type change is tracked
+// automatically. kXdrWord is one RFC 4506 wire word: the length prefix before
+// every variable-length array/opaque and the discriminant before every union.
+template<typename T>
+constexpr size_t kXdrMax = x23::detail::xdr_size_bounds<T>().max_;
+constexpr size_t kXdrWord = 4;
+
+// footprint_bound(value) -> a conservative upper bound, in bytes, on value's
+// XDR-encoded size. Every overload must (a) return >= the value's actual
+// encoded size for every possible value (the debug assert in the push loop
+// checks this against x23::xdr_size) and (b) compute that from field lengths
+// only -- never serialize, never read the database. This generic overload
+// returns the type's compile-time maximum and static_asserts the type is
+// fixed-size; a variable-size type must add its own overload that bounds from
+// the value's contents (see Bytestring and RetrocausalQueueDelta), else it
+// would charge a maximum far above a typical value and turn away transactions
+// that would fit.
+template<typename T>
+constexpr size_t
+footprint_bound(T const & /*value*/)
+{
+  static_assert(x23::detail::xdr_size_bounds<T>().min_ ==
+                    x23::detail::xdr_size_bounds<T>().max_,
+                "variable-size type needs a content-derived footprint_bound "
+                "overload (see Bytestring, RetrocausalQueueDelta)");
+  return kXdrMax<T>;
+}
+
+// XDR opaque<>: a 4-byte length prefix plus content padded to a 4-byte
+// boundary.
+constexpr size_t
+opaque_bound(size_t len)
+{
+  return kXdrWord + ((len + 3) & ~size_t{3});
+}
+static_assert(opaque_bound(Bytestring::kMaxSize) == kXdrMax<Bytestring>);
+
+inline size_t
+footprint_bound(Bytestring const &b)
+{
+  return opaque_bound(b.size());
+}
+
+// Auth changes carry a variable signer list but are rare; charging the maximum
+// (kMaxSigners signers) flat is acceptable. Explicit so it does not trip the
+// fixed-size static_assert in the generic overload above.
+inline size_t
+footprint_bound(AuthDataChangeArgs const & /*auth*/)
+{
+  return kXdrMax<AuthDataChangeArgs>;
+}
+
+// RCQ delta: the encoded size is dominated by the entry payloads, which vary
+// with the delta, so it is bounded from the entry counts (each entry charged
+// kXdrMax<QueueEntry>) rather than the type maximum -- the latter is the full
+// per-tx observation cap, far above a typical delta. The overhead term covers
+// the past-consume struct and the array/optional framing words.
+constexpr size_t kRcqDeltaOverhead =
+    kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + (4 * kXdrWord);
+
+inline size_t
+footprint_bound(RetrocausalQueueDelta const &rq)
+{
+  size_t entries = rq.insert.added_entries.size() +
+                   rq.observed_concurrent_entries.size() +
+                   (rq.consume ? rq.consume->current_block_consumed.size() : 0);
+  return kRcqDeltaOverhead + (entries * kXdrMax<QueueEntry>);
+}
+
+// Dispatch to the active arm's footprint_bound. The delete arm is void (nothing
+// to serialize); every other arm carries a value the visitor forwards. The
+// fallback is unreachable -- a StorageDelta always has a set discriminant --
+// but charges the largest any arm could be, which stays a true upper bound.
+inline size_t
+footprint_bound(StorageDelta const &d)
+{
+  if (d.type() == StorageDeltaType::kDeltaTypeDelete)
+    return 0;
+  return x23::union_visit_arm(
+      [](auto const &arm) { return footprint_bound(arm); }, d,
+      kXdrMax<StorageDelta>);
+}
+
+// Per-FlaggedStorageDelta framing: addrkey + flags + the union discriminant --
+// all type-derived.
+constexpr size_t kPerDeltaFraming = kXdrMax<AddressAndKey> +
+                                    kXdrMax<StorageDeltaFlagSet> +
+                                    kXdrMax<StorageDeltaType>;
+
+inline size_t
+footprint_bound(FlaggedStorageDelta const &fd)
+{
+  return kPerDeltaFraming + footprint_bound(fd.delta);
+}
+
+// The executor->HogDB RPC message cap a push must fit. x23 bounds
+// (record.size() - 4) -- the rpc_msg header plus the call args -- against
+// max_message_size (see send_call in x23/rpc.h). exec_server runs at x23's
+// default_max_message_size, which is a runtime-mutable extern (tests lower it)
+// with no constexpr to bind to; this mirrors its compile-time default.
+// TODO(rstutsman): bind to an x23 constexpr default once x23 exposes one.
+constexpr size_t kExecToDbMessageCap = 0x100'0000;
+
+// Bytes of the try_push_new_subtransaction request that count against the cap
+// but are NOT per-delta: the rpc_msg header, the BlockID and TransactionID
+// args, and the StorageDeltaBatch Vec length prefix. footprint_bound accounts
+// for the FlaggedStorageDeltas themselves.
+constexpr size_t kMessageOverhead = kXdrMax<x23::rpc_msg> + kXdrMax<BlockID> +
+                                    kXdrMax<TransactionID> + kXdrWord;
+static_assert(kMessageOverhead < kExecToDbMessageCap);
+constexpr size_t kMaxSubtransactionPushFootprint =
+    kExecToDbMessageCap - kMessageOverhead;
+
+// Coherence guard: the largest possible single delta must itself fit one push,
+// so the per-key/per-tx entry caps can't be raised to a value no push could
+// ever carry (which would auto-reject every max-footprint tx). Every
+// StorageDelta arm is bounded in the protocol, so xdr_size_bounds derives a
+// finite kXdrMax<FlaggedStorageDelta> -- the exact worst case over all arms,
+// framing included. (The RUNTIME guard below is the real check: it sums
+// footprint_bound over the WHOLE batch, whose key count is unbounded.)
+static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
+              "the largest possible single delta must fit one push");
+
+} // namespace
+
 SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
-                                           StorageDeltaBatch const &delta_batch)
+                                           StorageDeltaBatch const &delta_batch,
+                                           DbConflictResult *conflict_out)
 {
+  // Reject (as a concurrency-control conflict -- the existing `false`
+  // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
+  // whose r/w footprint would not fit the RPC message cap, so an oversized push
+  // can never reach serialization and turn into a node-unrecoverable error.
+  size_t footprint = 0;
+  for (auto const &fd : delta_batch) {
+    size_t bound = footprint_bound(fd);
+    // footprint_bound must be a true upper bound on the serialized size.
+    // Validate it against the serializer here, where it is compiled out of the
+    // normal path (release strips assert) -- so ser/des stays off the gate
+    // while a StorageDelta field/type change that the hand-written bound misses
+    // is still caught in tests before it could re-open the overflow.
+    assert(bound >= x23::xdr_size(fd) &&
+           "footprint_bound under-counts a StorageDelta; update the "
+           "footprint_bound overload for the changed delta layout");
+    footprint += bound;
+  }
+  if (footprint + kMessageOverhead > kExecToDbMessageCap) {
+    debug(
+        "rejecting subtransaction push as a conflict: delta-batch footprint "
+        "{} + message overhead {} exceeds the {}-byte executor->HogDB message "
+        "cap",
+        footprint, kMessageOverhead, kExecToDbMessageCap);
+    return false;
+  }
+
   if constexpr (is_debug_build()) {
     for (auto const &delta : delta_batch) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
@@ -272,7 +442,21 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
   try {
     auto res =
         client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-    return to_system_error_code<false>(res, [] { return true; });
+    switch (res.error()) {
+    case RPCError::kRPCNone:
+      return true;
+    case RPCError::kRPCStorageWriteFailed:
+      if (conflict_out != nullptr) {
+        *conflict_out = std::move(res.conflict());
+      }
+      return false;
+    case RPCError::kRPCBadBlockID:
+      return SystemError{SystemErrorCode::Abandon};
+    default:
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            res.error());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
     // worker, so contain every failure -- XdrBadInput (oversized delta batch),

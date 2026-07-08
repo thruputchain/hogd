@@ -122,6 +122,13 @@ public:
   IndexerStatus<TransactionPage>
   get_transactions(TransactionQuery const &query) const;
 
+  // Paginated account transaction history: refs to transactions whose ROOT
+  // invocation targets `query.address`, in block order.  Reads refs directly
+  // off the address index (kind = ROOT_TX); no tx_index hydration.  Clients
+  // hydrate full bodies via get_transaction_info.
+  IndexerStatus<TransactionRefPage>
+  get_transactions_by_address(AddressTransactionQuery const &query) const;
+
   // Highest block height through which the index is CONTIGUOUS:
   // every block from the first-ever ingested height up to this value
   // is fully ingested.  Out-of-order blocks above a gap are ingested

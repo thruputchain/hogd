@@ -11,6 +11,7 @@
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -78,8 +79,20 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
                              TxEventLog const &tx_event_log,
                              ProposedTransaction const &proposed_tx)
 {
-  auto r = co_await client_.eventexecutor_emit_event(block_id, tx_id,
-                                                     tx_event_log, proposed_tx);
+  RPCError r = RPCError::kRPCNone;
+  try {
+    r = co_await client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log,
+                                                  proposed_tx);
+  } catch (x23::XdrException const &e) {
+    // The RPC client can throw (an over-cap payload throws XdrBadInput; a
+    // failed call throws XdrCallFailed) instead of returning a status; on this
+    // detached event coroutine an uncaught throw would terminate the executor
+    // (#2857). Catch the XDR base so no RPC-layer throw escapes; anything else
+    // (e.g. bad_alloc) is a genuine bug and still terminates.
+    error("Unrecoverable: event emission threw before an RPC status: {}",
+          e.what());
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
+  }
   if (r != RPCError::kRPCNone) {
     error("emit_event failed: {}", r);
   }

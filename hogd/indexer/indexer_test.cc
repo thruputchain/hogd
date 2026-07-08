@@ -5,10 +5,12 @@
 #include <filesystem>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -184,6 +186,305 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
     EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
               events[i].events[0].contract_address);
   }
+}
+
+TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
+{
+  BlockHeight block_height = 100;
+  TxEventLogBatch events = create_event_logs(); // 2 txs, addrs 0xAA/0xBB
+  ProposedTransactionBatch bodies = create_tx_bodies(events.size());
+  event_->indexer_event_process_events(block_height, events, bodies)();
+
+  TransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0;
+
+  TransactionPage page = block_explorer_->get_transactions(query)();
+  EXPECT_EQ(page.transactions.size(), 2);
+}
+
+TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
+{
+  BlockHeight block_height = 101;
+
+  ContractAddress root_addr;
+  std::ranges::fill(root_addr, 0xCC);
+
+  ProposedTransaction body;
+  body.signed_tx.tx.uniquifier.nonce = 42;
+  body.signed_tx.tx.invocation.invoked_address = root_addr;
+
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x33);
+
+  TxEventLog event_log; // no events emitted
+  event_log.proposed_tx_hash = tx_hash;
+  ASSERT_TRUE(event_log.events.empty());
+
+  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+                                       ProposedTransactionBatch{body})();
+
+  AddressTransactionQuery query{};
+  query.address = root_addr;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0;
+
+  TransactionRefPage page =
+      block_explorer_->get_transactions_by_address(query)();
+  ASSERT_EQ(page.refs.size(), 1);
+  EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
+  EXPECT_EQ(page.refs[0].height, block_height);
+
+  // The ref hydrates to the full body via the existing by-hash API.
+  TxInfoResult info =
+      block_explorer_->get_transaction_info(page.refs[0].tx_hash)();
+  ASSERT_EQ(info.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(info.info().tx.signed_tx.tx.invocation.invoked_address, root_addr);
+}
+
+TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
+{
+  BlockHeight block_height = 200;
+
+  ContractAddress root_a, emitter_b;
+  std::ranges::fill(root_a, 0xA1);
+  std::ranges::fill(emitter_b, 0xB2);
+
+  ProposedTransaction body;
+  body.signed_tx.tx.invocation.invoked_address = root_a;
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x44);
+
+  TxEventLog event_log;
+  event_log.proposed_tx_hash = tx_hash;
+  TxEmittedEvent ev;
+  ev.contract_address = emitter_b; // event emitted by B, not the root A
+  ev.num_topics = 0;
+  ev.serialized_event.resize(4);
+  event_log.events.push_back(ev);
+
+  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+                                       ProposedTransactionBatch{body})();
+
+  auto query_for = [&](ContractAddress const &addr) {
+    AddressTransactionQuery q{};
+    q.address = addr;
+    q.order = IterationOrder::IterationOrderAscending;
+    q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    q.limit = 0;
+    return block_explorer_->get_transactions_by_address(q)();
+  };
+
+  // Rooted at A → in A's history.
+  TransactionRefPage a_page = query_for(root_a);
+  ASSERT_EQ(a_page.refs.size(), 1);
+  EXPECT_EQ(a_page.refs[0].tx_hash, tx_hash);
+
+  // B only emitted an event → NOT in B's transaction history.
+  TransactionRefPage b_page = query_for(emitter_b);
+  EXPECT_TRUE(b_page.refs.empty());
+
+  // But B's event is still found via the event index.
+  EventQuery eq{};
+  EventFilter filter{};
+  filter.contract_addresses.push_back(emitter_b);
+  eq.filters.push_back(filter);
+  eq.order = IterationOrder::IterationOrderAscending;
+  eq.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  eq.limit = 0;
+  EventPage ep = block_explorer_->get_events(eq)();
+  EXPECT_EQ(ep.events.size(), 1);
+}
+
+TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
+{
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xD4);
+
+  std::vector<SHA256Hash> hashes;
+  for (uint8_t i = 0; i < 3; i++) {
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+    SHA256Hash h;
+    std::ranges::fill(h, static_cast<char>(0x50 + i));
+    hashes.push_back(h);
+    TxEventLog log;
+    log.proposed_tx_hash = h;
+    event_->indexer_event_process_events(static_cast<BlockHeight>(300 + i),
+                                         TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
+  }
+
+  AddressTransactionQuery q{};
+  q.address = addr;
+  q.order = IterationOrder::IterationOrderAscending;
+  q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  q.limit = 1;
+
+  std::vector<SHA256Hash> seen;
+  for (int guard = 0; guard < 10; guard++) {
+    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
+    for (auto const &r : page.refs) {
+      seen.push_back(r.tx_hash);
+    }
+    if (page.cursor.empty()) {
+      break;
+    }
+    q.cursor = page.cursor;
+  }
+
+  ASSERT_EQ(seen.size(), 3);
+  EXPECT_EQ(seen[0], hashes[0]); // block 300
+  EXPECT_EQ(seen[1], hashes[1]); // block 301
+  EXPECT_EQ(seen[2], hashes[2]); // block 302
+}
+
+// Regression: a batch in which NO transaction emits any event (every
+// TxEventLog is present but has an empty events vector) must still write a
+// ROOT_TX row for every body.  Guards against the contract-index chunking
+// being driven by emitted-event count rather than transaction count.
+TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
+{
+  BlockHeight block_height = 500;
+
+  std::vector<ContractAddress> addrs;
+  TxEventLogBatch logs;
+  ProposedTransactionBatch bodies;
+  for (uint8_t i = 0; i < 4; i++) {
+    ContractAddress addr;
+    std::ranges::fill(addr, static_cast<char>(0x60 + i));
+    addrs.push_back(addr);
+
+    SHA256Hash h;
+    std::ranges::fill(h, static_cast<char>(0x90 + i));
+
+    TxEventLog log;
+    log.proposed_tx_hash = h;
+    logs.push_back(log); // present, but emits no events
+
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+    bodies.push_back(body);
+  }
+
+  // Whole batch ingested in a single call: events.size() == 4, but the total
+  // number of emitted events across the batch is 0.
+  event_->indexer_event_process_events(block_height, logs, bodies)();
+
+  for (uint8_t i = 0; i < 4; i++) {
+    AddressTransactionQuery q{};
+    q.address = addrs[i];
+    q.order = IterationOrder::IterationOrderAscending;
+    q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    q.limit = 0;
+
+    // Each eventless tx must still have produced its ROOT_TX row.
+    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
+    ASSERT_EQ(page.refs.size(), 1);
+    EXPECT_EQ(page.refs[0].tx_hash, logs[i].proposed_tx_hash);
+  }
+}
+
+// WAI / regression lock for #2851. Out-of-order ingest persists a tx-index row
+// for a height above the contiguous serving watermark before latest_block()
+// advances (consume_events writes the SST rows, then record_height() buffers
+// the gapped height in pending_heights_). Such a row is intentionally served by
+// the direct point lookup -- the caller supplied the exact hash and gets the tx
+// with its true height -- but is deliberately hidden from every paginated scan,
+// which clamps iteration to latest_block() so pages stay gapless as the lower
+// gap fills. Returning NotFound from the point lookup instead would be a false
+// negative (the row is genuinely stored) that silently flips to Found once the
+// gap fills. This pins that divergence across all four public surfaces: the
+// point lookup finds the pending tx; get_events, get_transactions, and the
+// indexed get_transactions_by_address all hide it.
+TEST_F(IndexerTest, PendingTxServedByPointLookupButHiddenFromScans)
+{
+  // One address is both the event emitter and the root invoked_address, so it
+  // is the single discriminator for the event index, the tx list, and the
+  // address index alike.
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  SHA256Hash tx10, tx12;
+  std::ranges::fill(tx10, 0x10);
+  std::ranges::fill(tx12, 0x12);
+
+  auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
+    TxEventLog log;
+    log.proposed_tx_hash = tx;
+    TxEmittedEvent ev;
+    ev.contract_address = addr;
+    ev.num_topics = 0;
+    ev.serialized_event.resize(4);
+    log.events.push_back(std::move(ev));
+
+    ProposedTransaction body;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+
+    event_->indexer_event_process_events(height, TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
+  };
+
+  // Block 10 is contiguous; block 12 arrives before block 11, so it is
+  // ingested but held behind the watermark at 10.
+  ingest_at(10, tx10);
+  ingest_at(12, tx12);
+  ASSERT_EQ(db().latest_block(), 10);
+
+  // Point lookup: the pending block-12 tx IS served, with its true height.
+  TxInfoResult pending = block_explorer_->get_transaction_info(tx12)();
+  ASSERT_EQ(pending.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(pending.info().height, 12);
+
+  // The block-10 tx below the watermark is servable too (positive control).
+  TxInfoResult settled = block_explorer_->get_transaction_info(tx10)();
+  ASSERT_EQ(settled.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(settled.info().height, 10);
+
+  // Scan 1 -- events by address: only the block-10 event is served.
+  EventQuery event_query{};
+  EventFilter filter{};
+  filter.contract_addresses.push_back(addr);
+  event_query.filters.push_back(std::move(filter));
+  event_query.order = IterationOrder::IterationOrderAscending;
+  event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  event_query.limit = 0;
+
+  EventPage event_page = block_explorer_->get_events(event_query)();
+  EXPECT_EQ(event_page.latest_block, 10);
+  ASSERT_EQ(event_page.events.size(), 1);
+  EXPECT_EQ(event_page.events[0].block_height, 10);
+  EXPECT_EQ(event_page.events[0].proposed_tx_hash, tx10);
+
+  // Scan 2 -- unfiltered transaction list: only block 10 appears.
+  TransactionQuery tx_query{};
+  tx_query.order = IterationOrder::IterationOrderAscending;
+  tx_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  tx_query.limit = 0;
+
+  TransactionPage tx_page = block_explorer_->get_transactions(tx_query)();
+  EXPECT_EQ(tx_page.latest_block, 10);
+  ASSERT_EQ(tx_page.transactions.size(), 1);
+  EXPECT_EQ(tx_page.transactions[0].height, 10);
+
+  // Scan 3 -- indexed address query (get_transactions_by_address): the pending
+  // block-12 ref is hidden even though its tx is point-lookup visible.
+  AddressTransactionQuery addr_query{};
+  addr_query.address = addr;
+  addr_query.order = IterationOrder::IterationOrderAscending;
+  addr_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  addr_query.limit = 0;
+
+  TransactionRefPage addr_page =
+      block_explorer_->get_transactions_by_address(addr_query)();
+  EXPECT_EQ(addr_page.latest_block, 10);
+  ASSERT_EQ(addr_page.refs.size(), 1);
+  EXPECT_EQ(addr_page.refs[0].tx_hash, tx10);
+  EXPECT_EQ(addr_page.refs[0].height, 10);
 }
 
 } // namespace hogd

@@ -5,6 +5,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "db_conflict.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
@@ -74,14 +75,14 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 
   std::unique_lock<x23::TestLock> ul(lock_);
   if (locked_ && before == nullptr) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
   }
   assert(before == nullptr ||
          before->get()->base_auth_data() == base_auth_data_);
 
   if (after != nullptr) {
     if (after->get()->base_auth_data() != base_auth_data_) {
-      return HogDBError{HogDBCode::kConflict};
+      return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
     }
     locked_ = true;
   }

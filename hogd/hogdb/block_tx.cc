@@ -8,6 +8,7 @@
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
@@ -104,7 +105,8 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 }
 
 HogDBStatus<int128_t>
-BlockTX::lock(const ItemKey &key, ItemChange &change)
+BlockTX::lock(const ItemKey &key, ItemChange &change,
+              std::optional<DbConflictCode> *conflict_reason)
 {
   if (auto s = check_stale();
       !s || mode_ == BlockExecutionMode::kBlockExecutionModeViewing)
@@ -119,6 +121,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
     });
 
     LockContext ctx(&db_, block_height_, key, &cost_model_);
+    ctx.conflict_reason = conflict_reason;
     return do_lock(*lock, change, ctx)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
@@ -130,18 +133,21 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   assert(item != nullptr);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
+  ctx.conflict_reason = conflict_reason;
   return do_lock(*item, change, ctx);
 }
 
 HogDBStatus<int128_t>
 BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
-                     const ItemChange &new_change)
+                     const ItemChange &new_change,
+                     std::optional<DbConflictCode> *conflict_reason)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
+    ctx.conflict_reason = conflict_reason;
     return do_modify_lock(*lock, old_change, new_change, ctx)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
@@ -150,6 +156,7 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
+  ctx.conflict_reason = conflict_reason;
   auto r = do_modify_lock(*lock, old_change, new_change, ctx);
   if (!r && is_invalidated()) [[unlikely]] {
     // Catches the narrow race where a sibling invalidated us *during*

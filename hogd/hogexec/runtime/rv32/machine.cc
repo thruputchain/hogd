@@ -58,7 +58,10 @@ Machine::reset(uint64_t gas)
     halted_ = true;
     return;
   }
-  registers_[2] = static_cast<uint32_t>(memory_.size()) & ~uint32_t{0x0f};
+  // Entry ABI v3: sp (x2) is seeded to 0. The guest owns stack placement and
+  // must set sp itself; a stack touch before that computes 0 - frame, wraps,
+  // and traps OOB instead of silently running the stack somewhere valid.
+  registers_[2] = 0;
 }
 
 void
@@ -80,6 +83,7 @@ bool
 Machine::consume_gas(uint64_t amount)
 {
   if (gas_remaining_ < amount) {
+    gas_remaining_ = 0;
     set_trap(Trap::kOutOfGas);
     return false;
   }
@@ -235,8 +239,9 @@ Machine::complete_ecall(const HostResult &result)
     halted_ = true;
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
-    // Host OOG keeps ECALL + reported host gas charged and pc advanced; host
-    // memory writes persist (no per-ecall rollback).
+    // Host OOG keeps pc advanced and host memory writes persist (no per-ecall
+    // rollback), but all OOG paths saturate remaining gas to zero.
+    gas_remaining_ = 0;
     set_trap(Trap::kOutOfGas);
     return StepResult::kTrap;
   case HostStatus::kTrap:

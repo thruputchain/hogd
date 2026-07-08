@@ -61,10 +61,7 @@ public:
   {
     return {.cs_ = this, .wake_time_ = wake_time};
   }
-  Awaiter sleep(clock::duration d)
-  {
-    return sleep_until(clock::now() + d);
-  }
+  Awaiter sleep(clock::duration d) { return sleep_until(clock::now() + d); }
 
   ThreadPool &pool_;
 

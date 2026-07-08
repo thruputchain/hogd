@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/syscall_misc_tests.h"
 #include "db_sched.hh"
@@ -28,6 +29,7 @@
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
+#include "integration.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -197,6 +199,23 @@ protected:
         .uniquifier = Uniquifier{.block_expiry_height = expiry, .nonce = 1},
     };
   }
+
+  // A (non-expired) tx whose serialized size exceeds kMaxBytesSignedTransaction
+  // via oversized calldata (#2857).
+  static Transaction make_oversized_tx()
+  {
+    std::vector<uint8_t> big(kMaxBytesSignedTransaction + 1, 0);
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address =
+                           NativeContractTestFramework::make_contract_address(
+                               1),
+                       .entrypoint = entrypoint_from_method_id(0),
+                       .gas_limit = UINT64_MAX,
+                       .calldata = Calldata(big.begin(), big.end())},
+        .uniquifier = Uniquifier{.block_expiry_height = 1'000'000, .nonce = 1},
+    };
+  }
 };
 
 //
@@ -320,6 +339,50 @@ TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
   };
   EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
             ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// Oversized tx: propose() rejects it before the body runs, so it can't reach
+// emit_events and overflow the event RPC (#2857).
+TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
+{
+  init_executor();
+
+  BlockID block_id = 1020;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_oversized_tx()})
+                .result(),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// Same cap on the validation path: a peer-proposed oversized tx is rejected,
+// not a validator fail-stop (#2857).
+TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
+{
+  init_executor();
+
+  BlockID block_id = 1021;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultOK);
+  auto db_res = db_client_.dbsched_create_snapshot(
+      0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+  open_event_block(block_id);
+
+  ProposedTransaction proposed_tx{
+      .signed_tx = SignedTransaction{.tx = make_oversized_tx()},
+      .nondeterministic_proposal_data = {},
+  };
+  EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
+            ExecResult::ExecResultTxNonDeterministicError);
 
   client_.executorsched_finish_block(block_id);
 }

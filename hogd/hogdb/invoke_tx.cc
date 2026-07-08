@@ -14,6 +14,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -93,6 +94,8 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
 HogDBStatus<void>
 InvokeTX::update_balance_lock(Address const &addr)
 {
+  last_conflict_reason_.reset();
+
   // Combines the manual balance transfers with the up-to-now storage cost
   // to create/apply/update one balance nnint delta.
   auto storage_change_res = get_storage_balance_change(addr);
@@ -106,7 +109,7 @@ InvokeTX::update_balance_lock(Address const &addr)
   auto &change = changes_[key];
   if (change.empty()) {
 
-    auto status = block_.get().lock(key, new_item);
+    auto status = block_.get().lock(key, new_item, &last_conflict_reason_);
     if (!status) {
       if constexpr (is_debug_build()) {
         ContractAddress contract_addr = addr.get_raw();
@@ -141,7 +144,8 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto status = block_.get().modify_lock(key, last.change, new_item);
+  auto status = block_.get().modify_lock(key, last.change, new_item,
+                                         &last_conflict_reason_);
   if (!status) {
     if constexpr (is_debug_build()) {
       ContractAddress contract_addr = addr.get_raw();
@@ -367,12 +371,15 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
+  last_conflict_reason_.reset();
+
   assert(!key.is_address_balance());
   std::vector<ItemVersion> &v = changes_[key];
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDBStatus<int128_t> ret = block_.get().lock(key, change);
+    HogDBStatus<int128_t> ret =
+        block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
       return ret.error();
     }
@@ -394,8 +401,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   ItemVersion &item = v.back();
   if (auto r = change.narrow(item.change); !r)
     return r.error();
-  HogDBStatus<int128_t> ret =
-      block_.get().modify_lock(key, item.change, change);
+  HogDBStatus<int128_t> ret = block_.get().modify_lock(key, item.change, change,
+                                                       &last_conflict_reason_);
   if (!ret) {
     return ret.error();
   }
@@ -445,6 +452,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
     return HogDBError(HogDBCode::kOverflow);
   }
   if (sum < std::min<int128_t>(base, 0)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
     return HogDBError(HogDBCode::kConflict);
   }
 
@@ -462,6 +470,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
       return HogDBError(HogDBCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -494,6 +503,7 @@ InvokeTX::request_auth_data(Address const &addr,
   AuthDataItem auth_data_item(std::move(base_auth_data.value()));
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
       return HogDBError(HogDBCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
@@ -525,6 +535,7 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
   // We do not support setting exclusive locks on replay cache items;
   // consuming a nonce is already a unique event.
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
     return HogDBError(HogDBCode::kConflict);
   }
 
@@ -534,22 +545,35 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
 
 HogDBStatus<void>
 InvokeTX::request_retrocausal_queue(const ItemKey &key,
-                                    const RetrocausalQueueDelta &delta,
+                                    RetrocausalQueueDelta &&delta,
                                     StorageDeltaFlagSet flags)
 {
-  if (delta.insert.added_entries.size() > kRetrocausalQueueBlockEntriesMaxLen) {
-    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
-  }
-  auto change = ItemChange(RetrocausalQueueIt(delta));
+  auto change = ItemChange(RetrocausalQueueIt(std::move(delta)));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));
 }
 
-HogDBStatus<void>
-InvokeTX::sync_balance_locks()
+DbConflictCode
+InvokeTX::conflict_reason_for(HogDBCode code) const
 {
+  if (code == HogDBCode::kOverflow) {
+    return DbConflictCode::kDbConflictOverflow;
+  }
+  CHECK(code == HogDBCode::kConflict);
+  // CHECK below guarantees last_conflict_reason_ has a value.
+  CHECK(last_conflict_reason_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return *last_conflict_reason_;
+}
+
+HogDBStatus<void>
+InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr,
+                             std::vector<BalanceConflict> *all_conflicts)
+{
+  std::optional<HogDBError> first_error;
+
   if constexpr (is_debug_build()) {
     std::vector<const Address *> addrs;
     for (const auto &[addr, vec] : balance_deltas_) {
@@ -562,6 +586,20 @@ InvokeTX::sync_balance_locks()
     for (const auto *addr : addrs) {
       auto status = update_balance_lock(*addr);
       if (!status) {
+        HogDBCode code = status.error().code();
+        if (all_conflicts != nullptr &&
+            (code == HogDBCode::kConflict || code == HogDBCode::kOverflow)) {
+          all_conflicts->push_back(
+              BalanceConflict{.addr = addr->get_raw(),
+                              .reason = conflict_reason_for(code)});
+          if (!first_error.has_value()) {
+            first_error = status.error();
+          }
+          continue;
+        }
+        if (first_conflicting_addr != nullptr) {
+          *first_conflicting_addr = addr->get_raw();
+        }
         return status.error();
       }
     }
@@ -571,10 +609,28 @@ InvokeTX::sync_balance_locks()
       if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
         auto status = update_balance_lock(addr);
         if (!status) {
+          HogDBCode code = status.error().code();
+          if (all_conflicts != nullptr &&
+              (code == HogDBCode::kConflict || code == HogDBCode::kOverflow)) {
+            all_conflicts->push_back(
+                BalanceConflict{.addr = addr.get_raw(),
+                                .reason = conflict_reason_for(code)});
+            if (!first_error.has_value()) {
+              first_error = status.error();
+            }
+            continue;
+          }
+          if (first_conflicting_addr != nullptr) {
+            *first_conflicting_addr = addr.get_raw();
+          }
           return status.error();
         }
       }
     }
+  }
+
+  if (first_error.has_value()) {
+    return std::unexpected{*first_error};
   }
 
   assert_is_valid();

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <limits>
 
+#include "db_conflict.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -91,7 +92,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
   assert(before == nullptr || before->base() == base_);
 
   if (after != nullptr && after->base() != base_) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
   }
 
   int128_t add_before = before == nullptr ? 0 : before->plus();
@@ -106,7 +107,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
 
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return HogDBError{HogDBCode::kConflict};
+    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
   }
 
   return get_storage_cost_of_committed_value(ctx.cost_model);

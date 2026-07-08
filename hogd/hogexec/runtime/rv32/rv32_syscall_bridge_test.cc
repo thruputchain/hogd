@@ -644,7 +644,7 @@ TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallWritePersists)
 
   EXPECT_EQ(captured.calls, 2);
   EXPECT_EQ(machine.trap(), Trap::kOutOfGas);
-  EXPECT_EQ(machine.gas_remaining(), 2U);
+  EXPECT_EQ(machine.gas_remaining(), 0U);
   EXPECT_EQ(machine.reg(10), 0U);
   // The second ecall's host write commits before complete_ecall debits host
   // gas and traps OOG; there is no per-ecall snapshot, so the write persists.

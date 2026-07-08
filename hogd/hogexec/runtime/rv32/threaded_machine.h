@@ -33,12 +33,19 @@
 // handlers inside do no gas work. Control-flow instructions and host-boundary
 // instructions (branches/jal/jalr/ecall/ebreak/unimp) are barriers and
 // self-charge.
-// Loads/stores stay in straight-line runs for performance; if they trap, the
-// run has already been charged. On out-of-gas, the run is aborted at its head
-// with gas_remaining saturated to 0, so the gas left never exceeds what
-// per-instruction metering would leave (and is exactly equal for 1-gas runs).
-// The trap pc still points at the run head, so the exact instruction and the
-// intermediate gas_remaining can differ from the per-instruction Machine.
+// Loads/stores stay in straight-line runs for performance; if one traps, the
+// run has already been charged past it, so trap_bad_memory refunds the run's
+// unexecuted suffix -- the trapped state charges exactly the instructions
+// through the faulting one, matching the per-instruction Machine. An
+// unaffordable run still executes, speculatively, on a zero balance with the
+// shortfall recorded out-of-band in gas_deficit_ (so budgets keep the full
+// uint64 domain); the deficit settles as kOutOfGas with zero gas at the run's
+// exit seam (enter_run / op_ecall / trap_at), before any effect can escape
+// the frame. The consensus-visible pair (trap classification, gas_remaining)
+// thus matches the per-instruction Machine at every budget; the speculative
+// run's register/memory writes and the trap pc are frame-local state a trap
+// discards and may differ (as may traced intermediate gas past the OOG
+// fence).
 //
 // Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
 // the executable Slot array is built (once, cached across reset()) with either
@@ -49,6 +56,14 @@ struct Ctx;
 struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
                                uint64_t);
+
+// Maximum gas any single run (chunk) may total. The lowering splits longer
+// straight-line runs at mid-run break carriers so no run's gas_to_run exceeds
+// this, which (a) keeps gas_to_run within its uint16 field and (b) bounds the
+// maximum speculative overdraft a deficit run can incur (enter_run_deficit),
+// since at most one run ever runs in deficit. A single instruction's gas is
+// <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
+inline constexpr uint32_t kMaxRunGas = 10000;
 
 // Executable instruction, packed to 16 bytes (alignas(16) -- a power of two, so
 // `ip - base` (pc_of) and `ip + imm` (branch/jump targets) still lower to a
@@ -64,9 +79,10 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // wide imm and none of them use rs2, while the rs2-users (R-type/store/branch)
 // need at most an int16 imm (store offset / branch slot-delta). So rs2 shares
 // the imm word with a narrow imm16. `gas_to_run` is the run's total gas (body
-// through terminating barrier), charged once by enter_run; uint16 --
-// PreInstantiation::create rejects a program whose run gas would overflow
-// (TODO(geoff): split the run / charge in chunks instead).
+// through terminating barrier), charged once by enter_run; uint16 -- the
+// lowering splits any run whose gas would exceed kMaxRunGas at a mid-run break
+// carrier, so a single run never overflows the field and no program is rejected
+// for run gas.
 struct alignas(16) Slot {
   Handler handler = nullptr; // offset 0
   uint16_t gas_to_run = 0;   // offset 8
@@ -89,12 +105,14 @@ static_assert(alignof(Slot) == 16);
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
-  // it is zero-padded out to total_memory_size, which is the machine's full
-  // memory size and must be <= kMaxMemoryBytes and >= memory.size().
+  // it is placed at data-space VA `memory_start`, with zeros filling [0,
+  // memory_start) and [memory_start+memory.size(), total_memory_size).
+  // `total_memory_size` is the machine's full memory size and must be <=
+  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-         uint32_t total_memory_size, bool trace);
+         uint32_t memory_start, uint32_t total_memory_size, bool trace);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -117,6 +135,7 @@ private:
   std::vector<uint8_t> initial_memory_image_;
   bool trace_ = false;
 
+  friend struct ThreadedMachinePreInstantiationTestPeer;
   friend class ThreadedMachine;
 };
 
@@ -242,9 +261,8 @@ public:
     memory_.bytes().assign(image.begin(), image.end());
 
     regs_.fill(0);
-    // Stack pointer (x2/sp) starts at the top of memory, 16-byte aligned --
-    // matches canonical Machine::reset and the old reset() path.
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
+    // Entry ABI v3: sp (x2) stays 0 from the fill above -- the guest owns
+    // stack placement (matches canonical Machine::reset).
 
     exec_ = std::span(pre_instantiation.exec_);
     max_pc_ = (exec_.size() - 1) * kInstructionBytes;
@@ -271,11 +289,11 @@ public:
                       memory_.bytes().begin());
     pc_ = 0;
     gas_remaining_ = gas;
+    gas_deficit_ = 0;
     trap_ = Trap::kNone;
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
-    regs_[2] = static_cast<uint32_t>(memory_.bytes().size()) & ~uint32_t{0x0f};
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
   }
@@ -375,6 +393,13 @@ public:
   bool halted_ = false;
   const bool exec_traced_;
   uint32_t halt_code_ = 0;
+  // Unsettled overdraft of the (single) speculative run: enter_run_deficit
+  // records the shortfall here and runs the body on a zero balance; every run
+  // exit seam settles a nonzero value as (kOutOfGas, 0). Kept out-of-band so
+  // the uint64 balance keeps its full domain (callers pass UINT64_MAX
+  // budgets); bounded by the lowering's kMaxRunGas chunk cap. Cold: written
+  // only on the deficit path, read at seams.
+  uint32_t gas_deficit_ = 0;
 };
 
 // Lock the cache-line layout the comments above call load-bearing. memory_ must
@@ -492,11 +517,37 @@ is_barrier(Op op)
     HOGD_MUSTTAIL return enter_run<Trace>((c), (next), mem, memsize, gas);     \
   } while (false)
 
+// Continue after a non-barrier instruction. `Brk` (the enclosing handler's
+// template parameter) is false for the common in-run step (thread to the next
+// slot, no gas work) and true only at a mid-run split point the lowering
+// inserted to keep a run's gas within kMaxRunGas: there the slot ends its
+// (sub-)run, so control enters a fresh run at the successor, charging the next
+// chunk. `if constexpr` keeps Brk==false byte-identical to a bare
+// HOGD_THREAD_NEXT (zero hot-path cost); the Brk==true instantiations are cold,
+// baked only into the rare split slots.
+#define HOGD_STEP_NEXT(c, next)                                                \
+  do {                                                                         \
+    if constexpr (Brk) {                                                       \
+      HOGD_ENTER_RUN((c), (next));                                             \
+    }                                                                          \
+    else {                                                                     \
+      HOGD_THREAD_NEXT((c), (next));                                           \
+    }                                                                          \
+  } while (false)
+
 // Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
 // a template parameter (compile-time literal at every call site). Its signature
 // matches a handler's, so fault sites HOGD_MUSTTAIL into it (a single
 // tail-branch, no frame). Spills the register-carried `gas` back to
 // gas_remaining_ first, so observable state at the trap is correct.
+// An unsettled gas_deficit_ means this trap was reached by a speculative
+// (deficit) run that canonical metering never finished: it stopped at the
+// run's first unpayable instruction, so the trap settles as kOutOfGas with
+// zero gas regardless of T. This one check covers every deficit-run trap exit
+// -- ebreak, unimp, bad branch target, out-of-range jal/jalr, and the
+// fall-off sentinel. (trap_bad_memory settles or clears the deficit itself
+// before tailing in, so a memory fault in the still-affordable prefix keeps
+// its kBadMemory class.)
 // cold+noinline: faults are off the hot path, and out-of-lining keeps the pc_of
 // divide and the pc_/trap_/halted_ stores out of every handler body.
 template<bool Trace, Trap T>
@@ -504,9 +555,16 @@ template<bool Trace, Trap T>
 trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
         [[maybe_unused]] uint32_t memsize, uint64_t gas)
 {
-  c.m->gas_remaining_ = gas;
+  if (c.m->gas_deficit_ != 0) {
+    c.m->gas_deficit_ = 0;
+    c.m->gas_remaining_ = 0;
+    c.m->trap_ = Trap::kOutOfGas;
+  }
+  else {
+    c.m->gas_remaining_ = gas;
+    c.m->trap_ = T;
+  }
   c.m->pc_ = pc_of(c, ip);
-  c.m->trap_ = T;
   c.m->halted_ = true;
   if constexpr (Trace) {
     c.m->obs_->on_retire(capture(c), StepResult::kTrap);
@@ -514,25 +572,89 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kTrap;
 }
 
+// A load/store faulted mid-run: enter_run pre-charged the whole run, but the
+// trapped state may keep only the instructions through the faulting one
+// charged (gas_remaining at a trap is consensus-visible, and the
+// per-instruction Machine charges exactly that prefix). Every slot's
+// gas_to_run is the run gas from that slot through its barrier -- kept
+// per-slot for branch-in run heads -- so the faulting slot's successor holds
+// exactly the unexecuted suffix: refund it, net of any deficit, then trap.
+// Loads/stores are never barriers, so ip+1 is a real slot or the fall-off
+// sentinel (gas_to_run 0). Exception: when `Brk` is true the faulting slot
+// is a break carrier -- the last instruction of its chunk -- so ip+1 heads
+// the *next*, not-yet-charged chunk; its gas_to_run must NOT be credited, and
+// the suffix is 0. In a deficit run the refund decides the class: a
+// balance that covers the deficit means the fault sits in the prefix
+// canonical metering could afford (kBadMemory with the prefix charged); one
+// that does not means canonical ran dry first (kOutOfGas, zero). Memory
+// faults only: at a barrier trap (bad branch target, ebreak, unimp), ip+1
+// heads the *next* run, whose gas was never charged, and this refund would
+// over-credit.
+template<bool Trace, bool Brk = false>
+StepResult
+trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+                uint64_t gas)
+{
+  // No overflow: the suffix is part of the charge the entered run already
+  // paid (or capped by it in a deficit run), so balance <= the entry balance.
+  // Brk (a break carrier): ip is the last instruction of its chunk, so its
+  // in-run suffix is empty -- the successor heads the *next*, not-yet-charged
+  // chunk, so refunding its gas_to_run would over-credit. Refund 0 instead.
+  const uint64_t suffix = Brk ? uint64_t{0} : uint64_t{(ip + 1)->gas_to_run};
+  const uint64_t balance = gas + suffix;
+  const uint32_t deficit = c.m->gas_deficit_;
+  if (balance < deficit) {
+    // trap_at's deficit branch settles this as (kOutOfGas, 0).
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         /*gas=*/0);
+  }
+  c.m->gas_deficit_ = 0;
+  HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
+                                                        balance - deficit);
+}
+
+// The run at `ip` does not fit the balance (enter_run's unlikely arm). If a
+// prior speculative run's deficit is still unsettled, settle it now as
+// (kOutOfGas, 0): its balance was zeroed, so it re-enters here for any
+// successor run (every instruction costs >= 1 gas). Otherwise record the
+// shortfall in gas_deficit_ and execute the run speculatively on a zero
+// balance; the deficit settles at the run's exit seam -- back here, op_ecall
+// before the host sees a syscall, or trap_at / trap_bad_memory at a trap.
+// Settling everywhere at (kOutOfGas, 0) makes the consensus-visible pair
+// (trap classification, gas_remaining) match per-instruction metering at
+// every budget: canonical stops at the run's first unpayable instruction with
+// zero gas, and no seam lets a deficit escape. The deficit is tracked
+// out-of-band (not encoded in the balance) so budgets keep the full uint64
+// domain -- callers pass UINT64_MAX -- and is bounded by one run (<=
+// kMaxRunGas, the lowering's chunk cap): at most one run ever executes in
+// deficit.
+template<bool Trace>
+[[gnu::noinline, gnu::cold]] StepResult
+enter_run_deficit(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+                  uint64_t gas)
+{
+  if (c.m->gas_deficit_ != 0) {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         /*gas=*/0);
+  }
+  c.m->gas_deficit_ = ip->gas_to_run - static_cast<uint32_t>(gas);
+  HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, /*gas=*/0);
+}
+
 // Charge the gas for the whole run starting at `ip` -- its body through and
 // including its terminating barrier -- then dispatch to it. Called at every run
 // head: program start, every jump/branch target, and the instruction after each
 // barrier. This is the only place gas is charged; no instruction self-charges.
-// Block-granular OOG: if the run does not fit, abort at its head with gas
-// saturated to 0 (the whole unaffordable run is debited). Zeroing keeps
-// block-granular OOG indistinguishable from debiting one gas per instruction --
-// a run of 1-gas instructions drains to exactly 0 before it would trap -- and
-// matches consume_gas()/apply_ecall(), which also zero on overdraft. No
-// leftover ever survives an OOG, so the gas left never exceeds what
-// per-instruction metering would leave.
+// An unaffordable run is not rejected: enter_run_deficit (cold) records the
+// shortfall and executes it speculatively -- see its comment for how the
+// deficit settles into canonical-exact (kOutOfGas, 0).
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t run_gas = ip->gas_to_run;
-  if (gas < run_gas) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
-                                                         /*gas=*/0);
+  if (gas < run_gas) [[unlikely]] {
+    HOGD_MUSTTAIL return enter_run_deficit<Trace>(c, ip, mem, memsize, gas);
   }
   gas -= run_gas;
   HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, gas);
@@ -591,43 +713,43 @@ sltu_op(uint32_t a, uint32_t b)
 }
 // --- Non-barrier handlers: no gas work (the run was pre-charged) ------------
 
-template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2]);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t)>
+template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = bits_from_i32(ip->imm);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   c.m->regs_[ip->rd] = pc_of(c, ip) + bits_from_i32(ip->imm);
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 StepResult
 op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
 // --- Barrier handlers: self-charge gas, end the run -------------------------
@@ -808,30 +930,28 @@ try_store(uint8_t *mem, uint32_t memsize, uint32_t base, int32_t imm,
 // Loads/stores are non-barriers: no self-charge (their gas is in the run total
 // pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
 // still fault (oob), which is terminal.
-template<bool Trace, uint32_t Width, bool SignExtend>
+template<bool Trace, uint32_t Width, bool SignExtend, bool Brk = false>
 StepResult
 op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   uint32_t v;
   if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
                                    v)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace, Brk>(c, ip, mem, memsize, gas);
   }
   c.m->regs_[ip->rd] = v;
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
-template<bool Trace, uint32_t Width>
+template<bool Trace, uint32_t Width, bool Brk = false>
 StepResult
 op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   if (!try_store<Width>(mem, memsize, c.m->regs_[ip->rs1], ip->rb.imm16,
                         c.m->regs_[ip->rb.rs2])) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace, Brk>(c, ip, mem, memsize, gas);
   }
-  HOGD_THREAD_NEXT(c, ip + 1);
+  HOGD_STEP_NEXT(c, ip + 1);
 }
 
 // EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
@@ -876,8 +996,7 @@ op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   uint32_t v;
   if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
                                    v)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
@@ -909,8 +1028,7 @@ op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   uint32_t v;
   if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
                                    v)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
@@ -1020,8 +1138,7 @@ op_alu_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   const Slot *st = ip + 1;
   if (!try_store<Width>(mem, memsize, c.m->regs_[st->rs1], st->rb.imm16,
                         c.m->regs_[st->rb.rs2])) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, st, mem, memsize, gas);
   }
   HOGD_THREAD_NEXT(c, ip + 2);
 }
@@ -1042,8 +1159,7 @@ op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   uint32_t v;
   if (!try_load<Width, SignExtend>(mem, memsize, c.m->regs_[ld->rs1], ld->imm,
                                    v)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ld, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ld, mem, memsize, gas);
   }
   c.m->regs_[ld->rd] = v;
   HOGD_THREAD_NEXT(c, ip + 2);
@@ -1059,8 +1175,7 @@ op_store_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 {
   if (!try_store<Width>(mem, memsize, c.m->regs_[ip->rs1], ip->rb.imm16,
                         c.m->regs_[ip->rb.rs2])) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
@@ -1082,8 +1197,7 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   uint32_t v;
   if (!try_load<LWidth, LSignExtend>(mem, memsize, c.m->regs_[ip->rs1], ip->imm,
                                      v)) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, ip, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
@@ -1092,8 +1206,7 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   const Slot *st = ip + 1;
   if (!try_store<SWidth>(mem, memsize, c.m->regs_[st->rs1], st->rb.imm16,
                          c.m->regs_[st->rb.rs2])) {
-    HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadMemory>(c, st, mem, memsize,
-                                                          gas);
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, st, mem, memsize, gas);
   }
   HOGD_THREAD_NEXT(c, ip + 2);
 }
@@ -1134,6 +1247,14 @@ StepResult
 op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
          [[maybe_unused]] uint32_t memsize, uint64_t gas)
 {
+  // A deficit (speculative) run must settle before the host boundary: a
+  // syscall has effects outside the frame that canonical -- which stopped at
+  // the run's first unpayable instruction -- never performs. Every other run
+  // exit funnels through enter_run or trap_at, which carry the same check.
+  if (c.m->gas_deficit_ != 0) [[unlikely]] {
+    HOGD_MUSTTAIL return trap_at<Trace, Trap::kOutOfGas>(c, ip, mem, memsize,
+                                                         /*gas=*/0);
+  }
   // Spill the register-carried gas back to the struct: the host sees it via
   // view(), and apply_ecall debits host gas from gas_remaining_. On resume,
   // drive() reloads it into the register.
@@ -1158,7 +1279,7 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
 // rather than going through a forwarding handler (see
 // handler_for/PreInstantiation::create).
 
-template<bool Trace>
+template<bool Trace, bool Brk = false>
 Handler
 handler_for(Op op)
 {
@@ -1180,81 +1301,81 @@ handler_for(Op op)
   case Op::kBgeu:
     return &op_branch<Trace, bgeu_cmp>;
   case Op::kLui:
-    return &op_lui<Trace>;
+    return &op_lui<Trace, Brk>;
   case Op::kAuipc:
-    return &op_auipc<Trace>;
+    return &op_auipc<Trace, Brk>;
   case Op::kAddi:
-    return &op_ri<Trace, add_op>;
+    return &op_ri<Trace, add_op, Brk>;
   case Op::kSlti:
-    return &op_ri<Trace, slt_op>;
+    return &op_ri<Trace, slt_op, Brk>;
   case Op::kSltiu:
-    return &op_ri<Trace, sltu_op>;
+    return &op_ri<Trace, sltu_op, Brk>;
   case Op::kXori:
-    return &op_ri<Trace, xor_op>;
+    return &op_ri<Trace, xor_op, Brk>;
   case Op::kOri:
-    return &op_ri<Trace, or_op>;
+    return &op_ri<Trace, or_op, Brk>;
   case Op::kAndi:
-    return &op_ri<Trace, and_op>;
+    return &op_ri<Trace, and_op, Brk>;
   case Op::kSlli:
-    return &op_ri<Trace, sll_op>;
+    return &op_ri<Trace, sll_op, Brk>;
   case Op::kSrli:
-    return &op_ri<Trace, srl_op>;
+    return &op_ri<Trace, srl_op, Brk>;
   case Op::kSrai:
-    return &op_ri<Trace, sra_op>;
+    return &op_ri<Trace, sra_op, Brk>;
   case Op::kAdd:
-    return &op_rr<Trace, add_op>;
+    return &op_rr<Trace, add_op, Brk>;
   case Op::kSub:
-    return &op_rr<Trace, sub_op>;
+    return &op_rr<Trace, sub_op, Brk>;
   case Op::kSll:
-    return &op_rr<Trace, sll_op>;
+    return &op_rr<Trace, sll_op, Brk>;
   case Op::kSlt:
-    return &op_rr<Trace, slt_op>;
+    return &op_rr<Trace, slt_op, Brk>;
   case Op::kSltu:
-    return &op_rr<Trace, sltu_op>;
+    return &op_rr<Trace, sltu_op, Brk>;
   case Op::kXor:
-    return &op_rr<Trace, xor_op>;
+    return &op_rr<Trace, xor_op, Brk>;
   case Op::kSrl:
-    return &op_rr<Trace, srl_op>;
+    return &op_rr<Trace, srl_op, Brk>;
   case Op::kSra:
-    return &op_rr<Trace, sra_op>;
+    return &op_rr<Trace, sra_op, Brk>;
   case Op::kOr:
-    return &op_rr<Trace, or_op>;
+    return &op_rr<Trace, or_op, Brk>;
   case Op::kAnd:
-    return &op_rr<Trace, and_op>;
+    return &op_rr<Trace, and_op, Brk>;
   case Op::kMul:
-    return &op_rr<Trace, mul_low>;
+    return &op_rr<Trace, mul_low, Brk>;
   case Op::kMulh:
-    return &op_rr<Trace, mulh>;
+    return &op_rr<Trace, mulh, Brk>;
   case Op::kMulhsu:
-    return &op_rr<Trace, mulhsu>;
+    return &op_rr<Trace, mulhsu, Brk>;
   case Op::kMulhu:
-    return &op_rr<Trace, mulhu>;
+    return &op_rr<Trace, mulhu, Brk>;
   case Op::kDiv:
-    return &op_rr<Trace, div_signed>;
+    return &op_rr<Trace, div_signed, Brk>;
   case Op::kDivu:
-    return &op_rr<Trace, div_unsigned>;
+    return &op_rr<Trace, div_unsigned, Brk>;
   case Op::kRem:
-    return &op_rr<Trace, rem_signed>;
+    return &op_rr<Trace, rem_signed, Brk>;
   case Op::kRemu:
-    return &op_rr<Trace, rem_unsigned>;
+    return &op_rr<Trace, rem_unsigned, Brk>;
   case Op::kLb:
-    return &op_load<Trace, 1, true>;
+    return &op_load<Trace, 1, true, Brk>;
   case Op::kLh:
-    return &op_load<Trace, 2, true>;
+    return &op_load<Trace, 2, true, Brk>;
   case Op::kLw:
-    return &op_load<Trace, 4, false>;
+    return &op_load<Trace, 4, false, Brk>;
   case Op::kLbu:
-    return &op_load<Trace, 1, false>;
+    return &op_load<Trace, 1, false, Brk>;
   case Op::kLhu:
-    return &op_load<Trace, 2, false>;
+    return &op_load<Trace, 2, false, Brk>;
   case Op::kSb:
-    return &op_store<Trace, 1>;
+    return &op_store<Trace, 1, Brk>;
   case Op::kSh:
-    return &op_store<Trace, 2>;
+    return &op_store<Trace, 2, Brk>;
   case Op::kSw:
-    return &op_store<Trace, 4>;
+    return &op_store<Trace, 4, Brk>;
   case Op::kFence:
-    return &op_fence<Trace>;
+    return &op_fence<Trace, Brk>;
   case Op::kEbreak:
     // ebreak's gas is charged at the run head; the handler is a pure trap, so
     // dispatch straight to trap_at (it has the handler signature).
@@ -1270,6 +1391,17 @@ handler_for(Op op)
     // ops); the defensive default traps kInvalidInstruction directly.
     return &trap_at<Trace, Trap::kInvalidInstruction>;
   }
+}
+
+// Select a handler from the runtime (trace, brk) pair. brk is set only for a
+// mid-run break carrier (a non-barrier slot ending a chunk).
+inline Handler
+pick_handler(Op op, bool trace, bool brk)
+{
+  if (brk) {
+    return trace ? handler_for<true, true>(op) : handler_for<false, true>(op);
+  }
+  return trace ? handler_for<true, false>(op) : handler_for<false, false>(op);
 }
 
 // Selects the out-of-range branch handler with the same Cmp handler_for bakes
@@ -1714,6 +1846,7 @@ inline constexpr std::array<FusionRule, 9> kFusionRules = {
 inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
+                                        uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace)
 {
   const auto program = ThreadedProgram::create(code);
@@ -1722,12 +1855,12 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   }
 
   if (total_memory_size > kMaxMemoryBytes ||
-      total_memory_size < memory.size()) {
+      size_t{memory_start} + memory.size() > total_memory_size) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 
-  std::vector<uint8_t> initial_memory_image(memory.begin(), memory.end());
-  initial_memory_image.resize(total_memory_size);
+  std::vector<uint8_t> initial_memory_image(total_memory_size, 0);
+  std::ranges::copy(memory, initial_memory_image.begin() + memory_start);
 
   std::vector<Slot> exec;
   size_t n = program->instruction_count();
@@ -1738,15 +1871,17 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   exec[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
                                   : &trap_at<false, Trap::kBadPc>};
 
-  bool gas_overflow = false;
-
-  // Backward fusion carry: `next_op` is the instruction one slot ahead (i+1,
-  // processed on the previous iteration) and `next_fused` says whether that
-  // slot was itself consumed as a fusion tail, so it can't also head this
-  // pair -- a slot belongs to at most one pair. Seeded at the bottom of the
-  // loop.
+  // Single backward lowering pass: decode each instruction, place its gas and
+  // any mid-run break carrier, select its handler, resolve control targets, and
+  // fuse. Backward carries, seeded at the bottom of the loop: `next_op` is the
+  // instruction one slot ahead (i+1) and `next_fused` whether that slot was
+  // consumed as a fusion tail (so it can't also head this pair -- a slot
+  // belongs to at most one pair); `next_is_break` whether i+1 is a break
+  // carrier, so the fusion guard can reject a pair whose tail is a carrier
+  // without materializing a per-slot array.
   Instr next_op = {};
   bool next_fused = false;
+  bool next_is_break = false;
 
   for (size_t i = n; i-- > 0;) {
     const auto instruction = program->instruction_at(i);
@@ -1755,7 +1890,40 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
     const Instr &d = *instruction;
     Slot &slot = exec[i];
-    slot.handler = trace ? handler_for<true>(d.op) : handler_for<false>(d.op);
+
+    // Gas + break placement, folded into this one backward pass. KEEP THIS
+    // SINGLE-PASS: the break decision reads exec[i+1].gas_to_run, which this
+    // same backward pass already computed, so it needs no forward pre-pass and
+    // no per-slot is_break array -- do not reintroduce either. gas_to_run[i]
+    // is the gas of the run starting at i, through its terminating barrier or
+    // break carrier; each entry sees its successor's already-computed sum
+    // (exec[i+1].gas_to_run; the i+1<n guard excludes the fall-off sentinel,
+    // gas 0). enter_run pre-charges this at every run head, so no instruction
+    // self-charges. A non-barrier normally extends into its successor's run --
+    // unless that would push the run past kMaxRunGas, in which case slot i
+    // becomes a break carrier: its Brk=true handler ends the run at its own gas
+    // and charges the next chunk via enter_run at i+1. Greedy from the tail
+    // keeps every chunk <= kMaxRunGas; a single instruction's gas is <<
+    // kMaxRunGas, so a valid split always exists and no program is rejected for
+    // run gas.
+    const auto self_gas = static_cast<uint32_t>(d.gas);
+    assert(self_gas <= kMaxRunGas &&
+           "a single instruction's gas must fit within one run chunk");
+    bool is_break_here = false;
+    uint32_t run_gas = self_gas;
+    if (!is_barrier(d.op) && i + 1 < n) {
+      const uint32_t candidate = self_gas + exec[i + 1].gas_to_run;
+      if (candidate <= kMaxRunGas) {
+        run_gas = candidate;
+      }
+      else {
+        is_break_here = true; // break carrier; run_gas stays self_gas
+      }
+    }
+    assert(run_gas <= kMaxRunGas);
+    slot.gas_to_run = static_cast<uint16_t>(run_gas);
+
+    slot.handler = pick_handler(d.op, trace, is_break_here);
 
     // x0 reads come from the always zero register at regs_[kRegisterCount].
     // writes go to trash at regs_[0].  This keeps the write-heavy actions
@@ -1808,31 +1976,6 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       }
     }
 
-    // fill in gas costs
-    // gas_to_run[i] = gas of the run starting at i, through and including its
-    // terminating barrier; backward so each entry sees its successor's
-    // already-computed sum. enter_run pre-charges this at every run head, so no
-    // instruction self-charges. A barrier ends its run, so its gas_to_run is
-    // just its own gas (charged when a jump/branch lands directly on it); a
-    // non-barrier always continues into its successor, and the sum stops
-    // naturally at the barrier (whose gas_to_run excludes its own successor).
-    // The i+1<n guard keeps the run from absorbing the fall-off sentinel
-    // (exec_[n], gas 0). The per-instruction op and gas come straight from
-    // `code` -- they are build-time inputs, not stored in the Slot.
-    //
-    // gas_to_run is a uint16. A run whose total gas exceeds 65535 (only
-    // reachable by a pathologically long straight-line run -- up to 16384
-    // instrs * 8 gas for div) is rejected below.
-    // TODO(geoff): instead split the run, charging 65535 at a synthetic mid-run
-    // recharge handler.
-    const auto self_gas = static_cast<uint32_t>(d.gas);
-    const uint32_t run_gas =
-        is_barrier(d.op)
-            ? self_gas
-            : self_gas + ((i + 1 < n) ? exec[i + 1].gas_to_run : 0U);
-    gas_overflow = gas_overflow || run_gas > 0xFFFFU;
-    exec[i].gas_to_run = static_cast<uint16_t>(run_gas);
-
     // EXPERIMENT(fuse): collapse this slot and its successor into one fused
     // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
     // is a real instruction (not the fall-off sentinel) and was not itself
@@ -1840,7 +1983,11 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // pair. The tail slot keeps its standalone handler and gas_to_run as the
     // branch-in fallback; fusion is behavior-preserving and never changes gas.
     bool fused_here = false;
-    if (i + 1 < n && !next_fused) {
+    // Do not fuse across a chunk boundary: a fused handler skips the
+    // intervening enter_run, so a pair may not straddle a break carrier
+    // (either as the pair's head or its tail). Break carriers are
+    // astronomically rare, so this costs no measurable coverage.
+    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
@@ -1856,10 +2003,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
     next_op = d;
     next_fused = fused_here;
-  }
-
-  if (gas_overflow) {
-    return std::unexpected(ProgramError::kRunGasTooLarge);
+    next_is_break = is_break_here;
   }
 
   return ThreadedMachinePreInstantiation(std::move(exec),
@@ -1950,6 +2094,7 @@ ThreadedMachine::apply_ecall(const HostResult &result)
     }
     return StepResult::kHalted;
   case HostStatus::kOutOfGas:
+    gas_remaining_ = 0;
     return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,
                                            gas_remaining_);
   case HostStatus::kTrap:
