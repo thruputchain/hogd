@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -31,7 +32,10 @@ namespace hogd {
 class NNIntAddTest : public ::testing::TestWithParam<TestDB>,
                      public NativeContractTestFramework {
 public:
-  NNIntAddTest() : NativeContractTestFramework(false) {}
+  NNIntAddTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override {}
@@ -138,6 +142,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -227,6 +232,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -314,6 +320,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -332,23 +339,37 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
   auto commit_res2 = handler2.try_commit_transaction();
-  ASSERT_EQ(commit_res2, ExecResult::ExecResultOK);
+  // MockInMemory allows concurrent NNIntAdd(-100) alongside the set_add(0,200);
+  // HogDB rejects it at the bounds pre-check (snapshot base=0, delta=-100 =>
+  // sum < min(base,0)) and returns a conflict error.
+  if (GetParam() == TestDB::kMockInMemory) {
+    ASSERT_EQ(commit_res2, ExecResult::ExecResultOK);
+  } else {
+    ASSERT_EQ(commit_res2, ExecResult::ExecResultTxNonDeterministicError);
+  }
 
   advance_block();
 
-  // Check that the storage item is (100)
+  // Check that the storage item reflects the committed state.
+  // MockInMemory: both handlers committed => 0+200-100 = 100.
+  // HogDB: only handler1 committed (handler2 conflicted) => 0+200 = 200.
   auto read_res = lookup_storage_item_from_db(
       make_contract_data_addrkey(contract_addr, "test"));
   ASSERT_TRUE(read_res.has_value());
   ASSERT_EQ(read_res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
   auto nnint_item = read_res.value().nnint();
-  ASSERT_EQ(from_xdr(nnint_item), 100);
+  if (GetParam() == TestDB::kMockInMemory) {
+    ASSERT_EQ(from_xdr(nnint_item), 100);
+  } else {
+    ASSERT_EQ(from_xdr(nnint_item), 200);
+  }
 
   // Now assert that nnint add conflicts with set_add, if the set value differs
   // from the base value.
@@ -361,6 +382,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -379,6 +401,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -387,9 +410,26 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto commit_res4 = handler4.try_commit_transaction();
   ASSERT_EQ(commit_res4, ExecResult::ExecResultTxNonDeterministicError);
 
+  // The getter surfaces the same diagnostic the FFI serializes out. handler4's
+  // add conflicts: handler3 committed set=0 (locking base_=0 in HogDB), but
+  // handler4's executor sees snapshot base=100, so the push is rejected with
+  // kDbConflictValueMismatch.
+  if (GetParam() == TestDB::kHogDB) {
+    ASSERT_EQ(handler4.last_commit_conflict().level(),
+              DbDiagnosticLevel::kDbDiagnosticAll);
+    bool found_conflict = false;
+    for (auto const &c : handler4.last_commit_conflict().conflicts()) {
+      if (c.code == DbConflictCode::kDbConflictValueMismatch) {
+        found_conflict = true;
+      }
+    }
+    ASSERT_TRUE(found_conflict);
+  }
+
   advance_block();
 
-  // Check that the storage item is (100)
+  // Check that the storage item is (200): handler3 committed set_add(0,200),
+  // handler4 was rejected. Both backends agree on 200 here.
   read_res = lookup_storage_item_from_db(
       make_contract_data_addrkey(contract_addr, "test"));
   ASSERT_TRUE(read_res.has_value());
@@ -436,6 +476,7 @@ TEST_P(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -493,6 +534,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithPositiveAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -553,6 +595,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 

@@ -1066,6 +1066,12 @@ SystemCallHandler::get_trace() const
   return invocation_frame_trace_.get();
 }
 
+DbConflictResult const &
+SystemCallHandler::last_commit_conflict() const
+{
+  return db_proxy_.last_push_conflict();
+}
+
 void
 SystemCallHandler::log_db_conflict_diagnostic() const
 {

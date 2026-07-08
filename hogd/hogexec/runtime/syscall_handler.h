@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "db_conflict.hh"
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "contract.hh"
@@ -192,6 +193,15 @@ public:
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
   ExecResult try_commit_transaction();
+
+  // The two-phase-commit conflict diagnostic from the most recent failed commit
+  // push (the root lock-acquire / 2pc push, or the commit_body_discarded RCQ /
+  // replay path), at the DbDiagnosticLevel the database selected from the block
+  // mode. The kDbDiagnosticNone arm if the last push succeeded. Valid after
+  // try_commit_transaction() returns: abort_transaction() does not reset it.
+  // Intended for SDK / test surfacing.
+  DbConflictResult const &last_commit_conflict() const;
+
   SystemStatus<void> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the
