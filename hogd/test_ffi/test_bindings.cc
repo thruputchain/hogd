@@ -805,6 +805,8 @@ try_commit_transaction(void *syscall_handler) noexcept
         kTestFFIErrorCodeInvalidPointer);
   }
 
+  // Hoisted before try{} so the catch block can free it if emit_events throws.
+  FFIDataBuffer serialized_conflict = kNullBuffer;
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     // Reject a repeat commit (or a commit after a prior abort) on a still-live
@@ -845,7 +847,6 @@ try_commit_transaction(void *syscall_handler) noexcept
     // effort: a serialization failure degrades to a null buffer (reserved for
     // "serialization failed", distinct from the None arm) rather than turning a
     // real commit result into an FFI error.
-    FFIDataBuffer serialized_conflict = kNullBuffer;
     {
       auto s = serialize_to_ffi_data_buffer(
           context->to_handler().last_commit_conflict());
@@ -874,6 +875,7 @@ try_commit_transaction(void *syscall_handler) noexcept
     return ForeignTryCommitResult{.result_code = std::to_underlying(res),
                                   .serialized_conflict = serialized_conflict};
   } catch (std::exception const &e) {
+    hogd::free_ffi_data_buffer(serialized_conflict);
     log_error("error during try_commit_transaction: {}", e);
     return kUnrecoverableError;
   }

@@ -3784,11 +3784,11 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
   free_ffi_data_buffer(r2.serialized_events);
 
   auto c2 = try_commit_transaction(h2);
+  x23::Defer dc([&] { free_ffi_data_buffer(c2.serialized_conflict); });
   ASSERT_EQ(c2.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_EQ(c2.result_code,
             std::to_underlying(ExecResult::ExecResultTxNonDeterministicError));
   ASSERT_NE(c2.serialized_conflict.data, nullptr);
-  x23::Defer dc([&] { free_ffi_data_buffer(c2.serialized_conflict); });
 
   DbConflictResult conflict;
   x23::deserialize(&conflict, x23::BufView{c2.serialized_conflict.data,
