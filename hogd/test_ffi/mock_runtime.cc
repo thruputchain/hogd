@@ -3,11 +3,13 @@
 
 #include <cassert>
 #include <memory>
+#include <utility>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/mock_contract.h"

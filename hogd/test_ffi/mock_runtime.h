@@ -115,10 +115,11 @@ public:
 
   ~MockRuntime() override = default;
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
+private:
   MockContract backing_contract_;
 };
 
@@ -130,7 +131,7 @@ public:
 
   ~EmptyRuntime() override = default;
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {
