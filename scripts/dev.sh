@@ -367,7 +367,7 @@ echo "=== Configuring build for tidy ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -C build/llvm tidy_targets
+cmake --build build/llvm --parallel "${CI_CPUS:-$(nproc)}" --target tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm
@@ -390,7 +390,7 @@ echo "=== Configuring Clang build ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -C build/llvm tidy_targets
+cmake --build build/llvm --parallel "${CI_CPUS:-$(nproc)}" --target tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm
@@ -423,7 +423,7 @@ Container-based development and CI for HOGD.
 Commands:
     shell               Start interactive shell in container
     build [ARGS]        Fetch deps + run ./scripts/build.sh
-    test [ARGS]         Run make test
+    test [ARGS]         Run the CMake test target
     <cmd>               Run arbitrary command in container
 
     ci cpp [--no-test]  Run C++ CI checks (format, build, test)
@@ -437,7 +437,7 @@ Commands:
 Examples:
     $0 shell                                # Interactive shell
     $0 build -n -d build -t Debug -c clang  # Configure clang debug build
-    $0 make -C build -j8                    # Build the project
+    $0 build -d build -j8                   # Build the project
     $0 test                                 # Run tests
     $0 ci cpp                               # Run C++ CI locally
     $0 ci tidy                              # Run tidy checks locally
@@ -469,7 +469,7 @@ handle_command() {
     ;;
   test)
     shift
-    run_container "$runtime" make -C build test "$@"
+    run_container "$runtime" cmake --build build --target test "$@"
     ;;
   ci)
     shift

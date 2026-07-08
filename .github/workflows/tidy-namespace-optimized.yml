@@ -138,7 +138,7 @@ jobs:
           ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
       - name: Build Tidy Targets
-        run: make -j $(nproc) -C build/llvm tidy_targets
+        run: cmake --build build/llvm --parallel "$(nproc)" --target tidy_targets
 
       - name: Run Tidy Checks
         run: |

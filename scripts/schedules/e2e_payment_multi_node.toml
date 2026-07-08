@@ -26,7 +26,7 @@ echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
@@ -100,7 +100,7 @@ echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)

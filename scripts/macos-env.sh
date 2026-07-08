@@ -81,4 +81,4 @@ if [ -n "$TOOLCHAIN_VERSION" ]; then
 fi
 echo ""
 echo "Note: ./scripts/build.sh automatically activates this environment."
-echo "      If running 'make' directly, source this file first."
+echo "      If running 'cmake --build' directly, source this file first."
