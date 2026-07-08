@@ -32,6 +32,7 @@ target_link_libraries(
   hogd_interface
   GTest::gtest
 )
+hogd_target_precompile_headers(exec_interface_test_objects ${HOGD_TEST_PCH_HEADERS})
 add_dependencies(
   exec_interface_test_objects
   all_wasm_headers

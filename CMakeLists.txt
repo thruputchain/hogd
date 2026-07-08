@@ -15,6 +15,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
+option(HOGD_ENABLE_PCH "Enable precompiled headers for C++ targets" ON)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
 # Enable WASM debug backtraces (preserves function names in stack traces)
@@ -33,6 +34,7 @@ endif()
 
 message(STATUS "ENABLE_CI_FAIL_LOG: ${ENABLE_CI_FAIL_LOG}")
 message(STATUS "HAS_CI_FAIL_LOG: ${HAS_CI_FAIL_LOG}")
+message(STATUS "HOGD_ENABLE_PCH: ${HOGD_ENABLE_PCH}")
 
 # Get git commit hash
 find_package(Git)
@@ -100,6 +102,28 @@ message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
 include(cmake/wasmopt.cmake)
+
+function(hogd_target_precompile_headers target_name)
+  if(HOGD_ENABLE_PCH)
+    target_precompile_headers(${target_name} PRIVATE ${ARGN})
+  endif()
+endfunction()
+
+set(HOGD_TEST_PCH_HEADERS
+  <gtest/gtest.h>
+  <array>
+  <cstddef>
+  <cstdint>
+  <memory>
+  <optional>
+  <span>
+  <string>
+  <tuple>
+  <unordered_map>
+  <utility>
+  <vector>
+  [["hogd/base/types.h"]]
+)
 
 # Where to place generated headers
 set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers")
