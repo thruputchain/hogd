@@ -67,6 +67,7 @@ parse_fixed_up(std::span<const uint8_t> bytes)
 } // namespace
 
 extern "C" int
+// NOLINTNEXTLINE(readability-identifier-naming)
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
   const std::span<const uint8_t> bytes(data, size);

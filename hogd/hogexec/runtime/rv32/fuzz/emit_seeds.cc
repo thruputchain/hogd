@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -47,7 +48,7 @@ engine_diff_seed(const std::vector<uint32_t> &words)
 
 int
 main(int argc, char **argv)
-{
+try {
   if (argc != 2) {
     std::cerr << "usage: " << argv[0] << " <corpus-root>\n";
     return 2;
@@ -83,4 +84,10 @@ main(int argc, char **argv)
 
   std::cerr << "wrote seeds under " << root << "\n";
   return 0;
+} catch (const std::exception &e) {
+  std::cerr << "rv32_emit_seeds: " << e.what() << "\n";
+  return 1;
+} catch (...) {
+  std::cerr << "rv32_emit_seeds: unknown error\n";
+  return 1;
 }

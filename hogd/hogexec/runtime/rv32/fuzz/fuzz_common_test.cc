@@ -1,9 +1,11 @@
 #include "hogd/hogexec/runtime/rv32/fuzz/fuzz_common.h"
+#include "hogd/hogexec/runtime/rv32/program.h"
 #include "hogd/hogexec/runtime/rv32/test_corpus.h"
 #include "hogd/hogexec/runtime/rv32/test_program_builder.h"
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -104,10 +106,12 @@ TEST(Rv32FuzzCarveEngineDiff, ClampsGasAndMemAndForcesWordAlignedCode)
   }
   const auto in = carve_engine_diff_input(data);
   ASSERT_TRUE(in.has_value());
-  EXPECT_LE(in->gas_budget, kFuzzGasCap);
-  EXPECT_LE(in->memory_bytes, kFuzzMemCap);
-  ASSERT_EQ(in->code.size() % kInstructionBytes, 0U);
-  EXPECT_EQ(in->code.size(), 4U);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const EngineDiffInput &input = in.value();
+  EXPECT_LE(input.gas_budget, kFuzzGasCap);
+  EXPECT_LE(input.memory_bytes, kFuzzMemCap);
+  ASSERT_EQ(input.code.size() % kInstructionBytes, 0U);
+  EXPECT_EQ(input.code.size(), 4U);
 }
 
 TEST(Rv32FuzzCarveEngineDiff, ReturnsNulloptWhenNoFullCodeWord)
@@ -132,15 +136,18 @@ TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)
   data.push_back(0xCC); // 3-byte tail
   const auto fx = carve_artifact_fixup(data);
   ASSERT_TRUE(fx.has_value());
-  EXPECT_LE(fx->initial_memory.size(), 3U);
-  EXPECT_LE(size_t{fx->initial_memory_start} + fx->initial_memory.size(),
-            size_t{kMaxMemoryBytes});
-  EXPECT_FALSE(fx->code_words.empty()); // forced non-empty
-  EXPECT_GE(fx->memory_bytes,
-            std::max<uint32_t>(1, fx->initial_memory_start +
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const ArtifactFixup &fixup = fx.value();
+  EXPECT_LE(fixup.initial_memory.size(), 3U);
+  EXPECT_LE(std::size_t{fixup.initial_memory_start} +
+                fixup.initial_memory.size(),
+            std::size_t{kMaxMemoryBytes});
+  EXPECT_FALSE(fixup.code_words.empty()); // forced non-empty
+  EXPECT_GE(fixup.memory_bytes,
+            std::max<uint32_t>(1, fixup.initial_memory_start +
                                       static_cast<uint32_t>(
-                                          fx->initial_memory.size())));
-  EXPECT_LE(fx->memory_bytes, kMaxMemoryBytes);
+                                          fixup.initial_memory.size())));
+  EXPECT_LE(fixup.memory_bytes, kMaxMemoryBytes);
 }
 
 TEST(Rv32FuzzCarveArtifact, ReturnsNulloptWhenNoPayload)
@@ -161,10 +168,12 @@ TEST(Rv32FuzzCarveArtifact, EmptyInitialMemoryUsesCanonicalStartZero)
 
   const auto fx = carve_artifact_fixup(data);
   ASSERT_TRUE(fx.has_value());
-  EXPECT_TRUE(fx->initial_memory.empty());
-  EXPECT_EQ(fx->initial_memory_start, 0U);
-  EXPECT_GE(fx->memory_bytes, 1U);
-  EXPECT_FALSE(fx->code_words.empty());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const ArtifactFixup &fixup = fx.value();
+  EXPECT_TRUE(fixup.initial_memory.empty());
+  EXPECT_EQ(fixup.initial_memory_start, 0U);
+  EXPECT_GE(fixup.memory_bytes, 1U);
+  EXPECT_FALSE(fixup.code_words.empty());
 }
 
 } // namespace

@@ -3,8 +3,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <print>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "hogd/hogexec/runtime/rv32/arch_trace.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
@@ -35,20 +37,21 @@ namespace fuzz = hogd::rv32::fuzz;
 fail(const char *what, std::span<const uint8_t> code, uint64_t gas,
      uint32_t memory_bytes)
 {
-  std::fprintf(stderr, "rv32 engine divergence: %s\n", what);
-  std::fprintf(stderr, "  gas_budget=%llu memory_bytes=%u words:",
-               static_cast<unsigned long long>(gas), memory_bytes);
+  std::println(stderr, "rv32 engine divergence: {}", what);
+  std::print(stderr, "  gas_budget={} memory_bytes={} words:", gas,
+             memory_bytes);
   for (std::size_t i = 0; i + kInstructionBytes <= code.size();
        i += kInstructionBytes) {
-    std::fprintf(stderr, " %08x", load_u32_le(code, i));
+    std::print(stderr, " {:08x}", load_u32_le(code, i));
   }
-  std::fprintf(stderr, "\n");
+  std::println(stderr, "");
   std::abort();
 }
 
 } // namespace
 
 extern "C" int
+// NOLINTNEXTLINE(readability-identifier-naming)
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
   const auto in =
