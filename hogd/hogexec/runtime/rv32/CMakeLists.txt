@@ -344,3 +344,51 @@ if(BUILD_BENCHMARKS)
     set_property(TARGET rv32_vm_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
 endif()
+
+if(BUILD_FUZZERS)
+  # Plain gtest for the pure carve/decoder-parity helpers (no fuzzer sanitizer).
+  add_executable(
+    rv32_fuzz_common_test
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_common_test.cc
+    rv32_vm_test_main.cc
+  )
+  target_link_libraries(rv32_fuzz_common_test rv32_isa_core GTest::gtest)
+  target_include_directories(rv32_fuzz_common_test PRIVATE ${CMAKE_SOURCE_DIR})
+
+  add_executable(
+    rv32_fuzz_engine_diff
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_engine_diff.cc
+  )
+  target_link_libraries(rv32_fuzz_engine_diff rv32_isa_core)
+  target_include_directories(rv32_fuzz_engine_diff PRIVATE ${CMAKE_SOURCE_DIR})
+  target_compile_options(rv32_fuzz_engine_diff PRIVATE -fsanitize=fuzzer,address)
+  target_link_options(rv32_fuzz_engine_diff PRIVATE
+    -fsanitize=fuzzer,address -nostdlib++ -lc++)
+  if(NOT APPLE)
+    target_link_options(rv32_fuzz_engine_diff PRIVATE -lstdc++)
+  endif()
+
+  add_executable(
+    rv32_fuzz_artifact
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_artifact.cc
+  )
+  target_link_libraries(rv32_fuzz_artifact rv32_vm)
+  target_include_directories(rv32_fuzz_artifact PRIVATE ${CMAKE_SOURCE_DIR})
+  target_compile_options(rv32_fuzz_artifact PRIVATE -fsanitize=fuzzer,address)
+  target_link_options(rv32_fuzz_artifact PRIVATE
+    -fsanitize=fuzzer,address -nostdlib++ -lc++)
+  if(NOT APPLE)
+    target_link_options(rv32_fuzz_artifact PRIVATE -lstdc++)
+  endif()
+
+  add_executable(
+    rv32_emit_seeds
+    EXCLUDE_FROM_ALL
+    fuzz/emit_seeds.cc
+  )
+  target_link_libraries(rv32_emit_seeds rv32_vm)
+  target_include_directories(rv32_emit_seeds PRIVATE ${CMAKE_SOURCE_DIR})
+endif()

@@ -132,3 +132,14 @@ The test strategy is deliberately redundant:
 
 For consensus-sensitive changes, prefer a narrow regression test near the
 changed layer plus at least one cross-engine check.
+
+Two local-only libFuzzer targets live under `fuzz/` (built with
+`-DBUILD_FUZZERS=ON`, excluded from CI). `rv32_fuzz_artifact` drives the
+attacker-facing deploy path -- raw bytes through `parse_artifact` /
+`parse_threaded_artifact` for the rejection paths, and a fixed-up well-formed
+artifact through lowering and machine construction to reach decode/fusion/image
+staging past the SHA256 digest wall. `rv32_fuzz_engine_diff` extends the
+canonical-vs-threaded differential beyond the fixed-seed corpora, asserting
+exact-`ProgramError` decoder parity and execution parity (OOG class and
+`gas_remaining==0` first; full trace parity only when neither engine runs out of
+gas). See `fuzz/README.md`.
