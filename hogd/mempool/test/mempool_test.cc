@@ -23,6 +23,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/init.h"
+#include "hogd/mempool/nomination_compat.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/mempool/test/infra.h"

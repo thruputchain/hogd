@@ -25,8 +25,8 @@ struct BlockHeader {
   BlockHash prev_block_hash;
 
   bool operator==(const BlockHeader &) const noexcept = default;
-  friend std::partial_ordering operator<=>(const BlockHeader &,
-                                           const BlockHeader &) noexcept;
+  friend std::partial_ordering operator<=>(const BlockHeader &a,
+                                           const BlockHeader &b) noexcept;
 };
 
 template<size_t I, x23::references<BlockHeader> T> requires (I < 6)
@@ -59,6 +59,7 @@ struct std::tuple_element<I, hogd::BlockHeader> {
   using type = decltype(auto(get<I>(struct_type{})));
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 template<> struct x23::xdr_meta<hogd::BlockHeader> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "BlockHeader";
@@ -67,6 +68,7 @@ template<> struct x23::xdr_meta<hogd::BlockHeader> {
       "db_hash",    "events_hash",  "prev_block_hash",
   };
 };
+// NOLINTEND(readability-identifier-naming)
 
 namespace hogd {
 
