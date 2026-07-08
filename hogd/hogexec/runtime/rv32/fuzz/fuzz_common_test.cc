@@ -124,7 +124,7 @@ TEST(Rv32FuzzCarveEngineDiff, ReturnsNulloptWhenNoFullCodeWord)
 TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)
 {
   // Headers: start u32, mem_len u32 (huge), extra u32. Then a tiny 3-byte tail:
-  // mem_len clamps to the 3 available bytes, leaving zero code -> forced word.
+  // there is no full code word to reserve, so code is forced non-empty.
   std::vector<uint8_t> data;
   const std::array<uint8_t, 4> zero = {0, 0, 0, 0};
   data.insert(data.end(), zero.begin(), zero.end()); // start = 0
@@ -148,6 +148,24 @@ TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)
                                       static_cast<uint32_t>(
                                           fixup.initial_memory.size())));
   EXPECT_LE(fixup.memory_bytes, kMaxMemoryBytes);
+}
+
+TEST(Rv32FuzzCarveArtifact, ReservesFullWordForFuzzerCodeWhenAvailable)
+{
+  std::vector<uint8_t> data;
+  const std::array<uint8_t, 4> zero = {0, 0, 0, 0};
+  const std::array<uint8_t, 4> big = {0xFF, 0xFF, 0xFF, 0xFF};
+  data.insert(data.end(), zero.begin(), zero.end()); // start = 0
+  data.insert(data.end(), big.begin(), big.end());   // large mem_len knob
+  data.insert(data.end(), zero.begin(), zero.end()); // extra = 0
+  data.insert(data.end(), {0xaa, 0xbb, 0xcc, 0xdd, 0x13, 0x00, 0x10, 0x00});
+
+  const auto fx = carve_artifact_fixup(data);
+  ASSERT_TRUE(fx.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const ArtifactFixup &fixup = fx.value();
+  ASSERT_FALSE(fixup.code_words.empty());
+  EXPECT_EQ(fixup.code_words.back(), 0x00100013U);
 }
 
 TEST(Rv32FuzzCarveArtifact, ReturnsNulloptWhenNoPayload)

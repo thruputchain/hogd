@@ -134,10 +134,11 @@ struct ArtifactFixup {
 
 // Layout: [u32 start][u32 mem_len][u32 extra][payload...]. The payload is split
 // into initial_memory (clamped to fit both kMaxMemoryBytes and the remaining
-// bytes) followed by code, which is forced non-empty and 4-aligned so the fixup
-// reaches decode. The empty initial-memory image has a single canonical start
-// encoding (0), and memory_bytes is floor plus fuzzer-chosen headroom to
-// exercise the zero-extended tail. nullopt if the payload is empty.
+// bytes) followed by code. When the payload can hold at least one instruction,
+// reserve one word for code instead of letting the image consume the whole
+// tail. The empty initial-memory image has a single canonical start encoding
+// (0), and memory_bytes is floor plus fuzzer-chosen headroom to exercise the
+// zero-extended tail. nullopt if the payload is empty.
 inline std::optional<ArtifactFixup>
 carve_artifact_fixup(std::span<const uint8_t> data)
 {
@@ -151,9 +152,12 @@ carve_artifact_fixup(std::span<const uint8_t> data)
   }
 
   const uint32_t max_by_space = kMaxMemoryBytes - start;
-  const auto max_by_buffer = static_cast<uint32_t>(tail.size());
+  const auto max_by_buffer = static_cast<uint32_t>(
+      tail.size() >= kInstructionBytes ? tail.size() - kInstructionBytes
+                                       : tail.size());
+  const uint32_t max_mem_len = std::min(max_by_space, max_by_buffer);
   const uint32_t mem_len =
-      std::min({mem_len_knob, max_by_space, max_by_buffer});
+      max_mem_len == 0 ? 0U : mem_len_knob % (max_mem_len + 1);
 
   ArtifactFixup fixup;
   fixup.initial_memory_start = start;

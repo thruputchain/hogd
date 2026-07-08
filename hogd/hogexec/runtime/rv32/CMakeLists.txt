@@ -346,6 +346,38 @@ if(BUILD_BENCHMARKS)
 endif()
 
 if(BUILD_FUZZERS)
+  add_library(
+    rv32_isa_core_fuzz
+    machine.cc
+    program.cc
+  )
+  target_include_directories(
+    rv32_isa_core_fuzz
+    PUBLIC
+    ${CMAKE_SOURCE_DIR}
+  )
+  target_compile_options(rv32_isa_core_fuzz PRIVATE
+    -fsanitize=fuzzer-no-link,address)
+
+  add_library(
+    rv32_vm_fuzz
+    artifact.cc
+  )
+  target_include_directories(
+    rv32_vm_fuzz
+    PUBLIC
+    ${CMAKE_SOURCE_DIR}
+  )
+  target_link_libraries(
+    rv32_vm_fuzz
+    PUBLIC
+    rv32_isa_core_fuzz
+    PRIVATE
+    OpenSSL::Crypto
+  )
+  target_compile_options(rv32_vm_fuzz PRIVATE
+    -fsanitize=fuzzer-no-link,address)
+
   # Plain gtest for the pure carve/decoder-parity helpers (no fuzzer sanitizer).
   add_executable(
     rv32_fuzz_common_test
@@ -361,7 +393,7 @@ if(BUILD_FUZZERS)
     EXCLUDE_FROM_ALL
     fuzz/fuzz_engine_diff.cc
   )
-  target_link_libraries(rv32_fuzz_engine_diff rv32_isa_core)
+  target_link_libraries(rv32_fuzz_engine_diff rv32_isa_core_fuzz)
   target_include_directories(rv32_fuzz_engine_diff PRIVATE ${CMAKE_SOURCE_DIR})
   target_compile_options(rv32_fuzz_engine_diff PRIVATE -fsanitize=fuzzer,address)
   target_link_options(rv32_fuzz_engine_diff PRIVATE
@@ -375,7 +407,7 @@ if(BUILD_FUZZERS)
     EXCLUDE_FROM_ALL
     fuzz/fuzz_artifact.cc
   )
-  target_link_libraries(rv32_fuzz_artifact rv32_vm)
+  target_link_libraries(rv32_fuzz_artifact rv32_vm_fuzz)
   target_include_directories(rv32_fuzz_artifact PRIVATE ${CMAKE_SOURCE_DIR})
   target_compile_options(rv32_fuzz_artifact PRIVATE -fsanitize=fuzzer,address)
   target_link_options(rv32_fuzz_artifact PRIVATE
