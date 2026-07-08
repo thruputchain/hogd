@@ -15,7 +15,6 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <unistd.h>
 #include <utility>
 
 #include "ffi_enums.hh"
@@ -28,6 +27,7 @@
 #include "hogd/hogexec/components/ffi_helpers.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
@@ -504,9 +504,9 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
       -> std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount> {
     // check whether any loads failed
-    if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
-               std::get<Is>(args)) &&
-           ...))) {
+    if (!(SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
+              std::get<Is>(args)) &&
+          ...)) {
       if (auto *stats = handler.get_transaction_stats()) {
         stats->syscall_fault_count++;
       }

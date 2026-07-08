@@ -111,7 +111,7 @@ private:
     if (selector != U::kSelector) {
       return false;
     }
-    std::remove_cvref_t<decltype(std::declval<U>().exn)> exn{};
+    std::remove_cvref_t<decltype(std::declval<U>().exn)> exn;
     x23::deserialize_cxs(&exn, body);
     variant_ = U{exn};
     return true;

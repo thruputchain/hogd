@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <exception>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -240,8 +241,20 @@ RPCContext::~RPCContext()
   // are properly maintained. We could just silently drop both the InvokeTXs and
   // the references they have to the BlockTXs.
 
-  invoke_txes_.for_each(
-      [](auto &tx) { tx.second.release_blocktx_reference(); });
+  try {
+    invoke_txes_.for_each(
+        [](auto &tx) { tx.second.release_blocktx_reference(); });
+  } catch (std::exception const &e) {
+    try {
+      error("failed to release RPCContext block reference: {}", e.what());
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+    }
+  } catch (...) {
+    try {
+      error("failed to release RPCContext block reference");
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+    }
+  }
 }
 
 } // namespace hogd

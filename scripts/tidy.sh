@@ -41,12 +41,14 @@ cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnin
 # noexcept violations in the syscall handlers), so instead of dropping it
 # globally we split the corpus: production TUs get the full check set, while
 # test/bench/loadgen TUs and hogdb.cc -- where the check is just as expensive but
-# reports nothing -- get everything except exception-escape. The two passes run
-# concurrently. Net: full tidy 327s -> 109s with no loss of coverage on
-# production code.
+# reports nothing -- get a narrower check set. That pass also excludes checks that
+# flag intentional gtest fixture structure and benchmark registration statics.
+# The two passes run concurrently. Net: full tidy 327s -> 109s with no loss of
+# coverage on production code.
 cd ${ROOT_DIR}
 ALL_FILES=$(find ${CODE_DIR} -name '*.h' -o -name '*.cc')
-EE_EXEMPT='_tests?\.(cc|h)$|/contract_tests/|/direct_rpc_tests/|/test_util/|/bench/|/loadgen/|test_framework|/hogdb/hogdb\.cc$'
+EE_EXEMPT='_tests?\.(cc|h)$|_bench\.(cc|h)$|/contract_tests/|/direct_rpc_tests/|/test_util/|/bench/|/loadgen/|test_framework|/hogdb/hogdb\.cc$'
+EXEMPT_CHECKS='-checks=-bugprone-exception-escape,-bugprone-throwing-static-initialization,-misc-multiple-inheritance,-misc-override-with-different-visibility,-misc-use-internal-linkage'
 PROD_FILES=$(echo "$ALL_FILES" | grep -vE "$EE_EXEMPT")
 EXEMPT_FILES=$(echo "$ALL_FILES" | grep -E "$EE_EXEMPT")
 
@@ -61,12 +63,12 @@ if [ -n "$FIX_FLAG" ]; then
   # avoid two clang-tidy processes rewriting the same header at once.
   echo "$PROD_FILES" | tidy_pass ""
   PROD_RC=$?
-  echo "$EXEMPT_FILES" | tidy_pass "-checks=-bugprone-exception-escape"
+  echo "$EXEMPT_FILES" | tidy_pass "$EXEMPT_CHECKS"
   EXEMPT_RC=$?
 else
   echo "$PROD_FILES" | tidy_pass "" &
   PROD_PID=$!
-  echo "$EXEMPT_FILES" | tidy_pass "-checks=-bugprone-exception-escape" &
+  echo "$EXEMPT_FILES" | tidy_pass "$EXEMPT_CHECKS" &
   EXEMPT_PID=$!
   wait $PROD_PID
   PROD_RC=$?

@@ -65,11 +65,12 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &get_status = *status;
+  if (!get_status) {
+    return {get_status.error().code(), WrappedGasAmount{0}};
   }
 
-  output_length = (*(*status))->size();
+  output_length = (*get_status)->size();
 
   if (auto *trace_data =
           syscall_handler
@@ -101,8 +102,9 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &set_status = *status;
+  if (!set_status) {
+    return {set_status.error().code(), WrappedGasAmount{0}};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
