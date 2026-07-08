@@ -21,6 +21,7 @@ add_xdr(
   ../../protocol/exec_sched.x
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
+  ../../protocol/header.x
   ../../protocol/hogexec_constants.x
   ../../protocol/indexer.x
   ../../protocol/integration.x
@@ -49,6 +50,7 @@ add_xdr(
   ../../protocol/transaction.x
   ../../protocol/transaction_trace.x
   ../../protocol/types.x
+  ../../protocol/validator.x
   ../../protocol/view.x
   ../../protocol/db_gateway.x
   ../../protocol/view_gateway.x
