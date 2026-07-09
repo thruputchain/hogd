@@ -15,6 +15,7 @@
 #include "auth_rpc.hh"
 #include "auth_token.hh"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -223,6 +224,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
             0);
 
   auto commit_res = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
@@ -429,6 +431,7 @@ TEST(TestBindingsTest, RootInvokeExpiredUniquifierRejected)
   free_ffi_data_buffer(result.serialized_events);
 
   auto commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit.result_code,
             std::to_underlying(ExecResult::ExecResultTxValidationFailure));
@@ -498,6 +501,7 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
 
   // Normal workflow: try_commit drains events and handles the abort internally.
   auto commit_res = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -2477,6 +2481,7 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -2542,6 +2547,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
@@ -3100,6 +3106,7 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
   x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
 
   auto commit_res = try_commit_transaction(handler.syscall_handler);
+  free_ffi_data_buffer(commit_res.serialized_conflict);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
@@ -3716,6 +3723,90 @@ TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
   EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_create_event, nullptr),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                10'000'000),
+            kTestFFIErrorCodeNone);
+
+  auto make_tx = [&] {
+    return SignedTransaction{
+        .tx = {.invocation = {.invoked_address = deployment_addr,
+                              .entrypoint = entrypoint_from_method_id(0x1234),
+                              .gas_limit = 1'000'000,
+                              .calldata = {}},
+               .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
+        .signatures = {}};
+  };
+
+  // First tx commits OK, consuming the replay nonce for this block.
+  {
+    auto stx = make_tx();
+    auto *h = make_syscall_handler(db, rc, stx);
+    x23::Defer dh([h] { close_syscall_handler(h); });
+    auto r = root_invoke(h, 0);
+    ASSERT_EQ(r.ffi_error_code, kTestFFIErrorCodeNone);
+    free_ffi_data_buffer(r.serialized_output);
+    free_ffi_data_buffer(r.serialized_trace);
+    free_ffi_data_buffer(r.serialized_events);
+    auto c = try_commit_transaction(h);
+    ASSERT_EQ(c.ffi_error_code, kTestFFIErrorCodeNone);
+    ASSERT_EQ(c.result_code, std::to_underlying(ExecResult::ExecResultOK));
+    free_ffi_data_buffer(c.serialized_conflict);
+  }
+
+  // Second tx, same uniquifier -> replay conflict at commit.
+  auto stx2 = make_tx();
+  auto *h2 = make_syscall_handler(db, rc, stx2);
+  x23::Defer dh2([h2] { close_syscall_handler(h2); });
+  auto r2 = root_invoke(h2, 0);
+  ASSERT_EQ(r2.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(r2.serialized_output);
+  free_ffi_data_buffer(r2.serialized_trace);
+  free_ffi_data_buffer(r2.serialized_events);
+
+  auto c2 = try_commit_transaction(h2);
+  x23::Defer dc([&] { free_ffi_data_buffer(c2.serialized_conflict); });
+  ASSERT_EQ(c2.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_EQ(c2.result_code,
+            std::to_underlying(ExecResult::ExecResultTxNonDeterministicError));
+  ASSERT_NE(c2.serialized_conflict.data, nullptr);
+
+  DbConflictResult conflict;
+  x23::deserialize(&conflict, x23::BufView{c2.serialized_conflict.data,
+                                           c2.serialized_conflict.len});
+  ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
+  bool found_replay = false;
+  for (auto const &c : conflict.conflicts()) {
+    if (c.code == DbConflictCode::kDbConflictReplayProtection) {
+      found_replay = true;
+    }
+  }
+  ASSERT_TRUE(found_replay);
 }
 
 } // namespace hogd

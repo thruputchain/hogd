@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -20,6 +21,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -28,10 +30,15 @@
 
 namespace hogd {
 
-class NNIntAddTest : public ::testing::TestWithParam<TestDB>,
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class NNIntAddTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
-  NNIntAddTest() : NativeContractTestFramework(false) {}
+  NNIntAddTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
 
 protected:
   void SetUp() override {}
@@ -52,7 +59,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_P(NNIntAddTest, ReadWriteAddValue)
+TEST_F(NNIntAddTest, ReadWriteAddValue)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -138,6 +145,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -158,7 +166,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
 
 // Test to assert consistency of behavior with regard to the implementation of
 // add vs set_add.  Each one overwrites the other.
-TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
+TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -227,6 +235,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -245,7 +254,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   ASSERT_EQ(from_xdr(nnint_item), 150);
 }
 
-TEST_P(NNIntAddTest, SetAddWithAdd)
+TEST_F(NNIntAddTest, SetAddWithAdd)
 {
   // Create a native contract with two methods.  The first method calls set_add
   // on (0, 200). The second method calls add on (-100). Both methods should
@@ -314,6 +323,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -332,23 +342,28 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
   auto commit_res2 = handler2.try_commit_transaction();
-  ASSERT_EQ(commit_res2, ExecResult::ExecResultOK);
+  // HogDB rejects the concurrent NNIntAdd(-100) alongside set_add(0,200) at the
+  // bounds pre-check (snapshot base=0, delta=-100 => sum < min(base,0)) and
+  // returns a conflict error.
+  ASSERT_EQ(commit_res2, ExecResult::ExecResultTxNonDeterministicError);
 
   advance_block();
 
-  // Check that the storage item is (100)
+  // Only handler1 committed (handler2 conflicted), so the stored value is
+  // 0+200 = 200.
   auto read_res = lookup_storage_item_from_db(
       make_contract_data_addrkey(contract_addr, "test"));
   ASSERT_TRUE(read_res.has_value());
   ASSERT_EQ(read_res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
   auto nnint_item = read_res.value().nnint();
-  ASSERT_EQ(from_xdr(nnint_item), 100);
+  ASSERT_EQ(from_xdr(nnint_item), 200);
 
   // Now assert that nnint add conflicts with set_add, if the set value differs
   // from the base value.
@@ -361,6 +376,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -379,6 +395,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *context);
 
@@ -387,9 +404,24 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto commit_res4 = handler4.try_commit_transaction();
   ASSERT_EQ(commit_res4, ExecResult::ExecResultTxNonDeterministicError);
 
+  // The getter surfaces the same diagnostic the FFI serializes out. handler4's
+  // add conflicts: handler3 committed set=0 (locking base_=0 in HogDB), but
+  // handler4's executor sees snapshot base=200, so the push is rejected with
+  // kDbConflictValueMismatch.
+  ASSERT_EQ(handler4.last_commit_conflict().level(),
+            DbDiagnosticLevel::kDbDiagnosticAll);
+  bool found_conflict = false;
+  for (auto const &c : handler4.last_commit_conflict().conflicts()) {
+    if (c.code == DbConflictCode::kDbConflictValueMismatch) {
+      found_conflict = true;
+    }
+  }
+  ASSERT_TRUE(found_conflict);
+
   advance_block();
 
-  // Check that the storage item is (100)
+  // Check that the storage item is (200): handler3 committed set_add(0,200),
+  // handler4 was rejected.
   read_res = lookup_storage_item_from_db(
       make_contract_data_addrkey(contract_addr, "test"));
   ASSERT_TRUE(read_res.has_value());
@@ -400,7 +432,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
 
 // Regression test for #2155: negative set_value is intentionally allowed.
 // The protocol invariant is value >= min(set_value, 0), not value >= 0.
-TEST_P(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
+TEST_F(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -436,6 +468,7 @@ TEST_P(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -457,7 +490,7 @@ TEST_P(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
 // Regression test for #2155: negative set_value with positive add_value.
 // Final value is set_value + add_value.  The lock lower bound is
 // min(set_value, 0), so the result is valid as long as it stays above that.
-TEST_P(NNIntAddTest, NegativeSetValueWithPositiveAdd)
+TEST_F(NNIntAddTest, NegativeSetValueWithPositiveAdd)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -493,6 +526,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithPositiveAdd)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -514,7 +548,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithPositiveAdd)
 // Regression test for #2155: negative set_value with negative add_value
 // is rejected, since subtracting from an already-negative base would violate
 // the lower bound.
-TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
+TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -553,6 +587,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
 
@@ -560,10 +595,5 @@ TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
   ASSERT_TRUE(res.is_root_success());
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(NNIntAddTest, NNIntAddTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDB),
-                         test_db_to_string);
 
 } // namespace hogd

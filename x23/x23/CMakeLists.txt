@@ -3,6 +3,7 @@ add_library(x23
   async.h
   callsite.h
   cleanup.h
+  corosleep.h
   corosync.cc
   corosync.h
   corotrace.cc
