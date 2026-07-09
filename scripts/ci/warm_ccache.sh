@@ -38,7 +38,7 @@ echo "ccache dir: ${CCACHE_DIR:-<host default>}"
 echo "ccache namespace: ${CCACHE_NAMESPACE:-<unset>}"
 
 echo "fetching repository state"
-git fetch --prune origin main
+git fetch --prune origin "$TARGET_SHA"
 git checkout --force "$TARGET_SHA"
 git submodule sync --recursive
 git submodule update --init --recursive
