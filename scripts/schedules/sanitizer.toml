@@ -95,16 +95,17 @@ source ./scripts/ci/prepare_env.sh
 export ASAN_OPTIONS=abort_on_error=1
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
+# Cap build parallelism at 64: the gcc asan TUs can each peak around 5GB in
+# cc1plus, so fanning out to all 128 hyperthreads OOMs the host (the OOM killer
+# took out the login session's sd-pam, dropping the SSH job). Applies to both
+# the Debug and Release builds below.
 echo 'build gcc asan'
-./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run gcc tests'
 ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 # gcc release seems to be more likely broken than clang release?
-# Cap build parallelism at 64: the gcc asan Release TUs can each peak around
-# 5GB in cc1plus, so fanning out to all 128 hyperthreads OOMs the host (the
-# OOM killer took out the login session's sd-pam, dropping the SSH job).
 echo 'build gcc asan release'
 ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
