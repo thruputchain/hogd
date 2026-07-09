@@ -17,7 +17,7 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc -x "-DBUILD_BENCHMARKS=ON" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)

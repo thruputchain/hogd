@@ -209,7 +209,7 @@ public:
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
         // NOLINTBEGIN(modernize-use-std-print)
-        info("dup2 failed: %s\n", strerror(errno));
+        info("dup2 failed: {}", strerror(errno));
         // NOLINTEND(modernize-use-std-print)
         _exit(EXIT_FAILURE);
       }
@@ -221,7 +221,7 @@ public:
       if (cpu_set.has_value()) {
         Errno err = cpu_set->set_affinity();
         if (err) {
-          info("sched_setaffinity failed: {}\n", err);
+          info("sched_setaffinity failed: {}", err);
           _exit(EXIT_FAILURE);
         }
       }
@@ -235,9 +235,9 @@ public:
       args.push_back(nullptr);
 
       // NOLINTBEGIN(modernize-use-std-print)
-      info("execvp: {} {}\n", full_program_name, join_args(program_args));
+      info("execvp: {} {}", full_program_name, join_args(program_args));
       execvp(full_program_name.c_str(), args.data());
-      info("execvp failed: %s\n", strerror(errno));
+      info("execvp failed: {}", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
     }
