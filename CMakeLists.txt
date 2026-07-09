@@ -157,7 +157,7 @@ option(BENCHMARK_ENABLE_TESTING "" OFF)
 option(BENCHMARK_ENABLE_WERROR "" OFF)
 
 # BUILD_BENCHMARKS turns on or off the hogd benchmarks
-option(BUILD_BENCHMARKS "" OFF)
+option(BUILD_BENCHMARKS "" ON)
 
 if(BUILD_BENCHMARKS)
 add_subdirectory(external/benchmark)
