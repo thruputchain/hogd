@@ -19,6 +19,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/crypto/lthash16.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
@@ -463,6 +464,12 @@ HogDBDAO::read_retrocausal_queue_metadata(const ItemKey &key)
   } catch (x23::XdrException &e) {
     return HogDBError(HogDBCode::kInternal);
   }
+  // live_entries is persisted as an unsigned hyper, but storage-cost
+  // accounting is signed 64-bit. RetrocausalQueueLock bans inserts at
+  // kMaxRetrocausalQueueLiveEntries, so a value over the hard cap (bound
+  // plus one block of overshoot) can only come from on-disk corruption;
+  // fail-stop rather than feed it to signed cost arithmetic (issue #2917).
+  CHECK_LE(metadata.live_entries, kRetrocausalQueueLiveEntriesHardCap);
   return metadata;
 }
 
@@ -654,6 +661,9 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         error("failed to deserialize rcq metadata: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
       }
+      // See read_retrocausal_queue_metadata: an over-cap live_entries is
+      // corrupt on-disk state and must not reach signed cost arithmetic.
+      CHECK_LE(meta.live_entries, kRetrocausalQueueLiveEntriesHardCap);
       return std::make_pair(cost_model->get_retrocausal_queue_cost(
                                 meta.live_entries),
                             ItemLockCacheData::from_rcq());
