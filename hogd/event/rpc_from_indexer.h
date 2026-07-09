@@ -29,7 +29,7 @@ public:
     indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
-    co_await ctx_.add_indexer(std::move(client));
+    ctx_.add_indexer(std::move(client));
     co_return;
   }
 

@@ -1,5 +1,6 @@
 #include "hogd/event/rpc_context.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <exception>
@@ -27,6 +28,55 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+// Releases a reference acquired by try_acquire_indexer_snapshot(). The last
+// release of a retired snapshot destroys it (and with it the ClientRefs of
+// any since-removed indexers).
+void
+release_indexer_snapshot(indexer_snapshot_t *snapshot)
+{
+  if (snapshot->release_reference()) {
+    delete snapshot;
+  }
+}
+
+// Fan out one failure report to every indexer concurrently (dispatch all,
+// then await), like send_events_to_indexers; a per-indexer catch keeps one
+// indexer's RPC-layer throw from disturbing the others or the executor-facing
+// response. bad_alloc and other non-RPC throws are genuine bugs and still
+// terminate (cf. EventServerProxy::emit_event's #2857 containment).
+//
+// x23::Async is eager (initial_suspend is suspend_never), so the dispatch
+// call itself runs the send up to its first suspension and can throw
+// synchronously (e.g. XdrBadInput on an over-cap payload) -- guard the
+// dispatch loop too, not just the await loop, or one bad indexer would
+// abort the fan-out before the others are even dispatched.
+x23::Async<void>
+relay_tx_failure(std::vector<indexer_event_client_t> &indexers,
+                 SignedTransactionHash tx_hash, TxFailureDiagnostic diag)
+{
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(indexers.size());
+  for (indexer_event_client_t &indexer : indexers) {
+    try {
+      handles.push_back(indexer.indexer_event_report_tx_failure(tx_hash, diag));
+    } catch (x23::XdrException const &e) {
+      warn("dropping tx-failure report to an indexer (dispatch): {}", e.what());
+    }
+  }
+  for (x23::Async<void> &handle : handles) {
+    try {
+      co_await handle;
+    } catch (x23::XdrException const &e) {
+      warn("dropping tx-failure report to an indexer: {}", e.what());
+    }
+  }
+  co_return;
+}
+
+} // namespace
 
 x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
@@ -225,11 +275,21 @@ EventRPCContext::commit_block(BlockID block_id)
   co_await context_ptr->get().wait_file_done();
 
   BlockHeight block_height = context_ptr->get().block_height();
-  {
-    x23::CoroGuard cg;
-    co_await cg(indexers_lock_);
-    co_await context_ptr->get().send_events_to_indexers(block_height,
-                                                        indexers_);
+  // Send from an acquired snapshot rather than under a lock, so a slow
+  // indexer here never blocks add_indexer()/remove_indexer() or the
+  // tx-failure relay's slow path.
+  if (indexer_snapshot_t *snapshot = try_acquire_indexer_snapshot()) {
+    std::exception_ptr ex;
+    try {
+      co_await context_ptr->get().send_events_to_indexers(block_height,
+                                                          snapshot->get());
+    } catch (...) {
+      ex = std::current_exception();
+    }
+    release_indexer_snapshot(snapshot);
+    if (ex) {
+      std::rethrow_exception(ex);
+    }
   }
 
   info("EventRPCContext::commit_block: block_id={} done, gc", block_id);
@@ -386,50 +446,102 @@ EventRPCContext::get_context_slow(BlockID block_id)
   panic("unreachable");
 }
 
+indexer_snapshot_t *
+EventRPCContext::try_acquire_indexer_snapshot()
+{
+  {
+    std::scoped_lock g(cache_->mtx_);
+    indexer_snapshot_t *snapshot = cache_->indexer_snapshot_;
+    // Acquiring under our own cache mutex makes this safe against a
+    // concurrent publish: the sweep clears this cache entry under the same
+    // mutex before the old snapshot's shutdown is initiated, so a non-null
+    // pointer seen here either acquires successfully or (at worst, across
+    // back-to-back publishes) falls through to the slow path.
+    if (snapshot != nullptr && snapshot->try_acquire_reference()) {
+      return snapshot;
+    }
+  }
+
+  std::scoped_lock g(indexers_mtx_);
+  if (indexers_snapshot_ == nullptr) {
+    return nullptr;
+  }
+  // Cannot fail: the snapshot's shutdown is only initiated after it is
+  // unlinked from indexers_snapshot_, under indexers_mtx_.
+  CHECK(indexers_snapshot_->try_acquire_reference());
+  {
+    std::scoped_lock cg(cache_->mtx_);
+    cache_->indexer_snapshot_ = indexers_snapshot_;
+  }
+  return indexers_snapshot_;
+}
+
+void
+EventRPCContext::publish_indexer_snapshot()
+{
+  indexer_snapshot_t *old = indexers_snapshot_;
+  if (indexers_.empty()) {
+    indexers_snapshot_ = nullptr;
+  }
+  else {
+    std::vector<indexer_event_client_t> clients;
+    clients.reserve(indexers_.size());
+    for (auto &[id, client] : indexers_) {
+      clients.push_back(client);
+    }
+    indexers_snapshot_ = new indexer_snapshot_t(std::move(clients));
+  }
+
+  // Invalidate every thread's cached pointer before retiring [old] (same
+  // sweep as gc_context_internal). A reader that acquired a reference under
+  // its cache mutex before we sweep its cache is counted by
+  // initiate_shutdown() and keeps [old] alive until it releases.
+  auto thread_ul = cache_.lock_threads();
+  cache_.for_each(thread_ul, [](ContextCache &cache) {
+    std::scoped_lock g(cache.mtx_);
+    cache.indexer_snapshot_ = nullptr;
+  });
+
+  if (old != nullptr && old->initiate_shutdown()) {
+    delete old;
+  }
+  // else: destroyed by the last release_indexer_snapshot().
+}
+
+uint64_t
+EventRPCContext::add_indexer(indexer_event_client_t &&indexer)
+{
+  std::scoped_lock g(indexers_mtx_);
+  uint64_t id = next_indexer_id_++;
+  indexers_.emplace_back(id, std::move(indexer));
+  publish_indexer_snapshot();
+  return id;
+}
+
+bool
+EventRPCContext::remove_indexer(uint64_t indexer_id)
+{
+  std::scoped_lock g(indexers_mtx_);
+  auto it = std::ranges::find(indexers_, indexer_id,
+                              [](const auto &entry) { return entry.first; });
+  if (it == indexers_.end()) {
+    return false;
+  }
+  indexers_.erase(it);
+  publish_indexer_snapshot();
+  return true;
+}
+
 x23::Async<void>
 EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
                                                TxFailureDiagnostic diag)
 {
-  // Snapshot the registered indexer clients under the lock, then release it
-  // BEFORE any network send. indexer_event_client_t is a refcounted ClientRef,
-  // so each copy keeps its stream alive independently. Holding indexers_lock_
-  // across the sends would let one slow or half-open indexer stall
-  // commit_block(), which acquires the same lock every block -- and this
-  // best-effort diagnostic path must never disturb the commit pipeline.
-  std::vector<indexer_event_client_t> indexers_snapshot;
-  {
-    x23::CoroGuard cg;
-    co_await cg(indexers_lock_);
-    indexers_snapshot = indexers_;
+  indexer_snapshot_t *snapshot = try_acquire_indexer_snapshot();
+  if (snapshot == nullptr) {
+    co_return;
   }
-
-  // Fan out concurrently (dispatch all, then await), like
-  // send_events_to_indexers; a per-indexer catch keeps one indexer's RPC-layer
-  // throw from disturbing the others or the executor-facing response.
-  // bad_alloc and other non-RPC throws are genuine bugs and still terminate
-  // (cf. EventServerProxy::emit_event's #2857 containment).
-  //
-  // x23::Async is eager (initial_suspend is suspend_never), so the dispatch
-  // call itself runs the send up to its first suspension and can throw
-  // synchronously (e.g. XdrBadInput on an over-cap payload) -- guard the
-  // dispatch loop too, not just the await loop, or one bad indexer would
-  // abort the fan-out before the others are even dispatched.
-  std::vector<x23::Async<void>> handles;
-  handles.reserve(indexers_snapshot.size());
-  for (indexer_event_client_t &indexer : indexers_snapshot) {
-    try {
-      handles.push_back(indexer.indexer_event_report_tx_failure(tx_hash, diag));
-    } catch (x23::XdrException const &e) {
-      warn("dropping tx-failure report to an indexer (dispatch): {}", e.what());
-    }
-  }
-  for (x23::Async<void> &handle : handles) {
-    try {
-      co_await handle;
-    } catch (x23::XdrException const &e) {
-      warn("dropping tx-failure report to an indexer: {}", e.what());
-    }
-  }
+  co_await relay_tx_failure(snapshot->get(), tx_hash, diag);
+  release_indexer_snapshot(snapshot);
   co_return;
 }
 
@@ -440,14 +552,23 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   // Fire-and-forget: the executor-facing report RPC hands the relay off to a
   // detached coroutine and returns immediately, so a slow indexer never holds
   // the executor's in-flight-report slot (or the RPC dispatch thread) hostage.
-  // Tracked by pending_detached_coroutines_ so ~EventRPCContext drains it.
-  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-  [](EventRPCContext &self, SignedTransactionHash hash,
+  //
+  // The snapshot reference is acquired synchronously here, so the detached
+  // coroutine owns everything it touches (the snapshot pins the ClientRefs,
+  // which pin their streams; sends run on the process-global coropoll) and
+  // never dereferences the EventRPCContext. It therefore needs no
+  // pending_detached_coroutines_ tracking -- per-failed-tx traffic on that
+  // shared counter is exactly what this path must avoid.
+  indexer_snapshot_t *snapshot = try_acquire_indexer_snapshot();
+  if (snapshot == nullptr) {
+    return;
+  }
+  [](indexer_snapshot_t *snapshot, SignedTransactionHash hash,
      TxFailureDiagnostic d) -> x23::Detached {
-    co_await self.report_tx_failure_to_indexers(std::move(hash), std::move(d));
-    self.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+    co_await relay_tx_failure(snapshot->get(), hash, d);
+    release_indexer_snapshot(snapshot);
     co_return;
-  }(*this, std::move(tx_hash), std::move(diag));
+  }(snapshot, std::move(tx_hash), std::move(diag));
 }
 
 } // namespace hogd

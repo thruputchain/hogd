@@ -25,6 +25,11 @@
 
 namespace hogd {
 
+// Immutable, refcounted snapshot of the registered indexer clients.
+// PerThreadARC keeps the acquire/release refcounts thread-local, so the
+// per-failed-tx relay path never writes to contended shared state.
+using indexer_snapshot_t = PerThreadARC<std::vector<indexer_event_client_t>>;
+
 class EventRPCContext {
 public:
   EventRPCContext(std::string_view work_directory)
@@ -35,6 +40,14 @@ public:
   {
     while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    // Retire the current indexer snapshot. If a fire-and-forget tx-failure
+    // relay is still in flight it holds a reference and touches nothing else
+    // of this object, so we don't wait: the last release deletes the
+    // (heap-allocated) snapshot.
+    if (indexers_snapshot_ != nullptr &&
+        indexers_snapshot_->initiate_shutdown()) {
+      delete indexers_snapshot_;
     }
   }
 
@@ -69,13 +82,14 @@ public:
   x23::Async<void> gc_context(BlockID block_id);
 
   // Adds an indexer, which the event server will send events to.
-  x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
-  {
-    x23::CoroGuard cg;
-    co_await cg(indexers_lock_);
-    indexers_.push_back(std::move(indexer));
-    co_await cg.reset_and_return();
-  }
+  // Returns an id that can later be passed to remove_indexer().
+  uint64_t add_indexer(indexer_event_client_t &&indexer);
+
+  // Removes a previously added indexer. Returns false if the id is unknown
+  // (e.g. already removed). Relays already in flight hold the prior snapshot
+  // and may still complete one last send to the removed indexer; its
+  // ClientRefs are destroyed once the last such snapshot drains.
+  bool remove_indexer(uint64_t indexer_id);
 
   // Best-effort relay of a nondeterministic tx-failure diagnostic to every
   // registered indexer. Bypasses the per-block commit pipeline entirely --
@@ -104,7 +118,8 @@ private:
   struct ContextCache {
     ContextCache() = default;
     ContextCache(ContextCache &&cache) noexcept
-      : contexts_(std::move(cache.contexts_))
+      : contexts_(std::move(cache.contexts_)),
+        indexer_snapshot_(cache.indexer_snapshot_)
     {}
 
 #ifdef NDEBUG
@@ -115,14 +130,39 @@ private:
 
     mutex_type mtx_;
     std::unordered_map<BlockID, PerThreadARC<EventBlockContext> *> contexts_;
+    // This thread's cached pointer to the current indexer snapshot
+    // (non-owning; references are acquired per use under mtx_). Cleared by
+    // publish_indexer_snapshot()'s sweep, exactly like contexts_ entries are
+    // cleared by gc_context_internal().
+    indexer_snapshot_t *indexer_snapshot_ = nullptr;
   };
+
+  // Fast path for readers of the indexer list: acquire a reference to the
+  // current snapshot via this thread's cache, falling back to indexers_mtx_
+  // on a miss (mirrors get_context()/get_context_slow()). Returns nullptr if
+  // no indexers are registered. The caller must pass the result to
+  // release_indexer_snapshot() when done.
+  indexer_snapshot_t *try_acquire_indexer_snapshot();
+
+  // Rebuilds the published snapshot from indexers_ and retires the previous
+  // one (destroyed once its last reference drains). Caller must hold
+  // indexers_mtx_.
+  void publish_indexer_snapshot();
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
-  x23::CoroLock indexers_lock_;
-  std::vector<indexer_event_client_t> indexers_;
+  // Guards the authoritative indexer list and snapshot publication (writers
+  // plus the snapshot slow path). Plain mutex: critical sections are short
+  // and never suspend, and in particular no network send happens under it.
+  std::mutex indexers_mtx_;
+  uint64_t next_indexer_id_ = 0;
+  std::vector<std::pair<uint64_t, indexer_event_client_t>> indexers_;
+  // Currently published snapshot; owned here until publish_indexer_snapshot()
+  // retires it (then owned by whichever reader releases the last reference).
+  // nullptr when no indexers are registered.
+  indexer_snapshot_t *indexers_snapshot_ = nullptr;
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a

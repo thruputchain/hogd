@@ -81,8 +81,8 @@ TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)
 
   FailureCapturingIndexerRpc indexer_a;
   FailureCapturingIndexerRpc indexer_b;
-  ctx.add_indexer(make_socketpair_indexer_client(&indexer_a))();
-  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b))();
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
 
   SignedTransactionHash tx_hash;
   std::ranges::fill(tx_hash, 0x5A);
@@ -120,11 +120,11 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
   CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
   CHECK_EQ(close(fds[1]), 0);
   auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx.add_indexer(dead_stream->client<IndexerEvent1>())();
+  ctx.add_indexer(dead_stream->client<IndexerEvent1>());
 
   // Second indexer: live and capturing.
   FailureCapturingIndexerRpc live_indexer;
-  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer))();
+  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer));
 
   SignedTransactionHash tx_hash;
   std::ranges::fill(tx_hash, 0x11);
@@ -139,6 +139,49 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
   ASSERT_EQ(live_indexer.reports.size(), 1);
   EXPECT_EQ(live_indexer.reports[0].first, tx_hash);
   EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
+}
+
+TEST_F(EventRpcTest, RemovedIndexerStopsReceivingReports)
+{
+  EventRPCContext ctx(temp_dir());
+
+  FailureCapturingIndexerRpc indexer_a;
+  FailureCapturingIndexerRpc indexer_b;
+  uint64_t id_a = ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x21);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 3;
+  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
+
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  ASSERT_EQ(indexer_a.reports.size(), 1);
+  ASSERT_EQ(indexer_b.reports.size(), 1);
+
+  EXPECT_TRUE(ctx.remove_indexer(id_a));
+  // Removing an id that is already gone reports failure.
+  EXPECT_FALSE(ctx.remove_indexer(id_a));
+
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  EXPECT_EQ(indexer_a.reports.size(), 1);
+  ASSERT_EQ(indexer_b.reports.size(), 2);
+}
+
+TEST_F(EventRpcTest, RemoveLastIndexerMakesReportsNoop)
+{
+  EventRPCContext ctx(temp_dir());
+
+  FailureCapturingIndexerRpc indexer;
+  uint64_t id = ctx.add_indexer(make_socketpair_indexer_client(&indexer));
+  EXPECT_TRUE(ctx.remove_indexer(id));
+
+  const SignedTransactionHash tx_hash{};
+  const TxFailureDiagnostic diag{};
+  // Must complete without error or hang.
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  EXPECT_TRUE(indexer.reports.empty());
 }
 
 TEST_F(EventRpcTest, BasicUsage)
