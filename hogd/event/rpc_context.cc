@@ -482,8 +482,10 @@ EventRPCContext::try_acquire_indexer_snapshot()
 }
 
 void
-EventRPCContext::publish_indexer_snapshot()
+EventRPCContext::publish_indexer_snapshot(
+    const std::unique_lock<std::mutex> &indexers_ul)
 {
+  assert(indexers_ul.owns_lock() && indexers_ul.mutex() == &indexers_mtx_);
   indexer_snapshot_t *old = indexers_snapshot_;
   // An empty indexer list publishes an empty-vector snapshot rather than
   // nullptr, so readers' per-thread caches stay valid (and hot) in the
@@ -514,24 +516,24 @@ EventRPCContext::publish_indexer_snapshot()
 uint64_t
 EventRPCContext::add_indexer(indexer_event_client_t &&indexer)
 {
-  std::scoped_lock g(indexers_mtx_);
+  std::unique_lock g(indexers_mtx_);
   uint64_t id = next_indexer_id_++;
   indexers_.emplace_back(id, std::move(indexer));
-  publish_indexer_snapshot();
+  publish_indexer_snapshot(g);
   return id;
 }
 
 bool
 EventRPCContext::remove_indexer(uint64_t indexer_id)
 {
-  std::scoped_lock g(indexers_mtx_);
+  std::unique_lock g(indexers_mtx_);
   auto it = std::ranges::find(indexers_, indexer_id,
                               [](const auto &entry) { return entry.first; });
   if (it == indexers_.end()) {
     return false;
   }
   indexers_.erase(it);
-  publish_indexer_snapshot();
+  publish_indexer_snapshot(g);
   return true;
 }
 

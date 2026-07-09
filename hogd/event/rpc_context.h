@@ -149,9 +149,11 @@ private:
   indexer_snapshot_t *try_acquire_indexer_snapshot();
 
   // Rebuilds the published snapshot from indexers_ and retires the previous
-  // one (destroyed once its last reference drains). Caller must hold
-  // indexers_mtx_.
-  void publish_indexer_snapshot();
+  // one (destroyed once its last reference drains). [indexers_ul] is the
+  // caller's held lock on indexers_mtx_, passed as a witness so the
+  // requirement can't be forgotten (same pattern as SynchronizedMap).
+  void
+  publish_indexer_snapshot(const std::unique_lock<std::mutex> &indexers_ul);
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   x23::CoroLock lock_;
