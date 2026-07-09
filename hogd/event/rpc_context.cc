@@ -459,13 +459,15 @@ EventRPCContext::try_acquire_indexer_snapshot()
 {
   {
     std::scoped_lock g(cache_->mtx_);
-    indexer_snapshot_t *snapshot = cache_->indexer_snapshot_;
-    // Acquiring under our own cache mutex makes this safe against a
-    // concurrent publish: the sweep clears this cache entry under the same
-    // mutex before the old snapshot's shutdown is initiated, so a non-null
-    // pointer seen here either acquires successfully or (at worst, across
-    // back-to-back publishes) falls through to the slow path.
-    if (snapshot != nullptr && snapshot->try_acquire_reference()) {
+    if (indexer_snapshot_t *snapshot = cache_->indexer_snapshot_) {
+      // Cannot fail: publish_indexer_snapshot() clears this entry (under
+      // this same mutex) before initiating the old snapshot's shutdown, and
+      // try_acquire_reference() only fails once shutdown has begun -- so a
+      // non-null entry read here always precedes its snapshot's shutdown.
+      // CHECK rather than fall through: a failure means that ordering was
+      // broken, which is a use-after-free waiting to happen elsewhere, not
+      // a condition to paper over with the slow path.
+      CHECK(snapshot->try_acquire_reference());
       return snapshot;
     }
   }
