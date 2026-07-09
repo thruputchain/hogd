@@ -40,28 +40,22 @@ target_include_directories(
 )
 
 add_executable(
-  hog_devnode_exec
+  hog-devnode
   hog_devnode.cc
 )
-set_property(TARGET hog_devnode_exec PROPERTY OUTPUT_NAME hog-devnode)
 target_link_libraries(
-  hog_devnode_exec
+  hog-devnode
   hog_devnode
 )
-
-add_custom_target(hog-devnode DEPENDS hog_devnode_exec)
 
 add_executable(
-  hog_hosted_bootstrap_exec
+  hog-hosted-bootstrap
   hosted_bootstrap.cc
 )
-set_property(TARGET hog_hosted_bootstrap_exec PROPERTY OUTPUT_NAME hog-hosted-bootstrap)
 target_link_libraries(
-  hog_hosted_bootstrap_exec
+  hog-hosted-bootstrap
   hog_devnode
 )
-
-add_custom_target(hog-hosted-bootstrap DEPENDS hog_hosted_bootstrap_exec)
 
 add_executable(
   hog_devnode_test
@@ -70,7 +64,7 @@ add_executable(
 target_compile_definitions(
   hog_devnode_test
   PRIVATE
-  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog_devnode_exec>"
+  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog-devnode>"
 )
 target_include_directories(
   hog_devnode_test
@@ -90,7 +84,7 @@ add_dependencies(
   hog_devnode_test
   all_riscv_contracts
   all_wasm_contracts
-  hog_devnode_exec
+  hog-devnode
 )
 gtest_discover_tests(
   hog_devnode_test
@@ -153,11 +147,11 @@ add_executable(
 target_compile_definitions(
   hog_devnode_fresh_launch_test
   PRIVATE
-  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog_devnode_exec>"
+  HOG_DEVNODE_BINARY="$<TARGET_FILE:hog-devnode>"
 )
 add_dependencies(
   hog_devnode_fresh_launch_test
-  hog_devnode_exec
+  hog-devnode
 )
 add_test(
   NAME HogDevnode.FreshNonInteractiveLaunchEmitsReadiness

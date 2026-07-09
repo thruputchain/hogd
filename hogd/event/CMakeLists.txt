@@ -84,4 +84,6 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
-set_property(TARGET event_server_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+  set_property(TARGET event_server_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

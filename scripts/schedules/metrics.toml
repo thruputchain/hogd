@@ -22,7 +22,7 @@ echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'run bench server'
 mkdir -p ci_work_dir/
@@ -65,7 +65,7 @@ echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh

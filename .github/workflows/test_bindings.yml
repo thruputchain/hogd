@@ -116,7 +116,7 @@ jobs:
           ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -n
 
       - name: Build test_ffi_test
-        run: make -C build -j "$(nproc)" test_ffi_test
+        run: cmake --build build --parallel "$(nproc)" --target test_ffi_test
 
       - name: Run test_ffi_test
         run: |

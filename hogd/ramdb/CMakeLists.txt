@@ -24,15 +24,17 @@ target_link_libraries(
   metrics
 )
 
-# Build the db_bench executable
-add_executable(
-  ramdb_bench
-  db_bench.cc
-)
-target_link_libraries(
-  ramdb_bench
-  ramdb
-)
+if(BUILD_BENCHMARKS)
+  # Build the db_bench executable
+  add_executable(
+    ramdb_bench
+    db_bench.cc
+  )
+  target_link_libraries(
+    ramdb_bench
+    ramdb
+  )
+endif()
 
 # Build the db_crash_test executable
 add_executable(

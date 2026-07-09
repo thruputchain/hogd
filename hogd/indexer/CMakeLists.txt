@@ -26,18 +26,20 @@ target_link_libraries(indexer_test
 )
 gtest_discover_tests(indexer_test)
 
-# Benchmark executable
-add_executable(indexer_bench
-    indexer_bench.cc
-)
+if(BUILD_BENCHMARKS)
+    # Benchmark executable
+    add_executable(indexer_bench
+        indexer_bench.cc
+    )
 
-target_link_libraries(indexer_bench
-    indexer
-    event
-    hogd
-)
+    target_link_libraries(indexer_bench
+        indexer
+        event
+        hogd
+    )
 
-set_property(TARGET indexer_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
+    set_property(TARGET indexer_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
+endif()
 
 add_executable(
   indexer_exec
