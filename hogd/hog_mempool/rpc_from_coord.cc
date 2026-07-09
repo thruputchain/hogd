@@ -497,8 +497,18 @@ x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
-  co_return co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
-                                                               block_id, mode);
+  // Open the block on every shard. Surface the first non-OK result; the caller
+  // abandons on failure (which also fans out across shards).
+  DbSchedResult result = DbSchedResult::DbSchedResultOK;
+  for (auto &client : db_sched_clients_) {
+    DbSchedResult r =
+        co_await client->dbsched_create_snapshot(prev_block_id, block_id, mode);
+    if (result == DbSchedResult::DbSchedResultOK &&
+        r != DbSchedResult::DbSchedResultOK) {
+      result = r;
+    }
+  }
+  co_return result;
 }
 
 x23::Async<RPCError>
@@ -510,7 +520,16 @@ MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
-  co_return co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
+  // Abandon the block on every shard.
+  DbSchedResult result = DbSchedResult::DbSchedResultOK;
+  for (auto &client : db_sched_clients_) {
+    DbSchedResult r = co_await client->dbsched_abandon_snapshot(block_id);
+    if (result == DbSchedResult::DbSchedResultOK &&
+        r != DbSchedResult::DbSchedResultOK) {
+      result = r;
+    }
+  }
+  co_return result;
 }
 
 x23::Async<RPCError>
@@ -522,7 +541,27 @@ MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
-  co_return co_await db_sched_client_->dbsched_close_snapshot(block_id);
+  // Close the block on every shard. For now the block's db_hash is shard 0's
+  // result only (per-shard state-root combination is a later step); the other
+  // shards are still closed so their block state advances in lockstep.
+  //
+  // Surface the first non-OK close from ANY shard (mirrors create/abandon): a
+  // non-primary shard can reject the close (e.g. hogdb rejecting a forged RCQ
+  // observation that touches its keys), and if we returned shard 0's OK we
+  // would build/accept a block that another shard rejected -- a validity
+  // divergence between nodes. On failure the caller abandons; a non-OK
+  // DbBlockResult carries no db_hash, but no caller reads db_hash on the
+  // non-OK path.
+  DbBlockResult result =
+      co_await db_sched_clients_[0]->dbsched_close_snapshot(block_id);
+  for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
+    DbBlockResult r = co_await db_sched_clients_[i]->dbsched_close_snapshot(block_id);
+    if (result.result() == DbSchedResult::DbSchedResultOK &&
+        r.result() != DbSchedResult::DbSchedResultOK) {
+      result = r;
+    }
+  }
+  co_return result;
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
@@ -557,7 +596,27 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  // Commit the block on every shard with the same (shard-0-derived) consensus
+  // value.
+  //
+  // Surface the first non-OK commit from ANY shard so the caller does not treat
+  // a partially-committed block as fully committed. NOTE: commit is the point
+  // of no return -- if shard 0 commits and a later shard fails, surfacing the
+  // error lets us fail loudly instead of continuing with divergent shards, but
+  // it does NOT make the cross-shard commit atomic. True atomicity under
+  // partial failure needs a durable commit record (deferred; see the sharding
+  // 2PC TODOs).
+  DbBlockResult result =
+      co_await db_sched_clients_[0]->dbsched_commit_snapshot(block_id, value);
+  for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
+    DbBlockResult r =
+        co_await db_sched_clients_[i]->dbsched_commit_snapshot(block_id, value);
+    if (result.result() == DbSchedResult::DbSchedResultOK &&
+        r.result() != DbSchedResult::DbSchedResultOK) {
+      result = r;
+    }
+  }
+  co_return result;
 }
 
 x23::Async<void>
