@@ -56,8 +56,10 @@ template<> struct formatter<ForeignTryCommitResult> {
   static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
   static auto format(const ForeignTryCommitResult &result, auto &ctx)
   {
-    return format_to(ctx.out(), "result_code={}, ffi_error_code={}",
-                     result.result_code,
+    return format_to(ctx.out(),
+                     "result_code={}, serialized_conflict=[{}], "
+                     "ffi_error_code={}",
+                     result.result_code, result.serialized_conflict,
                      std::to_underlying(result.ffi_error_code));
   }
 };
