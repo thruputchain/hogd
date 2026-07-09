@@ -61,6 +61,9 @@ print_usage() {
   printf -- "  -x sets cmake additional flags\n"
   printf -- "  -n configure but don't run the build\n"
   printf -- "  -h disable ccache\n"
+  printf -- "\n"
+  printf -- "environment:\n"
+  printf -- "  HOGD_SHARED_CCACHE_DIR enables shared ccache remote storage at the specified directory\n"
 }
 
 while getopts 'c:f:d:j:t:x:nh' flag; do
@@ -132,17 +135,13 @@ if test -z "$HAS_COLOR_DIAGNOSTICS_FLAG"; then
 fi
 
 if test -z "$DISABLE_CCACHE" && command -v ccache >/dev/null 2>&1; then
-  if [[ "${HOGD_DISABLE_SHARED_CCACHE:-}" != "1" && "$OSTYPE" == "linux-gnu"* ]]; then
-    HOGD_HOSTNAME="$(hostname 2>/dev/null || true)"
-    HOGD_SHARED_CCACHE_DIR="/home/hog12/hogci/ccache"
-    if [[ "$HOGD_HOSTNAME" =~ ^hog[0-9]+$ ]]; then
-      if [[ -d "$HOGD_SHARED_CCACHE_DIR" && -w "$HOGD_SHARED_CCACHE_DIR" ]]; then
-        export CCACHE_REMOTE_STORAGE="${CCACHE_REMOTE_STORAGE:-file://$HOGD_SHARED_CCACHE_DIR @umask=002 @update-mtime=true}"
-        export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$ROOT_DIR}"
-        export CCACHE_NAMESPACE="${CCACHE_NAMESPACE:-hogd}"
-      else
-        echo "warning: shared ccache directory $HOGD_SHARED_CCACHE_DIR is not writable; using local ccache only" >&2
-      fi
+  if [[ -n "${HOGD_SHARED_CCACHE_DIR:-}" ]]; then
+    if [[ -d "$HOGD_SHARED_CCACHE_DIR" && -w "$HOGD_SHARED_CCACHE_DIR" ]]; then
+      export CCACHE_REMOTE_STORAGE="${CCACHE_REMOTE_STORAGE:-file://$HOGD_SHARED_CCACHE_DIR @umask=002 @update-mtime=true}"
+      export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$ROOT_DIR}"
+      export CCACHE_NAMESPACE="${CCACHE_NAMESPACE:-hogd}"
+    else
+      echo "warning: shared ccache directory $HOGD_SHARED_CCACHE_DIR is not writable; using local ccache only" >&2
     fi
   fi
   ccache --max-size="${HOGD_CCACHE_MAXSIZE:-50G}"
