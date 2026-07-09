@@ -21,17 +21,20 @@ namespace hogd {
 namespace {
 
 auto
-connect_to_event_server(x23::HostPort const &host_port, x23::CpuMap const &map)
+connect_to_event_server(x23::HostPort const &host_port, x23::CpuMap const &map,
+                        size_t max_message_size)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  return make_rpc_multiclient<EventExecutor1>(host_port, true, map);
+  return make_rpc_multiclient<EventExecutor1>(host_port, true, map,
+                                              max_message_size);
 }
 
 } // namespace
 
 EventServerProxy::EventServerProxy(x23::HostPort const &host_port,
-                                   x23::CpuMap const &map)
-  : client_(connect_to_event_server(host_port, map))
+                                   x23::CpuMap const &map,
+                                   size_t max_message_size)
+  : client_(connect_to_event_server(host_port, map, max_message_size))
 {}
 
 PerTransactionEventServerProxy::PerTransactionEventServerProxy(

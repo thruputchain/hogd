@@ -532,22 +532,25 @@ struct RpcMulticlient : RefCount,
 
   static ClientRef make(CoroPoll &cp, const struct sockaddr_storage &ss,
                         const CpuMap &map = *llc_map,
-                        int logfd = RpcLogger::default_logfd)
+                        int logfd = RpcLogger::default_logfd,
+                        size_t max_message_size = default_max_message_size)
   {
-    return *new RpcMulticlient(cp, ss, map, logfd);
+    return *new RpcMulticlient(cp, ss, map, logfd, max_message_size);
   }
 
 protected:
   RpcMulticlient(CoroPoll &cp, const struct sockaddr_storage &ss,
-                 const CpuMap &map, int logfd)
+                 const CpuMap &map, int logfd, size_t max_message_size)
     : super2(map)
   {
-    super2::populate([&cp, &ss, logfd](const CpuSet & /*unused*/)
+    super2::populate([&cp, &ss, logfd,
+                      max_message_size](const CpuSet & /*unused*/)
                          -> RpcStream<Logger>::ClientRef {
       UniqueFd fd = tcpconnect(ss);
       int socketfd = fd.get();
       typename super2::value_type stream =
           *new RpcStream<Logger>(cp, std::move(fd), Logger{socketfd, logfd});
+      stream->max_message_size = max_message_size;
       stream->go();
       return stream;
     });

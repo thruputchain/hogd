@@ -23,8 +23,12 @@ namespace hogd {
 
 class EventServerProxy {
 public:
+  // max_message_size caps the client-side RPC streams only (tests lower it to
+  // provoke oversized-send failures without mutating the process-wide
+  // x23::default_max_message_size, which racing server threads also read).
   EventServerProxy(x23::HostPort const &host_port,
-                   x23::CpuMap const &map = *x23::llc_map);
+                   x23::CpuMap const &map = *x23::llc_map,
+                   size_t max_message_size = x23::default_max_message_size);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
