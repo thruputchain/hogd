@@ -112,10 +112,6 @@ done
 if test -z "$HAS_GENERATOR_FLAG"; then
   if command -v ninja >/dev/null 2>&1; then
     GENERATOR_FLAGS=(-G Ninja)
-  else
-    echo "ERROR: ninja is required for the default build generator." >&2
-    echo "Install ninja, or pass an explicit CMake generator with -x, e.g. -x '-G Unix Makefiles'." >&2
-    exit 1
   fi
 fi
 
