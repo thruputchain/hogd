@@ -99,6 +99,7 @@ add_library(runtime_test_objects OBJECT
   native_contract_test.cc
   native_token_allowance_test.cc
   nnint_add_test.cc
+  tx_failure_report_test.cc
   propose_validate_roundtrip_test.cc
   nnint_get_test.cc
   rcq_delete_test.cc

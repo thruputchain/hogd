@@ -1,7 +1,9 @@
 #pragma once
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/metrics/health.h"
 #include "indexer.hh"
 #include "transaction.hh"
@@ -15,7 +17,9 @@ class IndexerEventRpc {
 public:
   using rpc_service = IndexerEvent1;
 
-  IndexerEventRpc(IndexDB &db) : db_(db) {}
+  IndexerEventRpc(IndexDB &db, RecentTxFailureCache &failure_cache)
+    : db_(db), failure_cache_(failure_cache)
+  {}
 
   x23::Async<void> indexer_event_intro()
   {
@@ -42,7 +46,22 @@ public:
     // copy those parameters above rather than keep them as references.
     CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_.consume_events(block_height, tx_events, tx_bodies).has_value());
+    // Expire failure diagnostics as the indexed watermark advances.
+    failure_cache_.prune(db_.latest_block());
     co_await Health::instance().set_current_block_height(block_height);
+    co_return;
+  }
+
+  // Best-effort diagnostic (relayed by the event server) for a tx that
+  // failed nondeterministically at proposal time. Cached briefly so
+  // get_transaction_info can explain the failure.
+  x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
+                                  const TxFailureDiagnostic &diag)
+  {
+    // Careful! Both parameters are references; copy them before any
+    // co_await is introduced ahead of their use.
+    failure_cache_.report(tx_hash, diag, db_.latest_block());
     co_return;
   }
 
@@ -53,6 +72,7 @@ public:
 
 private:
   IndexDB &db_;
+  RecentTxFailureCache &failure_cache_;
   std::atomic<bool> event_server_connected_ = false;
 };
 static_assert(is_IndexerEvent1<IndexerEventRpc *, x23::Async>);

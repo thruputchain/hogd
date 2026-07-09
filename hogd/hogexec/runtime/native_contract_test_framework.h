@@ -49,9 +49,11 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -221,6 +223,13 @@ public:
   // Blocking control for testing delays
   void block_emit_events() { event_server_.block_emit_events(); }
   void unblock_emit_events() { event_server_.unblock_emit_events(); }
+
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports() { return event_server_.get_failure_reports(); }
 
 private:
   TestEventAggregator event_server_;
@@ -580,6 +589,16 @@ public:
   }
 
   uint16_t get_event_exec_port() { return event_server_wrapper_.exec_port(); }
+
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_wrapper_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports()
+  {
+    return event_server_wrapper_.get_failure_reports();
+  }
 
   static DeployedContractHash
   make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
