@@ -18,13 +18,26 @@
 
 namespace hogd {
 
-// Maximum number of live entries a retrocausal queue may ever hold.
+// No new inserts are admitted once a retrocausal queue's committed
+// (block-start) size has reached this bound; see
+// RetrocausalQueueLock::try_atomic_change_lock.
+inline constexpr uint64_t kMaxRetrocausalQueueLiveEntries =
+    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) -
+    kRetrocausalQueueBlockEntriesMaxLen;
+
+// Within a single block, live_entries may overshoot the bound above by at
+// most one block of inserts (per-block growth is capped at
+// kRetrocausalQueueBlockEntriesMaxLen), giving this hard ceiling on any
+// legitimately persisted value. HogDBDAO CHECKs it on every metadata load.
 // live_entries is persisted as an unsigned XDR hyper, but storage-cost
 // accounting (StorageCostModel::get_retrocausal_queue_cost and the int64_t
-// arithmetic in RetrocausalQueueLock) is signed 64-bit, so the cap keeps
-// every admissible count inside the signed domain (issue #2917).
-inline constexpr uint64_t kMaxRetrocausalQueueLiveEntries =
-    std::numeric_limits<int64_t>::max();
+// arithmetic in RetrocausalQueueLock) is signed 64-bit; the static_assert
+// keeps every admissible count inside the signed domain (issue #2917).
+inline constexpr uint64_t kRetrocausalQueueLiveEntriesHardCap =
+    kMaxRetrocausalQueueLiveEntries + kRetrocausalQueueBlockEntriesMaxLen;
+
+static_assert(kRetrocausalQueueLiveEntriesHardCap <=
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
 
 // Uses the process-wide random-keyed SipHash24 to defend against adversarial
 // hash collision attacks on entry_tracking_.

@@ -21,6 +21,7 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -157,48 +158,59 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 // admission, then die on CHECK_LE in InvokeTX::commit when the
 // implementation-defined unsigned-to-signed conversion produced a cost change
 // exceeding the storage reservation. Two guards close this off:
-// 1. Loading RCQ metadata CHECKs that live_entries stays at or below
-//    kMaxRetrocausalQueueLiveEntries, so corrupt on-disk state fail-stops
-//    instead of reaching cost arithmetic.
-// 2. Inserts are rejected once the queue is within one block of the cap, so
-//    no legitimate history can ever produce an over-cap live_entries.
+// 1. Inserts are banned once the committed queue size has reached
+//    kMaxRetrocausalQueueLiveEntries; live_entries may overshoot by at most
+//    one block, and a static_assert keeps the overshoot inside the signed
+//    domain. No legitimate history can exceed the hard cap.
+// 2. Loading RCQ metadata CHECKs live_entries against
+//    kRetrocausalQueueLiveEntriesHardCap, so corrupt on-disk state
+//    fail-stops instead of reaching cost arithmetic.
 
-// Guard 2: a maximal-but-valid queue rejects further inserts up front.
-TEST(RecoveryTests, RecoveredNearMaxRCQLiveEntriesRejectsInsert)
+namespace {
+
+// Shared harness for the insert-admission boundary tests: persists an RCQ
+// whose committed live_entries is `live_entries`, reopens the database, and
+// issues a single-entry insert against the recovered queue. Returns the
+// result of the insert request, committing the transaction (and block) when
+// admitted.
+HogDBStatus<void>
+insert_into_recovered_rcq(uint64_t live_entries)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  constexpr uint64_t kNearMaxLiveEntries = kMaxRetrocausalQueueLiveEntries - 10;
 
-  ASSERT_TRUE(dir.has_value());
+  EXPECT_TRUE(dir.has_value());
 
   ItemKey rcq_key(ContractAddress{7}, StorageKeyContractData{42});
 
   {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
-    ASSERT_TRUE(db);
+    EXPECT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
 
-    ASSERT_TRUE(
-        dao.write_address_balance(rcq_key.get_address(), 100'000).has_value());
+    // Enough to cover the near-int64-max storage reservation of a
+    // maximal queue (~2^63 entries * 8 tokens each).
+    EXPECT_TRUE(
+        dao.write_address_balance(rcq_key.get_address(), int128_t{1} << 70)
+            .has_value());
 
     RetrocausalQueueMetadata metadata{};
-    metadata.live_entries = kNearMaxLiveEntries;
-    ASSERT_TRUE(
+    metadata.live_entries = live_entries;
+    EXPECT_TRUE(
         dao.write_retrocausal_queue_metadata(rcq_key, metadata).has_value());
-    ASSERT_TRUE(dao.commit().has_value());
+    EXPECT_TRUE(dao.commit().has_value());
   }
 
   DBStatus<std::unique_ptr<Database>> db =
       Database::open(dir->get_path(), kDefaultHeapSize, 0);
-  ASSERT_TRUE(db);
+  EXPECT_TRUE(db);
   auto dao = HogDBDAO(RAMDB(std::move(*db)));
 
-  // The near-max value is within the valid domain and survives recovery.
+  // The value is within the valid domain and survives recovery.
   auto recovered = dao.read_retrocausal_queue_metadata(rcq_key);
-  ASSERT_TRUE(recovered.has_value());
-  ASSERT_EQ(recovered->live_entries, kNearMaxLiveEntries);
+  EXPECT_TRUE(recovered.has_value());
+  EXPECT_EQ(recovered->live_entries, live_entries);
 
   AuthChangeSubscriptionManager subscription_manager;
   BackgroundCommitWorker background_commit_worker(subscription_manager,
@@ -207,7 +219,7 @@ TEST(RecoveryTests, RecoveredNearMaxRCQLiveEntriesRejectsInsert)
   PerThreadARC<BlockTX> block_tx(
       dao, cost_model, background_commit_worker, 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
-  ASSERT_TRUE(block_tx.try_acquire_reference());
+  EXPECT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
   invoke_tx.create_savepoint();
 
@@ -216,20 +228,55 @@ TEST(RecoveryTests, RecoveredNearMaxRCQLiveEntriesRejectsInsert)
 
   auto insert_result = invoke_tx.request_retrocausal_queue(
       rcq_key, std::move(delta), std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_FALSE(insert_result.has_value());
-  EXPECT_EQ(HogDBCode::kConflict, insert_result.error().code());
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictCapacityExceeded,
-            *invoke_tx.last_conflict_reason());
-  // NOLINTEND(bugprone-unchecked-optional-access)
 
-  invoke_tx.rollback_to_savepoint(0);
+  if (!insert_result.has_value()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    EXPECT_TRUE(invoke_tx.last_conflict_reason().has_value());
+    EXPECT_EQ(DbConflictCode::kDbConflictCapacityExceeded,
+              *invoke_tx.last_conflict_reason());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    invoke_tx.rollback_to_savepoint(0);
+    invoke_tx.release_blocktx_reference();
+    return insert_result;
+  }
+
+  // Admitted: drive the change through commit accounting and block staging,
+  // which exercises the signed cost arithmetic at the boundary.
+  EXPECT_TRUE(invoke_tx.sync_balance_locks().has_value());
+  EXPECT_TRUE(invoke_tx.commit());
   invoke_tx.release_blocktx_reference();
+
+  EXPECT_TRUE(block_tx.get().close(DbHash{}).has_value());
+  EXPECT_TRUE(block_tx.get().commit().has_value());
+
+  auto updated = dao.read_retrocausal_queue_metadata(rcq_key);
+  EXPECT_TRUE(updated.has_value());
+  EXPECT_EQ(updated->live_entries, live_entries + 1);
+
+  return insert_result;
 }
 
-// Guard 1: an over-cap live_entries value (only producible by on-disk
-// corruption, since guard 2 bounds all legitimate growth) fail-stops the
+} // namespace
+
+// Guard 1, rejection side: a queue whose committed size is exactly at the
+// bound refuses further inserts up front.
+TEST(RecoveryTests, RCQInsertRejectedAtMaxLiveEntries)
+{
+  auto result = insert_into_recovered_rcq(kMaxRetrocausalQueueLiveEntries);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(HogDBCode::kConflict, result.error().code());
+}
+
+// Guard 1, admission side: one entry below the bound, the insert is admitted
+// and commits cleanly through the signed cost arithmetic.
+TEST(RecoveryTests, RCQInsertAdmittedJustBelowMaxLiveEntries)
+{
+  auto result = insert_into_recovered_rcq(kMaxRetrocausalQueueLiveEntries - 1);
+  ASSERT_TRUE(result.has_value());
+}
+
+// Guard 2: an over-cap live_entries value (only producible by on-disk
+// corruption, since guard 1 bounds all legitimate growth) fail-stops the
 // moment the metadata is loaded, before any signed cost arithmetic.
 TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
 {
