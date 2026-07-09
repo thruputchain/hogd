@@ -1,11 +1,10 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 
 #include <bit>
-#include <cassert>
 #include <cstring>
-#include <regex> // NOLINT(misc-include-cleaner)
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -16,85 +15,93 @@
 namespace hogd {
 
 namespace {
-struct SemverComponents {
-  std::string major;
-  std::string minor;
-  std::string patch;
-  // The full, original version string. For a 0.0.0 version the major-version is
-  // the entire string (including any -prerelease/+build), matching the SDK.
-  std::string full;
-};
-
-SemverComponents
-parse_semver(std::string_view identifier_version)
-{
-  // Semver format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-  // We parse major, minor, patch, and prerelease (ignoring build metadata)
-  std::regex semver_regex(
-      R"((\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?)");
-  std::string version_str(identifier_version);
-  std::smatch matches;
-
-  [[maybe_unused]]
-  auto ok = std::regex_match(version_str, matches, semver_regex);
-  x23assert(ok);
-  x23assert(matches.size() >= 4);
-
-  SemverComponents components;
-  components.major = matches[1].str();
-  components.minor = matches[2].str();
-  components.patch = matches[3].str();
-  components.full = version_str;
-
-  return components;
-}
-
+// Returns the SDK/spec "major version" fold of a semver string, matching
+// sdk_rs contract-util::major_version and built_contracts/generate_header.py:
+//
+//   MAJOR.MINOR.PATCH[-prerelease][+build]:
+//     major > 0                    -> "MAJOR"
+//     major == 0, minor > 0        -> "MAJOR.MINOR"
+//     major == minor == 0, patch>0 -> "MAJOR.MINOR.PATCH"
+//     all three zero               -> the full original string (prerelease and
+//                                      build metadata included)
+//
+// The result is always a prefix slice of the input, and parsing keys only off
+// raw byte values (ASCII/UTF-8 digits 0x30..0x39 and '.' == 0x2e). It therefore
+// introduces no ordinary-literal bytes and folds identically regardless of the
+// translation unit's ordinary execution charset (`-fexec-charset`). An earlier
+// implementation compared against ordinary `"0"` literals and matched an
+// ordinary-literal `std::regex`, so under a non-UTF-8 charset it misfolded (or
+// aborted on) UTF-8 preimage bytes. See hogd issue #2898.
 std::string
-major_version(SemverComponents const &components)
+major_version(std::string_view version)
 {
-  if (components.major != "0") {
-    return components.major;
+  constexpr unsigned char kDot = 0x2e; // '.'
+
+  auto is_digit = [](unsigned char b) { return b >= 0x30 && b <= 0x39; };
+
+  // Consume a run of digits from `pos`; return {run_is_nonzero, end_pos}.
+  auto scan_number = [&](size_t pos) -> std::pair<bool, size_t> {
+    size_t start = pos;
+    bool nonzero = false;
+    while (pos < version.size() &&
+           is_digit(static_cast<unsigned char>(version[pos]))) {
+      if (static_cast<unsigned char>(version[pos]) != 0x30) {
+        nonzero = true;
+      }
+      ++pos;
+    }
+    x23assert(pos > start); // at least one digit
+    return {nonzero, pos};
+  };
+
+  auto [major_nonzero, after_major] = scan_number(0);
+  if (major_nonzero) {
+    return std::string(version.substr(0, after_major));
   }
-  if (components.minor != "0") {
-    return "0." + components.minor;
+  x23assert(after_major < version.size() &&
+            static_cast<unsigned char>(version[after_major]) == kDot);
+
+  auto [minor_nonzero, after_minor] = scan_number(after_major + 1);
+  if (minor_nonzero) {
+    return std::string(version.substr(0, after_minor));
   }
-  if (components.patch != "0") {
-    return "0.0." + components.patch;
+  x23assert(after_minor < version.size() &&
+            static_cast<unsigned char>(version[after_minor]) == kDot);
+
+  auto [patch_nonzero, after_patch] = scan_number(after_minor + 1);
+  if (patch_nonzero) {
+    return std::string(version.substr(0, after_patch));
   }
-  // 0.0.0[-prerelease][+build]: the SDK (contract-util::major_version) returns
-  // the full original version string here, so match it byte-for-byte rather
-  // than reconstructing "0.0.0" + a hyphen-stripped prerelease. Otherwise the
-  // host derivation diverges from the SDK/generate_header.py kEntrypoints for
-  // any 0.0.0-prerelease contract.
-  return components.full;
+
+  return std::string(version);
 }
 } // namespace
 
 ContractEntrypointID
-sdk_entrypoint_derivation(std::string_view identifier_name,
-                          std::string_view identifier_version,
-                          std::string_view method_name)
+sdk_entrypoint_derivation(std::u8string_view identifier_name,
+                          std::u8string_view identifier_version,
+                          std::u8string_view method_name)
 {
-  auto semver_components = parse_semver(identifier_version);
+  // Inputs are `u8""` bytes, so the preimage (and therefore the id) is the
+  // UTF-8 encoding independent of the ordinary execution charset
+  // (`-fexec-charset`). Reinterpreting to narrow bytes is byte-identical;
+  // major_version keys only off raw byte values. See hogd issue #2898.
+  auto as_bytes = [](std::u8string_view s) {
+    return std::string_view(reinterpret_cast<const char *>(s.data()), s.size());
+  };
 
   // Components are joined with a "::" domain separator so that distinct
-  // (name, version, method) triples cannot collide on the same preimage.
-  //
-  // The separator is a `u8"..."` literal so its bytes are the UTF-8 encoding
-  // (0x3a 0x3a) mandated by the standard, independent of the ordinary execution
-  // character set (`-fexec-charset`). An ordinary `"::"` literal would hash
-  // implementation-defined code units, so two honest validators built with
-  // different execution charsets could derive divergent ids. See hogd issue
-  // #2573.
+  // (name, version, method) triples cannot collide on the same preimage. The
+  // separator bytes are the UTF-8 encoding (0x3a 0x3a), matching the SDK and
+  // generate_header.py. See hogd issue #2573.
   constexpr std::u8string_view kSeparator = u8"::";
-  const auto *sep = reinterpret_cast<const char *>(kSeparator.data());
 
   std::string method_name_preimage;
-  method_name_preimage.append(identifier_name);
-  method_name_preimage.append(sep, kSeparator.size());
-  method_name_preimage.append(major_version(semver_components));
-  method_name_preimage.append(sep, kSeparator.size());
-  method_name_preimage.append(method_name);
+  method_name_preimage.append(as_bytes(identifier_name));
+  method_name_preimage.append(as_bytes(kSeparator));
+  method_name_preimage.append(major_version(as_bytes(identifier_version)));
+  method_name_preimage.append(as_bytes(kSeparator));
+  method_name_preimage.append(as_bytes(method_name));
 
   auto h = sha256(method_name_preimage);
 

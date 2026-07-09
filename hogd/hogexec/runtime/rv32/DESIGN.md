@@ -82,8 +82,9 @@ gas at the run's exit seam, before any effect can escape the frame. The seams
 are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
 sees a syscall (a speculative syscall would have effects outside the frame),
 and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
-executes in deficit (every head settles first), bounding the overdraft by the
-lowering's uint16 run-gas cap.
+executes in deficit (every head settles first), bounding the overdraft by
+`kMaxRunGas` (the lowering's chunk cap; over-cap straight-line runs are split
+at mid-run break carriers rather than rejected).
 
 The invariant this buys: the consensus-visible pair (trap classification,
 `gas_remaining`) matches the canonical `Machine` at every budget and on every
@@ -132,3 +133,14 @@ The test strategy is deliberately redundant:
 
 For consensus-sensitive changes, prefer a narrow regression test near the
 changed layer plus at least one cross-engine check.
+
+Two local-only libFuzzer targets live under `fuzz/` (built with
+`-DBUILD_FUZZERS=ON`, excluded from CI). `rv32_fuzz_artifact` drives the
+attacker-facing deploy path -- raw bytes through `parse_artifact` /
+`parse_threaded_artifact` for the rejection paths, and a fixed-up well-formed
+artifact through lowering and machine construction to reach decode/fusion/image
+staging past the SHA256 digest wall. `rv32_fuzz_engine_diff` extends the
+canonical-vs-threaded differential beyond the fixed-seed corpora, asserting
+exact-`ProgramError` decoder parity and execution parity (OOG class and
+`gas_remaining==0` first; full trace parity only when neither engine runs out of
+gas). See `fuzz/README.md`.

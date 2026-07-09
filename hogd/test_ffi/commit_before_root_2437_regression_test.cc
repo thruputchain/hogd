@@ -40,6 +40,7 @@ TEST(TestBindingsTest, CommitBeforeRootInvokeReturnsErrorInsteadOfAborting)
   ASSERT_NE(syscall_handler, nullptr);
 
   auto commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(commit.serialized_conflict);
   EXPECT_EQ(commit.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
   // The handler was never committed, so it can still be aborted and closed.

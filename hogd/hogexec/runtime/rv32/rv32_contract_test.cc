@@ -256,12 +256,15 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
   }
 }
 
-TEST(Rv32ContractTest, VerifyRejectsRunGasOverflow)
+TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
 {
-  constexpr size_t kOverflowingDivCount =
-      (0xFFFFU / rv32::kDivInstructionGas) + 1;
+  // A single straight-line run whose total gas exceeds the legacy uint16 run
+  // bound (65535) was formerly rejected; the lowering now splits it into
+  // <= kMaxRunGas chunks, so the contract loads and verifies.
+  constexpr size_t kOverBoundDivCount =
+      (0xFFFFU / rv32::kDivInstructionGas) + 1; // 8193 divs -> 65544 gas
   const std::vector<uint32_t> words(
-      kOverflowingDivCount,
+      kOverBoundDivCount,
       rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   const std::vector<uint8_t> initial_memory{0};
   const std::vector<uint8_t> artifact =
@@ -269,12 +272,12 @@ TEST(Rv32ContractTest, VerifyRejectsRunGasOverflow)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+  EXPECT_TRUE(Rv32Contract::create(blob).has_value());
 
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

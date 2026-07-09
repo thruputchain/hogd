@@ -199,6 +199,17 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       (before != nullptr) ? before->max_insert_count() : 0;
 
   if (new_entries_count > previous_entries_count) {
+    // Ban inserts once the committed (block-start) queue size has reached
+    // kMaxRetrocausalQueueLiveEntries. live_entries may still overshoot the
+    // bound by up to one block of inserts; the static_assert next to the
+    // constant guarantees the overshoot stays inside the signed-int64
+    // domain used by storage-cost accounting (issue #2917). Checking the
+    // block-start snapshot keeps the decision deterministic across
+    // concurrent transactions.
+    if (meta.live_entries >= kMaxRetrocausalQueueLiveEntries) {
+      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+    }
+
     const size_t additional_entries =
         new_entries_count - previous_entries_count;
     const size_t reserved_before =

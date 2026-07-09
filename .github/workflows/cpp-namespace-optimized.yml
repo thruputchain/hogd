@@ -1,7 +1,7 @@
 name: C++ CI (Namespace)
 
 # This workflow uses a custom base image with pre-installed toolchain.
-# Requires: Configure namespace-profile-hogd-linux with .devcontainer/Dockerfile as custom base image.
+# Requires: Configure namespace-profile-hogd-linux-2604 with .devcontainer/Dockerfile as custom base image.
 #
 # Jobs run in parallel where possible:
 #   format (fast) -> gcc-debug + llvm-debug (parallel) -> gcc-release (after gcc-debug)
@@ -23,7 +23,7 @@ env:
 jobs:
   # Fast format check - gates all other jobs
   format:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -93,7 +93,7 @@ jobs:
 
   # GCC Debug build + tests
   gcc-debug:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -223,7 +223,7 @@ jobs:
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -334,7 +334,7 @@ jobs:
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read

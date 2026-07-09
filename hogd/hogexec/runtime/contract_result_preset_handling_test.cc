@@ -31,11 +31,11 @@ constexpr ContractAddress kCallerContractAddr =
     NativeContractTestFramework::make_contract_address(1);
 
 struct TestContract {
-  constexpr static std::string_view kTraitName = "TestContract";
-  constexpr static std::string_view kVersion = "0.0.0";
+  constexpr static std::u8string_view kTraitName = u8"TestContract";
+  constexpr static std::u8string_view kVersion = u8"0.0.0";
 
   constexpr static auto kExportNames =
-      std::array<std::string_view, 2>{"return_ok_void", "return_ok_int"};
+      std::array<std::u8string_view, 2>{u8"return_ok_void", u8"return_ok_int"};
 
   using export_types = std::tuple<void (*)(), int32_t (*)()>;
 };
@@ -44,12 +44,12 @@ using test_contract_client_t = ContractTraitClient<TestContract>;
 
 // Second contract that calls the methods from TestContract
 struct CallerContract {
-  constexpr static std::string_view kTraitName = "CallerContract";
-  constexpr static std::string_view kVersion = "0.0.0";
+  constexpr static std::u8string_view kTraitName = u8"CallerContract";
+  constexpr static std::u8string_view kVersion = u8"0.0.0";
 
   constexpr static auto kExportNames =
-      std::array<std::string_view, 2>{"call_return_ok_void",
-                                      "call_return_ok_int"};
+      std::array<std::u8string_view, 2>{u8"call_return_ok_void",
+                                        u8"call_return_ok_int"};
 
   using export_types = std::tuple<void (*)(), void (*)()>;
 };

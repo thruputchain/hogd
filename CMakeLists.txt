@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 # Configuration options
+option(BUILD_FUZZERS "Build fuzz targets" OFF)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)

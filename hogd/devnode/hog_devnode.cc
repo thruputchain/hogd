@@ -66,7 +66,11 @@ block_shutdown_signal()
   CHECK_EQ(sigaddset(&blocked_mask, SIGTERM), 0);
 
   sigset_t suspend_mask;
-  CHECK_EQ(sigprocmask(SIG_BLOCK, &blocked_mask, &suspend_mask), 0);
+  // Use pthread_sigmask (not sigprocmask, whose behavior is unspecified in a
+  // multithreaded process). This must run while the process is still
+  // single-threaded so every worker thread spawned afterwards inherits the
+  // blocked mask; see hog_devnode_init.
+  CHECK_EQ(pthread_sigmask(SIG_BLOCK, &blocked_mask, &suspend_mask), 0);
   CHECK_EQ(sigdelset(&suspend_mask, SIGTERM), 0);
 
   return {.suspend_mask = suspend_mask};
@@ -116,6 +120,16 @@ hog_devnode_init(std::string listen_host,
                  std::optional<std::filesystem::path> const &data_dir)
 {
   install_signal_handler();
+  // Block SIGTERM before spawning any worker threads (init_hogexec_metrics and
+  // the HogDevnodeNode constructor start well over a hundred of them). Threads
+  // inherit the signal mask of their creator, so blocking here means SIGTERM is
+  // blocked in every worker. A process-directed SIGTERM is then delivered only
+  // to the main thread inside sigsuspend(). Otherwise the kernel could deliver
+  // it to a worker thread; request_shutdown() would set the flag there, but the
+  // main thread's sigsuspend() only wakes when the signal is delivered to
+  // itself, so shutdown would hang until the test escalates to SIGKILL.
+  ShutdownSignals shutdown_signals = block_shutdown_signal();
+
   init_hogexec_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
@@ -123,7 +137,6 @@ hog_devnode_init(std::string listen_host,
   emit_readiness(node, readiness_sink, runtime_network_id);
   info("hog-devnode initialization complete.");
 
-  ShutdownSignals shutdown_signals = block_shutdown_signal();
   wait_for_shutdown(shutdown_signals);
   return EXIT_SUCCESS;
 }

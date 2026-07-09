@@ -595,19 +595,32 @@ SystemCallHandler::try_commit_transaction()
     return ExecResult::ExecResultTxNonDeterministicError;
   }
 
-  auto new_contract_hashes =
-      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .get_committed_contracts();
-  auto res = db_proxy_.commit_transaction(
-      BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
-  if (!res.has_value()) {
+  // Abort on a throw here rather than let it escape with the tx still open: a
+  // retry would re-push the replay-cache delta and hard-abort at narrow
+  // (#2595).
+  try {
+    auto new_contract_hashes =
+        last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+            .value()
+            .get_committed_contracts();
+    auto res = db_proxy_.commit_transaction(
+        BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
+    if (!res.has_value()) {
+      two_phase_commit_failed_ = true;
+      auto abort_res = abort_transaction();
+      if (!abort_res.has_value()) {
+        return to_exec_result(abort_res.error().code());
+      }
+      return to_exec_result(res.error().code());
+    }
+  } catch (std::exception const &e) {
+    error("try_commit_transaction: commit preparation threw: {}", e.what());
     two_phase_commit_failed_ = true;
     auto abort_res = abort_transaction();
     if (!abort_res.has_value()) {
       return to_exec_result(abort_res.error().code());
     }
-    return to_exec_result(res.error().code());
+    return ExecResult::ExecResultUnrecoverable;
   }
 
   // This is past the point of successful commitment;
@@ -927,6 +940,29 @@ SystemCallHandler::finish_frame(
     }
   }
 
+  // Finish the frame on the stack first, capturing any try_invoke two-phase-
+  // commit conflict. This must run after log_trace_finish() above (which reads
+  // the finishing frame) and before the parent-trace restore below, so the
+  // conflict can be recorded on this (still-current) child frame's trace.
+  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
+  DbConflictResult try_invoke_conflict{DbDiagnosticLevel::kDbDiagnosticNone};
+  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_,
+                                                  &try_invoke_conflict);
+  size_t stack_size_after = invocation_frame_stack_.size();
+  assert(stack_size_after == stack_size - 1);
+  if (stack_size_after == 0) {
+    last_frame_finished_ = true;
+  }
+
+  // Record the conflict on this frame's trace. The default-constructed field is
+  // already the kDbDiagnosticNone arm, so only a real try_invoke conflict
+  // overwrites it. DbConflictResult's move-assignment is noexcept, safe in this
+  // noexcept function.
+  if (invocation_frame_trace_ &&
+      try_invoke_conflict.level() != DbDiagnosticLevel::kDbDiagnosticNone) {
+    invocation_frame_trace_->commit_conflict = std::move(try_invoke_conflict);
+  }
+
   // Restore parent trace and attach child
   if (stashed_parent_trace) {
     auto child_trace = std::move(invocation_frame_trace_);
@@ -956,13 +992,6 @@ SystemCallHandler::finish_frame(
     }
   }
 
-  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
-  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_);
-  size_t stack_size_after = invocation_frame_stack_.size();
-  assert(stack_size_after == stack_size - 1);
-  if (stack_size_after == 0) {
-    last_frame_finished_ = true;
-  }
   return res;
 }
 
@@ -1045,6 +1074,12 @@ InvocationFrameTrace const *
 SystemCallHandler::get_trace() const
 {
   return invocation_frame_trace_.get();
+}
+
+DbConflictResult const &
+SystemCallHandler::last_commit_conflict() const
+{
+  return db_proxy_.last_push_conflict();
 }
 
 void
