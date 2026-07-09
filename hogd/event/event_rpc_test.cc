@@ -23,6 +23,7 @@
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
+#include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/event/status.h"
 #include "hogd/event/test_util/socketpair_indexer_client.h"
@@ -78,6 +79,23 @@ struct FailureCapturingIndexerRpc {
 static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
 
 } // namespace
+
+// Regression for #2923: an indexer peer that sends an IndexerCard whose
+// protocol string does not match the local hogd protocol must be rejected
+// gracefully. The protocol string is remote RPC input, not an internal
+// invariant, so a mismatch must not abort the event server. The mismatch is
+// also detected before any network dial, so the (deliberately unreachable)
+// address is never touched.
+TEST_F(EventRpcTest, IndexerIntroProtocolMismatchIsRejectedNotAborted)
+{
+  EventRPCContext ctx(temp_dir());
+  EventIndexerRpc indexer_rpc(ctx);
+  const IndexerCard card{.protocol = "definitely-not-the-hogd-protocol",
+                         .address_for_event = "127.0.0.1:1"};
+
+  indexer_rpc.event_indexer_intro(card)();
+  SUCCEED();
+}
 
 TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)
 {
