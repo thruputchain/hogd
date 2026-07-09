@@ -132,7 +132,6 @@ target_link_libraries(
   GTest::gtest
   hogd_interface
 )
-hogd_target_precompile_headers(runtime_test_objects ${HOGD_TEST_PCH_HEADERS})
 
 add_executable(
   runtime_test

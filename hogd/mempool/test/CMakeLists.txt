@@ -9,7 +9,6 @@ target_link_libraries(mempool_test_infra
   GTest::gtest
   hogd_interface
 )
-hogd_target_precompile_headers(mempool_test_infra ${HOGD_TEST_PCH_HEADERS})
 add_dependencies(mempool_test_infra
   all_wasm_contracts
 )
@@ -26,7 +25,6 @@ target_link_libraries(mempool_test_objects
   GTest::gtest
   hogd_interface
 )
-hogd_target_precompile_headers(mempool_test_objects ${HOGD_TEST_PCH_HEADERS})
 add_dependencies(mempool_test_objects
   all_wasm_contracts
 )
