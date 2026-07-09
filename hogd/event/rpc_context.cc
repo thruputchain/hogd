@@ -88,20 +88,23 @@ EventRPCContext::open_block(BlockID block_id)
   co_await g(lock_);
   info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
 
+  // try_emplace, not emplace: emplace may construct the context node before
+  // discovering the key exists (libstdc++ does), and destroying that
+  // still-kActive context trips the assert in ~EventBlockContext. try_emplace
+  // guarantees no construction -- and no move from cached_blocks_.back() --
+  // unless the insertion happens.
   bool inserted = false;
   if (!cached_blocks_.empty()) {
-    std::tie(std::ignore, inserted) = event_block_contexts_.emplace(
-        std::piecewise_construct, std::forward_as_tuple(block_id),
-        std::forward_as_tuple(work_directory_, block_id,
-                              std::move(cached_blocks_.back())));
-    cached_blocks_.pop_back();
+    std::tie(std::ignore, inserted) =
+        event_block_contexts_.try_emplace(block_id, work_directory_, block_id,
+                                          std::move(cached_blocks_.back()));
+    if (inserted) {
+      cached_blocks_.pop_back();
+    }
   }
   else {
     std::tie(std::ignore, inserted) =
-        event_block_contexts_.emplace(std::piecewise_construct,
-                                      std::forward_as_tuple(block_id),
-                                      std::forward_as_tuple(work_directory_,
-                                                            block_id));
+        event_block_contexts_.try_emplace(block_id, work_directory_, block_id);
   }
 
   if (!inserted) {
