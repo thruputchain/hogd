@@ -3,8 +3,9 @@
 #pragma once
 
 #include <map>
-#include <ranges>
+#include <vector>
 
+#include <x23/config.h>
 #include <x23/fastclock.h>
 #include <x23/threadpool.h>
 
@@ -19,8 +20,7 @@ namespace x23 {
 // elapsed.
 class CoroSleep {
 public:
-  using clock = fastclock;
-  using Job = ThreadPool::Job;
+  using Clock = fastclock;
 
   CoroSleep(ThreadPool &pool)
     : pool_(pool), service_thread_(&CoroSleep::service_loop, this)
@@ -29,7 +29,7 @@ public:
   ~CoroSleep()
   {
     lock_.lock();
-    done_.store(true, std::memory_order_relaxed);
+    done_ = true;
     recheck_.notify_all();
     lock_.unlock();
 
@@ -38,69 +38,85 @@ public:
 
   struct [[nodiscard]] Awaiter {
     CoroSleep *cs_;
-    clock::time_point wake_time_;
+    Clock::time_point wake_time_;
+    bool active_ = true;
 
     // Always attempt to suspend
     static bool await_ready() noexcept { return false; }
 
     // Insert coroutine in waiters.  Returns false (meaning don't
     // suspend) when CoroSleep is being destroyed.
-    bool await_suspend(CoroHandle h) const noexcept
+    bool await_suspend(CoroHandle h) noexcept
     {
-      return cs_->insert(wake_time_, h);
+      return cs_->insert(wake_time_, h, &active_);
     }
 
     // Return true while the CoroSleep is active, or false if it is
     // being destroyed and the wake time may not have passed.
-    bool await_resume() const noexcept
-    {
-      return !cs_->done_.load(std::memory_order_relaxed);
-    }
+    bool await_resume() const noexcept { return active_; }
   };
-  Awaiter sleep_until(clock::time_point wake_time)
+  Awaiter sleep_until(Clock::time_point wake_time)
   {
     return {.cs_ = this, .wake_time_ = wake_time};
   }
-  Awaiter sleep(clock::duration d) { return sleep_until(clock::now() + d); }
+  Awaiter sleep(Clock::duration d) { return sleep_until(Clock::now() + d); }
 
   ThreadPool &pool_;
 
 private:
+  using Job = ThreadPool::Job;
+
+  struct Waiter {
+    Job job_;
+    bool *active_;
+  };
+
   // Return the next wakeup time.  Assumes lock_ is already held.
-  clock::time_point next_wake() const
+  Clock::time_point next_wake() const
   {
     auto it = waiters_.begin();
     if (it == waiters_.end())
-      return clock::time_point::max();
+      return Clock::time_point::max();
     return it->first;
   }
 
-  // Return a multimap of all coroutines whose wake time has arrived.
+  // Return a vector of all coroutines whose wake time has arrived.
   // If the CoroSleep is being destroyed, returns all coroutines.
   // Assumes lock_ is already held.
-  std::multimap<clock::time_point, Job> ready_coros()
+  std::vector<Job> ready_coros()
   {
-    if (done_.load(std::memory_order_relaxed))
-      return std::exchange(waiters_, {});
+    std::vector<Job> ready;
+    if (done_) {
+      ready.reserve(waiters_.size());
+      for (auto &[time, waiter] : waiters_) {
+        *waiter.active_ = false;
+        ready.emplace_back(waiter.job_);
+      }
+      waiters_.clear();
+      return ready;
+    }
 
-    decltype(waiters_) ready;
     auto it = waiters_.begin();
-    auto end = waiters_.upper_bound(clock::now());
-    while (it != end)
-      ready.insert(waiters_.extract(it++));
+    auto end = waiters_.upper_bound(Clock::now());
+    while (it != end) {
+      ready.emplace_back(it->second.job_);
+      it = waiters_.erase(it);
+    }
     return ready;
   }
 
   // Insert a new waiter.  Fails and returns false if CoroSleep is
   // being destroyed.
-  bool insert(clock::time_point wake_time, Job h)
+  bool insert(Clock::time_point wake_time, Job h, bool *active)
   {
     std::lock_guard _lg(lock_);
-    if (done_.load(std::memory_order_relaxed))
+    if (done_) {
+      *active = false;
       return false;
+    }
 
     bool need_wake = wake_time < next_wake();
-    waiters_.emplace(wake_time, h);
+    waiters_.emplace(wake_time, Waiter{.job_ = h, .active_ = active});
     if (need_wake)
       recheck_.notify_all();
     return true;
@@ -114,12 +130,20 @@ private:
       if (auto ready = ready_coros(); !ready.empty()) {
         // Release lock so resumed coros can call sleep() without deadlock
         lk.unlock();
-        pool_.go(ready | std::views::values |
-                 std::ranges::to<std::vector<Job>>());
+        pool_.go(std::move(ready));
         lk.lock();
       }
-      else if (!done_.load(std::memory_order_relaxed))
+      else if (!done_) {
+#if HAVE_BROKEN_WAIT_UNTIL
+        auto wake_time = next_wake();
+        if (wake_time == Clock::time_point::max())
+          recheck_.wait(lk);
+        else
+          recheck_.wait_until(lk, wake_time);
+#else  // !HAVE_BROKEN_WAIT_UNTIL
         recheck_.wait_until(lk, next_wake());
+#endif // !HAVE_BROKEN_WAIT_UNTIL
+      }
       else
         return;
   }
@@ -127,15 +151,11 @@ private:
   // Lock to protect waiters_ and done_.
   std::mutex lock_;
 
-  // True when CoroSleep is being destroyed.  Atomic because
-  // Awaiter::await_resume could load done_ concurrently with a store
-  // in ~CoroSleep.  Even though we don't care what value load returns
-  // in that situation, the spec says any such data race has undefined
-  // behavior.
-  std::atomic_bool done_{};
+  // True when CoroSleep is being destroyed.
+  bool done_ = false;
 
   // All sleeping coroutines, indexed by wake time
-  std::multimap<clock::time_point, Job> waiters_;
+  std::multimap<Clock::time_point, Waiter> waiters_;
 
   // Notified when inserting a coroutine with an earlier wake_time.
   std::condition_variable recheck_;

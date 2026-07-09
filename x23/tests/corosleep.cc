@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <memory>
+#include <print>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -14,9 +16,16 @@
 using namespace std::chrono_literals;
 using namespace x23;
 
-using Clock = CoroSleep::clock;
+using Clock = CoroSleep::Clock;
 
 constexpr auto kMaxOversleep = 2s;
+
+static void
+progress(const char *msg)
+{
+  std::println(stderr, "corosleep: {}", msg);
+  std::fflush(stderr);
+}
 
 struct SleepResult {
   bool active = false;
@@ -35,7 +44,7 @@ record_sleep(CoroSleep &cs, std::chrono::nanoseconds duration)
 }
 
 static Async<SleepResult>
-record_sleep_until(CoroSleep &cs, CoroSleep::clock::time_point deadline)
+record_sleep_until(CoroSleep &cs, CoroSleep::Clock::time_point deadline)
 {
   SleepResult result;
   result.start = Clock::now();
@@ -57,6 +66,7 @@ expect_elapsed_at_least(const SleepResult &result,
 static void
 test_repeated_relative_sleep()
 {
+  progress("start repeated_relative_sleep");
   ThreadPool pool(4);
   CoroSleep cs(pool);
 
@@ -64,24 +74,44 @@ test_repeated_relative_sleep()
     SleepResult result = record_sleep(cs, 10ms)();
     expect_elapsed_at_least(result, 10ms);
   }
+  progress("done repeated_relative_sleep");
 }
 
 static void
 test_expired_deadline_wakes_promptly()
 {
+  progress("start expired_deadline_wakes_promptly");
   ThreadPool pool(4);
   CoroSleep cs(pool);
 
-  SleepResult result = record_sleep_until(cs, CoroSleep::clock::now() - 1ms)();
+  SleepResult result = record_sleep_until(cs, CoroSleep::Clock::now() - 1ms)();
 
   auto elapsed = result.stop - result.start;
   x23assert(result.active);
   x23assert(elapsed < 250ms);
+  progress("done expired_deadline_wakes_promptly");
+}
+
+static void
+test_tiny_sleep_deadlines_do_not_hang()
+{
+  progress("start tiny_sleep_deadlines_do_not_hang");
+  ThreadPool pool(4);
+  CoroSleep cs(pool);
+
+  for (int i = 0; i < 500; i++) {
+    if (i % 100 == 0)
+      progress("tiny_sleep_deadlines_do_not_hang loop");
+    SleepResult result = record_sleep(cs, 1ns)();
+    expect_elapsed_at_least(result, 1ns);
+  }
+  progress("done tiny_sleep_deadlines_do_not_hang");
 }
 
 static void
 test_batches_many_waiters()
 {
+  progress("start batches_many_waiters");
   ThreadPool pool(4);
   CoroSleep cs(pool);
 
@@ -98,16 +128,18 @@ test_batches_many_waiters()
 
   for (const auto &result : results)
     expect_elapsed_at_least(result, 15ms);
+  progress("done batches_many_waiters");
 }
 
 static void
 test_sleep_until_orders_deadlines()
 {
+  progress("start sleep_until_orders_deadlines");
   ThreadPool pool(4);
   CoroSleep cs(pool);
 
   constexpr int kWaiters = 12;
-  auto base = CoroSleep::clock::now() + 20ms;
+  auto base = CoroSleep::Clock::now() + 20ms;
   std::vector<SleepResult> results(kWaiters);
   std::vector<std::pair<int, Async<SleepResult>>> sleepers;
   sleepers.reserve(kWaiters);
@@ -121,11 +153,13 @@ test_sleep_until_orders_deadlines()
     x23assert(result.active);
   for (int i = 1; i < kWaiters; i++)
     x23assert(results[i - 1].stop <= results[i].stop + 5ms);
+  progress("done sleep_until_orders_deadlines");
 }
 
 static void
 test_earlier_insert_rechecks_service_thread()
 {
+  progress("start earlier_insert_rechecks_service_thread");
   ThreadPool pool(4);
   CoroSleep cs(pool);
 
@@ -140,6 +174,7 @@ test_earlier_insert_rechecks_service_thread()
   expect_elapsed_at_least(fast, 20ms);
   expect_elapsed_at_least(slow, 300ms);
   x23assert(fast.stop < slow.stop);
+  progress("done earlier_insert_rechecks_service_thread");
 }
 
 static Async<void>
@@ -154,6 +189,7 @@ sleep_until_destroyed(CoroSleep &cs, unsigned char &active,
 static void
 test_destroy_wakes_waiters_false()
 {
+  progress("start destroy_wakes_waiters_false");
   ThreadPool pool(4);
   auto cs = std::make_unique<CoroSleep>(pool);
 
@@ -179,16 +215,20 @@ test_destroy_wakes_waiters_false()
     sleeper();
   for (unsigned char value : active)
     x23assert(!value);
+  progress("done destroy_wakes_waiters_false");
 }
 
 int
 main()
 {
+  progress("start main");
   test_repeated_relative_sleep();
   test_expired_deadline_wakes_promptly();
+  test_tiny_sleep_deadlines_do_not_hang();
   test_batches_many_waiters();
   test_sleep_until_orders_deadlines();
   test_earlier_insert_rechecks_service_thread();
   test_destroy_wakes_waiters_false();
+  progress("done main");
   return 0;
 }
