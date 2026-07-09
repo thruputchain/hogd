@@ -99,7 +99,12 @@ done
 shift $((OPTIND - 1))
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
+  if command -v xcrun >/dev/null 2>&1; then
+    MACOS_SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  fi
+  if [[ -n "${MACOS_SDKROOT:-}" ]]; then
+    CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT="$MACOS_SDKROOT")
+  fi
 fi
 
 HAS_GENERATOR_FLAG=
