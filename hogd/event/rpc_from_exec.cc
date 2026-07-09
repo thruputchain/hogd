@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
@@ -71,6 +72,16 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
   }
 
   co_return ok ? RPCError::kRPCNone : RPCError::kRPCBadBlockID;
+}
+
+x23::Async<RPCError>
+EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+                                              TxFailureDiagnostic diag)
+{
+  // Fire-and-forget: hand the relay to a detached coroutine and ack the
+  // executor immediately, rather than waiting on the indexer sends.
+  ctx_.spawn_tx_failure_relay(std::move(tx_hash), std::move(diag));
+  co_return RPCError::kRPCNone;
 }
 
 } // namespace hogd

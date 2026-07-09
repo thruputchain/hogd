@@ -15,6 +15,7 @@ target_link_libraries(indexer PUBLIC
 # Tests
 add_executable(indexer_test
     indexer_test.cc
+    recent_tx_failure_cache_test.cc
     db_test.cc
     event_cursor_test.cc
     key_format_test.cc

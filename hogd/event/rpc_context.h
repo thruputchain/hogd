@@ -1,12 +1,16 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
@@ -14,11 +18,17 @@
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 
 namespace hogd {
+
+// Immutable, refcounted snapshot of the registered indexer clients.
+// PerThreadARC keeps the acquire/release refcounts thread-local, so the
+// per-failed-tx relay path never writes to contended shared state.
+using indexer_snapshot_t = PerThreadARC<std::vector<indexer_event_client_t>>;
 
 class EventRPCContext {
 public:
@@ -30,6 +40,13 @@ public:
   {
     while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    // Retire the current indexer snapshot. If a fire-and-forget tx-failure
+    // relay is still in flight it holds a reference and touches nothing else
+    // of this object, so we don't wait: the last release deletes the
+    // (heap-allocated) snapshot.
+    if (indexers_snapshot_->initiate_shutdown()) {
+      delete indexers_snapshot_;
     }
   }
 
@@ -64,13 +81,33 @@ public:
   x23::Async<void> gc_context(BlockID block_id);
 
   // Adds an indexer, which the event server will send events to.
-  x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
-  {
-    x23::CoroGuard cg;
-    co_await cg(indexers_lock_);
-    indexers_.push_back(std::move(indexer));
-    co_await cg.reset_and_return();
-  }
+  // Returns an id that can later be passed to remove_indexer().
+  uint64_t add_indexer(indexer_event_client_t &&indexer);
+
+  // Removes a previously added indexer. Returns false if the id is unknown
+  // (e.g. already removed). Relays already in flight hold the prior snapshot
+  // and may still complete one last send to the removed indexer; its
+  // ClientRefs are destroyed once the last such snapshot drains.
+  bool remove_indexer(uint64_t indexer_id);
+
+  // Best-effort relay of a nondeterministic tx-failure diagnostic to every
+  // registered indexer. Bypasses the per-block commit pipeline entirely --
+  // the tx will never commit. One offline indexer's send error is logged and
+  // dropped so it never blocks the other indexers or errors toward the
+  // executor. Awaitable (drives the sends to completion) -- used directly by
+  // tests; production uses spawn_tx_failure_relay to fire it and forget.
+  x23::Async<void> report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
+                                                 TxFailureDiagnostic diag);
+
+  // Fire-and-forget wrapper around report_tx_failure_to_indexers: launches it
+  // as a detached coroutine and returns at once, so the executor's report RPC
+  // never waits on the indexer relay. The relay is NOT drained at shutdown:
+  // it owns a reference to the (heap-allocated, refcounted) indexer snapshot
+  // and runs on the process-global coropoll, and it must never touch this
+  // EventRPCContext -- it may outlive it. Anything added to the relay body
+  // must keep that property.
+  void spawn_tx_failure_relay(SignedTransactionHash tx_hash,
+                              TxFailureDiagnostic diag);
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>
@@ -84,7 +121,8 @@ private:
   struct ContextCache {
     ContextCache() = default;
     ContextCache(ContextCache &&cache) noexcept
-      : contexts_(std::move(cache.contexts_))
+      : contexts_(std::move(cache.contexts_)),
+        indexer_snapshot_(cache.indexer_snapshot_)
     {}
 
 #ifdef NDEBUG
@@ -95,14 +133,45 @@ private:
 
     mutex_type mtx_;
     std::unordered_map<BlockID, PerThreadARC<EventBlockContext> *> contexts_;
+    // This thread's cached pointer to the current indexer snapshot
+    // (non-owning; references are acquired per use under mtx_). Cleared by
+    // publish_indexer_snapshot()'s sweep, exactly like contexts_ entries are
+    // cleared by gc_context_internal().
+    indexer_snapshot_t *indexer_snapshot_ = nullptr;
   };
+
+  // Fast path for readers of the indexer list: acquire a reference to the
+  // current snapshot via this thread's cache, falling back to indexers_mtx_
+  // on a miss (mirrors get_context()/get_context_slow()). Never returns
+  // nullptr -- with no indexers registered the snapshot is an empty vector,
+  // so even that case stays on the per-thread fast path. The caller must
+  // pass the result to release_indexer_snapshot() when done.
+  indexer_snapshot_t *try_acquire_indexer_snapshot();
+
+  // Rebuilds the published snapshot from indexers_ and retires the previous
+  // one (destroyed once its last reference drains). [indexers_ul] is the
+  // caller's held lock on indexers_mtx_, passed as a witness so the
+  // requirement can't be forgotten (same pattern as SynchronizedMap).
+  void
+  publish_indexer_snapshot(const std::unique_lock<std::mutex> &indexers_ul);
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
-  x23::CoroLock indexers_lock_;
-  std::vector<indexer_event_client_t> indexers_;
+  // Guards the authoritative indexer list and snapshot publication (writers
+  // plus the snapshot slow path). Plain mutex: critical sections are short
+  // and never suspend, and in particular no network send happens under it.
+  std::mutex indexers_mtx_;
+  uint64_t next_indexer_id_ = 0;
+  std::vector<std::pair<uint64_t, indexer_event_client_t>> indexers_;
+  // Currently published snapshot; owned here until publish_indexer_snapshot()
+  // retires it (then owned by whichever reader releases the last reference).
+  // Never null: an empty-vector snapshot stands in for "no indexers", so the
+  // per-thread fast path works identically in the empty case (a cached
+  // nullptr always means "not cached", never "empty").
+  indexer_snapshot_t *indexers_snapshot_ =
+      new indexer_snapshot_t(std::vector<indexer_event_client_t>{});
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a
