@@ -41,7 +41,7 @@ echo "fetching repository state"
 git fetch --prune origin "$TARGET_SHA"
 git checkout --force "$TARGET_SHA"
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --depth 1 --jobs "${HOGD_CCACHE_WARMUP_SUBMODULE_JOBS:-8}"
 
 echo "fetching Rust dependencies"
 CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}" ./scripts/fetch.sh
