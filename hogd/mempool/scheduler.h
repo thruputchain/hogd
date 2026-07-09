@@ -27,9 +27,8 @@ namespace hogd {
 class Scheduler {
 public:
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<db_sched_client_t> db_sched_client)
-    : current_block_(current_block),
-      db_sched_client_(std::move(db_sched_client))
+            std::shared_ptr<sharded_db_sched_client_t> sharded_db)
+    : current_block_(current_block), sharded_db_(std::move(sharded_db))
   {}
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
@@ -314,10 +313,11 @@ private:
   std::atomic<ssize_t> size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  // The RPC client that the scheduler uses to talk to the database. The
-  // scheduler uses this to read/write the number of hogs and hog ages for
-  // accounts.
-  std::shared_ptr<db_sched_client_t> db_sched_client_;
+  // The scheduler's sharding-aware view of the database, used to read/write
+  // the hog ages for accounts. Per-account hog-age RPCs are routed to (and
+  // gathered from) the shard that owns each account; the scheduler itself
+  // stays unaware of sharding.
+  std::shared_ptr<sharded_db_sched_client_t> sharded_db_;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };

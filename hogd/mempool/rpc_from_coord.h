@@ -216,11 +216,15 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.network_hash = network_hash_;
-    DbSchedResult ret =
-        co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration, genesis_value);
-    if (ret != DbSchedResult::DbSchedResultOK) {
-      co_return ret;
+    // Load genesis on every shard so each gets the cost model and the genesis
+    // block (block 0), giving all shards matching block history for later
+    // create_snapshot(prev=...) calls.
+    for (auto &client : db_sched_clients_) {
+      DbSchedResult ret = co_await client->dbsched_load_genesis_configuration(
+          genesis_configuration, genesis_value);
+      if (ret != DbSchedResult::DbSchedResultOK) {
+        co_return ret;
+      }
     }
 
     DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
@@ -241,7 +245,8 @@ public:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
 
-    co_return ret;
+    // Reached only when genesis loaded OK on every shard.
+    co_return DbSchedResult::DbSchedResultOK;
   }
 
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
@@ -407,8 +412,18 @@ private:
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
-    db_sched_client_ = std::make_shared<db_sched_client_t>(
-        std::move((co_await MempoolDbRpc::get_clients())[0]));
+    {
+      // One client per registered db shard, for block-lifecycle fan-out.
+      auto clients = co_await MempoolDbRpc::get_clients();
+      db_sched_clients_.reserve(clients.size());
+      for (auto &c : clients) {
+        db_sched_clients_.push_back(
+            std::make_shared<db_sched_client_t>(std::move(c)));
+      }
+      CHECK(!db_sched_clients_.empty());
+      // Shard 0 still backs the scheduler's account reads and get_tip for now.
+      db_sched_client_ = db_sched_clients_[0];
+    }
     for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
       auto clients = co_await MempoolExecutorRpc::get_clients();
       for (auto &client : clients) {
@@ -449,7 +464,7 @@ private:
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.value.proposal_header
             .block_height,
-        db_sched_client_);
+        std::make_shared<sharded_db_sched_client_t>(db_sched_clients_));
     co_await Health::instance().set_current_block_height(
         last_committed_block_.value.proposal_header.block_height);
     MempoolMetrics::instance().current_block_height.record(
@@ -706,6 +721,11 @@ private:
   const ssize_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
+  // One db-sched client per shard. Block-lifecycle RPCs (create/close/commit/
+  // abandon snapshot) and genesis fan out over all of these. db_sched_client_
+  // aliases db_sched_clients_[0] and still backs the scheduler's account reads
+  // and get_tip for now (TODO: route those per shard).
+  std::vector<std::shared_ptr<db_sched_client_t>> db_sched_clients_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
