@@ -49,15 +49,16 @@ private:
 namespace {
 
 // Minimal IndexerEvent1 fake capturing failure reports (the relay under
-// test); process_events is unused here.
+// test) and committed-block event batches (the commit fan-out).
 struct FailureCapturingIndexerRpc {
   using rpc_service = IndexerEvent1;
 
-  static x23::Async<void>
-  indexer_event_process_events(BlockHeight /*block_height*/,
-                               const TxEventLogBatch & /*tx_events*/,
+  x23::Async<void>
+  indexer_event_process_events(BlockHeight block_height,
+                               const TxEventLogBatch &tx_events,
                                const ProposedTransactionBatch & /*tx_bodies*/)
   {
+    event_batches.emplace_back(block_height, tx_events.size());
     co_return;
   }
 
@@ -70,6 +71,7 @@ struct FailureCapturingIndexerRpc {
   }
 
   std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>> reports;
+  std::vector<std::pair<BlockHeight, size_t>> event_batches;
 };
 static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
 
@@ -139,6 +141,46 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
   ASSERT_EQ(live_indexer.reports.size(), 1);
   EXPECT_EQ(live_indexer.reports[0].first, tx_hash);
   EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
+}
+
+TEST_F(EventRpcTest, DeadIndexerDoesNotFailCommit)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  // First "indexer": a client whose peer is closed immediately, so the
+  // commit-time process_events send to it fails at the RPC layer.
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  CHECK_EQ(close(fds[1]), 0);
+  auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  ctx.add_indexer(dead_stream->client<IndexerEvent1>());
+
+  // Second indexer: live and capturing.
+  FailureCapturingIndexerRpc live_indexer;
+  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer));
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(7, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(7, 42)().error(),
+            RPCError::kRPCNone);
+
+  // Commit must succeed despite the dead indexer (its send error is dropped),
+  // and the live indexer must still receive the block's events.
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(7)(), RPCError::kRPCNone);
+  ASSERT_EQ(live_indexer.event_batches.size(), 1);
+  EXPECT_EQ(live_indexer.event_batches[0].first, 42);
+  EXPECT_EQ(live_indexer.event_batches[0].second, 1);
+
+  // The committed block's context must have been GC'd -- reopening the same
+  // block id succeeds rather than returning kExists.
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(7)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, RemovedIndexerStopsReceivingReports)

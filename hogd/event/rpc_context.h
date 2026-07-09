@@ -45,8 +45,7 @@ public:
     // relay is still in flight it holds a reference and touches nothing else
     // of this object, so we don't wait: the last release deletes the
     // (heap-allocated) snapshot.
-    if (indexers_snapshot_ != nullptr &&
-        indexers_snapshot_->initiate_shutdown()) {
+    if (indexers_snapshot_->initiate_shutdown()) {
       delete indexers_snapshot_;
     }
   }
@@ -101,8 +100,12 @@ public:
                                                  TxFailureDiagnostic diag);
 
   // Fire-and-forget wrapper around report_tx_failure_to_indexers: launches it
-  // as a detached, drained-at-shutdown coroutine and returns at once, so the
-  // executor's report RPC never waits on the indexer relay.
+  // as a detached coroutine and returns at once, so the executor's report RPC
+  // never waits on the indexer relay. The relay is NOT drained at shutdown:
+  // it owns a reference to the (heap-allocated, refcounted) indexer snapshot
+  // and runs on the process-global coropoll, and it must never touch this
+  // EventRPCContext -- it may outlive it. Anything added to the relay body
+  // must keep that property.
   void spawn_tx_failure_relay(SignedTransactionHash tx_hash,
                               TxFailureDiagnostic diag);
 
@@ -139,9 +142,10 @@ private:
 
   // Fast path for readers of the indexer list: acquire a reference to the
   // current snapshot via this thread's cache, falling back to indexers_mtx_
-  // on a miss (mirrors get_context()/get_context_slow()). Returns nullptr if
-  // no indexers are registered. The caller must pass the result to
-  // release_indexer_snapshot() when done.
+  // on a miss (mirrors get_context()/get_context_slow()). Never returns
+  // nullptr -- with no indexers registered the snapshot is an empty vector,
+  // so even that case stays on the per-thread fast path. The caller must
+  // pass the result to release_indexer_snapshot() when done.
   indexer_snapshot_t *try_acquire_indexer_snapshot();
 
   // Rebuilds the published snapshot from indexers_ and retires the previous
@@ -161,8 +165,11 @@ private:
   std::vector<std::pair<uint64_t, indexer_event_client_t>> indexers_;
   // Currently published snapshot; owned here until publish_indexer_snapshot()
   // retires it (then owned by whichever reader releases the last reference).
-  // nullptr when no indexers are registered.
-  indexer_snapshot_t *indexers_snapshot_ = nullptr;
+  // Never null: an empty-vector snapshot stands in for "no indexers", so the
+  // per-thread fast path works identically in the empty case (a cached
+  // nullptr always means "not cached", never "empty").
+  indexer_snapshot_t *indexers_snapshot_ =
+      new indexer_snapshot_t(std::vector<indexer_event_client_t>{});
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a

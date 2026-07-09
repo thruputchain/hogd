@@ -61,7 +61,7 @@ public:
   {
     // Careful! Both parameters are references; copy them before any
     // co_await is introduced ahead of their use.
-    failure_cache_.report(tx_hash, diag);
+    failure_cache_.report(tx_hash, diag, db_.latest_block());
     co_return;
   }
 

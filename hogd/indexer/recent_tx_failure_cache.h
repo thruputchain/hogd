@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "db_conflict.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "transaction.hh"
@@ -37,6 +38,14 @@ class RecentTxFailureCache {
 public:
   static constexpr BlockHeight kDefaultExpiryDelta = 5;
   static constexpr size_t kDefaultMaxEntries = 1 << 16;
+  // Reports whose attempt height is further than this ahead of the reporting
+  // watermark are rejected: an absurd height (buggy peer, corruption) would
+  // otherwise never satisfy the expiry test and occupy a cap slot forever.
+  // Generous on purpose -- a fresh or lagging indexer legitimately receives
+  // real-time failure reports far ahead of its own watermark, and any
+  // accepted entry still expires within slack + expiry_delta blocks of
+  // ingest progress, so the cache always self-heals.
+  static constexpr BlockHeight kMaxAttemptHeightSlack = BlockHeight{1} << 20;
   // This cache is tiny (only nondeterministic failures, expiring in a few
   // blocks) and low-QPS, and prune() scans every shard each block -- so a
   // modest fixed shard count beats SynchronizedMap's default (hundreds to
@@ -51,10 +60,21 @@ public:
   {}
 
   // Best-effort insert.  The latest attempt (highest attempt_height) wins for
-  // a given hash; a report for a new hash is dropped when the soft cap is hit.
+  // a given hash; a report for a new hash is dropped when the soft cap is
+  // hit.  [watermark] is the caller's current indexed height, used only to
+  // reject implausible attempt heights (see kMaxAttemptHeightSlack).
   void report(const SignedTransactionHash &tx_hash,
-              const TxFailureDiagnostic &diag)
+              const TxFailureDiagnostic &diag, BlockHeight watermark)
   {
+    // Malformed or absurd heights are wire input from a peer; drop them
+    // rather than let an unprunable entry poison the cap.
+    if (diag.attempt_height < 0 ||
+        diag.attempt_height > watermark + kMaxAttemptHeightSlack) {
+      warn("dropping tx-failure report with implausible attempt_height {} "
+           "(watermark {})",
+           diag.attempt_height, watermark);
+      return;
+    }
     auto [existing, lk] = entries_.find(tx_hash);
     if (existing != nullptr) {
       // A stale (lower-height) report never downgrades the entry; a same-or-
@@ -87,10 +107,13 @@ public:
   // watermark advances.
   void prune(BlockHeight watermark)
   {
+    // Subtract-form comparison (attempt <= watermark - delta) so a stored
+    // height near INT64_MAX can never overflow the arithmetic; equivalent
+    // for all in-range values.
     std::vector<SignedTransactionHash> expired;
     entries_.for_each([&](const std::pair<const SignedTransactionHash,
                                           TxFailureDiagnostic> &kv) {
-      if (kv.second.attempt_height + expiry_delta_ <= watermark) {
+      if (kv.second.attempt_height <= watermark - expiry_delta_) {
         expired.push_back(kv.first);
       }
     });
@@ -99,7 +122,7 @@ public:
       // Re-check under the bucket lock: a concurrent re-report at a higher
       // attempt height may have refreshed the entry since we scanned it.
       if (entry != nullptr &&
-          entry->attempt_height + expiry_delta_ <= watermark) {
+          entry->attempt_height <= watermark - expiry_delta_) {
         entries_.remove(tx_hash, lk);
         approx_size_.fetch_sub(1, std::memory_order_relaxed);
       }

@@ -462,16 +462,33 @@ EventBlockContext::send_events_to_indexers(
   // the indexer never re-matches bodies to events.
   CHECK(full_event_log.size() == full_tx_bodies.size());
 
+  // Per-indexer catch on both loops, like the tx-failure relay in
+  // rpc_context.cc: indexers are decoupled from consensus, so one dead or
+  // misbehaving indexer's RPC-layer error must not fail commit_block (which
+  // would hard-abort the coordinator). The dispatch loop needs its own guard
+  // because x23::Async is eager -- the call runs to its first suspension and
+  // can throw synchronously -- and an unguarded await-loop throw would also
+  // unwind [handles] while other sends are in flight (a panic in debug).
   std::vector<x23::Async<void>> handles;
   handles.reserve(indexers.size());
 
   for (indexer_event_client_t &indexer : indexers) {
-    handles.push_back(indexer.indexer_event_process_events(block_height,
-                                                           full_event_log,
-                                                           full_tx_bodies));
+    try {
+      handles.push_back(indexer.indexer_event_process_events(block_height,
+                                                             full_event_log,
+                                                             full_tx_bodies));
+    } catch (x23::XdrException const &e) {
+      warn("dropping block {} events to an indexer (dispatch): {}",
+           block_height, e.what());
+    }
   }
   for (x23::Async<void> &handle : handles) {
-    co_await handle;
+    try {
+      co_await handle;
+    } catch (x23::XdrException const &e) {
+      warn("dropping block {} events to an indexer: {}", block_height,
+           e.what());
+    }
   }
   handles.clear();
   co_return;
