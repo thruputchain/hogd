@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
 . "$(dirname "$0")/bench_harness.sh"
 
 echo 'set port env vars'
