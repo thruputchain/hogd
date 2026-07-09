@@ -15,7 +15,7 @@ env:
 
 jobs:
   startup-order:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read

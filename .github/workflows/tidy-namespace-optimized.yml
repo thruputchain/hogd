@@ -1,7 +1,7 @@
 name: Tidy (Namespace)
 
 # This workflow uses a custom base image with pre-installed toolchain.
-# Requires: Configure namespace-profile-hogd-linux with .devcontainer/Dockerfile as custom base image.
+# Requires: Configure namespace-profile-hogd-linux-2604 with .devcontainer/Dockerfile as custom base image.
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ env:
 
 jobs:
   tidy:
-    runs-on: namespace-profile-hogd-linux # Must have custom base image configured
+    runs-on: namespace-profile-hogd-linux-2604 # Must have custom base image configured
     permissions:
       contents: read
       actions: read
