@@ -586,6 +586,12 @@ struct CapturingIndexerRpc {
     co_return;
   }
 
+  static x23::Async<void> indexer_event_report_tx_failure(SignedTransactionHash,
+                                                          TxFailureDiagnostic)
+  {
+    co_return;
+  }
+
   size_t received_batches = 0;
   BlockHeight last_block_height = -1;
   TxEventLogBatch received_events;

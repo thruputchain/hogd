@@ -46,6 +46,12 @@ public:
     co_return;
   }
 
+  static x23::Async<void> indexer_event_report_tx_failure(SignedTransactionHash,
+                                                          TxFailureDiagnostic)
+  {
+    co_return;
+  }
+
   bool event_server_connected() const
   {
     return event_server_connected_.load(std::memory_order_acquire);

@@ -21,6 +21,12 @@ public:
   x23::Async<RPCError> eventexecutor_open_block(BlockID block_id);
   x23::Async<RPCError> eventexecutor_close_block(BlockID block_id);
 
+  static x23::Async<RPCError>
+  eventexecutor_report_tx_failure(SignedTransactionHash, TxFailureDiagnostic)
+  {
+    co_return RPCError::kRPCNone;
+  }
+
   x23::Async<RPCError>
   eventexecutor_emit_event(BlockID block_id, TransactionID tx_id,
                            TxEventLog event_log,
