@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -385,7 +385,7 @@ jobs:
   publish:
     if: github.event_name == 'push'
     needs: [release, hog-devnode-macos-arm64]
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: write
       actions: read
