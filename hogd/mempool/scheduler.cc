@@ -16,6 +16,7 @@
 
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/db_shard_routing/shard_router.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
@@ -124,8 +125,15 @@ Scheduler::write_all_average_hog_ages_to_db()
       ages += per_thread_ages;
     });
   }
-  CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
-           DbSchedResult::DbSchedResultOK);
+  CHECK_EQ(
+      co_await sharded_db_->scatter_write(
+          ages,
+          [](HogAge const &a, size_t n) { return shard_of_address(a.address, n); },
+          [](auto &c, HogAgeBatch const &sub) {
+            return c->dbsched_write_hog_ages(sub);
+          },
+          DbSchedResult::DbSchedResultOK),
+      DbSchedResult::DbSchedResultOK);
   co_return;
 }
 
@@ -268,8 +276,12 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
   ReadAverageHogAgesResult ret;
   ret.found.reserve(accounts.size());
 
-  HogAgeResults results =
-      co_await db_sched_client_->dbsched_get_hog_ages(accounts);
+  HogAgeResults results = co_await sharded_db_->scatter_gather<HogAgeResults>(
+      accounts,
+      [](ContractAddress const &a, size_t n) { return shard_of_address(a, n); },
+      [](auto &c, ContractAddressBatch const &sub) {
+        return c->dbsched_get_hog_ages(sub);
+      });
   CHECK_EQ(results.size(), accounts.size());
   for (size_t i = 0; i < results.size(); i++) {
     const HogAgeResult &res = results[i];

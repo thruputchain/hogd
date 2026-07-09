@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <sys/socket.h>
@@ -19,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_shard_routing/sharded_client.h"
 #include "hogd/metrics/metrics.h"
 #include "loadgen.hh"
 #include "parallel.hh"
@@ -93,6 +95,12 @@ using coord_sched_client_t =
 
 using db_sched_client_t =
     DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+// The scheduler's sharding-aware view of the database: one db-sched client per
+// shard, with per-account routing / scatter-gather for the hog-age RPCs (see
+// scheduler.cc). With a single shard this behaves like the lone shard client.
+using sharded_db_sched_client_t =
+    ShardedClient<std::shared_ptr<db_sched_client_t>>;
 
 using event_sched_client_t =
     EventSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

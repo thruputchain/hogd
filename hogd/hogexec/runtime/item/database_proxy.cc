@@ -19,6 +19,8 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
+#include "hogd/db_shard_routing/shard_router.h"
+#include "hogd/db_shard_routing/sharded_batch.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
@@ -146,31 +148,11 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
-namespace {
-
-// Runtime hash of an account address into [0, mod): FNV-1a over the 32 address
-// bytes. Deterministic within a process, so an address (and therefore all of
-// its items) maps to a single shard. This is a placeholder hash; a
-// network-agreed function will replace it when sharding becomes externally
-// visible.
-size_t
-shard_of_address(ContractAddress const &address, size_t mod)
-{
-  uint64_t h = 1469598103934665603ULL; // FNV-1a offset basis
-  for (uint8_t byte : address) {
-    h ^= byte;
-    h *= 1099511628211ULL; // FNV-1a prime
-  }
-  return static_cast<size_t>(h % mod);
-}
-
-} // namespace
-
 size_t
 DatabaseProxy::look_up_shard(AddressAndKey const &key) const
 {
-  // Route by account address so all of an address's items live on one shard.
-  return shard_of_address(key.address, clients_.size());
+  // Canonical key->shard routing lives in the shared shard-routing module.
+  return shard_of_key(key, clients_.size());
 }
 
 DatabaseProxy::client_t &
@@ -184,7 +166,7 @@ DatabaseProxy::client_for()
 {
   // Primary shard: global/keyless requests (db tip, viewing snapshots) and
   // content-addressed lookups (contracts) route here for now.
-  return clients_[0];
+  return clients_[kPrimaryShard];
 }
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
@@ -509,16 +491,16 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
   }
   try {
     // Split the batch so each shard receives only the deltas for the keys it
-    // owns. Every shard gets a (possibly empty) subtransaction so all shards'
-    // savepoint stacks stay aligned for pop_subtransactions. This is the prepare
-    // phase of the cross-shard 2PC.
-    std::vector<StorageDeltaBatch> per_shard(clients_.size());
-    for (auto const &delta : delta_batch) {
-      per_shard[look_up_shard(delta.addrkey)].push_back(delta);
-    }
+    // owns, via the shared cross-shard batch core. Every shard gets a
+    // (possibly empty) subtransaction so all shards' savepoint stacks stay
+    // aligned for pop_subtransactions. This is the prepare phase of the
+    // cross-shard 2PC.
+    auto split = split_by_shard(
+        delta_batch, clients_.size(),
+        [](auto const &delta, size_t n) { return shard_of_key(delta.addrkey, n); });
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
-      auto res = clients_[shard].try_push_new_subtransaction(block_id, tx_id,
-                                                             per_shard[shard]);
+      auto res = clients_[shard].try_push_new_subtransaction(
+          block_id, tx_id, split.batches[shard]);
       // Stop on the first error or conflict; the caller aborts, which fans the
       // abort out to every shard.
       switch (res.error()) {
