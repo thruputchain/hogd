@@ -199,6 +199,20 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       (before != nullptr) ? before->max_insert_count() : 0;
 
   if (new_entries_count > previous_entries_count) {
+    // live_entries is persisted as an unsigned hyper, but storage-cost
+    // accounting here and in commit_change / stage_committed_changes is
+    // signed 64-bit. Only admit inserts while the queue has headroom for a
+    // full block below kMaxRetrocausalQueueLiveEntries: per-block growth is
+    // capped at kRetrocausalQueueBlockEntriesMaxLen (enforced below), so
+    // this block-start-snapshot check deterministically bounds the
+    // end-of-block count for every concurrent transaction. In particular it
+    // keeps a corrupt-but-CRC-valid recovered metadata row with the high bit
+    // set (issue #2917) out of signed cost arithmetic.
+    if (meta.live_entries > kMaxRetrocausalQueueLiveEntries -
+                                kRetrocausalQueueBlockEntriesMaxLen) {
+      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+    }
+
     const size_t additional_entries =
         new_entries_count - previous_entries_count;
     const size_t reserved_before =

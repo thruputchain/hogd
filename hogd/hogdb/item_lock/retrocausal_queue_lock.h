@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -16,6 +17,14 @@
 #include "x23/testlock.h"
 
 namespace hogd {
+
+// Maximum number of live entries a retrocausal queue may ever hold.
+// live_entries is persisted as an unsigned XDR hyper, but storage-cost
+// accounting (StorageCostModel::get_retrocausal_queue_cost and the int64_t
+// arithmetic in RetrocausalQueueLock) is signed 64-bit, so the cap keeps
+// every admissible count inside the signed domain (issue #2917).
+inline constexpr uint64_t kMaxRetrocausalQueueLiveEntries =
+    std::numeric_limits<int64_t>::max();
 
 // Uses the process-wide random-keyed SipHash24 to defend against adversarial
 // hash collision attacks on entry_tracking_.
