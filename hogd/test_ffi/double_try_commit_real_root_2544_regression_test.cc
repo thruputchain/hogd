@@ -67,6 +67,7 @@ TEST(TestBindingsTest,
 
   // The first commit finalizes the transaction.
   auto first_commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(first_commit.serialized_conflict);
   ASSERT_EQ(first_commit.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_EQ(first_commit.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
@@ -74,6 +75,7 @@ TEST(TestBindingsTest,
   // The second commit is rejected with a structured error rather than
   // re-entering the core single-use commit and tripping its assert.
   auto second_commit = try_commit_transaction(syscall_handler);
+  free_ffi_data_buffer(second_commit.serialized_conflict);
   EXPECT_EQ(second_commit.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
   // The handle is still in a clean terminal state and closes normally.

@@ -95,11 +95,11 @@ constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
     WasmEngine::kWasmi,
     WasmEngine::kWasmtime,
 };
-constexpr std::string_view kRv32SmokeCounterInterface = "Counter";
+constexpr std::u8string_view kRv32SmokeCounterInterface = u8"Counter";
 // Keep in sync with built_contracts/integration_test_contracts/
 // rv32_smoke_counter/Cargo.toml; the SDK-lowered round-trip tests below fail
 // loudly if the version drifts from method-id hashing inputs.
-constexpr std::string_view kRv32SmokeCounterVersion = "0.2.0";
+constexpr std::u8string_view kRv32SmokeCounterVersion = u8"0.2.0";
 
 struct LoadedRv32SmokeArtifact {
   std::string path;
@@ -147,7 +147,7 @@ artifact_format_fingerprint_hex()
 }
 
 Runtime::MethodID
-rv32_smoke_counter_method_id(std::string_view method)
+rv32_smoke_counter_method_id(std::u8string_view method)
 {
   return sdk_method_id(kRv32SmokeCounterInterface, kRv32SmokeCounterVersion,
                        method);
@@ -1956,8 +1956,8 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   // The increment-then-get round trip below exercises dispatch end-to-end:
   // each call enters _start with its method id seeded, and the guest routes it.
   const Runtime::MethodID increment_method =
-      rv32_smoke_counter_method_id("increment");
-  const Runtime::MethodID get_method = rv32_smoke_counter_method_id("get");
+      rv32_smoke_counter_method_id(u8"increment");
+  const Runtime::MethodID get_method = rv32_smoke_counter_method_id(u8"get");
 
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, std::move(loaded_artifact.image)}});
@@ -2059,7 +2059,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   // v4 dispatches in-guest, so the target is chosen by method id, not a table
   // entry. Default to the no-arg `get` (returns cleanly without calldata); set
   // RV32_SMOKE_METHOD_ID=0x<16-hex> to target a specific method.
-  uint64_t smoke_method_id = rv32_smoke_counter_method_id("get");
+  uint64_t smoke_method_id = rv32_smoke_counter_method_id(u8"get");
   if (const char *want = std::getenv("RV32_SMOKE_METHOD_ID")) {
     smoke_method_id = std::strtoull(want, nullptr, 0);
   }

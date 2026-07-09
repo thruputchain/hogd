@@ -15,7 +15,7 @@ env:
 
 jobs:
   startup-order:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
@@ -113,7 +113,7 @@ jobs:
           # benchmarks. Target names from the hogd/*/CMakeLists.txt files
           # (hogdb_exec has OUTPUT_NAME hogdb).
           ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror" -n
-          make -C build/gcc -j"$(nproc)" \
+          cmake --build build/gcc --parallel "$(nproc)" --target \
             loadgen_server \
             mempool_exec \
             hogexec \

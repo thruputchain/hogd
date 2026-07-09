@@ -33,6 +33,7 @@ BREW_PACKAGES=(
   "llvm"      # clang-21, libc++
   "lld"       # LLVM linker (separate from llvm package on Homebrew)
   "cmake"     # Build system generator
+  "ninja"     # Default CMake build system
   "bison"     # Parser generator (macOS version is outdated)
   "python"    # Python for venv-backed build tools
   "jemalloc"  # Memory allocator
@@ -254,7 +255,7 @@ if [ -n "$TOOLCHAIN_VERSION" ]; then
 fi
 echo ""
 echo "Note: ./scripts/build.sh automatically activates this environment."
-echo "      If running 'make' directly, source this file first."
+echo "      If running 'cmake --build' directly, source this file first."
 EOF
 
 echo ""
@@ -272,7 +273,7 @@ echo "You need to source this file in each new shell session."
 echo ""
 echo "Then configure and build:"
 echo "  ./scripts/build.sh -n -d build -t Debug -c clang"
-echo "  make -C build -j8"
+echo "  cmake --build build --parallel 8"
 echo ""
 echo "Tip: Add this to your shell profile (~/.zshrc or ~/.bashrc):"
 echo "  alias hogd-env='source \$(git rev-parse --show-toplevel)/scripts/macos-env.sh'"

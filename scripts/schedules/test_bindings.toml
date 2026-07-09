@@ -19,7 +19,7 @@ echo 'configure test bindings'
 ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
 
 echo 'build test bindings'
-make -C build -j test_ffi_test
+cmake --build build --target test_ffi_test
 
 echo 'run ffi tests'
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1

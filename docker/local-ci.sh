@@ -188,7 +188,7 @@ echo "=== Configuring build for tidy ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -C build/llvm tidy_targets
+cmake --build build/llvm --parallel "${CI_CPUS:-$(nproc)}" --target tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm
@@ -232,7 +232,7 @@ echo "=== Configuring Clang build ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -C build/llvm tidy_targets
+cmake --build build/llvm --parallel "${CI_CPUS:-$(nproc)}" --target tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm

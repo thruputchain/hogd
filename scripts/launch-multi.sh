@@ -151,8 +151,8 @@ cleanup() {
   # Prevent re-entry into the trap handler.
   trap - EXIT INT TERM
 
-  # Kill the ssh sessions that print the [make] output and log statements from
-  # the servers.
+  # Kill the ssh sessions that print build output and log statements from the
+  # servers.
   if [[ ${#ssh_pids[@]} != 0 ]]; then
     kill -9 "${ssh_pids[@]}" 2>/dev/null
   fi
@@ -169,7 +169,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-make -C "$HOGD_BUILD_DIR" -j$(nproc)
+cmake --build "$HOGD_BUILD_DIR" --parallel "$(nproc)"
 # These build scripts place the binaries in the current working directory, so we
 # [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build
 # directory.

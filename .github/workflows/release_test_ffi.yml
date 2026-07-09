@@ -71,7 +71,7 @@ jobs:
 
       - name: Build test_ffi Library
         run: |
-          make -C build -j$(nproc) test_ffi
+          cmake --build build --parallel "$(nproc)" --target test_ffi
 
       - name: Verify Library Built
         run: |
@@ -207,7 +207,7 @@ jobs:
 
       - name: Build test_ffi Library
         run: |
-          make -C build -j$(nproc) test_ffi
+          cmake --build build --parallel "$(nproc)" --target test_ffi
 
       - name: Verify Library Built
         run: |
@@ -349,7 +349,7 @@ jobs:
       - name: Build test_ffi Library
         run: |
           source ./scripts/macos-env.sh
-          make -C build -j$(sysctl -n hw.logicalcpu) test_ffi
+          cmake --build build --parallel "$(sysctl -n hw.logicalcpu)" --target test_ffi
 
       - name: Verify Library Built
         run: |
@@ -389,7 +389,7 @@ jobs:
   create-release:
     if: ${{ !inputs.dry_run }}
     needs: [build-linux-x86_64, build-linux-arm64, build-macos-arm64]
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: write
       actions: read

@@ -54,6 +54,7 @@ include(cmake/getprogname.cmake)
 include(cmake/pause.cmake)
 include(cmake/stacktrace.cmake)
 include(cmake/coroICE.cmake)
+include(cmake/broken_wait_until.cmake)
 
 # Resolve X23_CORO_TRACE to a concrete 0 or 1 here in CMake (rather than
 # leaving the auto-detect to the preprocessor in corotrace.h) so that we
@@ -236,9 +237,14 @@ add_subdirectory(x23c)
 add_subdirectory(x23)
 add_subdirectory(tests)
 
+set(X23_CMAKE_ECHO_COLOR_ARGS --cyan)
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  list(PREPEND X23_CMAKE_ECHO_COLOR_ARGS "--switch=$(COLOR)")
+endif()
+
 add_custom_target(check
   DEPENDS build_tests
-  COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
+  COMMAND ${CMAKE_COMMAND} -E cmake_echo_color ${X23_CMAKE_ECHO_COLOR_ARGS} "Running tests..."
   COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure --parallel
   COMMENT "Building and running tests"
 )

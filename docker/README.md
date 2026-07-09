@@ -189,5 +189,5 @@ Only these remain:
 - **GCC**: 15 (default in 26.04's archive)
 - **Rust**: 1.93.0 (default, required by CMakeLists.txt + hogd/rust), 1.96.0 (pre-staged for the stable unification, with wasm32 + riscv32im targets), nightly-2026-02-12 (for wasm32 + build-std contracts)
 - **cbindgen**: 0.29.2
-- **Additional tools**: shfmt, wabt, binaryen
+- **Additional tools**: ninja, shfmt, wabt, binaryen
 - **Ubuntu**: 26.04 (resolute)

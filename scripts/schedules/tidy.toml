@@ -31,7 +31,7 @@ source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.lo
 echo 'configure'
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n > configure.log 2>&1 || (cat configure.log && exit 1)
 
-make -j "$(nproc)" -C build/llvm tidy_targets > build.log 2>&1 || (cat build.log && exit 1)
+cmake --build build/llvm --parallel "$(nproc)" --target tidy_targets > build.log 2>&1 || (cat build.log && exit 1)
 
 echo 'running clang-tidy'
 TIDY_RESULT=0

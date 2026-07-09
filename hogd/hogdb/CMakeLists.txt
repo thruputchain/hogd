@@ -63,15 +63,17 @@ target_link_libraries(
 )
 add_dependencies(hogdb_exec all_wasm_contracts)
 
-# Build the hogdb_bench executable
-add_executable(
-  hogdb_bench
-  hogdb_bench.cc
-)
-target_link_libraries(
-  hogdb_bench
-  hogdb
-)
+if(BUILD_BENCHMARKS)
+  # Build the hogdb_bench executable
+  add_executable(
+    hogdb_bench
+    hogdb_bench.cc
+  )
+  target_link_libraries(
+    hogdb_bench
+    hogdb
+  )
+endif()
 
 # Build hogdb_test executable
 add_executable(

@@ -69,8 +69,8 @@ if(ENABLE_TEST_FFI)
 endif()
 
 # Set up compiler flags for release and debug build types
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
@@ -88,9 +88,9 @@ endif()
 message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
 message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
-set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
+set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0 -g")
 set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
-set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0 -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
 message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
@@ -196,6 +196,11 @@ cmake_policy(SET CMP0114 NEW)
 if (HAS_CI_FAIL_LOG)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
   set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+  set(HOGD_RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+  set(HOGD_RULE_LAUNCH_LINK "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+else()
+  set(HOGD_RULE_LAUNCH_COMPILE "")
+  set(HOGD_RULE_LAUNCH_LINK "")
 endif()
 
 
@@ -286,6 +291,11 @@ endif()
 # Fix for macOS/LLVM: atomic operations are built-in, no need for -latomic
 set(BUILTIN_ATOMIC ON CACHE BOOL "" FORCE)
 add_subdirectory(external/rocksdb EXCLUDE_FROM_ALL)
+# RocksDB's CMakeLists globally installs ccache as RULE_LAUNCH_* when ccache is
+# present. The wrapper already configures ccache through CMAKE_*_COMPILER_LAUNCHER,
+# and leaving both enabled generates nested `ccache ccache ...` Ninja commands.
+set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${HOGD_RULE_LAUNCH_COMPILE}")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${HOGD_RULE_LAUNCH_LINK}")
 set(ROCKSDB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rocksdb/include")
 include_directories(${ROCKSDB_SOURCE_DIR})
 
