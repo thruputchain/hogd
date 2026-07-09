@@ -107,17 +107,19 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 export BUILD_DIR=release
 export WORK_DIR=ci_work_dir/
+source ./scripts/ci/bench_harness.sh
+
+ALL_BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
+BENCH_PROCESSES="loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev"
+CONTROL_CLI=./release/hogd/hogexec/bench/control_cli
+
+kill_stale_benchmark_processes() {
+  ci_remote_killall_hosts "$BENCH_PROCESSES" "${ALL_BENCH_HOSTS[@]}"
+}
 
 shutdown_bench_servers() {
-  set +e
-  ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog10 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
+  ci_enter_cleanup
+  ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${ALL_BENCH_HOSTS[@]}"
 }
 trap shutdown_bench_servers EXIT
 
@@ -137,33 +139,34 @@ mkdir -p ci_work_dir/
 ./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
 
 echo 'run multiexec interface benchmarks'
-(./scripts/ci/exec_scaling.sh) || true
-exec_scaling_exit=$?
+kill_stale_benchmark_processes
+exec_scaling_exit=0
+./scripts/ci/exec_scaling.sh || exec_scaling_exit=$?
 
 echo 'run e2e payment benchmark'
-(./scripts/ci/mempool_bench.sh) || true
-mempool_bench_exit=$?
+kill_stale_benchmark_processes
+mempool_bench_exit=0
+./scripts/ci/mempool_bench.sh || mempool_bench_exit=$?
 
 echo 'run e2e payment multi-node benchmark'
 # Skip the per-benchmark metrics-history commit; the combined run makes a
 # single commit at the end via commit_metrics.sh.
-(MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh) || true
-mempool_multi_node_bench_exit=$?
+kill_stale_benchmark_processes
+mempool_multi_node_bench_exit=0
+MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh || mempool_multi_node_bench_exit=$?
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
-./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
 
 echo 'run event server benchmarks'
-(./scripts/ci/event_bench.sh) || true
-event_bench_exit=$?
+kill_stale_benchmark_processes
+event_bench_exit=0
+./scripts/ci/event_bench.sh || event_bench_exit=$?
 
 echo 'run metrics'
-(./scripts/ci/metrics.sh) || true
-metrics_exit=$?
+kill_stale_benchmark_processes
+metrics_exit=0
+./scripts/ci/metrics.sh || metrics_exit=$?
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
