@@ -157,8 +157,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 // admission, then die on CHECK_LE in InvokeTX::commit when the
 // implementation-defined unsigned-to-signed conversion produced a cost change
 // exceeding the storage reservation. Two guards close this off:
-// 1. Loading RCQ metadata CHECKs live_entries <= kMaxRetrocausalQueueLiveEntries,
-//    so corrupt on-disk state fail-stops instead of reaching cost arithmetic.
+// 1. Loading RCQ metadata CHECKs that live_entries stays at or below
+//    kMaxRetrocausalQueueLiveEntries, so corrupt on-disk state fail-stops
+//    instead of reaching cost arithmetic.
 // 2. Inserts are rejected once the queue is within one block of the cap, so
 //    no legitimate history can ever produce an over-cap live_entries.
 
@@ -167,8 +168,7 @@ TEST(RecoveryTests, RecoveredNearMaxRCQLiveEntriesRejectsInsert)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  constexpr uint64_t kNearMaxLiveEntries =
-      kMaxRetrocausalQueueLiveEntries - 10;
+  constexpr uint64_t kNearMaxLiveEntries = kMaxRetrocausalQueueLiveEntries - 10;
 
   ASSERT_TRUE(dir.has_value());
 

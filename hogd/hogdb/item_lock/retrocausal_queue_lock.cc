@@ -208,8 +208,8 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // end-of-block count for every concurrent transaction. In particular it
     // keeps a corrupt-but-CRC-valid recovered metadata row with the high bit
     // set (issue #2917) out of signed cost arithmetic.
-    if (meta.live_entries > kMaxRetrocausalQueueLiveEntries -
-                                kRetrocausalQueueBlockEntriesMaxLen) {
+    if (meta.live_entries >
+        kMaxRetrocausalQueueLiveEntries - kRetrocausalQueueBlockEntriesMaxLen) {
       return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
     }
 
