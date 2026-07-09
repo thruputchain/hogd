@@ -1,10 +1,15 @@
 #pragma once
 
 #include <string_view>
+#include <utility>
 
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
+#include "hogd/indexer/status.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "network.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -13,7 +18,9 @@ class IndexerBlockExplorerRpc {
 public:
   using rpc_service = IndexerBlockExplorer1;
 
-  IndexerBlockExplorerRpc(IndexDB &db) : db_(db) {}
+  IndexerBlockExplorerRpc(IndexDB &db, RecentTxFailureCache &failure_cache)
+    : db_(db), failure_cache_(failure_cache)
+  {}
 
   static x23::Async<IndexerBlockExplorerIntroOutcome>
   indexer_block_explorer_intro(Protocol protocol)
@@ -32,6 +39,15 @@ public:
     // the [tx_hash] parameter above rather than keep it as a reference.
     const IndexerStatus<IndexDB::TxRecord> status = db_.get_tx_record(tx_hash);
     if (!status) {
+      // No committed record: fall back to the short-lived failure cache so a
+      // client can learn why a recently rejected tx never landed. Committed
+      // records always win (checked first) -- a conflicted-then-retried tx
+      // reports TxInfoFound.
+      if (auto diag = failure_cache_.lookup(tx_hash)) {
+        TxInfoResult ret(TxInfoOutcome::TxInfoRecentFailure);
+        ret.recent_failure() = *diag;
+        co_return ret;
+      }
       co_return TxInfoResult(TxInfoOutcome::TxInfoNotFound);
     }
     const TxInfo info{.height = status->height,
@@ -75,6 +91,7 @@ public:
 
 private:
   IndexDB &db_;
+  RecentTxFailureCache &failure_cache_;
 };
 static_assert(is_IndexerBlockExplorer1<IndexerBlockExplorerRpc *, x23::Async>);
 

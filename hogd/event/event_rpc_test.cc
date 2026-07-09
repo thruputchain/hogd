@@ -1,24 +1,36 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
+#include <utility>
+#include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
+#include "hogd/event/test_util/socketpair_indexer_client.h"
+#include "indexer.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
+#include "x23/rpc.h"
 #include "x23/srpc.h"
 
 namespace hogd {
@@ -34,6 +46,186 @@ public:
 private:
   std::unique_ptr<TmpDir> temp_dir_;
 };
+
+namespace {
+
+// Minimal IndexerEvent1 fake capturing failure reports (the relay under
+// test) and committed-block event batches (the commit fan-out).
+struct FailureCapturingIndexerRpc {
+  using rpc_service = IndexerEvent1;
+
+  x23::Async<void>
+  indexer_event_process_events(BlockHeight block_height,
+                               const TxEventLogBatch &tx_events,
+                               const ProposedTransactionBatch & /*tx_bodies*/)
+  {
+    event_batches.emplace_back(block_height, tx_events.size());
+    co_return;
+  }
+
+  x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
+                                  const TxFailureDiagnostic &diag)
+  {
+    reports.emplace_back(tx_hash, diag);
+    co_return;
+  }
+
+  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>> reports;
+  std::vector<std::pair<BlockHeight, size_t>> event_batches;
+};
+static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
+
+} // namespace
+
+TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)
+{
+  EventRPCContext ctx(temp_dir());
+
+  FailureCapturingIndexerRpc indexer_a;
+  FailureCapturingIndexerRpc indexer_b;
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x5A);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 42;
+  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
+
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+
+  for (const auto *indexer : {&indexer_a, &indexer_b}) {
+    ASSERT_EQ(indexer->reports.size(), 1);
+    EXPECT_EQ(indexer->reports[0].first, tx_hash);
+    EXPECT_EQ(indexer->reports[0].second.attempt_height, 42);
+    EXPECT_EQ(indexer->reports[0].second.conflict.code,
+              DbConflictCode::kDbConflictReplayProtection);
+  }
+}
+
+TEST_F(EventRpcTest, TxFailureReportWithNoIndexersIsNoop)
+{
+  EventRPCContext ctx(temp_dir());
+  const SignedTransactionHash tx_hash{};
+  const TxFailureDiagnostic diag{};
+  // Must complete without error or hang.
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+}
+
+TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
+{
+  EventRPCContext ctx(temp_dir());
+
+  // First "indexer": a client whose peer is closed immediately, so the send
+  // to it fails at the RPC layer.
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  CHECK_EQ(close(fds[1]), 0);
+  auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  ctx.add_indexer(dead_stream->client<IndexerEvent1>());
+
+  // Second indexer: live and capturing.
+  FailureCapturingIndexerRpc live_indexer;
+  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer));
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x11);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 7;
+  diag.conflict.code = DbConflictCode::kDbConflictExclusiveLock;
+
+  // Must complete (dead indexer's error swallowed) and still reach the
+  // live indexer.
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+
+  ASSERT_EQ(live_indexer.reports.size(), 1);
+  EXPECT_EQ(live_indexer.reports[0].first, tx_hash);
+  EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
+}
+
+TEST_F(EventRpcTest, DeadIndexerDoesNotFailCommit)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  // First "indexer": a client whose peer is closed immediately, so the
+  // commit-time process_events send to it fails at the RPC layer.
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  CHECK_EQ(close(fds[1]), 0);
+  auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  ctx.add_indexer(dead_stream->client<IndexerEvent1>());
+
+  // Second indexer: live and capturing.
+  FailureCapturingIndexerRpc live_indexer;
+  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer));
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(7, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(7, 42)().error(),
+            RPCError::kRPCNone);
+
+  // Commit must succeed despite the dead indexer (its send error is dropped),
+  // and the live indexer must still receive the block's events.
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(7)(), RPCError::kRPCNone);
+  ASSERT_EQ(live_indexer.event_batches.size(), 1);
+  EXPECT_EQ(live_indexer.event_batches[0].first, 42);
+  EXPECT_EQ(live_indexer.event_batches[0].second, 1);
+
+  // The committed block's context must have been GC'd -- reopening the same
+  // block id succeeds rather than returning kExists.
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(7)(), RPCError::kRPCNone);
+}
+
+TEST_F(EventRpcTest, RemovedIndexerStopsReceivingReports)
+{
+  EventRPCContext ctx(temp_dir());
+
+  FailureCapturingIndexerRpc indexer_a;
+  FailureCapturingIndexerRpc indexer_b;
+  uint64_t id_a = ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x21);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 3;
+  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
+
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  ASSERT_EQ(indexer_a.reports.size(), 1);
+  ASSERT_EQ(indexer_b.reports.size(), 1);
+
+  EXPECT_TRUE(ctx.remove_indexer(id_a));
+  // Removing an id that is already gone reports failure.
+  EXPECT_FALSE(ctx.remove_indexer(id_a));
+
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  EXPECT_EQ(indexer_a.reports.size(), 1);
+  ASSERT_EQ(indexer_b.reports.size(), 2);
+}
+
+TEST_F(EventRpcTest, RemoveLastIndexerMakesReportsNoop)
+{
+  EventRPCContext ctx(temp_dir());
+
+  FailureCapturingIndexerRpc indexer;
+  uint64_t id = ctx.add_indexer(make_socketpair_indexer_client(&indexer));
+  EXPECT_TRUE(ctx.remove_indexer(id));
+
+  const SignedTransactionHash tx_hash{};
+  const TxFailureDiagnostic diag{};
+  // Must complete without error or hang.
+  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
+  EXPECT_TRUE(indexer.reports.empty());
+}
 
 TEST_F(EventRpcTest, BasicUsage)
 {

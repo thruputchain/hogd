@@ -2,13 +2,16 @@
 
 #include <optional>
 #include <utility>
+#include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -161,6 +164,41 @@ TestEventAggregator::get_events_by_hash(BlockID block_id,
   }
   error("Tx hash not found in block {}", block_id);
   co_return std::nullopt;
+}
+
+x23::Async<RPCError>
+TestEventAggregator::report_tx_failure(SignedTransactionHash tx_hash,
+                                       TxFailureDiagnostic diag)
+{
+  {
+    x23::CoroGuard cg;
+    co_await cg(lock_);
+    failure_reports_.emplace_back(std::move(tx_hash), diag);
+  }
+  failure_report_count_.rmw([](int64_t &count) { count++; });
+  failure_report_count_.broadcast(&default_threadpool());
+  co_return RPCError::kRPCNone;
+}
+
+x23::Async<void>
+TestEventAggregator::wait_for_failure_reports(int64_t n)
+{
+  while (true) {
+    const int64_t current = failure_report_count_.load();
+    if (current >= n) {
+      co_return;
+    }
+    co_await failure_report_count_.wait(current);
+  }
+}
+
+x23::Async<std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>>
+TestEventAggregator::get_failure_reports()
+{
+  x23::CoroGuard cg;
+  co_await cg(lock_);
+  auto copy = failure_reports_;
+  co_return copy;
 }
 
 } // namespace hogd
