@@ -19,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"

@@ -16,6 +16,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/time.h"
+#include "hogd/base/types.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
