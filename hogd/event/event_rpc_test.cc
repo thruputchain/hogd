@@ -24,6 +24,7 @@
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
+#include "hogd/event/status.h"
 #include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "indexer.hh"
 #include "rpc_types.hh"
@@ -178,10 +179,39 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotFailCommit)
   EXPECT_EQ(live_indexer.event_batches[0].first, 42);
   EXPECT_EQ(live_indexer.event_batches[0].second, 1);
 
-  // The committed block's context must have been GC'd -- reopening the same
-  // block id succeeds rather than returning kExists.
-  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
+  // Commit releases the block id, but removal of the context from the map
+  // ("last reference out does the GC") may be deferred to close_block's
+  // detached file-write coroutine, so an immediate reopen can transiently
+  // see kExists. Retry with a deadline; any other error is a real failure.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (true) {
+    auto reopen = ctx.open_block(7)();
+    if (reopen.has_value()) {
+      break;
+    }
+    ASSERT_EQ(reopen.error().code(), EventErrorCode::kExists);
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "block id 7 still not reusable long after commit";
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(7)(), RPCError::kRPCNone);
+}
+
+TEST_F(EventRpcTest, DuplicateOpenReturnsExists)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(3)(), RPCError::kRPCNone);
+
+  // A second open of a live block id must fail cleanly with kExists (not
+  // abort constructing-then-destroying an active context).
+  auto status = ctx.open_block(3)();
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error().code(), EventErrorCode::kExists);
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(3)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, RemovedIndexerStopsReceivingReports)
