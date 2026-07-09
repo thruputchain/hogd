@@ -26,7 +26,9 @@ concurrency:
 jobs:
   release:
     if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
-    runs-on: namespace-profile-hogd-linux-2604
+    # This publishes a raw Linux binary; keep it on the compatibility profile
+    # until we build against an explicit sysroot or otherwise pin the glibc floor.
+    runs-on: namespace-profile-hogd-linux
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.10.0
