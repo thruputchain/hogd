@@ -18,9 +18,7 @@ permissions:
 
 jobs:
   release:
-    # Keep Linux release artifacts on the existing compatibility profile until
-    # we build against an explicit sysroot or otherwise pin the glibc floor.
-    runs-on: namespace-profile-hogd-linux
+    runs-on: namespace-profile-hogd-linux-2604
     permissions:
       contents: read
       actions: read
