@@ -58,12 +58,19 @@ run_build() {
   shift 3
 
   local build_dir="$BUILD_ROOT/$name"
+  if [[ -z "$build_dir" || "$build_dir" == "/" || "$build_dir" == "." ]]; then
+    echo "refusing to clear unsafe build directory: $build_dir" >&2
+    return 1
+  fi
 
   echo
   echo "===== warmup: $name ====="
   echo "compiler: $compiler"
   echo "build type: $build_type"
   echo "cmake extras: ${*:-<none>}"
+  echo "clearing build dir: $build_dir"
+
+  rm -rf -- "$build_dir"
 
   ./scripts/build.sh \
     -d "$build_dir" \
