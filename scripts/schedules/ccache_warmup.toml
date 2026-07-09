@@ -12,12 +12,10 @@ git remote remove origin 2>/dev/null || true
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git reset --hard 2>/dev/null || true
-git clean -ffd
+git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-source ./scripts/ci/configure_git_cache.sh
-
-git submodule update --init --recursive --quiet
+git submodule update --init --recursive --depth 1 --jobs 8 --quiet
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 

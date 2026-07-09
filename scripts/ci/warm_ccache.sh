@@ -37,14 +37,11 @@ echo "build root: $BUILD_ROOT"
 echo "ccache dir: ${CCACHE_DIR:-<host default>}"
 echo "ccache namespace: ${CCACHE_NAMESPACE:-<unset>}"
 
-echo "fetching repository state"
-git fetch --prune origin main
-git checkout --force "$TARGET_SHA"
-git submodule sync --recursive
-git submodule update --init --recursive
-
-echo "fetching Rust dependencies"
-CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}" ./scripts/fetch.sh
+CURRENT_SHA="$(git rev-parse HEAD)"
+if [[ "$CURRENT_SHA" != "$TARGET_SHA" ]]; then
+  echo "warmup checkout mismatch: expected $TARGET_SHA, got $CURRENT_SHA" >&2
+  exit 1
+fi
 
 echo "ccache stats before warmup"
 ccache -s || true
