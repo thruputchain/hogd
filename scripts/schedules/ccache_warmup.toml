@@ -11,7 +11,9 @@ git init -q .
 git remote remove origin 2>/dev/null || true
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git checkout -q {{ .git_commit }}
+git reset --hard 2>/dev/null || true
+git clean -ffd
+git checkout -f -q {{ .git_commit }}
 
 source ./scripts/ci/configure_git_cache.sh
 
