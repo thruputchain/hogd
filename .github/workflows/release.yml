@@ -104,7 +104,7 @@ jobs:
           chmod u+x ./scripts/conf.sh
 
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=hogd" >> $GITHUB_ENV
+          echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
           if [[ "$GITHUB_REF_NAME" == v* ]]; then

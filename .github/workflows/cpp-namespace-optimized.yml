@@ -178,9 +178,9 @@ jobs:
           echo 'NPROC=20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with a shared project namespace
+          # Configure ccache with namespace to avoid contention between parallel jobs
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=hogd" >> $GITHUB_ENV
+          echo "CCACHE_NAMESPACE=gcc-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
@@ -308,9 +308,9 @@ jobs:
           echo 'NPROC=28' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with a shared project namespace
+          # Configure ccache with namespace to avoid contention between parallel jobs
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=hogd" >> $GITHUB_ENV
+          echo "CCACHE_NAMESPACE=llvm-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
@@ -419,9 +419,9 @@ jobs:
           echo 'NPROC=18' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with a shared project namespace
+          # Configure ccache with namespace to avoid contention between parallel jobs
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=hogd" >> $GITHUB_ENV
+          echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
