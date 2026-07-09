@@ -136,10 +136,15 @@ fi
 
 if test -z "$DISABLE_CCACHE" && command -v ccache >/dev/null 2>&1; then
   if [[ -n "${HOGD_SHARED_CCACHE_DIR:-}" ]]; then
-    if [[ -d "$HOGD_SHARED_CCACHE_DIR" && -w "$HOGD_SHARED_CCACHE_DIR" ]]; then
-      export CCACHE_REMOTE_STORAGE="${CCACHE_REMOTE_STORAGE:-file://$HOGD_SHARED_CCACHE_DIR @umask=002 @update-mtime=true}"
-      export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$ROOT_DIR}"
-      export CCACHE_NAMESPACE="${CCACHE_NAMESPACE:-hogd}"
+    HOGD_SHARED_CCACHE_ABS_DIR="$(cd "$HOGD_SHARED_CCACHE_DIR" 2>/dev/null && pwd -P)"
+    if [[ -n "$HOGD_SHARED_CCACHE_ABS_DIR" && -w "$HOGD_SHARED_CCACHE_ABS_DIR" ]]; then
+      if [[ "$HOGD_SHARED_CCACHE_ABS_DIR" =~ [[:space:]] ]]; then
+        echo "warning: shared ccache directory $HOGD_SHARED_CCACHE_ABS_DIR contains whitespace; using local ccache only" >&2
+      else
+        export CCACHE_REMOTE_STORAGE="${CCACHE_REMOTE_STORAGE:-file://$HOGD_SHARED_CCACHE_ABS_DIR @umask=002 @update-mtime=true}"
+        export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$ROOT_DIR}"
+        export CCACHE_NAMESPACE="${CCACHE_NAMESPACE:-hogd}"
+      fi
     else
       echo "warning: shared ccache directory $HOGD_SHARED_CCACHE_DIR is not writable; using local ccache only" >&2
     fi
