@@ -2,6 +2,8 @@ name: CCache Warmup (hog_sched)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 14 * * *"
   push:
     branches: ["main"]
 
