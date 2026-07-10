@@ -14,6 +14,8 @@
 
 namespace hogd {
 
+class GenesisConfigurationBuilder;
+
 inline constexpr std::uint32_t kMaxBootstrapAccounts = 1000;
 
 struct BootstrapAccountConfig {
@@ -36,6 +38,10 @@ struct BootstrapAccountArtifact {
   std::vector<SignedTransaction> initialization_txs;
   std::vector<BootstrapAccountMetadata> accounts;
 };
+
+std::vector<BootstrapAccountMetadata>
+append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
+                          BootstrapAccountConfig const &config);
 
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
 derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index);

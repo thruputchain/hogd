@@ -58,6 +58,22 @@ derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 BootstrapAccountArtifact
 build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
 {
+  GenesisConfigurationBuilder builder;
+  std::vector<BootstrapAccountMetadata> accounts =
+      append_bootstrap_accounts(builder, config);
+
+  return BootstrapAccountArtifact{
+      .genesis_configuration =
+          builder.build(StorageCostModel::default_cost_model()),
+      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .accounts = std::move(accounts),
+  };
+}
+
+std::vector<BootstrapAccountMetadata>
+append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
+                          BootstrapAccountConfig const &config)
+{
   CHECK_LE(config.count, kMaxBootstrapAccounts);
 
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
@@ -67,7 +83,6 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
 
-  GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(config.count);
 
@@ -93,12 +108,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
     });
   }
 
-  return BootstrapAccountArtifact{
-      .genesis_configuration =
-          builder.build(StorageCostModel::default_cost_model()),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
-      .accounts = std::move(accounts),
-  };
+  return accounts;
 }
 
 } // namespace hogd
