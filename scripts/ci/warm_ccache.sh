@@ -6,17 +6,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(realpath "${SCRIPT_DIR}/../..")"
 
 TARGET_SHA="${1:-}"
-WARMUP_JOBS="${HOGD_CCACHE_WARMUP_JOBS:-8}"
+WARMUP_JOBS="${HOGD_CCACHE_WARMUP_JOBS:-auto}"
 BUILD_ROOT="${HOGD_CCACHE_WARMUP_BUILD_ROOT:-build/ccache-warm}"
 LOCK_FILE="${HOGD_CCACHE_WARMUP_LOCK:-/tmp/hogd-ccache-warmup.lock}"
+
+detect_warmup_jobs() {
+  if command -v nproc >/dev/null 2>&1; then
+    nproc
+    return
+  fi
+
+  getconf _NPROCESSORS_ONLN
+}
 
 if [[ -z "$TARGET_SHA" ]]; then
   echo "usage: $0 <git-sha>" >&2
   exit 2
 fi
 
+if [[ "$WARMUP_JOBS" == "auto" ]]; then
+  WARMUP_JOBS="$(detect_warmup_jobs)"
+fi
+
 if ! [[ "$WARMUP_JOBS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "HOGD_CCACHE_WARMUP_JOBS must be a positive integer, got: $WARMUP_JOBS" >&2
+  echo "HOGD_CCACHE_WARMUP_JOBS must be 'auto' or a positive integer, got: $WARMUP_JOBS" >&2
   exit 2
 fi
 
