@@ -19,6 +19,7 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
@@ -3799,14 +3800,23 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
   DbConflictResult conflict;
   x23::deserialize(&conflict, x23::BufView{c2.serialized_conflict.data,
                                            c2.serialized_conflict.len});
-  ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
-  bool found_replay = false;
-  for (auto const &c : conflict.conflicts()) {
-    if (c.code == DbConflictCode::kDbConflictReplayProtection) {
-      found_replay = true;
+  // Proposal mode: hogdb selects All in debug builds, First in release
+  // builds.
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    bool found_replay = false;
+    for (auto const &c : conflict.conflicts()) {
+      if (c.code == DbConflictCode::kDbConflictReplayProtection) {
+        found_replay = true;
+      }
     }
+    ASSERT_TRUE(found_replay);
   }
-  ASSERT_TRUE(found_replay);
+  else {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(conflict.first().code,
+              DbConflictCode::kDbConflictReplayProtection);
+  }
 }
 
 } // namespace hogd
