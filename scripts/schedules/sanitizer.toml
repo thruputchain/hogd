@@ -28,21 +28,24 @@ source ./scripts/ci/prepare_env.sh
 export ASAN_OPTIONS=abort_on_error=1
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
+# Cap build parallelism at 64, same as the gcc job below: fanning out to all
+# 128 hyperthreads OOMs the host (the OOM killer took out the login session's
+# sd-pam, dropping the SSH job mid-build). Applies to all three builds below.
 echo 'build clang asan'
-./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm tests'
 ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang asan release'
-./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm asan tests release'
 ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
 
 # Gcc doesn't support ignorelist with ubsan, so the ubsan build is clang-only.
 echo 'build clang ubsan'
-./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm ubsan tests'
 export UBSAN_OPTIONS=print_stacktrace=1
