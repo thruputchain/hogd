@@ -1,3 +1,4 @@
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -5,10 +6,12 @@
 #include <filesystem>
 #include <format>
 #include <limits>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -19,6 +22,7 @@
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/init.h"
+#include "types.hh"
 
 namespace {
 
@@ -28,6 +32,32 @@ struct GenerateOptions {
   std::filesystem::path metadata_out;
   std::vector<std::filesystem::path> contract_artifact_directories;
 };
+
+hogd::Ed25519PublicKey
+parse_faucet_public_key(std::string_view value)
+{
+  if (value.starts_with("0x")) {
+    value.remove_prefix(2);
+  }
+  if (value.size() != 64) {
+    throw std::runtime_error(
+        "Invalid faucet public key: expected 32-byte hex value");
+  }
+
+  hogd::Ed25519PublicKey public_key{};
+  for (std::size_t i = 0; i < public_key.size(); ++i) {
+    unsigned int byte = 0;
+    const char *first = value.data() + (i * 2);
+    const char *last = first + 2;
+    auto [ptr, error] = std::from_chars(first, last, byte, 16);
+    if (error != std::errc{} || ptr != last) {
+      throw std::runtime_error(
+          "Invalid faucet public key: expected 32-byte hex value");
+    }
+    public_key[i] = static_cast<std::uint8_t>(byte);
+  }
+  return public_key;
+}
 
 void
 print_usage(FILE *stream, char *argv[])
@@ -46,6 +76,8 @@ Options:
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
+  --faucet-public-key <hex>      Dedicated faucet Ed25519 public key
+  --faucet-tokens <tokens>       Initial storage-token balance for the faucet
   --genesis-out <path>           Output JSON-XDR genesis configuration
   --metadata-out <path>          Output hosted bootstrap metadata
   --contract-artifacts-dir <dir> Search this directory before default contract
@@ -88,6 +120,8 @@ GenerateOptions
 parse_generate_args(int argc, char *argv[])
 {
   GenerateOptions options;
+  std::optional<hogd::Ed25519PublicKey> faucet_public_key;
+  std::optional<std::uint64_t> faucet_tokens;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -129,6 +163,21 @@ parse_generate_args(int argc, char *argv[])
           hogd::parse_u64(argv[++i], "dev account tokens");
       continue;
     }
+    if (arg == "--faucet-public-key" && i + 1 < argc) {
+      if (faucet_public_key.has_value()) {
+        throw std::runtime_error(
+            "--faucet-public-key may only be specified once");
+      }
+      faucet_public_key = parse_faucet_public_key(argv[++i]);
+      continue;
+    }
+    if (arg == "--faucet-tokens" && i + 1 < argc) {
+      if (faucet_tokens.has_value()) {
+        throw std::runtime_error("--faucet-tokens may only be specified once");
+      }
+      faucet_tokens = hogd::parse_u64(argv[++i], "faucet tokens");
+      continue;
+    }
     if (arg == "--genesis-out" && i + 1 < argc) {
       options.genesis_out = std::filesystem::path(argv[++i]);
       continue;
@@ -154,6 +203,16 @@ parse_generate_args(int argc, char *argv[])
   }
   if (options.metadata_out.empty()) {
     throw std::runtime_error("--metadata-out is required");
+  }
+  if (faucet_public_key.has_value() != faucet_tokens.has_value()) {
+    throw std::runtime_error(
+        "--faucet-public-key and --faucet-tokens must be specified together");
+  }
+  if (faucet_public_key.has_value()) {
+    options.config.faucet = hogd::HostedFaucetConfig{
+        .public_key = *faucet_public_key,
+        .storage_tokens = *faucet_tokens,
+    };
   }
   return options;
 }
