@@ -3,17 +3,10 @@ name = "ccache_warmup"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_default_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release default
 """
 [jobs.env]
@@ -31,17 +24,10 @@ ccache_gcc_release_default = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_x23_coro_trace_on_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release x23-coro-trace-on
 """
 [jobs.env]
@@ -59,17 +45,10 @@ ccache_gcc_release_x23_coro_trace_on = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_x23_coro_trace_off_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release x23-coro-trace-off
 """
 [jobs.env]
@@ -87,17 +66,10 @@ ccache_gcc_release_x23_coro_trace_off = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_test_ffi_no_bench_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release test-ffi-no-bench
 """
 [jobs.env]
@@ -115,17 +87,10 @@ ccache_gcc_release_test_ffi_no_bench = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_default_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug default
 """
 [jobs.env]
@@ -143,17 +108,10 @@ ccache_gcc_debug_default = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_x23_coro_trace_on_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug x23-coro-trace-on
 """
 [jobs.env]
@@ -171,17 +129,10 @@ ccache_gcc_debug_x23_coro_trace_on = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_x23_coro_trace_off_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug x23-coro-trace-off
 """
 [jobs.env]
@@ -199,17 +150,10 @@ ccache_gcc_debug_x23_coro_trace_off = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_test_ffi_no_bench_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug test-ffi-no-bench
 """
 [jobs.env]
@@ -227,17 +171,10 @@ ccache_gcc_debug_test_ffi_no_bench = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_default_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release default
 """
 [jobs.env]
@@ -255,17 +192,10 @@ ccache_clang_release_default = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_x23_coro_trace_on_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release x23-coro-trace-on
 """
 [jobs.env]
@@ -283,17 +213,10 @@ ccache_clang_release_x23_coro_trace_on = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_x23_coro_trace_off_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release x23-coro-trace-off
 """
 [jobs.env]
@@ -311,17 +234,10 @@ ccache_clang_release_x23_coro_trace_off = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_test_ffi_no_bench_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release test-ffi-no-bench
 """
 [jobs.env]
@@ -339,17 +255,10 @@ ccache_clang_release_test_ffi_no_bench = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_default_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug default
 """
 [jobs.env]
@@ -367,17 +276,10 @@ ccache_clang_debug_default = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_x23_coro_trace_on_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug x23-coro-trace-on
 """
 [jobs.env]
@@ -395,17 +297,10 @@ ccache_clang_debug_x23_coro_trace_on = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_x23_coro_trace_off_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug x23-coro-trace-off
 """
 [jobs.env]
@@ -423,17 +318,10 @@ ccache_clang_debug_x23_coro_trace_off = "?"
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_test_ffi_no_bench_{{ .hog_host }}"
 script = """
+set -euo pipefail
 set -x
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
-git reset --hard 2>/dev/null || true
-git clean -ffd -e .ssh/ -e .gitconfig
-git checkout -f -q {{ .git_commit }}
-
+git archive --remote=git@github.com:{{ .github_repo }}.git {{ .git_commit }} scripts/ci/warm_ccache_hog_sched_job.sh | tar -x
 ./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug test-ffi-no-bench
 """
 [jobs.env]
