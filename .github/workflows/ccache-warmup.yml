@@ -63,6 +63,7 @@ jobs:
             --key=hogd_ccache_warmup_jobs --value=${{ env.HOGD_CCACHE_WARMUP_JOBS }} \
             --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
             --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+            --timeout-sec=28800 \
             ./scripts/schedules/ccache_warmup.toml
 
       - name: Print Log Download Instructions
