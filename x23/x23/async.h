@@ -838,7 +838,7 @@ private:
 // the co_await.
 template<typename F, typename A>
 requires is_awaitable<A> && void_invocable<F, detail::resume_type<A>>
-struct MapAwait {
+struct [[nodiscard]] MapAwait {
   [[no_unique_address]] F func;
   [[no_unique_address]] A awaitable;
 
