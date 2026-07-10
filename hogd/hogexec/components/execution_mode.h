@@ -82,10 +82,16 @@ public:
     return empty;
   }
 
+  // Set once a concurrent observation would exceed kMaxConcurrentRcqReadsPerTx.
+  // The RCQ read syscall then returns InvalidSyscallInput instead of
+  // overflowing the bounded observed_queue_entry_sequence (#2894).
+  bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
+
 private:
   // Proposal data containing nondeterministic choices made during execution
   NondeterministicProposalData proposal_data_{};
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
+  bool observation_cap_exceeded_ = false;
 };
 
 // Data structure for validation mode execution that validates nondeterministic
@@ -136,6 +142,13 @@ public:
     return queue_entry_observations_;
   }
 
+  // Set when replay reaches a new observation but the recorded sequence is
+  // exhausted at exactly kMaxConcurrentRcqReadsPerTx -- the proposer hit the
+  // observation cap and surfaced InvalidSyscallInput, so replay must agree
+  // (#2894). Distinguished from a malformed short sequence, which stays a
+  // validation failure.
+  bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
+
 private:
   // Proposal data containing expected nondeterministic choices
   const NondeterministicProposalData proposal_data_;
@@ -145,6 +158,7 @@ private:
   // Index of next queue entry to consume from proposal
   uint32_t next_queue_entry_index_ = 0;
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
+  bool observation_cap_exceeded_ = false;
 };
 
 class ViewingModeData {
@@ -207,6 +221,11 @@ public:
     return partial_validation_data_.observations_to_validate();
   }
 
+  bool observation_cap_exceeded() const
+  {
+    return partial_validation_data_.observation_cap_exceeded();
+  }
+
 private:
   ValidationModeData partial_validation_data_;
 };
@@ -214,6 +233,15 @@ private:
 // Variant type that holds either proposal or validation mode data
 using ExecutionModeData =
     std::variant<ProposalModeData, ValidationModeData, ViewingModeData>;
+
+// True once a concurrent RCQ observation would exceed
+// kMaxConcurrentRcqReadsPerTx in the current mode (#2894).
+inline bool
+observation_cap_exceeded(ExecutionModeData const &mode)
+{
+  return std::visit(
+      [](auto const &data) { return data.observation_cap_exceeded(); }, mode);
+}
 
 using ExecutionModeCtor =
     std::variant<ProposalModeCtor, ValidationModeCtor, ViewingModeCtor>;
