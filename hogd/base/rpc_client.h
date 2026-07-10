@@ -126,7 +126,8 @@ make_srpc_client(x23::HostPort host_port, bool retry = false,
   return make_srpc_client<RpcService>(*ss, retry, max_message_size);
 }
 
-// TODO(geoff): setting max_message_size isn't implemented for multiclient yet
+// TODO(geoff): setting max_message_size isn't implemented for the srpc
+// multiclient yet
 template<typename RpcService>
 auto
 make_srpc_multiclient(sockaddr_storage &ss, bool retry = false,
@@ -164,11 +165,13 @@ make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
 template<typename RpcService>
 auto
 make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
-                     bool retry = false, x23::CpuMap const &map = *x23::llc_map)
+                     bool retry = false, x23::CpuMap const &map = *x23::llc_map,
+                     size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
     try {
-      auto client = x23::RpcMulticlient<x23::RpcLogger>::make(cp, ss, map);
+      auto client = x23::RpcMulticlient<x23::RpcLogger>::make(
+          cp, ss, map, x23::RpcLogger::default_logfd, max_message_size);
       return client->template client<RpcService>();
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
@@ -186,13 +189,15 @@ make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
 template<typename RpcService>
 auto
 make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
-                     x23::CpuMap const &map = *x23::llc_map)
+                     x23::CpuMap const &map = *x23::llc_map,
+                     size_t max_message_size = x23::default_max_message_size)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
-  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map);
+  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
+                                          max_message_size);
 }
 
 } // namespace hogd

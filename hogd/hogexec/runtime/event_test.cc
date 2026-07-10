@@ -29,8 +29,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc_common.h"
+#include "x23/cpumap.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1133,14 +1132,13 @@ TEST(EventRpcValidationProposalData,
               ExecResult::ExecResultOK);
   }
 
-  auto capped_event_proxy = [&]() {
-    const std::size_t saved_max = x23::default_max_message_size;
-    x23::default_max_message_size = kValidationProposalEventRpcCap;
-    x23::Defer restore_max{
-        [saved_max] { x23::default_max_message_size = saved_max; }};
-    return std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", fw.get_event_exec_port()});
-  }();
+  // Cap only this proxy's client streams. Mutating the process-wide
+  // x23::default_max_message_size here would race with the event server's
+  // accept threads, which read it while constructing their side of these
+  // very connections.
+  auto capped_event_proxy = std::make_unique<EventServerProxy>(
+      x23::HostPort{"localhost", fw.get_event_exec_port()}, *x23::llc_map,
+      kValidationProposalEventRpcCap);
 
   SystemCallHandler consume_validation_handler(
       consume_tx, *fw.get_storage_snapshot_cache(),
