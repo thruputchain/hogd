@@ -3,7 +3,6 @@ name = "ccache_warmup"
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_default_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -15,17 +14,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=default \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release default
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -35,15 +25,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_release_default = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_x23_coro_trace_on_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -55,17 +42,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-on \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release x23-coro-trace-on
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -75,15 +53,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_release_x23_coro_trace_on = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_x23_coro_trace_off_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -95,17 +70,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-off \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release x23-coro-trace-off
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -115,15 +81,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_release_x23_coro_trace_off = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_release_test_ffi_no_bench_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -135,17 +98,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=test-ffi-no-bench \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Release test-ffi-no-bench
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -155,15 +109,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_release_test_ffi_no_bench = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_default_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -175,17 +126,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=default \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug default
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -195,15 +137,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_debug_default = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_x23_coro_trace_on_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -215,17 +154,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-on \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug x23-coro-trace-on
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -235,15 +165,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_debug_x23_coro_trace_on = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_x23_coro_trace_off_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -255,17 +182,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-off \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug x23-coro-trace-off
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -275,15 +193,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_debug_x23_coro_trace_off = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_debug_test_ffi_no_bench_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -295,17 +210,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=gcc \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=test-ffi-no-bench \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} gcc Debug test-ffi-no-bench
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -315,15 +221,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_gcc_debug_test_ffi_no_bench = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_default_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -335,17 +238,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=default \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release default
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -355,15 +249,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_release_default = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_x23_coro_trace_on_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -375,17 +266,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-on \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release x23-coro-trace-on
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -395,15 +277,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_release_x23_coro_trace_on = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_x23_coro_trace_off_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -415,17 +294,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-off \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release x23-coro-trace-off
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -435,15 +305,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_release_x23_coro_trace_off = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_release_test_ffi_no_bench_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -455,17 +322,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Release \
-HOGD_CCACHE_WARMUP_VARIANT=test-ffi-no-bench \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Release test-ffi-no-bench
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -475,15 +333,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_release_test_ffi_no_bench = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_default_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -495,17 +350,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=default \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug default
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -515,15 +361,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_debug_default = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_x23_coro_trace_on_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -535,17 +378,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-on \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug x23-coro-trace-on
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -555,15 +389,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_debug_x23_coro_trace_on = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_x23_coro_trace_off_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -575,17 +406,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=x23-coro-trace-off \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug x23-coro-trace-off
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -595,15 +417,12 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_debug_x23_coro_trace_off = "?"
-
 
 [[jobs]]
 name = "{{ .hog_schedule }}_clang_debug_test_ffi_no_bench_{{ .hog_host }}"
 script = """
-
 set -x
 
 echo 'cloning hogd'
@@ -615,17 +434,8 @@ git reset --hard 2>/dev/null || true
 git clean -ffd -e .ssh/ -e .gitconfig
 git checkout -f -q {{ .git_commit }}
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
-
-HOGD_CCACHE_WARMUP_COMPILER=clang \
-HOGD_CCACHE_WARMUP_BUILD_TYPE=Debug \
-HOGD_CCACHE_WARMUP_VARIANT=test-ffi-no-bench \
-  ./scripts/ci/warm_ccache.sh {{ .git_commit }}
-
+./scripts/ci/warm_ccache_hog_sched_job.sh {{ .git_commit }} clang Debug test-ffi-no-bench
 """
-
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
@@ -635,6 +445,5 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-
 [jobs.host]
 ccache_clang_debug_test_ffi_no_bench = "?"
