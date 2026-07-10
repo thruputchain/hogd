@@ -125,6 +125,11 @@ target_include_directories(
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
+target_compile_definitions(
+  hosted_bootstrap_generator_test
+  PRIVATE
+  HOG_HOSTED_BOOTSTRAP_BINARY="$<TARGET_FILE:hog-hosted-bootstrap>"
+)
 target_link_libraries(
   hosted_bootstrap_generator_test
   contract_loader
@@ -137,6 +142,7 @@ add_dependencies(
   all_riscv_contracts
   all_wasm_contracts
   all_wasm_headers
+  hog-hosted-bootstrap
 )
 gtest_discover_tests(hosted_bootstrap_generator_test)
 

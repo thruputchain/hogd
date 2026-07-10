@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,17 @@ namespace hogd {
 
 inline constexpr std::string_view kDefaultHostedDevnetNetworkId = "devnet";
 
+struct HostedFaucetConfig {
+  Ed25519PublicKey public_key;
+  std::uint64_t storage_tokens = 0;
+};
+
+struct HostedFaucetMetadata {
+  ContractAddress wallet_address;
+  Ed25519PublicKey public_key;
+  std::uint64_t initial_storage_tokens;
+};
+
 struct HostedBootstrapGeneratorConfig {
   std::string network_id = std::string(kDefaultHostedDevnetNetworkId);
   BootstrapAccountConfig bootstrap_config{
@@ -21,12 +34,14 @@ struct HostedBootstrapGeneratorConfig {
       .storage_tokens = 1'000'000'000,
       .dev_wallet_profile = std::string(kDefaultDevWalletProfile),
   };
+  std::optional<HostedFaucetConfig> faucet;
 };
 
 struct HostedBootstrapArtifact {
   GenesisConfiguration genesis_configuration;
   std::vector<SignedTransaction> initialization_txs;
   std::vector<BootstrapAccountMetadata> accounts;
+  std::optional<HostedFaucetMetadata> faucet;
   SHA256Hash genesis_hash;
   std::string genesis_json;
   std::string metadata_json;
