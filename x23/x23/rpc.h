@@ -543,17 +543,18 @@ protected:
                  const CpuMap &map, int logfd, size_t max_message_size)
     : super2(map)
   {
-    super2::populate([&cp, &ss, logfd,
-                      max_message_size](const CpuSet & /*unused*/)
-                         -> RpcStream<Logger>::ClientRef {
-      UniqueFd fd = tcpconnect(ss);
-      int socketfd = fd.get();
-      typename super2::value_type stream =
-          *new RpcStream<Logger>(cp, std::move(fd), Logger{socketfd, logfd});
-      stream->max_message_size = max_message_size;
-      stream->go();
-      return stream;
-    });
+    super2::populate(
+        [&cp, &ss, logfd, max_message_size](
+            const CpuSet & /*unused*/) -> RpcStream<Logger>::ClientRef {
+          UniqueFd fd = tcpconnect(ss);
+          int socketfd = fd.get();
+          typename super2::value_type stream =
+              *new RpcStream<Logger>(cp, std::move(fd),
+                                     Logger{socketfd, logfd});
+          stream->max_message_size = max_message_size;
+          stream->go();
+          return stream;
+        });
   }
 };
 

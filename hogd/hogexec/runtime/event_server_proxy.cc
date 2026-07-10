@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
+#include <cstddef>
 #include <utility>
 
 #include "db_conflict.hh"
