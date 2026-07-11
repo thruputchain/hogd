@@ -212,11 +212,10 @@ def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> se
         return result
     _, header_to_sources = dependency_graph(compile_db, root)
     for header in changed_headers:
+        result.add(header)
         affected_sources = header_to_sources.get(header, set())
         if affected_sources:
             result.update(affected_sources)
-        else:
-            result.add(header)
     return result
 
 

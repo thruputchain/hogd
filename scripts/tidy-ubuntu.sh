@@ -159,7 +159,6 @@ exempt)
   run_cpp_tidy exempt -checks=-bugprone-exception-escape
   ;;
 all)
-  run_other_checks || exit 1
   if [ -n "$FIX_FLAG" ]; then
     run_cpp_tidy prod
     PROD_RC=$?
@@ -175,7 +174,9 @@ all)
     wait $EXEMPT_PID
     EXEMPT_RC=$?
   fi
-  if [ $PROD_RC -ne 0 ] || [ $EXEMPT_RC -ne 0 ]; then
+  run_other_checks
+  OTHER_RC=$?
+  if [ $PROD_RC -ne 0 ] || [ $EXEMPT_RC -ne 0 ] || [ $OTHER_RC -ne 0 ]; then
     exit 1
   fi
   ;;
