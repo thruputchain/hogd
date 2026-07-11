@@ -98,11 +98,14 @@ run_other_checks() {
 
 tidy_inputs() {
   local partition="$1"
+  local proxy_root="$2"
   local args=(
     "${SCRIPT_DIR}/tidy_inputs.py"
     --compile-db "${BUILD_DIR}/compile_commands.json"
     --scope "$SCOPE"
     --partition "$partition"
+    --proxy-dir "${proxy_root}/proxies"
+    --proxy-compile-db "${proxy_root}/compile_commands.json"
   )
   if [[ "$SCOPE" == "changed" ]]; then
     args+=(--base "$BASE_SHA" --head "$HEAD_SHA")
@@ -115,9 +118,12 @@ run_cpp_tidy() {
   shift
   local extra_args=("$@")
   local input_file
+  local proxy_root
   input_file=$(mktemp)
-  tidy_inputs "$partition" >"$input_file" || {
+  proxy_root=$(mktemp -d)
+  tidy_inputs "$partition" "$proxy_root" >"$input_file" || {
     rm -f "$input_file"
+    rm -rf "$proxy_root"
     return 1
   }
   local input_count
@@ -125,10 +131,11 @@ run_cpp_tidy() {
   if [[ "$input_count" -eq 0 ]]; then
     printf "No clang-tidy inputs for %s/%s\n" "$SCOPE" "$partition"
     rm -f "$input_file"
+    rm -rf "$proxy_root"
     return 0
   fi
   printf "Running clang-tidy for %s/%s on %s inputs\n" "$SCOPE" "$partition" "$input_count"
-  xargs -r ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
+  xargs -r ${CLANG_TIDY} -j"$NPROC" -use-color -p "${proxy_root}" \
     -clang-tidy-binary "$CLANG_TIDY_BINARY" \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet \
     -extra-arg=-std=c++23 \
@@ -136,6 +143,7 @@ run_cpp_tidy() {
     -extra-arg=-Werror ${FIX_FLAG} "${extra_args[@]}" <"$input_file"
   local rc=$?
   rm -f "$input_file"
+  rm -rf "$proxy_root"
   return "$rc"
 }
 

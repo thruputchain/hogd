@@ -101,6 +101,39 @@ def dependency_command(entry: dict) -> list[str]:
     return cleaned + ["-MM", "-MG", "-MT", "__tidy_deps__"]
 
 
+def proxy_compile_argv(entry: dict, source: Path, output: Path) -> list[str]:
+    argv = command_argv(entry)
+    original_file = Path(entry["file"])
+    if not original_file.is_absolute():
+        original_file = Path(entry.get("directory", ".")) / original_file
+    cleaned = []
+    skip_next = False
+    skip_with_arg = {
+        "-o",
+        "-MF",
+        "-MT",
+        "-MQ",
+        "-MJ",
+        "-serialize-diagnostics",
+    }
+    skip_prefixes = ("-o", "-MF", "-MT", "-MQ", "-MJ")
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "-c":
+            continue
+        if arg in skip_with_arg:
+            skip_next = True
+            continue
+        if any(arg.startswith(prefix) and arg != prefix for prefix in skip_prefixes):
+            continue
+        if Path(arg) == original_file or arg == entry["file"]:
+            continue
+        cleaned.append(arg)
+    return cleaned + ["-c", str(source), "-o", str(output)]
+
+
 def parse_make_deps(output: str, root: Path) -> set[str]:
     logical = output.replace("\\\n", " ")
     if ":" in logical:
@@ -188,6 +221,52 @@ def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> se
     return result
 
 
+def write_proxy_compile_db(
+    root: Path,
+    compile_db: Path,
+    inputs: set[str],
+    proxy_dir: Path,
+    proxy_compile_db: Path,
+) -> set[str]:
+    with compile_db.open(encoding="utf-8") as file:
+        entries = json.load(file)
+    base_entry = None
+    for entry in entries:
+        try:
+            rel = repo_path(Path(entry["file"]), root)
+        except ValueError:
+            continue
+        if rel.startswith("hogd/") and rel.endswith(".cc"):
+            base_entry = entry
+            break
+    if base_entry is None:
+        print("no hogd .cc entry found in compile database", file=sys.stderr)
+        sys.exit(1)
+    proxy_dir.mkdir(parents=True, exist_ok=True)
+    proxy_compile_db.parent.mkdir(parents=True, exist_ok=True)
+    rewritten_inputs = set()
+    proxy_entries = []
+    for path in sorted(inputs):
+        if not path.endswith(".h"):
+            rewritten_inputs.add(path)
+            continue
+        proxy = proxy_dir / f"{path.replace('/', '__')}.cc"
+        proxy.write_text(f'#include "{path}"\n', encoding="utf-8")
+        rewritten_inputs.add(str(proxy))
+        proxy_entries.append(
+            {
+                "directory": str(root),
+                "arguments": proxy_compile_argv(
+                    base_entry, proxy, proxy.with_suffix(".o")
+                ),
+                "file": str(proxy),
+            }
+        )
+    with proxy_compile_db.open("w", encoding="utf-8") as file:
+        json.dump(entries + proxy_entries, file)
+    return rewritten_inputs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="List clang-tidy input files")
     parser.add_argument("--compile-db", required=True)
@@ -195,6 +274,8 @@ def main() -> int:
     parser.add_argument("--partition", choices=("all", "prod", "exempt"), default="all")
     parser.add_argument("--base")
     parser.add_argument("--head")
+    parser.add_argument("--proxy-dir")
+    parser.add_argument("--proxy-compile-db")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -213,7 +294,24 @@ def main() -> int:
     else:
         inputs = inputs_for_full(root, compile_db)
 
-    for path in sorted(path for path in inputs if partition_matches(path, args.partition)):
+    inputs = {path for path in inputs if partition_matches(path, args.partition)}
+
+    if args.proxy_dir or args.proxy_compile_db:
+        if not args.proxy_dir or not args.proxy_compile_db:
+            print(
+                "--proxy-dir and --proxy-compile-db must be used together",
+                file=sys.stderr,
+            )
+            return 1
+        inputs = write_proxy_compile_db(
+            root,
+            compile_db,
+            inputs,
+            Path(args.proxy_dir),
+            Path(args.proxy_compile_db),
+        )
+
+    for path in sorted(inputs):
         print(path)
     return 0
 
