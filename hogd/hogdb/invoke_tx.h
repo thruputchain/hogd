@@ -60,16 +60,6 @@ public:
 
   BlockTX &get() const { return arc_->get(); }
 
-  // Releases the counted reference early, before destruction. Returns true
-  // if the block should be destroyed (last reference on a shutdown block);
-  // the caller is then responsible for any garbage collection.
-  bool release_reference()
-  {
-    assert(active_);
-    active_ = false;
-    return arc_->release_reference();
-  }
-
 private:
   PerThreadARC<BlockTX> *arc_;
   RPCContext *gc_ctx_ = nullptr;
@@ -173,12 +163,6 @@ public:
   HogDBStatus<void> request_retrocausal_queue(const ItemKey &key,
                                               RetrocausalQueueDelta &&delta,
                                               StorageDeltaFlagSet flags);
-
-  // Releases the counted BlockTX reference before destruction, for tests and
-  // benchmarks that manage the block's lifetime directly. Production code
-  // must not call this: ~InvokeTX() releases the reference itself, after
-  // destructor-time cleanup (#2959).
-  bool release_blocktx_reference() { return block_.release_reference(); }
 
   void assert_is_valid() const noexcept;
 

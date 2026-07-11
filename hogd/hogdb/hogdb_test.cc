@@ -126,7 +126,6 @@ protected:
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
@@ -164,7 +163,6 @@ protected:
     if (!commit_result.has_value()) {
       return {};
     }
-    invoke_tx.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
     EXPECT_TRUE(hash_result.has_value());
@@ -642,7 +640,6 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
@@ -818,7 +815,6 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
@@ -868,7 +864,6 @@ TEST_F(HogDBTest, NewBalanceHogAgeIsAllZeroes)
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
@@ -1030,7 +1025,6 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 
     ASSERT_TRUE(invoke_tx1.sync_balance_locks());
     ASSERT_TRUE(invoke_tx1.commit());
-    invoke_tx1.release_blocktx_reference();
   }
 
   {
@@ -1047,7 +1041,6 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 
     ASSERT_TRUE(invoke_tx2.sync_balance_locks());
     ASSERT_TRUE(invoke_tx2.commit());
-    invoke_tx2.release_blocktx_reference();
   }
 
   // Commit the block transaction
@@ -1168,7 +1161,6 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
                                  std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
@@ -1222,7 +1214,6 @@ TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
                                  std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
@@ -1371,7 +1362,6 @@ TEST_F(HogDBTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
   EXPECT_EQ(HogDBCode::kInvalidExecutorBehavior, ret.error().code());
 
   invoke_tx.abort();
-  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
@@ -1466,7 +1456,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     // sync_balance_locks() handles storage cost deduction
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
 
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -1561,7 +1550,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -1588,7 +1576,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_consume);
       ASSERT_TRUE(r.has_value());
@@ -1650,7 +1637,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -1679,7 +1665,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_delete);
       ASSERT_TRUE(r.has_value());
@@ -1746,7 +1731,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -1768,7 +1752,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
         rcq_key, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_delete);
       ASSERT_TRUE(r.has_value());
@@ -1842,7 +1825,6 @@ TEST_F(HogDBTest,
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -1865,7 +1847,6 @@ TEST_F(HogDBTest,
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_type_change);
       ASSERT_TRUE(r.has_value());
@@ -1938,7 +1919,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -1960,7 +1940,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
         rcq_key, 100, std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     {
       auto r = block_tx.get().close(db_hash_before_type_change);
       ASSERT_TRUE(r.has_value());
@@ -2044,7 +2023,6 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -2069,7 +2047,6 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -2150,7 +2127,6 @@ TEST_F(HogDBTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
 
     invoke_tx.abort();
-    invoke_tx.release_blocktx_reference();
 
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
@@ -2233,7 +2209,6 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     EXPECT_EQ(failed_addr, conflict_addr.get_raw());
 
     invoke_tx.rollback_to_savepoint(0);
-    invoke_tx.release_blocktx_reference();
   }
 
   Address charged_addr = make_address(kAddress + 51);
@@ -2304,7 +2279,6 @@ TEST_F(HogDBTest, SyncBalanceLocksReportsAllBalanceConflicts)
   EXPECT_EQ(expected_addrs, actual_addrs);
 
   invoke_tx.rollback_to_savepoint(0);
-  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, ReplayCacheGCPrunesMultipleHeightsAtOnce)
@@ -2489,7 +2463,6 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -2508,7 +2481,6 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
     ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
@@ -2630,7 +2602,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
           data_key, 0, 100, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     // Second InvokeTX: add 200 more
@@ -2641,7 +2612,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
           data_key, 200, std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -2779,7 +2749,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     // Second InvokeTX: insert more entries
@@ -2793,7 +2762,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -2875,7 +2843,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     // Second InvokeTX: add another nonce at same height
@@ -2887,7 +2854,6 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -2941,7 +2907,6 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     // Second InvokeTX: consume past block + current block entry
@@ -2959,7 +2924,6 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx.sync_balance_locks());
       ASSERT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -3002,11 +2966,9 @@ TEST_F(HogDBTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
       ASSERT_TRUE(invoke_tx_b.commit());
-      invoke_tx_b.release_blocktx_reference();
     }
 
     invoke_tx_a.abort();
-    invoke_tx_a.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
@@ -3057,11 +3019,9 @@ TEST_F(HogDBTest, AbortedFreshHeightStaysAbsentInNextBlock)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
       ASSERT_TRUE(invoke_tx_b.commit());
-      invoke_tx_b.release_blocktx_reference();
     }
 
     invoke_tx_a.abort();
-    invoke_tx_a.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
@@ -3118,11 +3078,9 @@ TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
           std::to_underlying(StorageDeltaFlags::None)));
       ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
       ASSERT_TRUE(invoke_tx_b.commit());
-      invoke_tx_b.release_blocktx_reference();
     }
 
     invoke_tx_a.abort();
-    invoke_tx_a.release_blocktx_reference();
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
@@ -3182,11 +3140,9 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
             std::to_underlying(StorageDeltaFlags::None)));
         EXPECT_TRUE(invoke_tx_b.sync_balance_locks());
         EXPECT_TRUE(invoke_tx_b.commit());
-        invoke_tx_b.release_blocktx_reference();
       }
 
       invoke_tx_a.abort();
-      invoke_tx_a.release_blocktx_reference();
     }
     else {
       EXPECT_TRUE(block_tx.try_acquire_reference());
@@ -3196,7 +3152,6 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
           std::to_underlying(StorageDeltaFlags::None)));
       EXPECT_TRUE(invoke_tx.sync_balance_locks());
       EXPECT_TRUE(invoke_tx.commit());
-      invoke_tx.release_blocktx_reference();
     }
 
     auto hash_result = block_tx.get().close(base_hash);
@@ -3238,7 +3193,6 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
 
     ASSERT_TRUE(itx.sync_balance_locks());
     ASSERT_TRUE(itx.commit());
-    itx.release_blocktx_reference();
   }
 
   // T2: consume RCQ entries, producing a small storage refund
@@ -3257,7 +3211,6 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
 
     // Before the fix, this throws std::runtime_error("failed to lock balance")
     ASSERT_TRUE(itx.commit());
-    itx.release_blocktx_reference();
   }
 }
 
@@ -3312,7 +3265,6 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
     ASSERT_TRUE(itx.sync_balance_locks());
 
     ASSERT_TRUE(itx.commit());
-    itx.release_blocktx_reference();
   }
 }
 
@@ -3376,7 +3328,6 @@ TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
                              std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx.sync_balance_locks());
     ASSERT_TRUE(itx.commit());
-    itx.release_blocktx_reference();
   }
 
   // T2: fund the same fresh address with 1 token (below balance-row cost).
@@ -3392,7 +3343,6 @@ TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
                              std::to_underlying(StorageDeltaFlags::None)));
     EXPECT_FALSE(itx.sync_balance_locks());
     itx.rollback_to_savepoint(depth);
-    itx.release_blocktx_reference();
   }
 }
 
@@ -3425,14 +3375,12 @@ TEST_F(HogDBTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
                               std::to_underlying(StorageDeltaFlags::None)));
     EXPECT_FALSE(itx2.sync_balance_locks());
     itx2.rollback_to_savepoint(depth);
-    itx2.release_blocktx_reference();
   }
 
   // T1 aborts. If a cumulative guard had let T2 through, the balance row
   // would now have insufficient funds. T1's abort must not retroactively
   // invalidate any accepted locks (and T2 was correctly rejected above).
   itx1.abort();
-  itx1.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
@@ -3463,7 +3411,6 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
     if (ordering == 0) {
       // T1 commits before T2 tries to lock balance
       ASSERT_TRUE(itx1.commit());
-      itx1.release_blocktx_reference();
 
       int depth = itx2.get_savepoint_head();
       itx2.create_savepoint();
@@ -3473,7 +3420,6 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
       EXPECT_FALSE(itx2.sync_balance_locks())
           << "underfunded T2 must fail even after T1 committed";
       itx2.rollback_to_savepoint(depth);
-      itx2.release_blocktx_reference();
     }
     else {
       // T2 tries to lock balance before T1 commits
@@ -3485,10 +3431,8 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
       EXPECT_FALSE(itx2.sync_balance_locks())
           << "underfunded T2 must fail even before T1 committed";
       itx2.rollback_to_savepoint(depth);
-      itx2.release_blocktx_reference();
 
       ASSERT_TRUE(itx1.commit());
-      itx1.release_blocktx_reference();
     }
   }
 }
@@ -3530,7 +3474,6 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
                                 std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
     ASSERT_TRUE(itx_b.commit());
-    itx_b.release_blocktx_reference();
     ASSERT_TRUE(block_tx_b.get().close(DbHash{}));
     ASSERT_TRUE(block_tx_b.get().commit());
   }
@@ -3544,7 +3487,6 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
   EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
 
   itx_a.abort();
-  itx_a.release_blocktx_reference();
 }
 
 // Regression test for #2759: a bytestring value-mismatch conflict must record
@@ -3581,9 +3523,7 @@ TEST_F(HogDBTest, BytestringConflictRecordsDbConflictReason)
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
-  itx_b.release_blocktx_reference();
   itx_a.abort();
-  itx_a.release_blocktx_reference();
 }
 
 // Regression test for #2759: requesting a different item type than what is
@@ -3618,9 +3558,7 @@ TEST_F(HogDBTest, ConflictReasonTypeMismatch)
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
-  itx_b.release_blocktx_reference();
   itx_a.abort();
-  itx_a.release_blocktx_reference();
 }
 
 // Regression test for #2759: consuming the same uniquifier twice in the same
@@ -3654,9 +3592,7 @@ TEST_F(HogDBTest, ConflictReasonReplayProtection)
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
-  itx_b.release_blocktx_reference();
   itx_a.abort();
-  itx_a.release_blocktx_reference();
 }
 
 // Regression test for #2759: setting ExclusiveLock on a balance key is
@@ -3685,7 +3621,6 @@ TEST_F(HogDBTest, ConflictReasonExclusiveLockBalanceFlag)
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   invoke_tx.abort();
-  invoke_tx.release_blocktx_reference();
 }
 
 TEST_F(HogDBTest, InvalidateSiblingBlockTX)
@@ -3825,7 +3760,6 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
                                std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_a.sync_balance_locks());
     ASSERT_TRUE(itx_a.commit());
-    itx_a.release_blocktx_reference();
   }
 
   std::array<std::byte, 1024> large_value;
@@ -3838,7 +3772,6 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
                             std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
     ASSERT_TRUE(itx_b.commit());
-    itx_b.release_blocktx_reference();
   }
   ASSERT_TRUE(block_b.get().close_skip_hash_for_testing());
   ASSERT_TRUE(block_b.get().commit());
@@ -3861,7 +3794,6 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
     EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
 
     itx_a.abort();
-    itx_a.release_blocktx_reference();
   }
 }
 
@@ -3933,7 +3865,6 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
     ASSERT_TRUE(sibling_tx.request_deletion(control_key, kNoFlags));
     ASSERT_TRUE(sibling_tx.sync_balance_locks());
     ASSERT_TRUE(sibling_tx.commit());
-    sibling_tx.release_blocktx_reference();
   }
 
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
@@ -3945,13 +3876,11 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
   // Insert-only exclusive RCQ commit succeeds even on a stale block because
   // the re-validation has no past-block consume to check against the DAO.
   ASSERT_TRUE(insert_only_tx.commit());
-  insert_only_tx.release_blocktx_reference();
 
   // Consuming exclusive RCQ commit fails: the re-validation reads deleted
   // RCQ blocks from the live DAO.
   auto r = consuming_tx.commit();
   ASSERT_FALSE(r.has_value());
-  consuming_tx.release_blocktx_reference();
 
   // The failed commit poisons the BlockTX.
   ASSERT_TRUE(stale_block_tx.get().is_poisoned());
@@ -4000,7 +3929,6 @@ TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
 
   // Commit succeeds on a non-stale block.
   ASSERT_TRUE(itx.commit());
-  itx.release_blocktx_reference();
 
   // Block is not poisoned, close and commit succeed.
   ASSERT_FALSE(block_tx.get().is_poisoned());
@@ -4080,7 +4008,6 @@ TEST_F(HogDBTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
     ASSERT_TRUE(sibling_tx.request_deletion(queue_key, kNoFlags));
     ASSERT_TRUE(sibling_tx.sync_balance_locks());
     ASSERT_TRUE(sibling_tx.commit());
-    sibling_tx.release_blocktx_reference();
   }
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
@@ -4099,8 +4026,6 @@ TEST_F(HogDBTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   auto follow_up = stale_tx.request_bytes(other_key, follow_up_buf, kNoFlags);
   ASSERT_FALSE(follow_up.has_value());
   EXPECT_EQ(follow_up.error().code(), HogDBCode::kStaleBlock);
-
-  stale_tx.release_blocktx_reference();
 }
 
 // Regression test for #2959: an InvokeTX that still owns its counted BlockTX
@@ -4120,25 +4045,21 @@ TEST_F(HogDBTest, InvokeTxDestructorReleasesBlockTxReference)
   EXPECT_TRUE(block_tx.initiate_shutdown());
 }
 
-// Companion to the above: a manual release (the pattern used throughout these
-// tests) hands the reference back early, and the destructor must not release
-// it a second time.
-TEST_F(HogDBTest, InvokeTxManualReleaseIsNotDoubleReleasedByDestructor)
+// Companion to the above: moving an InvokeTX (as RPCContext::get_invoke_tx
+// does when inserting into its map) transfers the reference, so destroying
+// both the moved-from and moved-to objects releases it exactly once (a
+// double release would corrupt the refcount and trip the shutdown CHECKs).
+TEST_F(HogDBTest, InvokeTxMoveTransfersBlockTxReference)
 {
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
   ASSERT_TRUE(block_tx.try_acquire_reference());
-  ASSERT_TRUE(block_tx.try_acquire_reference());
   {
-    InvokeTX invoke_tx(block_tx);
-    EXPECT_FALSE(invoke_tx.release_blocktx_reference());
+    InvokeTX source(block_tx);
+    InvokeTX moved(std::move(source));
   }
-  // Exactly one of the two references was released; the second is still
-  // outstanding (a double release would corrupt the refcount and trip the
-  // shutdown CHECKs).
-  EXPECT_FALSE(block_tx.initiate_shutdown());
-  EXPECT_TRUE(block_tx.release_reference());
+  EXPECT_TRUE(block_tx.initiate_shutdown());
 }
 
 } // namespace hogd

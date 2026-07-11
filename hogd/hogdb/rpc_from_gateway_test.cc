@@ -146,7 +146,6 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
                                                StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    invoke_tx.release_blocktx_reference();
 
     auto db_hash = block_tx.get().close(base_hash);
     ASSERT_TRUE(db_hash.has_value());
