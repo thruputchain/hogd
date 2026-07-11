@@ -1191,10 +1191,11 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
       ASSERT_TRUE(found_excl);
     }
     else {
+      // First mode reports whichever conflicting delta hogdb hit first,
+      // which is not deterministic when the batch can conflict more than
+      // once, so don't assert a specific code.
       ASSERT_EQ(child_trace.commit_conflict.level(),
                 DbDiagnosticLevel::kDbDiagnosticFirst);
-      EXPECT_EQ(child_trace.commit_conflict.first().code,
-                DbConflictCode::kDbConflictExclusiveLock);
     }
   }
 

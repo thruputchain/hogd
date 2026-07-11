@@ -3813,9 +3813,10 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
     ASSERT_TRUE(found_replay);
   }
   else {
+    // First mode reports whichever conflicting delta hogdb hit first, which
+    // is not deterministic when the batch can conflict more than once, so
+    // don't assert a specific code.
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-    EXPECT_EQ(conflict.first().code,
-              DbConflictCode::kDbConflictReplayProtection);
   }
 }
 
