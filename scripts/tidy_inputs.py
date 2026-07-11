@@ -198,8 +198,7 @@ def changed_files(root: Path, base: str, head: str) -> set[str]:
 
 
 def inputs_for_full(root: Path, compile_db: Path) -> set[str]:
-    _, header_to_sources = dependency_graph(compile_db, root)
-    sources = all_files(root, ".cc")
+    sources, header_to_sources = dependency_graph(compile_db, root)
     headers = all_files(root, ".h")
     referenced_headers = set(header_to_sources)
     return sources | (headers - referenced_headers)
