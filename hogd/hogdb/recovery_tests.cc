@@ -7,6 +7,7 @@
 
 #include "db_conflict.hh"
 #include "db_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -280,6 +281,13 @@ TEST(RecoveryTests, RCQInsertAdmittedJustBelowMaxLiveEntries)
 // moment the metadata is loaded, before any signed cost arithmetic.
 TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
 {
+  if constexpr (!is_debug_build()) {
+    // The "CHECK FAILED" panic message this death test matches is only
+    // produced in debug builds (x23::panic is std::unreachable() under
+    // NDEBUG).
+    GTEST_SKIP();
+  }
+
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
   constexpr uint64_t kHighBitLiveEntries = uint64_t{1} << 63;

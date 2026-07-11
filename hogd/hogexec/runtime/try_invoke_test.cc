@@ -17,6 +17,7 @@
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -1174,18 +1175,28 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   ASSERT_NE(invoke_trace.outputs, nullptr);
   ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
   auto const &child_trace = *invoke_trace.outputs->child_trace;
-  // Debug build + HogDB => full vector of conflicts (kDbDiagnosticAll).
-  // MockInMemory does not populate conflict diagnostics; skip that assertion.
+  // HogDB proposal mode reports all conflicts in debug builds, first-only in
+  // release builds. MockInMemory does not populate conflict diagnostics; skip
+  // that assertion.
   if (GetParam() == TestDB::kHogDB) {
-    ASSERT_EQ(child_trace.commit_conflict.level(),
-              DbDiagnosticLevel::kDbDiagnosticAll);
-    bool found_excl = false;
-    for (auto const &c : child_trace.commit_conflict.conflicts()) {
-      if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
-        found_excl = true;
+    if constexpr (is_debug_build()) {
+      ASSERT_EQ(child_trace.commit_conflict.level(),
+                DbDiagnosticLevel::kDbDiagnosticAll);
+      bool found_excl = false;
+      for (auto const &c : child_trace.commit_conflict.conflicts()) {
+        if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
+          found_excl = true;
+        }
       }
+      ASSERT_TRUE(found_excl);
     }
-    ASSERT_TRUE(found_excl);
+    else {
+      // First mode reports whichever conflicting delta hogdb hit first,
+      // which is not deterministic when the batch can conflict more than
+      // once, so don't assert a specific code.
+      ASSERT_EQ(child_trace.commit_conflict.level(),
+                DbDiagnosticLevel::kDbDiagnosticFirst);
+    }
   }
 
   // Now commit the first transaction (should succeed)
