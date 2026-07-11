@@ -64,6 +64,6 @@ ci_remote_killall_hosts() {
   shift
 
   for host in "$@"; do
-    ci_remote_run "$host" "killall -q $processes" || true
+    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
   done
 }

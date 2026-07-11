@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 if [ $# -ne 1 ]; then
   echo "Usage: $0 <coordinator_output_file>"
@@ -33,36 +33,11 @@ echo "Branch: $branch"
 echo "Commit: $commit"
 echo "Commit Timestamp: $commit_time"
 
-# Check if metrics_history/ is a git repo; if not, clone it
-if [ ! -d "metrics_history/.git" ]; then
-  echo "Cloning groundhogchain/metrics_history.git into metrics_history/"
-  git clone --quiet https://github.com/groundhogchain/metrics_history.git metrics_history/
-else
-  echo "metrics_history/ already exists and is a git repository."
-fi
+./scripts/clone_metrics_history.sh
 
 # Log integration metrics
 
-./metrics_history/scripts/make_metric_file.sh nightly_integration_mempool $branch $commit $commit_time
-cat $COORDINATOR_OUTPUT_FILE >metrics_history/metrics/nightly_integration_mempool/$branch/${commit_time}_$commit
+./scripts/make_metric_file.sh nightly_integration_mempool "$branch" "$commit" "$commit_time"
+cat "$COORDINATOR_OUTPUT_FILE" >"metrics_history/metrics/nightly_integration_mempool/$branch/${commit_time}_$commit"
 
-# Push metrics_history/ to groundhogchain/metrics_history.git
-cd metrics_history/
-
-# Check if git committer name and email are set; if not, set them to metrics-script
-committer_name=$(git config user.name || true)
-committer_email=$(git config user.email || true)
-if [ -z "$committer_name" ]; then
-  committer_name="metrics-script"
-fi
-if [ -z "$committer_email" ]; then
-  committer_email="metrics-script@groundhogchain.com"
-fi
-echo "Committer name: $committer_name"
-echo "Committer email: $committer_email"
-
-git add metrics/
-GIT_COMMITTER_NAME="$committer_name" \
-  GIT_COMMITTER_EMAIL="$committer_email" \
-  git commit -m "Add nightly integration metrics for $branch $commit" --author "$committer_name <$committer_email>"
-git push
+./scripts/commit_metrics.sh

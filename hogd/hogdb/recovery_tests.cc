@@ -237,7 +237,6 @@ insert_into_recovered_rcq(uint64_t live_entries)
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     invoke_tx.rollback_to_savepoint(0);
-    invoke_tx.release_blocktx_reference();
     return insert_result;
   }
 
@@ -245,7 +244,6 @@ insert_into_recovered_rcq(uint64_t live_entries)
   // which exercises the signed cost arithmetic at the boundary.
   EXPECT_TRUE(invoke_tx.sync_balance_locks().has_value());
   EXPECT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   EXPECT_TRUE(block_tx.get().close(DbHash{}).has_value());
   EXPECT_TRUE(block_tx.get().commit().has_value());

@@ -12,5 +12,5 @@ fi
 METRIC_NAME=$1
 FILENAME_TO_LOG=$2
 
-./metrics_history/scripts/make_metric_file.sh $METRIC_NAME $GIT_branch $GIT_commit $GIT_commit_time
-cat $FILENAME_TO_LOG >metrics_history/metrics/$METRIC_NAME/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/make_metric_file.sh "$METRIC_NAME" "$GIT_branch" "$GIT_commit" "$GIT_commit_time"
+cat "$FILENAME_TO_LOG" >"metrics_history/metrics/$METRIC_NAME/$GIT_branch/${GIT_commit_time}_$GIT_commit"
