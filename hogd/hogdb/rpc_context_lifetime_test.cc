@@ -9,7 +9,10 @@
 #include <thread>
 #include <utility>
 
+#include "rpc_types.hh"
+
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
 #include "hogd/hogdb/block_tx.h"
