@@ -12,6 +12,7 @@ SCOPE="full"
 PARTITION="all"
 BASE_SHA=""
 HEAD_SHA=""
+CLANG_TIDY_BINARY="${CLANG_TIDY_BINARY:-/usr/bin/clang-tidy-21}"
 
 print_usage() {
   printf "usage: scripts/tidy-ubuntu.sh [OPTION]...\n"
@@ -21,6 +22,7 @@ print_usage() {
   printf -- "--partition all|prod|exempt|other selects the tidy partition (default: all)\n"
   printf -- "--base sets the base git SHA for changed scope\n"
   printf -- "--head sets the head git SHA for changed scope\n"
+  printf -- "CLANG_TIDY_BINARY overrides the clang-tidy binary (default: /usr/bin/clang-tidy-21)\n"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -127,7 +129,7 @@ run_cpp_tidy() {
   fi
   printf "Running clang-tidy for %s/%s on %s inputs\n" "$SCOPE" "$partition" "$input_count"
   xargs -r ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
-    -clang-tidy-binary /usr/bin/clang-tidy-21 \
+    -clang-tidy-binary "$CLANG_TIDY_BINARY" \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet \
     -extra-arg=-std=c++23 \
     -extra-arg=-stdlib=libc++ \

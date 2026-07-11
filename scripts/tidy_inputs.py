@@ -174,9 +174,12 @@ def inputs_for_full(root: Path, compile_db: Path) -> set[str]:
 
 def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> set[str]:
     changed = changed_files(root, base, head)
-    _, header_to_sources = dependency_graph(compile_db, root)
     result = {path for path in changed if path.endswith(".cc")}
-    for header in sorted(path for path in changed if path.endswith(".h")):
+    changed_headers = sorted(path for path in changed if path.endswith(".h"))
+    if not changed_headers:
+        return result
+    _, header_to_sources = dependency_graph(compile_db, root)
+    for header in changed_headers:
         affected_sources = header_to_sources.get(header, set())
         if affected_sources:
             result.update(affected_sources)

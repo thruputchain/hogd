@@ -85,8 +85,10 @@ jobs:
           fi
 
       - name: Fetch Changed-File Base
-        if: env.TIDY_SCOPE == 'changed'
-        run: git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+        run: |
+          if [ "$TIDY_SCOPE" = "changed" ]; then
+            git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+          fi
 
       - name: Configure Git for Submodule Caching
         run: |
