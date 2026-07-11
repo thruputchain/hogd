@@ -4103,6 +4103,44 @@ TEST_F(HogDBTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   stale_tx.release_blocktx_reference();
 }
 
+// Regression test for #2959: an InvokeTX that still owns its counted BlockTX
+// reference must release it when destroyed, so the reference always outlives
+// destructor-time cleanup (abort/assert_is_valid dereference the block).
+TEST_F(HogDBTest, InvokeTxDestructorReleasesBlockTxReference)
+{
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX invoke_tx(block_tx);
+  }
+  // The InvokeTX held the only reference; after its destruction, shutdown
+  // must see no outstanding references.
+  EXPECT_TRUE(block_tx.initiate_shutdown());
+}
+
+// Companion to the above: a manual release (the pattern used throughout these
+// tests) hands the reference back early, and the destructor must not release
+// it a second time.
+TEST_F(HogDBTest, InvokeTxManualReleaseIsNotDoubleReleasedByDestructor)
+{
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX invoke_tx(block_tx);
+    EXPECT_FALSE(invoke_tx.release_blocktx_reference());
+  }
+  // Exactly one of the two references was released; the second is still
+  // outstanding (a double release would corrupt the refcount and trip the
+  // shutdown CHECKs).
+  EXPECT_FALSE(block_tx.initiate_shutdown());
+  EXPECT_TRUE(block_tx.release_reference());
+}
+
 } // namespace hogd
 
 int

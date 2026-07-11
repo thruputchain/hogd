@@ -24,6 +24,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/common/limits.h"
 #include "hogexec_constants.hh"
@@ -35,6 +36,16 @@
 #include "x23/serialize.h"
 
 namespace hogd {
+
+BlockTXRef::~BlockTXRef()
+{
+  if (!active_) {
+    return;
+  }
+  if (arc_->release_reference() && gc_ctx_ != nullptr) {
+    gc_ctx_->remove_shutdown_block_tx(bid_);
+  }
+}
 
 HogDBStatus<int128_t>
 InvokeTX::read_nnint128(const ItemKey &key)

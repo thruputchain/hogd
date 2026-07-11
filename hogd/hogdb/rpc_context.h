@@ -41,14 +41,16 @@ namespace hogd {
 // by the database.
 //
 // The block txs are refcounted.
-// Each InvokeTX acquires a reference; when the invoke tx is closed, it releases
-// the reference to the PerThreadARC<BlockTX>. The PerThreadARC<BlockTX> lives
-// until both there are no references remaining to it, and the PerThreadARC has
-// been explicitly shutdown (via initiate_shutdown()). Closing the BlockTX
-// initiates shutdown of the PerThreadARC<BlockTX>. If the BlockTX is shutdown
-// and the reference closed is the last reference, the BlockTX is garbage
-// collected (that condition is checked when an InvokeTX is closed, and when the
-// BlockTX is committed or abandoned).  When a BlockTX is committed, all pending
+// Each InvokeTX owns a counted reference to its PerThreadARC<BlockTX>;
+// destroying the InvokeTX releases the reference, only after destructor-time
+// cleanup, since that cleanup dereferences the block (see BlockTXRef, #2959).
+// The PerThreadARC<BlockTX> lives until both there are no references
+// remaining to it, and the PerThreadARC has been explicitly shutdown (via
+// initiate_shutdown()). Closing the BlockTX initiates shutdown of the
+// PerThreadARC<BlockTX>. If the BlockTX is shutdown and the reference
+// released is the last reference, the BlockTX is garbage collected (that
+// condition is checked when an InvokeTX is destroyed, and when the BlockTX is
+// committed or abandoned).  When a BlockTX is committed, all pending
 // InvokeTXs must have been closed (so the refcount must be zero). If the
 // blockTX is abandoned, it is allowed for there to be pending, outstanding
 // InvokeTXs. However, you should eventually close all pending InvokeTXs, or
@@ -239,10 +241,14 @@ private:
   std::unordered_map<BlockTXID, PerThreadARC<BlockTX>> block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
+  // closed snapshot hashes waiting for commit.
+  // Declared (with lock_, block_txes_, and block_tx_cache_) before
+  // invoke_txes_: destroying an InvokeTX can garbage collect an abandoned
+  // block through remove_shutdown_block_tx(), which touches all of them, so
+  // they must outlive invoke_txes_ during ~RPCContext().
+  std::map<BlockTXID, DbHash> db_hashes_;
   // pending invocation transactions.
   SynchronizedMap<InvokeTxKey, InvokeTX, InvokeTxKey::Hash> invoke_txes_;
-  // closed snapshot hashes waiting for commit.
-  std::map<BlockTXID, DbHash> db_hashes_;
 
   // External services that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;
@@ -318,20 +324,28 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
     PerThreadARC<BlockTX> *btx = get_block_tx(bid);
     if (!btx) [[unlikely]]
       return nullptr;
-    // get_block_tx() acquires a reference to the blocktx.
-    tx = invoke_txes_.insert(key, InvokeTX(*btx), ul);
+    // get_block_tx() acquires a reference to the blocktx; the InvokeTX owns
+    // it from here on.
+    tx = invoke_txes_.insert(key, InvokeTX(*btx, *this, bid), ul);
     assert(tx != nullptr);
   }
   return tx;
 }
 
 inline void
-RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx)
+RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid,
+                            [[maybe_unused]] InvokeTX *itx)
 {
-  bool destroy_blocktx = itx->release_blocktx_reference();
-  invoke_txes_.remove(InvokeTxKey{.block_tx_id = bid, .invoke_tx_id = iid});
-  if (destroy_blocktx) {
-    remove_shutdown_block_tx(bid);
+  InvokeTxKey key{.block_tx_id = bid, .invoke_tx_id = iid};
+  // Destroying the InvokeTX releases its counted BlockTX reference -- only
+  // after destructor-time cleanup -- and garbage collects a shutdown block on
+  // the last release (see BlockTXRef, #2959). Nothing may release the
+  // reference before the InvokeTX is destroyed: another close could then free
+  // the BlockTX while this InvokeTX's destructor still dereferences it.
+  auto [tx, ul] = invoke_txes_.find(key);
+  assert(tx == itx);
+  if (tx != nullptr) {
+    invoke_txes_.remove(key, ul);
   }
 }
 
