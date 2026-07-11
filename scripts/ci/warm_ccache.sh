@@ -7,6 +7,7 @@ ROOT_DIR="$(realpath "${SCRIPT_DIR}/../..")"
 
 TARGET_SHA="${1:-}"
 WARMUP_JOBS="${HOGD_CCACHE_WARMUP_JOBS:-auto}"
+MAX_AUTO_JOBS="${HOGD_CCACHE_WARMUP_MAX_AUTO_JOBS:-96}"
 BUILD_ROOT="${HOGD_CCACHE_WARMUP_BUILD_ROOT:-build/ccache-warm}"
 LOCK_FILE="${HOGD_CCACHE_WARMUP_LOCK:-/tmp/hogd-ccache-warmup.lock}"
 SELECTED_COMPILER="${HOGD_CCACHE_WARMUP_COMPILER:-}"
@@ -29,6 +30,13 @@ fi
 
 if [[ "$WARMUP_JOBS" == "auto" ]]; then
   WARMUP_JOBS="$(detect_warmup_jobs)"
+  if ! [[ "$MAX_AUTO_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "HOGD_CCACHE_WARMUP_MAX_AUTO_JOBS must be a positive integer, got: $MAX_AUTO_JOBS" >&2
+    exit 2
+  fi
+  if ((WARMUP_JOBS > MAX_AUTO_JOBS)); then
+    WARMUP_JOBS="$MAX_AUTO_JOBS"
+  fi
 fi
 
 if ! [[ "$WARMUP_JOBS" =~ ^[1-9][0-9]*$ ]]; then
@@ -56,6 +64,7 @@ cd "$ROOT_DIR"
 
 echo "warming ccache for commit: $TARGET_SHA"
 echo "build parallelism: $WARMUP_JOBS"
+echo "max auto parallelism: $MAX_AUTO_JOBS"
 echo "build root: $BUILD_ROOT"
 echo "selected compiler: ${SELECTED_COMPILER:-<all>}"
 echo "selected build type: ${SELECTED_BUILD_TYPE:-<all>}"
