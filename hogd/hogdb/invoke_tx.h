@@ -30,12 +30,56 @@
 
 namespace hogd {
 
+class RPCContext;
+
+// BlockTXRef owns an InvokeTX's counted reference to a PerThreadARC<BlockTX>.
+// The reference is released when the BlockTXRef is destroyed -- i.e. only
+// after ~InvokeTX() has finished the destructor-time cleanup that
+// dereferences the block -- so the BlockTX can never be freed while an
+// InvokeTX that uses it is still alive (#2959). If the released reference is
+// the last one on a shutdown block and a gc context was provided, the block
+// is garbage collected via RPCContext::remove_shutdown_block_tx().
+class BlockTXRef {
+public:
+  explicit BlockTXRef(PerThreadARC<BlockTX> &block) : arc_(&block) {}
+  BlockTXRef(PerThreadARC<BlockTX> &block, RPCContext &gc_ctx, BlockTXID bid)
+    : arc_(&block), gc_ctx_(&gc_ctx), bid_(bid)
+  {}
+
+  BlockTXRef(const BlockTXRef &) = delete;
+  BlockTXRef &operator=(const BlockTXRef &) = delete;
+  BlockTXRef(BlockTXRef &&other) noexcept
+    : arc_(other.arc_), gc_ctx_(other.gc_ctx_), bid_(other.bid_),
+      active_(std::exchange(other.active_, false))
+  {}
+  BlockTXRef &operator=(BlockTXRef &&) = delete;
+
+  // Releases the reference and, on the last release of a shutdown block,
+  // garbage collects the block through the gc context.
+  ~BlockTXRef();
+
+  BlockTX &get() const { return arc_->get(); }
+
+private:
+  PerThreadARC<BlockTX> *arc_;
+  RPCContext *gc_ctx_ = nullptr;
+  BlockTXID bid_ = 0;
+  bool active_ = true;
+};
+
 // InvokeTX represents a transaction for a root contract invocation and its
 // child invocations. Rolling back nested transactions is supported through
 // savepoints. The caller must provide synchronization if needed.
 class InvokeTX {
 public:
+  // The InvokeTX takes ownership of a counted reference to [block] that the
+  // caller has already acquired; ~InvokeTX() releases it. RPCContext uses
+  // the second overload so that the last release of a shutdown block
+  // garbage collects it.
   InvokeTX(PerThreadARC<BlockTX> &block) : block_(block) {}
+  InvokeTX(PerThreadARC<BlockTX> &block, RPCContext &gc_ctx, BlockTXID bid)
+    : block_(block, gc_ctx, bid)
+  {}
   ~InvokeTX() { abort(); }
 
   InvokeTX(InvokeTX &&other) noexcept = default;
@@ -120,8 +164,6 @@ public:
                                               RetrocausalQueueDelta &&delta,
                                               StorageDeltaFlagSet flags);
 
-  bool release_blocktx_reference() { return block_.release_reference(); }
-
   void assert_is_valid() const noexcept;
 
   // Execution mode of the block this transaction runs in.
@@ -191,8 +233,11 @@ private:
     unsigned int tx_depth;
   };
 
+  // block_ is the first data member so it is destroyed last: destructor-time
+  // cleanup (~InvokeTX() -> abort()) dereferences the block, so the counted
+  // reference must outlive every other part of teardown (#2959).
+  BlockTXRef block_;
   unsigned int tx_depth_{0};
-  PerThreadARC<BlockTX> &block_;
   std::optional<DbConflictCode> last_conflict_reason_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
