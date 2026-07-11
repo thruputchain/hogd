@@ -333,26 +333,18 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 }
 
 inline void
-RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid,
-                            [[maybe_unused]] InvokeTX *itx)
+RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx)
 {
-  InvokeTxKey key{.block_tx_id = bid, .invoke_tx_id = iid};
-  auto [tx, ul] = invoke_txes_.find(key);
-  assert(tx == itx);
-  if (tx == nullptr) [[unlikely]] {
-    return;
-  }
-  // Move the InvokeTX out of the map so that its destructor runs after the
-  // bucket lock is dropped: destroying the InvokeTX releases its counted
-  // BlockTX reference -- only after destructor-time cleanup -- and garbage
-  // collects a shutdown block on the last release (see BlockTXRef, #2959),
-  // which is too much work to hold the bucket lock across. Nothing may
-  // release the reference before the InvokeTX is destroyed: another close
-  // could then free the BlockTX while this InvokeTX's destructor still
-  // dereferences it.
-  InvokeTX closing(std::move(*tx));
-  invoke_txes_.remove(key, ul);
-  ul.unlock();
+  // Steal [itx]'s contents into a local so that its destructor runs after
+  // the map entry is erased and the bucket lock dropped: destroying the
+  // InvokeTX releases its counted BlockTX reference -- only after
+  // destructor-time cleanup -- and garbage collects a shutdown block on the
+  // last release (see BlockTXRef, #2959), which is too much work to hold the
+  // bucket lock across. Nothing may release the reference before the
+  // InvokeTX's cleanup has finished: another close could then free the
+  // BlockTX while this one's destructor still dereferences it.
+  InvokeTX closing(std::move(*itx));
+  invoke_txes_.remove(InvokeTxKey{.block_tx_id = bid, .invoke_tx_id = iid});
 }
 
 } // namespace hogd
