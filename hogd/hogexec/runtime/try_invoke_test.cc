@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -18,6 +17,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -2714,7 +2714,7 @@ check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
 {
   if (!res.has_value() || !res.value().has_value() ||
       !res.value().value().has_value()) {
-    throw std::runtime_error("Failed to invoke method");
+    panic("Failed to invoke method");
   }
   return res.value().value().value();
 };
@@ -3097,14 +3097,13 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           handler.hack_dont_use_test_bypass_allow_reentrance();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
-            throw std::runtime_error("root invoke 0 failed");
+            panic("root invoke 0 failed");
           }
           co_await set.bg();
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " +
-                                     x23::show(commit_res));
+            panic("try_commit_transaction error: {}", x23::show(commit_res));
           }
           co_return;
         },
@@ -3138,8 +3137,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " +
-                                     x23::show(commit_res));
+            panic("try_commit_transaction error: {}", x23::show(commit_res));
           }
           co_return;
         },

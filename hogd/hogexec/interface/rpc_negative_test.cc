@@ -4,7 +4,6 @@
 #include <format>
 #include <future>
 #include <limits>
-#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -68,9 +67,8 @@ public:
         db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
                                                       network_id, txset_hash,
                                                       events_hash);
-    if (db_res != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to load genesis configuration");
-    }
+    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
+        << "Failed to load genesis configuration";
   }
 
 protected:
@@ -122,21 +120,20 @@ protected:
     rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
   }
 
+  // CHECK, not ASSERT_*: a fatal gtest assertion in a void helper records the
+  // failure but lets the caller run on with an unopened block, which fails
+  // later in a way that hides the real cause.
   void open_db_block(BlockID block_id)
   {
     auto db_res = db_client_.dbsched_create_snapshot(
         0, block_id, BlockExecutionMode::kBlockExecutionModeProposal);
-    if (db_res != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to open db block");
-    }
+    CHECK_EQ(db_res, DbSchedResult::DbSchedResultOK);
   }
 
   void open_event_block(BlockID block_id)
   {
     auto event_res = event_client_.eventsched_open_block(block_id);
-    if (event_res != RPCError::kRPCNone) {
-      throw std::runtime_error("Failed to open event block");
-    }
+    CHECK_EQ(event_res, RPCError::kRPCNone);
   }
 
   static StalledSyscallMiscSnapshotSetup

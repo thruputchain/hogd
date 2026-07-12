@@ -3,7 +3,6 @@
 #include <cassert>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -113,16 +112,13 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
                              uint64_t expected_block_number,
                              x23::Vec<QueueEntry> expected_entries) {
     auto block = test_item.get_next_rcq_block(search_block_number);
-    ASSERT_TRUE(block.has_value());
-    // ASSERT_TRUE doesn't work properly inside a lambda
-    if (!block.value()) {
-      throw std::runtime_error("Block is null");
-    }
+    // CHECK, not ASSERT_*: a fatal gtest assertion inside a lambda returns from
+    // the lambda, not the test, so the checks below would still run on a null
+    // or short block.
+    CHECK(block.has_value());
+    CHECK(block.value() != nullptr);
     EXPECT_EQ(block.value()->block_number, expected_block_number);
-    ASSERT_EQ(block.value()->entries.size(), expected_entries.size());
-    if (block.value()->entries.size() != expected_entries.size()) {
-      throw std::runtime_error("Block entries size mismatch");
-    }
+    CHECK_EQ(block.value()->entries.size(), expected_entries.size());
     for (size_t i = 0; i < expected_entries.size(); ++i) {
       EXPECT_EQ(block.value()->entries[i], expected_entries[i]);
     }

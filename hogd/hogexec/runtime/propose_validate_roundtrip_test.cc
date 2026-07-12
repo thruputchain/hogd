@@ -6,7 +6,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -807,7 +806,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
-  EXPECT_THROW(advance_block(), std::runtime_error)
+  EXPECT_FALSE(try_advance_block().has_value())
       << "Fabricated observation value should fail finalization";
 }
 
@@ -844,7 +843,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
     ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
-  EXPECT_THROW(advance_block(), std::runtime_error)
+  EXPECT_FALSE(try_advance_block().has_value())
       << "Consumed entry from missing inserter should fail finalization";
 }
 
@@ -895,7 +894,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
     ASSERT_EQ(hc.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 
-  EXPECT_THROW(advance_block(), std::runtime_error)
+  EXPECT_FALSE(try_advance_block().has_value())
       << "More consumed than inserted should fail finalization";
 }
 
@@ -968,8 +967,9 @@ TEST_P(ProposeValidateRoundtripTest,
   ASSERT_EQ(validation_handler.try_commit_transaction(),
             ExecResult::ExecResultTxRootFrameReverted)
       << "Manual root revert commits through the revert branch";
-  EXPECT_THROW(advance_block(BlockExecutionMode::kBlockExecutionModeValidation),
-               std::runtime_error)
+  EXPECT_FALSE(
+      try_advance_block(BlockExecutionMode::kBlockExecutionModeValidation)
+          .has_value())
       << "Block close must reject the forged observation with no matching "
          "insert";
 }

@@ -3,12 +3,12 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -97,7 +97,10 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   model::WorkQueue work_queue;
 
-  auto reset_state = [&]() {
+  // Returns false rather than asserting directly: a fatal gtest assertion
+  // inside a lambda returns from the lambda, not the test, so the caller
+  // asserts on the result instead.
+  auto reset_state = [&]() -> bool {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -110,17 +113,19 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         *context);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
-      throw std::runtime_error("root invoke for reset transaction failed");
+      ADD_FAILURE() << "root invoke for reset transaction failed";
+      return false;
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res != ExecResult::ExecResultOK) {
-      throw std::runtime_error(
-          "try_commit_transaction error for reset transaction");
+      ADD_FAILURE() << "try_commit_transaction error for reset transaction";
+      return false;
     }
+    return true;
   };
 
   while (!work_queue.done()) {
-    reset_state();
+    ASSERT_TRUE(reset_state());
     advance_block();
 
     model::RunnableActionSet actions(work_queue);
@@ -138,7 +143,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                     serialize<int64_t, int64_t>(SetAmount, AddAmount);
             if (!calldata.has_value()) {
-              throw std::runtime_error("Failed to serialize calldata");
+              panic("Failed to serialize calldata");
             }
 
             auto handler = self->make_new_system_call_handler(
@@ -154,12 +159,12 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 *context);
             auto res = handler.root_invoke();
             if (!res.is_root_success()) {
-              throw std::runtime_error("root invoke failed");
+              panic("root invoke failed");
             }
             auto commit_res = handler.try_commit_transaction();
             if (commit_res != ExecResult::ExecResultOK &&
                 commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-              throw std::runtime_error("try_commit_transaction error");
+              panic("try_commit_transaction error");
             }
             if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
               action_result = false;

@@ -9,10 +9,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <expected>
 #include <optional>
 #include <ostream>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -179,7 +179,7 @@ private:
   {
     auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
     if (!server_addr) {
-      throw std::runtime_error("Failed to connect to event server");
+      panic("Failed to connect to event server");
     }
     return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
         ->client(EventSched1{});
@@ -284,7 +284,7 @@ public:
       return std::variant<MockDBWrapper, HogdbWrapper>(
           std::in_place_type<HogdbWrapper>);
     default:
-      throw std::runtime_error("make_db_wrapper: invalid test_db");
+      panic("make_db_wrapper: invalid test_db {}", static_cast<int>(test_db));
     }
   }
 
@@ -304,7 +304,18 @@ public:
   // Commits the current block and creates a new one. Returns the committed
   // block's resulting trie root hash (captured at close), so callers can
   // compare committed-block state (mirrors discard_block).
+  //
+  // Aborts if the advance fails. Tests that expect the advance itself to fail
+  // -- e.g. after the db has shut down, or with a deliberately mismatched
+  // expected_dbsched_commit_snapshot_result -- must call try_advance_block and
+  // assert on the returned error instead.
   DbHash advance_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
+      DbSchedResult expected_dbsched_commit_snapshot_result =
+          DbSchedResult::DbSchedResultOK);
+
+  // As advance_block, but reports the failure rather than aborting.
+  std::expected<DbHash, std::string> try_advance_block(
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       DbSchedResult expected_dbsched_commit_snapshot_result =
           DbSchedResult::DbSchedResultOK);
@@ -370,18 +381,14 @@ public:
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
     auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
   std::optional<Contract> lookup_contract_from_db(SHA256Hash const &hash)
   {
     auto r = db_proxy_->get_contract(block_number_, hash);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_contract_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return std::move(*r);
   }
 
@@ -389,9 +396,7 @@ public:
   lookup_deployment_from_db(ContractAddress const &addr)
   {
     auto r = db_proxy_->get_deployment(block_number_, addr);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_deployment_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
@@ -561,9 +566,7 @@ public:
   DbTip get_db_tip() const
   {
     auto r = db_proxy_->get_db_tip(block_number_);
-    if (!r) {
-      throw std::runtime_error("get_db_tip: db_proxy_->get_db_tip failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
@@ -664,7 +667,7 @@ private:
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
+      panic("open_block: dbsched_create_snapshot failed: {}", r);
     }
     open_event_block(block_number_);
     storage_snapshot_cache_ =
@@ -709,8 +712,7 @@ private:
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, network_id, txset_hash, events_hash);
       if (r != DbSchedResult::DbSchedResultOK) {
-        throw std::runtime_error(
-            "initialize: dbsched_load_genesis_configuration failed");
+        panic("initialize: dbsched_load_genesis_configuration failed: {}", r);
       }
     }
 
