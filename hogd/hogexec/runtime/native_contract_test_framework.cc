@@ -4,7 +4,6 @@
 #include <expected>
 #include <format>
 #include <memory>
-#include <string>
 #include <utility>
 #include <variant>
 
@@ -25,10 +24,8 @@
 
 namespace hogd {
 
-std::expected<DbHash, std::string>
-NativeContractTestFramework::try_advance_block(
-    BlockExecutionMode mode,
-    DbSchedResult expected_dbsched_commit_snapshot_result)
+std::expected<DbHash, DbSchedResult>
+NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
 {
   // Closing finalizes the block's resulting trie root; capture it so callers
   // can compare committed-block state (mirrors discard_block's return).
@@ -36,9 +33,7 @@ NativeContractTestFramework::try_advance_block(
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
-      return std::unexpected(
-          std::format("advance_block: dbsched_close_snapshot failed: {}",
-                      r.result()));
+      return std::unexpected(r.result());
     }
     closed_hash = r.db_hash();
   }
@@ -47,10 +42,8 @@ NativeContractTestFramework::try_advance_block(
         block_number_,
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*block_hash=*/{}, /*events_hash=*/{});
-    if (r.result() != expected_dbsched_commit_snapshot_result) {
-      return std::unexpected(std::format(
-          "advance_block: mismatching dbsched_commit_snapshot result: {} != {}",
-          r.result(), expected_dbsched_commit_snapshot_result));
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      return std::unexpected(r.result());
     }
   }
   close_event_block(block_number_);
@@ -62,8 +55,7 @@ NativeContractTestFramework::try_advance_block(
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      return std::unexpected(
-          std::format("advance_block: dbsched_create_snapshot failed: {}", r));
+      return std::unexpected(r);
     }
   }
   open_event_block(block_number_);
@@ -75,13 +67,11 @@ NativeContractTestFramework::try_advance_block(
 }
 
 DbHash
-NativeContractTestFramework::advance_block(
-    BlockExecutionMode mode,
-    DbSchedResult expected_dbsched_commit_snapshot_result)
+NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
-  auto res = try_advance_block(mode, expected_dbsched_commit_snapshot_result);
+  auto res = try_advance_block(mode);
   if (!res.has_value()) {
-    panic("{}", res.error());
+    panic("advance_block failed: {}", res.error());
   }
   return res.value();
 }

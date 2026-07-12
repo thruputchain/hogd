@@ -306,19 +306,16 @@ public:
   // compare committed-block state (mirrors discard_block).
   //
   // Aborts if the advance fails. Tests that expect the advance itself to fail
-  // -- e.g. after the db has shut down, or with a deliberately mismatched
-  // expected_dbsched_commit_snapshot_result -- must call try_advance_block and
-  // assert on the returned error instead.
-  DbHash advance_block(
-      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      DbSchedResult expected_dbsched_commit_snapshot_result =
-          DbSchedResult::DbSchedResultOK);
+  // -- e.g. after the db has shut down, or on a rejected block -- must call
+  // try_advance_block and assert on the returned error instead.
+  DbHash advance_block(BlockExecutionMode mode =
+                           BlockExecutionMode::kBlockExecutionModeProposal);
 
-  // As advance_block, but reports the failure rather than aborting.
-  std::expected<DbHash, std::string> try_advance_block(
-      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      DbSchedResult expected_dbsched_commit_snapshot_result =
-          DbSchedResult::DbSchedResultOK);
+  // As advance_block, but returns the failing DbSchedResult rather than
+  // aborting.
+  std::expected<DbHash, DbSchedResult>
+  try_advance_block(BlockExecutionMode mode =
+                        BlockExecutionMode::kBlockExecutionModeProposal);
 
   // Closes the current block expecting prepare_committed_changes to fail,
   // then abandons (never commits). Asserts the DAO db hash is unchanged —
