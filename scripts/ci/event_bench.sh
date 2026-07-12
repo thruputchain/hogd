@@ -10,11 +10,17 @@ EVENT_BENCH_CONTROL_PORT=${EVENT_BENCH_CONTROL_PORT:-${CI_CONTROL_PORT:-11111}}
 EVENT_BENCH_FAKE_SCHED_HOST=${EVENT_BENCH_FAKE_SCHED_HOST:-${EVENT_BENCH_MEMPOOL_HOST:-$(hostname)}}
 EVENT_BENCH_FAKE_SCHED_PORT=${EVENT_BENCH_FAKE_SCHED_PORT:-${EVENT_BENCH_MEMPOOL_PORT:-8095}}
 EVENT_BENCH_WORK_DIR=${EVENT_BENCH_WORK_DIR:-${WORK_DIR:-ci_work_dir}}
+EVENT_BENCH_FAKE_SCHED_PID=""
 
 cleanup() {
   local exit_code=$1
 
   ci_enter_cleanup
+  if [ -n "$EVENT_BENCH_FAKE_SCHED_PID" ]; then
+    echo 'stop fake scheduler event server'
+    kill "$EVENT_BENCH_FAKE_SCHED_PID" 2>/dev/null || true
+    wait "$EVENT_BENCH_FAKE_SCHED_PID" 2>/dev/null || true
+  fi
   echo 'stop event server'
   "$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" stop || true
 
@@ -35,6 +41,11 @@ ci_wait_port "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT"
 echo 'clear work dirs'
 "$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" clear_work_dir
 
+echo 'start fake scheduler event server'
+./$BUILD_DIR/hogd/event/event_server_bench -F -p "$EVENT_BENCH_FAKE_SCHED_PORT" >event_fake_sched_log 2>&1 &
+EVENT_BENCH_FAKE_SCHED_PID=$!
+ci_wait_port "$EVENT_BENCH_FAKE_SCHED_HOST" "$EVENT_BENCH_FAKE_SCHED_PORT"
+
 echo 'launch event server'
 "$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" start hogd/event/event_exec --mempool-addr "$(hog_ip "$EVENT_BENCH_FAKE_SCHED_HOST"):$EVENT_BENCH_FAKE_SCHED_PORT" --bind-ip "$(hog_ip "$EVENT_BENCH_HOST")" --work-dir "$EVENT_BENCH_WORK_DIR/" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT"
 
@@ -46,7 +57,7 @@ ci_wait_port "$EVENT_BENCH_HOST" "$EVENT_EXECUTOR_PORT"
 ci_wait_port "$EVENT_BENCH_HOST" "$EVENT_MEMPOOL_PORT"
 
 echo 'run event server benchmark'
-./$BUILD_DIR/hogd/event/event_server_bench -e "$(hog_ip "$EVENT_BENCH_HOST"):$EVENT_EXECUTOR_PORT" -s "$(hog_ip "$EVENT_BENCH_HOST"):$EVENT_MEMPOOL_PORT" -n 1000000 -c 40 -o 100 -p "$EVENT_BENCH_FAKE_SCHED_PORT" >event_server_bench_log
+./$BUILD_DIR/hogd/event/event_server_bench -S -e "$(hog_ip "$EVENT_BENCH_HOST"):$EVENT_EXECUTOR_PORT" -s "$(hog_ip "$EVENT_BENCH_HOST"):$EVENT_MEMPOOL_PORT" -n 1000000 -c 40 -o 100 -p "$EVENT_BENCH_FAKE_SCHED_PORT" >event_server_bench_log
 
 if [ "${CI_SKIP_CLONE_METRICS_HISTORY:-0}" != "1" ]; then
   echo 'clone metrics history' # This is idempotent
