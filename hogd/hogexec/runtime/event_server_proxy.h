@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdexcept>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -36,7 +35,7 @@ public:
     info("Connecting to event server at {}", x23::show(event));
     x23::HostPort host_port;
     if (!host_port.parse(event.address_for_exec)) {
-      throw std::runtime_error("Failed to parse event server address");
+      panic("Failed to parse event server address");
     }
     return EventServerProxy(host_port);
   }

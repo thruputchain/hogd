@@ -353,7 +353,7 @@ private:
   {
     auto out = Serializer<kSerializationFormat>::serialize(args);
     if (!out.has_value()) {
-      throw std::runtime_error("Failed to encode calldata");
+      panic("Failed to encode calldata");
     }
     return out.value();
   }
