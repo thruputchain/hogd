@@ -4,7 +4,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <variant>
 
@@ -20,6 +19,52 @@
 #include "types.hh"
 
 namespace hogd {
+
+SystemStatus<void>
+SnapshotStorageItem::validate_wire_item(StorageKey const &db_key,
+                                        WireStorageItem const &item)
+{
+  switch (db_key.key_type()) {
+  case StorageKeyType::ContractData:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeBytestring:
+    case StorageItemType::kItemTypeNonnegativeInt:
+    case StorageItemType::kItemTypeRetrocausalQueue:
+    case StorageItemType::kItemTypeDeleted:
+    case StorageItemType::kItemTypeReplayCacheData:
+      return {};
+    default:
+      error("Unrecoverable: unsupported wire item type {} for ContractData key",
+            static_cast<int>(item.type()));
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  case StorageKeyType::FreeNativeTokenBalance:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeNonnegativeInt:
+    case StorageItemType::kItemTypeDeleted:
+      return {};
+    default:
+      error("Unrecoverable: unsupported wire item type {} for "
+            "FreeNativeTokenBalance key",
+            static_cast<int>(item.type()));
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  case StorageKeyType::AuthData:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeAuthData:
+    case StorageItemType::kItemTypeDeleted:
+      return {};
+    default:
+      error("Unrecoverable: unsupported wire item type {} for AuthData key",
+            static_cast<int>(item.type()));
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  default:
+    error("Unrecoverable: unsupported storage key type {}",
+          static_cast<int>(db_key.key_type()));
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+}
 
 SnapshotStorageItem::variant_type
 SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
@@ -40,12 +85,13 @@ SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
   case StorageItemType::kItemTypeReplayCacheData:
     return variant_type{std::in_place_type<ReplayCacheEntry>};
   case StorageItemType::kItemTypeAuthData:
-    throw std::runtime_error("Auth data not yet supported");
+    panic("Auth data not supported for contract-data key (should be gated by "
+          "validate_wire_item)");
   case StorageItemType::kItemTypeDeployedContractHash:
-    throw std::runtime_error("Deployed contract hash cached elsewhere");
+    panic("Deployed contract hash cached elsewhere (should be gated by "
+          "validate_wire_item)");
   }
-  assert(false);
-  throw std::runtime_error("Impossible");
+  panic("Impossible: unhandled StorageItemType in make_contract_key_variant");
 }
 
 SnapshotStorageItem::variant_type
@@ -64,12 +110,13 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
     case StorageItemType::kItemTypeDeleted:
       return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
     case StorageItemType::kItemTypeAuthData:
-      throw std::runtime_error("Auth data not yet supported");
+      panic("Auth data not supported for native-token-balance key (should be "
+            "gated by validate_wire_item)");
     case StorageItemType::kItemTypeReplayCacheData:
-      throw std::runtime_error("Replay cache data not yet supported");
+      panic("Replay cache data not supported for native-token-balance key "
+            "(should be gated by validate_wire_item)");
     default:
-      assert(false);
-      throw std::runtime_error("Impossible");
+      panic("Impossible: unhandled item type for native-token-balance key");
     }
   case StorageKeyType::AuthData:
     switch (item.type()) {
@@ -79,12 +126,10 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
     case StorageItemType::kItemTypeDeleted:
       return variant_type{std::in_place_type<DeletedEntry>};
     default:
-      assert(false);
-      throw std::runtime_error("Unexpected item type for auth data key");
+      panic("Impossible: unhandled item type for auth-data key");
     }
   default:
-    assert(false);
-    throw std::runtime_error("Impossible");
+    panic("Impossible: unhandled StorageKeyType in make_variant");
   }
 }
 

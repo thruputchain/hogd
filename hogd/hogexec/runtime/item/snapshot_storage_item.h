@@ -42,6 +42,12 @@ public:
     assert(&db_proxy_);
   }
 
+  // Returns Unrecoverable if the (key_type, item_type) pair is one that
+  // make_variant cannot map (unsupported/unexpected wire item). Must be called
+  // before constructing a SnapshotStorageItem, which is immovable.
+  static SystemStatus<void> validate_wire_item(StorageKey const &db_key,
+                                               WireStorageItem const &item);
+
   // Delete copy and move
   SnapshotStorageItem(const SnapshotStorageItem &) = delete;
   SnapshotStorageItem &operator=(const SnapshotStorageItem &) = delete;

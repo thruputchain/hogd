@@ -154,6 +154,11 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
           ? db_res.value().value()
           : WireStorageItem(StorageItemType::kItemTypeDeleted);
 
+  if (auto v = SnapshotStorageItem::validate_wire_item(addrkey.key, db_item);
+      !v) {
+    return v.error();
+  }
+
   auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
                                                block_id_, db_proxy_);
   if (out) {

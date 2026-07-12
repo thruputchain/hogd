@@ -212,4 +212,42 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
   check_concurrent_entry(3, std::nullopt);
   check_concurrent_entry_bad(4);
 }
+
+TEST(SnapshotStorageItemValidate, RejectsUnsupportedWireTypes)
+{
+  // ContractData accepts value/queue/deleted/replay-cache; not auth or
+  // deployed-contract-hash.
+  EXPECT_TRUE(SnapshotStorageItem::validate_wire_item(
+                  StorageKey(StorageKeyType::ContractData),
+                  WireStorageItem(StorageItemType::kItemTypeBytestring))
+                  .has_value());
+  EXPECT_FALSE(SnapshotStorageItem::validate_wire_item(
+                   StorageKey(StorageKeyType::ContractData),
+                   WireStorageItem(StorageItemType::kItemTypeAuthData))
+                   .has_value());
+  EXPECT_FALSE(SnapshotStorageItem::validate_wire_item(
+                   StorageKey(StorageKeyType::ContractData),
+                   WireStorageItem(StorageItemType::kItemTypeDeployedContractHash))
+                   .has_value());
+
+  // FreeNativeTokenBalance accepts nnint/deleted only.
+  EXPECT_TRUE(SnapshotStorageItem::validate_wire_item(
+                  StorageKey(StorageKeyType::FreeNativeTokenBalance),
+                  WireStorageItem(StorageItemType::kItemTypeNonnegativeInt))
+                  .has_value());
+  EXPECT_FALSE(SnapshotStorageItem::validate_wire_item(
+                   StorageKey(StorageKeyType::FreeNativeTokenBalance),
+                   WireStorageItem(StorageItemType::kItemTypeReplayCacheData))
+                   .has_value());
+
+  // AuthData accepts auth/deleted only.
+  EXPECT_TRUE(SnapshotStorageItem::validate_wire_item(
+                  StorageKey(StorageKeyType::AuthData),
+                  WireStorageItem(StorageItemType::kItemTypeAuthData))
+                  .has_value());
+  EXPECT_FALSE(SnapshotStorageItem::validate_wire_item(
+                   StorageKey(StorageKeyType::AuthData),
+                   WireStorageItem(StorageItemType::kItemTypeBytestring))
+                   .has_value());
+}
 } // namespace hogd
