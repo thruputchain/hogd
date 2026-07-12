@@ -8,10 +8,6 @@ source ./scripts/ci/setup_cargo.sh
 echo 'setting up ccache'
 ln -s "$USER_HOME/.cache" "$HOME/.cache"
 
-echo 'setting up go build cache'
-export GOCACHE="$HOME/.gocache/go-build"
-mkdir -p "$GOCACHE"
-
 CBINDGEN_VERSION=0.29.2
 if command -v cbindgen >/dev/null 2>&1 && cbindgen --version | grep -qx "cbindgen ${CBINDGEN_VERSION}"; then
   echo "cbindgen ${CBINDGEN_VERSION} already installed"
