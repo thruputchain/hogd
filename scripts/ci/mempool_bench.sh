@@ -143,8 +143,10 @@ echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
 
-echo 'clone metrics history # This is idempotent'
-./scripts/clone_metrics_history.sh
+if [ "${CI_SKIP_CLONE_METRICS_HISTORY:-0}" != "1" ]; then
+  echo 'clone metrics history # This is idempotent'
+  ./scripts/clone_metrics_history.sh
+fi
 
 echo 'log integration metrics'
 ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
