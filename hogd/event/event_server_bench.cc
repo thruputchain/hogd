@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -245,13 +246,14 @@ usage(char *argv[])
 {
   std::println("Usage: {} -e <event_exec_server_addr> -s "
                "<event_sched_server_addr> [-n num_events] [-c num_connections] "
-               "[-o coros_per_connection] [-b batch_size]",
+               "[-o coros_per_connection] [-p fake_sched_port]",
                argv[0]);
   std::println("  -e: Event executor server address (e.g., hostname:8090)");
   std::println("  -s: Event scheduler server address (e.g., hostname:8091)");
   std::println("  -n: Number of events (default: 1000000)");
   std::println("  -c: Number of connections (default: 10)");
   std::println("  -o: Coroutines per connection (default: 100)");
+  std::println("  -p: Fake scheduler event server port (default: 8095)");
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -268,10 +270,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   size_t num_events = 1'000'000;
   size_t num_connections = 20;
   size_t coros_per_connection = 100;
+  uint16_t fake_sched_port = 8095;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:s:n:c:o:b:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:s:n:c:o:p:")) != -1) {
     switch (opt) {
     case 'e':
       exec_server_addr = optarg;
@@ -288,6 +291,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'o':
       coros_per_connection = std::stoull(optarg);
       break;
+    case 'p':
+    {
+      const auto port = std::stoul(optarg);
+      if (port > UINT16_MAX) {
+        usage(argv);
+      }
+      fake_sched_port = static_cast<uint16_t>(port);
+      break;
+    }
     default:
       usage(argv);
     }
@@ -300,7 +312,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   hogd::RpcServer<hogd::TestSchedEvent> test_sched_event_server;
-  if (test_sched_event_server.start_server(8095) != 8095) {
+  if (test_sched_event_server.start_server(fake_sched_port) !=
+      fake_sched_port) {
     std::println("Error: Failed to start test sched event server");
     return EXIT_FAILURE;
   }
