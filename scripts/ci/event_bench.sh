@@ -13,6 +13,7 @@ EVENT_BENCH_WORK_DIR=${EVENT_BENCH_WORK_DIR:-${WORK_DIR:-ci_work_dir}}
 EVENT_BENCH_FAKE_SCHED_PID=""
 EVENT_BENCH_EVENT_STDOUT=""
 EVENT_BENCH_EVENT_STDERR=""
+EVENT_BENCH_REMOTE_WORK_DIR=""
 
 dump_local_log() {
   local label=$1
@@ -35,6 +36,44 @@ dump_event_exec_logs() {
     echo "--- event_exec log: $EVENT_BENCH_HOST:$path ---"
     ci_remote_run "$EVENT_BENCH_HOST" "if [ -f '$path' ]; then tail -n 200 '$path'; else echo 'missing $path'; fi" || true
   done
+}
+
+resolve_event_work_dir() {
+  local control_work_dir
+  local output
+  local suffix
+  local work_prefix
+
+  if [[ $EVENT_BENCH_WORK_DIR = /* ]]; then
+    EVENT_BENCH_REMOTE_WORK_DIR=$EVENT_BENCH_WORK_DIR
+    return 0
+  fi
+
+  if ! output=$("$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" work_dir 2>&1); then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  control_work_dir=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_WORK_DIR=//p' | tail -n 1)
+  if [[ -z $control_work_dir ]]; then
+    echo 'failed to parse control server work directory' >&2
+    return 1
+  fi
+
+  work_prefix=${WORK_DIR:-ci_work_dir}
+  work_prefix=${work_prefix%/}
+  if [[ -n $work_prefix &&
+        ($EVENT_BENCH_WORK_DIR == "$work_prefix" ||
+         $EVENT_BENCH_WORK_DIR == "$work_prefix/"*) ]]; then
+    suffix=${EVENT_BENCH_WORK_DIR#"$work_prefix"}
+    suffix=${suffix#/}
+    EVENT_BENCH_REMOTE_WORK_DIR=$control_work_dir
+    if [[ -n $suffix ]]; then
+      EVENT_BENCH_REMOTE_WORK_DIR="$EVENT_BENCH_REMOTE_WORK_DIR/$suffix"
+    fi
+  else
+    EVENT_BENCH_REMOTE_WORK_DIR="$control_work_dir/$EVENT_BENCH_WORK_DIR"
+  fi
 }
 
 cleanup() {
@@ -71,6 +110,9 @@ ci_wait_port "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT"
 
 echo 'clear work dirs'
 "$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" clear_work_dir
+resolve_event_work_dir
+echo "create event work dir: $EVENT_BENCH_REMOTE_WORK_DIR"
+ci_remote_run "$EVENT_BENCH_HOST" "mkdir -p '$EVENT_BENCH_REMOTE_WORK_DIR'"
 
 echo 'start fake scheduler event server'
 ./$BUILD_DIR/hogd/event/event_server_bench -F -p "$EVENT_BENCH_FAKE_SCHED_PORT" >event_fake_sched_log 2>&1 &
@@ -78,7 +120,7 @@ EVENT_BENCH_FAKE_SCHED_PID=$!
 ci_wait_port "$EVENT_BENCH_FAKE_SCHED_HOST" "$EVENT_BENCH_FAKE_SCHED_PORT"
 
 echo 'launch event server'
-if ! event_start_output=$("$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" start hogd/event/event_exec --mempool-addr "$(hog_ip "$EVENT_BENCH_FAKE_SCHED_HOST"):$EVENT_BENCH_FAKE_SCHED_PORT" --bind-ip "$(hog_ip "$EVENT_BENCH_HOST")" --work-dir "$EVENT_BENCH_WORK_DIR/" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" 2>&1); then
+if ! event_start_output=$("$CONTROL_CLI" "$EVENT_BENCH_HOST" "$EVENT_BENCH_CONTROL_PORT" start hogd/event/event_exec --mempool-addr "$(hog_ip "$EVENT_BENCH_FAKE_SCHED_HOST"):$EVENT_BENCH_FAKE_SCHED_PORT" --bind-ip "$(hog_ip "$EVENT_BENCH_HOST")" --work-dir "$EVENT_BENCH_REMOTE_WORK_DIR/" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" 2>&1); then
   printf '%s\n' "$event_start_output"
   exit 1
 fi
