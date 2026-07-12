@@ -11,7 +11,6 @@
 #include <optional>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -135,7 +134,7 @@ connect_to_event_sched_server(const ServerAddress &address)
 {
   x23::HostPort host_port;
   if (!host_port.parse(address)) {
-    throw std::runtime_error("Failed to parse event sched server address");
+    panic("Failed to parse event sched server address");
   }
   return make_rpc_client<EventSched1>(host_port, false)();
 }
@@ -145,7 +144,7 @@ connect_to_db_server(ShardCard const &card)
 {
   x23::HostPort host_port;
   if (!host_port.parse(card.address_for_sched)) {
-    throw std::runtime_error("Failed to parse db server address");
+    panic("Failed to parse db server address");
   }
   return make_srpc_client<DbSched1>(host_port, false);
 }
@@ -155,7 +154,7 @@ connect_to_exec_server(const ExecCard &card)
 {
   x23::HostPort host_port;
   if (!host_port.parse(card.address)) {
-    throw std::runtime_error("Failed to parse exec server address");
+    panic("Failed to parse exec server address");
   }
   return make_rpc_client<ExecutorSched1>(host_port, false)();
 }
@@ -218,7 +217,7 @@ open_block(db_sched_client_t &db_sched_client,
       parent_block_number, block_number,
       BlockExecutionMode::kBlockExecutionModeProposal);
   if (res != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to create snapshot");
+    panic("Failed to create snapshot");
   }
   auto create_time = x23::fastclock::get_ns();
   async();
@@ -255,7 +254,7 @@ close_block(db_sched_client_t &db_sched_client,
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to close snapshot");
+    panic("Failed to close snapshot");
   }
   auto close_time = x23::fastclock::get_ns();
   auto commit_res =
@@ -264,7 +263,7 @@ close_block(db_sched_client_t &db_sched_client,
                                               /*events_hash=*/{});
   // NOLINTEND(bugprone-argument-comment)
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("Failed to commit snapshot");
+    panic("Failed to commit snapshot");
   }
   auto commit_time = x23::fastclock::get_ns();
   // It's ok for finish_block to overlap with db.close_block, because we already
@@ -301,7 +300,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
       assert(r.size() == batch.size());
       for (auto const &result : r) {
         if (result.result() != ExecResult::ExecResultOK) {
-          throw std::runtime_error("Failed to propose batch");
+          panic("Failed to propose batch");
         }
       }
     }
@@ -371,7 +370,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   if (server_addrs.size() < 3) {
     // 1 db, 1 event server, and the rest executors
-    throw std::runtime_error("At least 3 servers are required");
+    panic("At least 3 servers are required");
   }
 
   RpcServer<SchedExecTest> sched_exec_test;
@@ -386,7 +385,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto work_dir = control_server_handles[0].ci_client.query_work_dir();
   if (work_dir.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
     error("Failed to query work dir: {}", work_dir.error_code());
-    throw std::runtime_error("Failed to query work dir");
+    panic("Failed to query work dir");
   }
 
   std::string work_dir_str(work_dir.work_dir().begin(),
@@ -460,7 +459,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         auto res = db_sched_client.dbsched_load_genesis_configuration(
             genesis_configuration, network_id, txset_hash, events_hash);
         if (res != DbSchedResult::DbSchedResultOK) {
-          throw std::runtime_error("Failed to write genesis block");
+          panic("Failed to write genesis block");
         }
       };
 
@@ -475,7 +474,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   LoadgenRpc loadgen;
   auto loadgen_result = loadgen.generate_experiment(config)();
   if (loadgen_result.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
-    throw std::runtime_error("Failed to generate loadgen experiment");
+    panic("Failed to generate loadgen experiment");
   }
   auto genesis_configuration = loadgen_result.success().genesis_configuration;
   write_genesis_configuration(genesis_configuration);
@@ -503,7 +502,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       loadgen.extend_experiment(loadgen_result.success().context_id,
                                 num_txs_per_block, 1000000)();
   if (work_txs_raw.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
-    throw std::runtime_error("Failed to extend loadgen experiment");
+    panic("Failed to extend loadgen experiment");
   }
   SignedTransactionBatch work_txs;
   parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs)();
