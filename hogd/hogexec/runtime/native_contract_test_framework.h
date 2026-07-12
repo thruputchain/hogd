@@ -5,11 +5,11 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <format>
 #include <limits>
 #include <map>
 #include <memory>
-#include <expected>
 #include <optional>
 #include <ostream>
 #include <span>

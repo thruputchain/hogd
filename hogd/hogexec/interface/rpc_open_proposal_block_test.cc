@@ -156,7 +156,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   // (with bad block id, instead of the expected "contract not found")
   auto db_res = db_client_.dbsched_create_snapshot(
       0, test_block_id, BlockExecutionMode::kBlockExecutionModeProposal);
-  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK) << "Failed to open db block";
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
+      << "Failed to open db block";
 
   // All calls should return OK
   EXPECT_EQ(result1, ExecResult::ExecResultOK);

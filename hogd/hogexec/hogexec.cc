@@ -73,8 +73,9 @@ parse_host_port(const std::string &label, const std::string &address)
   }
   return ParsedHostPort{
       .host = std::string{host_port.host.begin(), host_port.host.end()},
-      .port = parse_full_integer<uint16_t>(
-          label, std::string{host_port.port.begin(), host_port.port.end()})};
+      .port = parse_full_integer<uint16_t>(label,
+                                           std::string{host_port.port.begin(),
+                                                       host_port.port.end()})};
 }
 
 int
