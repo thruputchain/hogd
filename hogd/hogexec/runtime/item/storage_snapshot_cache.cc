@@ -154,8 +154,15 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
           ? db_res.value().value()
           : WireStorageItem(StorageItemType::kItemTypeDeleted);
 
-  auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
-                                               block_id_, db_proxy_);
+  auto entry =
+      SnapshotStorageItem::make_variant(std::move(db_item), addrkey.key);
+  if (!entry) {
+    return entry.error();
+  }
+
+  auto [out, ul] =
+      snapshot_item_cache_.insert(addrkey, std::move(entry).value(), addrkey,
+                                  block_id_, db_proxy_);
   if (out) {
     // insertion happened; return the result
     return out;

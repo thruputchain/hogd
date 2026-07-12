@@ -5,7 +5,6 @@
 #include <exception>
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -162,17 +161,16 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         auto sharded_db = std::get<ShardedDB>(db_identifier);
         assert(!sharded_db.shards_.empty());
         if (sharded_db.shards_.size() > 1) {
-          throw std::runtime_error(
-              "ShardedDB with more than one shard is not yet supported");
+          panic("ShardedDB with more than one shard is not yet supported");
         }
         x23::HostPort hostport;
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
-          throw std::runtime_error("Failed to parse database shard address");
+          panic("Failed to parse database shard address");
         }
         return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
                                                                     false);
       }
-      throw std::runtime_error("unimplemented");
+      panic("unimplemented");
     }())
 {}
 

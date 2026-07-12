@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -44,27 +45,39 @@ protected:
   std::unique_ptr<SnapshotStorageItem> make_empty_item()
   {
     assert(db_proxy_);
-    return std::make_unique<SnapshotStorageItem>(
-        WireStorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
-        BlockID{1}, *db_proxy_);
+    AddressAndKey addrkey{};
+    auto entry = SnapshotStorageItem::make_variant(
+        WireStorageItem(StorageItemType::kItemTypeDeleted), addrkey.key);
+    CHECK(entry.has_value());
+    return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
+                                                 std::move(addrkey), BlockID{1},
+                                                 *db_proxy_);
   }
 
   std::unique_ptr<SnapshotStorageItem> make_empty_native_token_balance_item()
   {
     assert(db_proxy_);
-    return std::make_unique<SnapshotStorageItem>(
-        WireStorageItem(StorageItemType::kItemTypeDeleted),
-        AddressAndKey{.address = ContractAddress{},
-                      .key =
-                          StorageKey(StorageKeyType::FreeNativeTokenBalance)},
-        BlockID{1}, *db_proxy_);
+    AddressAndKey addrkey{.address = ContractAddress{},
+                          .key = StorageKey(
+                              StorageKeyType::FreeNativeTokenBalance)};
+    auto entry = SnapshotStorageItem::make_variant(
+        WireStorageItem(StorageItemType::kItemTypeDeleted), addrkey.key);
+    CHECK(entry.has_value());
+    return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
+                                                 std::move(addrkey), BlockID{1},
+                                                 *db_proxy_);
   }
 
   std::unique_ptr<SnapshotStorageItem> make_rcq_item()
   {
-    return std::make_unique<SnapshotStorageItem>(
+    AddressAndKey addrkey{};
+    auto entry = SnapshotStorageItem::make_variant(
         WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue),
-        AddressAndKey{}, BlockID{1}, *db_proxy_);
+        addrkey.key);
+    CHECK(entry.has_value());
+    return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
+                                                 std::move(addrkey), BlockID{1},
+                                                 *db_proxy_);
   }
 
   static void check_eq(QueueEntry const &value, uint32_t expected)

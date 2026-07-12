@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <exception>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -79,7 +78,8 @@ handle_start_command(std::string const &host, std::string const &port,
 {
   try {
     if (args.empty()) {
-      throw std::runtime_error("start requires a program name");
+      hogd::info("Error: start requires a program name");
+      return 1;
     }
     auto client = hogd::connect_to_control_server(host, port);
     // gcc14 has vector<string> format problems in CI

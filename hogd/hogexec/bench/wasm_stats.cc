@@ -3,7 +3,6 @@
 #include <exception>
 #include <filesystem>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,7 +30,7 @@ load_wasm_file(std::string const &filename)
 {
   FILE *f = std::fopen(filename.c_str(), "rb");
   if (f == nullptr) {
-    throw std::runtime_error("Failed to open file: " + filename);
+    panic("Failed to open file: {}", filename);
   }
 
   std::vector<uint8_t> contents;

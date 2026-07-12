@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -181,7 +180,9 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
         return i;
       }
     }
-    throw "ContractTraitMeta: Method name not found";
+    // Not found: constant-evaluating std::unreachable() is ill-formed, so an
+    // unknown method name is a compile error (as with the previous throw).
+    std::unreachable();
   }();
 
   // map the i'th function name to the sorted index that it's actually exported
@@ -353,7 +354,7 @@ private:
   {
     auto out = Serializer<kSerializationFormat>::serialize(args);
     if (!out.has_value()) {
-      throw std::runtime_error("Failed to encode calldata");
+      panic("Failed to encode calldata");
     }
     return out.value();
   }
