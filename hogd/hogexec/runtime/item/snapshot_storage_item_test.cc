@@ -225,10 +225,11 @@ TEST(SnapshotStorageItemValidate, RejectsUnsupportedWireTypes)
                    StorageKey(StorageKeyType::ContractData),
                    WireStorageItem(StorageItemType::kItemTypeAuthData))
                    .has_value());
-  EXPECT_FALSE(SnapshotStorageItem::validate_wire_item(
-                   StorageKey(StorageKeyType::ContractData),
-                   WireStorageItem(StorageItemType::kItemTypeDeployedContractHash))
-                   .has_value());
+  EXPECT_FALSE(
+      SnapshotStorageItem::validate_wire_item(
+          StorageKey(StorageKeyType::ContractData),
+          WireStorageItem(StorageItemType::kItemTypeDeployedContractHash))
+          .has_value());
 
   // FreeNativeTokenBalance accepts nnint/deleted only.
   EXPECT_TRUE(SnapshotStorageItem::validate_wire_item(
