@@ -63,8 +63,8 @@ resolve_event_work_dir() {
   work_prefix=${WORK_DIR:-ci_work_dir}
   work_prefix=${work_prefix%/}
   if [[ -n $work_prefix &&
-        ($EVENT_BENCH_WORK_DIR == "$work_prefix" ||
-         $EVENT_BENCH_WORK_DIR == "$work_prefix/"*) ]]; then
+    ($EVENT_BENCH_WORK_DIR == "$work_prefix" ||
+    $EVENT_BENCH_WORK_DIR == "$work_prefix/"*) ]]; then
     suffix=${EVENT_BENCH_WORK_DIR#"$work_prefix"}
     suffix=${suffix#/}
     EVENT_BENCH_REMOTE_WORK_DIR=$control_work_dir

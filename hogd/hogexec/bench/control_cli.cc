@@ -129,14 +129,12 @@ handle_work_dir_command(std::string const &host, std::string const &port)
   try {
     auto client = hogd::connect_to_control_server(host, port);
     auto status = client.query_work_dir();
-    if (status.error_code() !=
-        hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+    if (status.error_code() != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       hogd::info("Error: {}", status.error_code());
       return 1;
     }
-    std::println("CONTROL_WORK_DIR={}",
-                 std::string(status.work_dir().begin(),
-                             status.work_dir().end()));
+    std::println("CONTROL_WORK_DIR={}", std::string(status.work_dir().begin(),
+                                                    status.work_dir().end()));
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
