@@ -5,10 +5,8 @@
 #include <exception>
 #include <filesystem>
 #include <format>
-#include <limits>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -16,6 +14,7 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
@@ -33,15 +32,18 @@ struct GenerateOptions {
   std::vector<std::filesystem::path> contract_artifact_directories;
 };
 
+// Defined below, after the usage text; the parse helpers report through it.
+[[noreturn]] void usage(char *argv[]);
+
 hogd::Ed25519PublicKey
-parse_faucet_public_key(std::string_view value)
+parse_faucet_public_key(std::string_view value, char *argv[])
 {
   if (value.starts_with("0x")) {
     value.remove_prefix(2);
   }
   if (value.size() != 64) {
-    throw std::runtime_error(
-        "Invalid faucet public key: expected 32-byte hex value");
+    hogd::arg_error("Invalid faucet public key: expected 32-byte hex value",
+                    argv, usage);
   }
 
   hogd::Ed25519PublicKey public_key{};
@@ -51,8 +53,8 @@ parse_faucet_public_key(std::string_view value)
     const char *last = first + 2;
     auto [ptr, error] = std::from_chars(first, last, byte, 16);
     if (error != std::errc{} || ptr != last) {
-      throw std::runtime_error(
-          "Invalid faucet public key: expected 32-byte hex value");
+      hogd::arg_error("Invalid faucet public key: expected 32-byte hex value",
+                      argv, usage);
     }
     public_key[i] = static_cast<std::uint8_t>(byte);
   }
@@ -95,23 +97,25 @@ usage(char *argv[])
 }
 
 std::uint32_t
-parse_u32(const std::string &value, std::string_view name)
+parse_u32(std::string_view value, std::string_view name, char *argv[])
 {
-  const std::uint64_t parsed = hogd::parse_u64(value, name);
-  if (parsed > std::numeric_limits<std::uint32_t>::max()) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  std::optional<std::uint32_t> parsed =
+      hogd::try_parse_integer<std::uint32_t>(value);
+  if (!parsed) {
+    hogd::arg_error(std::format("Invalid {}: {}", name, value), argv, usage);
   }
-  return static_cast<std::uint32_t>(parsed);
+  return *parsed;
 }
 
 std::uint32_t
-parse_bootstrap_account_count(const std::string &value)
+parse_bootstrap_account_count(std::string_view value, char *argv[])
 {
-  std::uint32_t count = parse_u32(value, "dev account count");
+  std::uint32_t count = parse_u32(value, "dev account count", argv);
   if (count > hogd::kMaxBootstrapAccounts) {
-    throw std::runtime_error(
+    hogd::arg_error(
         std::format("Invalid dev account count: {} exceeds maximum {}", value,
-                    hogd::kMaxBootstrapAccounts));
+                    hogd::kMaxBootstrapAccounts),
+        argv, usage);
   }
   return count;
 }
@@ -131,15 +135,16 @@ parse_generate_args(int argc, char *argv[])
     if (arg == "--network-id" && i + 1 < argc) {
       options.config.network_id = argv[++i];
       if (options.config.network_id.empty()) {
-        throw std::runtime_error("Invalid network id: id must not be empty");
+        hogd::arg_error("Invalid network id: id must not be empty", argv,
+                        usage);
       }
       continue;
     }
     if (arg == "--dev-wallet-profile" && i + 1 < argc) {
       options.config.bootstrap_config.dev_wallet_profile = argv[++i];
       if (options.config.bootstrap_config.dev_wallet_profile.empty()) {
-        throw std::runtime_error(
-            "Invalid dev wallet profile: profile must not be empty");
+        hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
+                        argv, usage);
       }
       hogd::resolve_dev_wallet_profile(
           options.config.bootstrap_config.dev_wallet_profile);
@@ -147,35 +152,46 @@ parse_generate_args(int argc, char *argv[])
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
       options.config.bootstrap_config.count =
-          parse_bootstrap_account_count(argv[++i]);
+          parse_bootstrap_account_count(argv[++i], argv);
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
       options.config.bootstrap_config.seed = argv[++i];
       if (options.config.bootstrap_config.seed.empty()) {
-        throw std::runtime_error(
-            "Invalid dev account seed: seed must not be empty");
+        hogd::arg_error("Invalid dev account seed: seed must not be empty",
+                        argv, usage);
       }
       continue;
     }
     if (arg == "--dev-account-tokens" && i + 1 < argc) {
-      options.config.bootstrap_config.storage_tokens =
-          hogd::parse_u64(argv[++i], "dev account tokens");
+      const std::string_view value = argv[++i];
+      std::optional<std::uint64_t> tokens = hogd::try_parse_u64(value);
+      if (!tokens) {
+        hogd::arg_error(std::format("Invalid dev account tokens: {}", value),
+                        argv, usage);
+      }
+      options.config.bootstrap_config.storage_tokens = *tokens;
       continue;
     }
     if (arg == "--faucet-public-key" && i + 1 < argc) {
       if (faucet_public_key.has_value()) {
-        throw std::runtime_error(
-            "--faucet-public-key may only be specified once");
+        hogd::arg_error("--faucet-public-key may only be specified once", argv,
+                        usage);
       }
-      faucet_public_key = parse_faucet_public_key(argv[++i]);
+      faucet_public_key = parse_faucet_public_key(argv[++i], argv);
       continue;
     }
     if (arg == "--faucet-tokens" && i + 1 < argc) {
       if (faucet_tokens.has_value()) {
-        throw std::runtime_error("--faucet-tokens may only be specified once");
+        hogd::arg_error("--faucet-tokens may only be specified once", argv,
+                        usage);
       }
-      faucet_tokens = hogd::parse_u64(argv[++i], "faucet tokens");
+      const std::string_view value = argv[++i];
+      faucet_tokens = hogd::try_parse_u64(value);
+      if (!faucet_tokens) {
+        hogd::arg_error(std::format("Invalid faucet tokens: {}", value), argv,
+                        usage);
+      }
       continue;
     }
     if (arg == "--genesis-out" && i + 1 < argc) {
@@ -189,8 +205,9 @@ parse_generate_args(int argc, char *argv[])
     if (arg == "--contract-artifacts-dir" && i + 1 < argc) {
       std::filesystem::path dir(argv[++i]);
       if (dir.empty()) {
-        throw std::runtime_error(
-            "Invalid contract artifacts dir: path must not be empty");
+        hogd::arg_error(
+            "Invalid contract artifacts dir: path must not be empty", argv,
+            usage);
       }
       options.contract_artifact_directories.push_back(std::move(dir));
       continue;
@@ -199,14 +216,15 @@ parse_generate_args(int argc, char *argv[])
   }
 
   if (options.genesis_out.empty()) {
-    throw std::runtime_error("--genesis-out is required");
+    hogd::arg_error("--genesis-out is required", argv, usage);
   }
   if (options.metadata_out.empty()) {
-    throw std::runtime_error("--metadata-out is required");
+    hogd::arg_error("--metadata-out is required", argv, usage);
   }
   if (faucet_public_key.has_value() != faucet_tokens.has_value()) {
-    throw std::runtime_error(
-        "--faucet-public-key and --faucet-tokens must be specified together");
+    hogd::arg_error(
+        "--faucet-public-key and --faucet-tokens must be specified together",
+        argv, usage);
   }
   if (faucet_public_key.has_value()) {
     options.config.faucet = hogd::HostedFaucetConfig{
