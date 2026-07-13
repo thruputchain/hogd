@@ -178,8 +178,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     return &res->second;
   }
 
-  auto [res, inserted] =
-      bases_.try_emplace(block_height, std::move(*base));
+  auto [res, inserted] = bases_.try_emplace(block_height, std::move(*base));
   CHECK(inserted);
   return &res->second;
 }
