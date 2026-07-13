@@ -1,3 +1,5 @@
+#include <charconv>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -5,9 +7,10 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
+#include <system_error>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -21,6 +24,36 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "x23/sockio.h"
+
+namespace {
+
+// Bad command-line input is a user error, not a violated invariant: report it
+// and exit rather than terminating on an uncaught throw.
+[[noreturn]] void
+die(std::string_view message)
+{
+  std::println(stderr, "{}", message);
+  exit(EXIT_FAILURE);
+}
+
+// parse_full_integer accepts only a complete, in-range decimal number.
+// std::stoul / std::stoi throw on non-numeric or out-of-range input, and
+// hogd::parse_integer accepts trailing characters ("80abc" -> 80), so neither
+// preserves the strict validation these flags need.
+template<std::integral T>
+T
+parse_full_integer(const std::string &label, const std::string &value)
+{
+  T parsed{};
+  const auto *const end = value.data() + value.size();
+  const auto res = std::from_chars(value.data(), end, parsed);
+  if (res.ec != std::errc{} || res.ptr != end) {
+    die(std::format("Invalid {}: {}", label, value));
+  }
+  return parsed;
+}
+
+} // namespace
 
 namespace hogd {
 
@@ -36,12 +69,13 @@ parse_host_port(const std::string &label, const std::string &address)
 {
   x23::HostPort host_port;
   if (!host_port.parse(address)) {
-    throw std::runtime_error(std::format("Invalid {}: {}", label, address));
+    die(std::format("Invalid {}: {}", label, address));
   }
   return ParsedHostPort{
       .host = std::string{host_port.host.begin(), host_port.host.end()},
-      .port = static_cast<uint16_t>(std::stoul(
-          std::string{host_port.port.begin(), host_port.port.end()}))};
+      .port = parse_full_integer<uint16_t>(label,
+                                           std::string{host_port.port.begin(),
+                                                       host_port.port.end()})};
 }
 
 int
@@ -66,8 +100,8 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
       db_executor_addr || event_executor_addr || view_gateway_port;
   if (view_gateway_configured &&
       (!db_executor_addr || !event_executor_addr || !view_gateway_port)) {
-    throw std::runtime_error("--db-executor-addr, --event-executor-addr, and "
-                             "--view-gateway-port must be provided together");
+    die("--db-executor-addr, --event-executor-addr, and --view-gateway-port "
+        "must be provided together");
   }
 
   Executor executor(nthreads);
@@ -123,12 +157,17 @@ usage(char *argv[])
 uint16_t
 parse_port(const std::string &value)
 {
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
+  return parse_full_integer<uint16_t>("port", value);
+}
+
+int
+parse_nthreads(const std::string &value)
+{
+  const int nthreads = parse_full_integer<int>("nthreads", value);
+  if (nthreads <= 0) {
+    die(std::format("Invalid nthreads: {}", value));
   }
-  return static_cast<uint16_t>(port);
+  return nthreads;
 }
 
 } // namespace
@@ -168,7 +207,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--nthreads" && i + 1 < argc) {
-      nthreads = std::stoi(argv[++i]);
+      nthreads = parse_nthreads(argv[++i]);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
@@ -188,7 +227,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "-n" && i + 1 < argc) {
-      nthreads = std::stoi(argv[++i]);
+      nthreads = parse_nthreads(argv[++i]);
       continue;
     }
     if (arg == "-p" && i + 1 < argc) {

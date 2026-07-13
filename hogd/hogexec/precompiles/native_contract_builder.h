@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -227,7 +226,8 @@ public:
 
     auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
     if (!inserted) {
-      throw std::runtime_error("Method ID already exists");
+      // Registration-time programming error: no untrusted input reaches here.
+      panic("Method ID {} already exists", id);
     }
   }
 

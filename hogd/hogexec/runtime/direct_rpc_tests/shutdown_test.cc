@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <limits>
-#include <stdexcept>
 #include <utility>
 
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -43,7 +42,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAF)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  EXPECT_THROW(advance_block(), std::runtime_error);
+  EXPECT_FALSE(try_advance_block().has_value());
 
   auto res = tx1.abort_transaction();
   ASSERT_TRUE(res.has_value());
@@ -63,7 +62,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAFUnclosedShutdown)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  EXPECT_THROW(advance_block(), std::runtime_error);
+  EXPECT_FALSE(try_advance_block().has_value());
 }
 
 TEST_F(ShutdownTest, AbandonNoBlockClose)

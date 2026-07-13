@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <stdexcept>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
@@ -72,8 +71,7 @@ TEST_P(InstantiateTest, InstantiateUnexportedMemory)
 // by wasm_meter (which cannot set the stack budget before start runs).
 TEST_P(InstantiateTest, InstantiateNoStart)
 {
-  EXPECT_THROW(test::load_wasm_from_file("test_no_start.wasm"),
-               std::runtime_error);
+  EXPECT_FALSE(test::try_load_wasm_from_file("test_no_start.wasm").has_value());
 }
 
 // Regression test for audit issue #1: instantiation of a module with an

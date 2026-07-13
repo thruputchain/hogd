@@ -5,13 +5,13 @@
 #include <cstring>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -66,7 +66,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
     }
 
     // GCC with -Werror in CI doesn't recognize the above switch as exhaustive,
-    throw std::runtime_error("Unhandled enum value");
+    panic("Unhandled enum value");
   };
 
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);

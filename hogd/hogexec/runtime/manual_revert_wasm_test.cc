@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -11,6 +10,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/contract_result.h"
@@ -73,7 +73,7 @@ protected:
     if (!res.has_value() || !res.value().has_value() ||
         !res.value().value().has_value()) {
       ADD_FAILURE() << "Function call should have succeeded";
-      throw std::runtime_error("Function call should have succeeded");
+      panic("Function call should have succeeded");
     }
     if (!res.value().value().has_value()) {
       ADD_FAILURE() << "Returned buffer decode should have succeeded";

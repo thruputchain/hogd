@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <stdexcept>
 #include <utility>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -574,8 +574,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
                        std::to_underlying(StorageDeltaFlags::None));
           auto r1 = tx.try_push_current_subtransaction();
           if (!r1.has_value() || !r1.value()) {
-            throw std::runtime_error(
-                "try_push_current_subtransaction 1-1 error");
+            panic("try_push_current_subtransaction 1-1 error");
           }
           co_await set.bg();
 
@@ -590,13 +589,12 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
                        std::to_underlying(StorageDeltaFlags::None));
           auto r2 = tx.try_push_current_subtransaction();
           if (!r2.has_value() || !r2.value()) {
-            throw std::runtime_error(
-                "try_push_current_subtransaction 1-2 error");
+            panic("try_push_current_subtransaction 1-2 error");
           }
           co_await set.bg();
 
           if (!tx.commit_transaction().has_value()) {
-            throw std::runtime_error("commit_transaction error");
+            panic("commit_transaction error");
           }
 
           co_return;
@@ -620,13 +618,12 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
                        std::to_underlying(StorageDeltaFlags::None));
           auto r3 = tx.try_push_current_subtransaction();
           if (!r3.has_value() || !r3.value()) {
-            throw std::runtime_error(
-                "try_push_current_subtransaction 2-1 error");
+            panic("try_push_current_subtransaction 2-1 error");
           }
           co_await set.bg();
 
           if (!tx.commit_transaction().has_value()) {
-            throw std::runtime_error("commit_transaction error");
+            panic("commit_transaction error");
           }
 
           co_return;
