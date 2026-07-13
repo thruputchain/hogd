@@ -31,12 +31,14 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
+#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
@@ -83,6 +85,12 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
+
+std::tuple<uint64_t, uint64_t>
+make_erc20_amount(uint128_t amount)
+{
+  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+}
 
 std::shared_ptr<Contract>
 load_default_dev_wallet_contract()
@@ -2327,7 +2335,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
+TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
@@ -2372,6 +2380,36 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
                                                   sponsor_wallet_address,
                                               .nonce = create_wallet_nonce,
                                               .contract_hash = wallet_hash});
+
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+    Calldata transfer_calldata =
+        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                       erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{10'000'000},
+                       erc20_meta::make_calldata<"transfer">(
+                           created_wallet_address,
+                           make_erc20_amount(uint128_t{200'000'000})));
+    Transaction prefund_wallet_tx{
+        .invocation =
+            Invocation{.invoked_address = sponsor_wallet_address,
+                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                       .gas_limit = GasAmount{10'000'000},
+                       .calldata = wallet_meta::make_calldata<"do_action">(
+                           transfer_calldata)},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 30},
+        .auth_claim = source_address_auth_claim(),
+    };
+    SignedTransaction signed_prefund_wallet_tx =
+        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second);
+    const SignedTransactionHash prefund_wallet_tx_hash =
+        sha256(signed_prefund_wallet_tx.tx);
+    SignedTransactionHashBatch prefund_hashes =
+        submit_and_commit(scheduler,
+                          SignedTransactionBatch{signed_prefund_wallet_tx});
+    ASSERT_EQ(prefund_hashes.size(), 1UL);
+    ASSERT_EQ(prefund_hashes[0], prefund_wallet_tx_hash);
 
     Transaction create_wallet_tx{
         .invocation =
