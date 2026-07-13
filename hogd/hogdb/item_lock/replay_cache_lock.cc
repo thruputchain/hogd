@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cassert>
 #include <iterator>
-#include <memory>
 #include <mutex>
 #include <ranges>
 #include <span>
