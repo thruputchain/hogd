@@ -249,8 +249,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
                                      .to_address = receiver,
                                      .amount = to_xdr(amount_signed_int),
                                  });
+  if (!event_buf)
+    return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
+  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer event in native token transfer");
     return err.error();
   }
@@ -323,8 +325,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
                                      .to_address = receiver,
                                      .amount = to_xdr(amount_signed_int),
                                  });
+  if (!event_buf)
+    return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
+  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer_from event in native token transfer_from");
     return err.error();
   }
@@ -371,8 +375,10 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
                                      .spender_address = spender,
                                      .amount = to_xdr(amount_signed_int),
                                  });
+  if (!event_buf)
+    return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
+  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log adjust_allowance event in native token "
          "adjust_allowance");
     return err.error();

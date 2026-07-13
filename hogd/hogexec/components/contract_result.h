@@ -59,28 +59,21 @@ public:
   {
     CHECK_EQ(kLibraryExceptionSelector,
              calculate_selector("1", "sdk", "LibraryExn"));
-    try {
-      uint64_t selector = 0;
-      size_t used_bytes =
-          x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
+    uint64_t selector = 0;
+    auto used_bytes =
+        x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
+    if (!used_bytes) {
+      variant_ = ParseFailureType{std::move(abort_buffer)};
+      return;
+    }
 
-      std::span<const uint8_t> const body_span(abort_buffer.data() + used_bytes,
-                                               abort_buffer.size() -
-                                                   used_bytes);
+    std::span<const uint8_t> const body_span(abort_buffer.data() + *used_bytes,
+                                             abort_buffer.size() - *used_bytes);
 
-      bool matched =
-          this->template try_dispatch_exception<LibraryException>(selector,
-                                                                  body_span);
-      if constexpr (sizeof...(T) > 0) {
-        matched =
-            matched ||
-            (this->template try_dispatch_exception<T>(selector, body_span) ||
-             ...);
-      }
-      if (!matched) {
-        variant_ = ParseFailureType{std::move(abort_buffer)};
-      }
-    } catch (const x23::XdrException &) {
+    bool matched =
+        this->template try_dispatch_exceptions<LibraryException, T...>(
+            selector, body_span);
+    if (!matched) {
       variant_ = ParseFailureType{std::move(abort_buffer)};
     }
   }
@@ -106,32 +99,48 @@ private:
   // attacker-controlled body producing such a value is not a trust-boundary
   // violation; do not add tag-set validation here.
   template<typename U>
-  bool try_dispatch_exception(uint64_t selector, std::span<const uint8_t> body)
+  x23::CxsStatus<bool> try_dispatch_exception(uint64_t selector,
+                                              std::span<const uint8_t> body)
   {
     if (selector != U::kSelector) {
       return false;
     }
     std::remove_cvref_t<decltype(std::declval<U>().exn)> exn{};
-    x23::deserialize_cxs(&exn, body);
+    if (auto status = x23::deserialize_cxs(&exn, body); !status)
+      return status.error();
     variant_ = U{exn};
     return true;
   }
 
+  template<typename U, typename... Rest>
+  bool try_dispatch_exceptions(uint64_t selector, std::span<const uint8_t> body)
+  {
+    auto matched = try_dispatch_exception<U>(selector, body);
+    if (!matched)
+      return false;
+    if (*matched)
+      return true;
+    if constexpr (sizeof...(Rest) > 0)
+      return try_dispatch_exceptions<Rest...>(selector, body);
+    return false;
+  }
+
 public:
   // Re-serialize to (u64 selector, CXS body) format.
-  ReturnBuffer serialize() const
+  x23::CxsStatus<ReturnBuffer> serialize() const
   {
     return std::visit(
-        [](auto const &v) -> ReturnBuffer {
+        [](auto const &v) -> x23::CxsStatus<ReturnBuffer> {
           using V = std::remove_cvref_t<decltype(v)>;
           if constexpr (std::is_same_v<V, ParseFailureType>) {
             return v.abort_buffer;
           }
           else {
             // V is a ContractException<Exn, Sel>
-            x23::Buf buf = x23::serialize_cxs(V::kSelector);
-            buf.append_range(x23::serialize_cxs(v.exn));
-            return ReturnBuffer(buf.begin(), buf.end());
+            auto buf = x23::serialize_cxs(V::kSelector, v.exn);
+            if (!buf)
+              return buf.error();
+            return ReturnBuffer(buf->begin(), buf->end());
           }
         },
         variant_);

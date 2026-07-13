@@ -1124,9 +1124,11 @@ TEST_F(NativeTokenAllowanceTest,
                                      .to_address = kZeroAddr,
                                      .amount = to_xdr(kTransferAmount),
                                  });
-  ASSERT_EQ(event.serialized_event.size(), expected_event.size());
+  ASSERT_TRUE(expected_event);
+  ASSERT_EQ(event.serialized_event.size(), expected_event->size());
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
-                         event.serialized_event.end(), expected_event.begin()));
+                         event.serialized_event.end(),
+                         expected_event->begin()));
 
   // Tx 3: confirm via the precompile views that the allowance is consumed and
   // native total_supply() is unchanged.

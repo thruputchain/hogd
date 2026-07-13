@@ -1,9 +1,12 @@
-
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include <x23/async.h>
 #include <x23/event.h>
 #include <x23/serialize.h>
+#include <x23/serialize_cxs.h>
 #include <x23/vec.h>
 
 #include <benchmark/benchmark.h>
@@ -38,6 +41,48 @@ BENCHMARK(deserialize_xdr<std::tuple<>>);
 BENCHMARK(deserialize_xdr<fix_4>);
 BENCHMARK(deserialize_xdr<fix_4_100>);
 BENCHMARK(deserialize_xdr<u_4_12>);
+
+void
+serialize_cxs_integers(benchmark::State &state)
+{
+  std::array<uint64_t, 100> values;
+  for (size_t i = 0; i < values.size(); ++i)
+    values[i] = (uint64_t{1} << (i % 64)) - 1;
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(values);
+    auto encoded = x23::serialize_cxs(values);
+    benchmark::DoNotOptimize(encoded);
+    if (encoded) {
+      benchmark::DoNotOptimize(encoded->data());
+      benchmark::DoNotOptimize(encoded->size());
+      benchmark::ClobberMemory();
+    }
+  }
+}
+BENCHMARK(serialize_cxs_integers);
+
+void
+deserialize_cxs_integers(benchmark::State &state)
+{
+  std::array<uint64_t, 100> values;
+  for (size_t i = 0; i < values.size(); ++i)
+    values[i] = (uint64_t{1} << (i % 64)) - 1;
+  auto serialized = x23::serialize_cxs(values);
+  if (!serialized) {
+    state.SkipWithError("CXS serialization failed");
+    return;
+  }
+  x23::Buf encoded = std::move(*serialized);
+  benchmark::DoNotOptimize(encoded.data());
+  benchmark::ClobberMemory();
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(encoded);
+    auto status = x23::deserialize_cxs(&values, encoded);
+    benchmark::DoNotOptimize(status);
+    benchmark::DoNotOptimize(values);
+  }
+}
+BENCHMARK(deserialize_cxs_integers);
 
 void
 empty_function(benchmark::State &state)
