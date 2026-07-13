@@ -3873,9 +3873,15 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
 
-  // Insert-only exclusive RCQ commit succeeds even on a stale block because
-  // the re-validation has no past-block consume to check against the DAO.
-  ASSERT_TRUE(insert_only_tx.commit());
+  // Insert-only exclusive RCQ commit is now rejected on a stale block: the
+  // exclusive commit path rechecks staleness after reading the live DAO and
+  // returns kStaleBlock (#2997). Previously this commit was allowed to succeed
+  // (its re-validation had no past-block consume to fail against the DAO), but
+  // its committed cost could drift past the reservation once a sibling
+  // published a larger queue at the same key.
+  auto insert_only_r = insert_only_tx.commit();
+  ASSERT_FALSE(insert_only_r.has_value());
+  EXPECT_EQ(insert_only_r.error().code(), HogDBCode::kStaleBlock);
 
   // Consuming exclusive RCQ commit fails: the re-validation reads deleted
   // RCQ blocks from the live DAO.
@@ -4060,6 +4066,86 @@ TEST_F(HogDBTest, InvokeTxMoveTransfersBlockTxReference)
     InvokeTX moved(std::move(source));
   }
   EXPECT_TRUE(block_tx.initiate_shutdown());
+}
+
+TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr auto kExclusiveFlags =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  StorageCostModel rcq_cost_model(StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = 12000,
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = 12000,
+      .contract_deployment_cost_per_byte = 10,
+      .auth_per_key_cost = 1111,
+      .rcq_cost_per_entry = 8,
+      .replay_cache_cost_per_entry = 7,
+      .balance_cost = 0,
+  });
+
+  Address addr = make_address(kAddress + 302);
+  ItemKey key = make_key(kAddress + 302, 1);
+  setup_contract_address(addr);
+  ASSERT_FALSE(db_.read_retrocausal_queue_metadata(key));
+
+  auto make_insert_delta = [](uint8_t byte) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{byte});
+    return delta;
+  };
+
+  const int128_t one_entry_cost = rcq_cost_model.get_retrocausal_queue_cost(1);
+  ASSERT_EQ(one_entry_cost, int128_t{12008});
+  ASSERT_EQ(rcq_cost_model.get_retrocausal_queue_cost(2) - one_entry_cost,
+            int128_t{8});
+
+  DbHash parent_hash = db_.compute_full_db_hash();
+  PerThreadARC<BlockTX> stale_block_tx(
+      db_, rcq_cost_model, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(stale_block_tx.try_acquire_reference());
+  InvokeTX stale_tx(stale_block_tx);
+  ASSERT_TRUE(stale_tx.request_deletion(key, kExclusiveFlags));
+  auto stale_delta = make_insert_delta(0xAA);
+  ASSERT_TRUE(stale_tx.request_retrocausal_queue(key, std::move(stale_delta),
+                                                 kNoFlags));
+  ASSERT_TRUE(stale_tx.sync_balance_locks());
+
+  PerThreadARC<BlockTX> sibling_block_tx(
+      db_, rcq_cost_model, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
+  {
+    InvokeTX sibling_tx(sibling_block_tx);
+    auto sibling_delta = make_insert_delta(0xBB);
+    ASSERT_TRUE(sibling_tx.request_retrocausal_queue(key,
+                                                     std::move(sibling_delta),
+                                                     kNoFlags));
+    ASSERT_TRUE(sibling_tx.sync_balance_locks());
+    ASSERT_TRUE(sibling_tx.commit());
+  }
+
+  ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
+  stale_block_tx.get().invalidate();
+  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
+
+  // Before the fix, the stale exclusive commit computed a committed cost
+  // (12016, one live sibling entry plus its own) exceeding the reserved
+  // standalone cost (12008) and tripped InvokeTX::commit()'s CHECK_LE. The
+  // exclusive commit path now rechecks staleness after reading the live DAO
+  // and rejects the doomed block with kStaleBlock instead of aborting.
+  auto r = stale_tx.commit();
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error().code(), HogDBCode::kStaleBlock);
+
+  // The failed commit poisons the BlockTX, which then refuses to close.
+  EXPECT_TRUE(stale_block_tx.get().is_poisoned());
+  EXPECT_FALSE(stale_block_tx.get().close(parent_hash).has_value());
 }
 
 } // namespace hogd
