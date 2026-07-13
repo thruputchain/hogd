@@ -15,6 +15,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
