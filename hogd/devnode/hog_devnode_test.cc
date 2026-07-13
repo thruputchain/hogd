@@ -1180,6 +1180,75 @@ TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
   }
 }
 
+TEST(HogDevnode, InvalidLogLevelPrintsFriendlyUsageBeforeInitialization)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--log-level", "chatty"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Invalid log level: chatty"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, DevAccountCountAboveMaximumPrintsFriendlyUsage)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--dev-accounts", "2000"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("exceeds maximum")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, BootstrapManifestConflictsWithShorthandPrintsFriendlyUsage)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--bootstrap-manifest", "/nonexistent.json", "--dev-accounts", "1"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(
+      stderr_output.contains("--bootstrap-manifest conflicts with dev-account"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
 TEST(HogDevnode, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
   // Disable LeakSanitizer so its print_suppressions output (which is

@@ -12,7 +12,6 @@
 #include <exception>
 #include <filesystem>
 #include <format>
-#include <limits>
 #include <optional>
 #include <print>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -25,6 +24,7 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
+#include "hogd/base/cli.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
@@ -295,23 +295,24 @@ usage(char *argv[])
 }
 
 std::uint16_t
-parse_port(const std::string &value)
+parse_port(std::string_view value, char *argv[])
 {
-  const std::uint64_t port = hogd::parse_u64(value, "port");
-  if (port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
+  std::optional<std::uint16_t> port = hogd::try_parse_port(value);
+  if (!port) {
+    hogd::arg_error(std::format("Invalid port: {}", value), argv, usage);
   }
-  return static_cast<std::uint16_t>(port);
+  return *port;
 }
 
 std::uint32_t
-parse_u32(const std::string &value, std::string_view name)
+parse_u32(std::string_view value, std::string_view name, char *argv[])
 {
-  const std::uint64_t parsed = hogd::parse_u64(value, name);
-  if (parsed > std::numeric_limits<std::uint32_t>::max()) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  std::optional<std::uint32_t> parsed =
+      hogd::try_parse_integer<std::uint32_t>(value);
+  if (!parsed) {
+    hogd::arg_error(std::format("Invalid {}: {}", name, value), argv, usage);
   }
-  return static_cast<std::uint32_t>(parsed);
+  return *parsed;
 }
 
 std::string_view
@@ -336,7 +337,7 @@ log_level_name(hogd::LogLevel level)
 }
 
 hogd::LogLevel
-parse_log_level(const std::string &value)
+parse_log_level(std::string_view value, char *argv[])
 {
   using enum hogd::LogLevel;
   hogd::LogLevel level;
@@ -353,43 +354,45 @@ parse_log_level(const std::string &value)
   else if (value == "trace")
     level = kTrace;
   else
-    throw std::runtime_error(std::format("Invalid log level: {}", value));
+    hogd::arg_error(std::format("Invalid log level: {}", value), argv, usage);
 
   // Levels above the compile-time ceiling are stripped from this build, so a
   // request for them can never be honored. Reject it rather than silently
   // capping.
   if (!hogd::should_log(level)) {
-    throw std::runtime_error(std::format(
-        "Log level '{}' is unavailable in this build; the maximum verbosity "
-        "compiled in is '{}'",
-        value, log_level_name(hogd::kMaxLogLevel)));
+    hogd::arg_error(std::format("Log level '{}' is unavailable in this build; "
+                                "the maximum verbosity "
+                                "compiled in is '{}'",
+                                value, log_level_name(hogd::kMaxLogLevel)),
+                    argv, usage);
   }
   return level;
 }
 
 std::uint32_t
-parse_bootstrap_account_count(const std::string &value)
+parse_bootstrap_account_count(std::string_view value, char *argv[])
 {
-  std::uint32_t count = parse_u32(value, "dev account count");
+  std::uint32_t count = parse_u32(value, "dev account count", argv);
   if (count > hogd::kMaxBootstrapAccounts) {
-    throw std::runtime_error(
+    hogd::arg_error(
         std::format("Invalid dev account count: {} exceeds maximum {}", value,
-                    hogd::kMaxBootstrapAccounts));
+                    hogd::kMaxBootstrapAccounts),
+        argv, usage);
   }
   return count;
 }
 
 void
-reject_manifest_shorthand_conflicts(OptionSources const &sources)
+reject_manifest_shorthand_conflicts(OptionSources const &sources, char *argv[])
 {
   if (!sources.bootstrap_manifest) {
     return;
   }
   if (sources.dev_accounts || sources.dev_account_seed ||
       sources.dev_account_tokens || sources.dev_wallet_profile) {
-    throw std::runtime_error(
-        "--bootstrap-manifest conflicts with dev-account and wallet shorthand "
-        "flags");
+    hogd::arg_error("--bootstrap-manifest conflicts with dev-account and "
+                    "wallet shorthand flags",
+                    argv, usage);
   }
 }
 
@@ -412,22 +415,24 @@ parse_args(int argc, char *argv[])
     if (arg == "--listen-host" && i + 1 < argc) {
       options.listen_host = argv[++i];
       if (hogd::is_wildcard_listen_host(options.listen_host)) {
-        throw std::runtime_error(
-            "Invalid listen host: wildcard addresses cannot be advertised");
+        hogd::arg_error(
+            "Invalid listen host: wildcard addresses cannot be advertised",
+            argv, usage);
       }
       continue;
     }
     if (arg == "--scheduler-port" && i + 1 < argc) {
-      options.scheduler_port = parse_port(argv[++i]);
+      options.scheduler_port = parse_port(argv[++i], argv);
       continue;
     }
     if (arg == "--data-dir" && i + 1 < argc) {
       if (options.data_dir.has_value()) {
-        throw std::runtime_error("--data-dir specified more than once");
+        hogd::arg_error("--data-dir specified more than once", argv, usage);
       }
       std::filesystem::path dir(argv[++i]);
       if (dir.empty()) {
-        throw std::runtime_error("Invalid data dir: path must not be empty");
+        hogd::arg_error("Invalid data dir: path must not be empty", argv,
+                        usage);
       }
       options.data_dir = std::move(dir);
       continue;
@@ -435,8 +440,8 @@ parse_args(int argc, char *argv[])
     if (arg == "--readiness" && i + 1 < argc) {
       const std::string readiness = argv[++i];
       if (readiness != "stdout") {
-        throw std::runtime_error(
-            std::format("Invalid readiness sink: {}", readiness));
+        hogd::arg_error(std::format("Invalid readiness sink: {}", readiness),
+                        argv, usage);
       }
       options.readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
@@ -444,16 +449,17 @@ parse_args(int argc, char *argv[])
     if (arg == "--contract-artifacts-dir" && i + 1 < argc) {
       std::filesystem::path dir(argv[++i]);
       if (dir.empty()) {
-        throw std::runtime_error(
-            "Invalid contract artifacts dir: path must not be empty");
+        hogd::arg_error(
+            "Invalid contract artifacts dir: path must not be empty", argv,
+            usage);
       }
       options.contract_artifact_directories.push_back(std::move(dir));
       continue;
     }
     if (arg == "--dev-wallet-profile" && i + 1 < argc) {
       if (sources.dev_wallet_profile) {
-        throw std::runtime_error(
-            "--dev-wallet-profile specified more than once");
+        hogd::arg_error("--dev-wallet-profile specified more than once", argv,
+                        usage);
       }
       sources.dev_wallet_profile = true;
       dev_wallet_profile_value = argv[++i];
@@ -461,15 +467,15 @@ parse_args(int argc, char *argv[])
     }
     if (arg == "--bootstrap-manifest" && i + 1 < argc) {
       if (sources.bootstrap_manifest) {
-        throw std::runtime_error(
-            "--bootstrap-manifest specified more than once");
+        hogd::arg_error("--bootstrap-manifest specified more than once", argv,
+                        usage);
       }
       sources.bootstrap_manifest = true;
       bootstrap_manifest_path = std::filesystem::path(argv[++i]);
       continue;
     }
     if (arg == "--log-level" && i + 1 < argc) {
-      options.log_level = parse_log_level(argv[++i]);
+      options.log_level = parse_log_level(argv[++i], argv);
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
@@ -489,26 +495,32 @@ parse_args(int argc, char *argv[])
     }
     usage(argv);
   }
-  reject_manifest_shorthand_conflicts(sources);
+  reject_manifest_shorthand_conflicts(sources, argv);
   if (dev_accounts_value.has_value()) {
     options.bootstrap_config.count =
-        parse_bootstrap_account_count(*dev_accounts_value);
+        parse_bootstrap_account_count(*dev_accounts_value, argv);
   }
   if (dev_account_seed_value.has_value()) {
     if (dev_account_seed_value->empty()) {
-      throw std::runtime_error(
-          "Invalid dev account seed: seed must not be empty");
+      hogd::arg_error("Invalid dev account seed: seed must not be empty", argv,
+                      usage);
     }
     options.bootstrap_config.seed = std::move(*dev_account_seed_value);
   }
   if (dev_account_tokens_value.has_value()) {
-    options.bootstrap_config.storage_tokens =
-        hogd::parse_u64(*dev_account_tokens_value, "dev account tokens");
+    std::optional<std::uint64_t> tokens =
+        hogd::try_parse_u64(*dev_account_tokens_value);
+    if (!tokens) {
+      hogd::arg_error(std::format("Invalid dev account tokens: {}",
+                                  *dev_account_tokens_value),
+                      argv, usage);
+    }
+    options.bootstrap_config.storage_tokens = *tokens;
   }
   if (dev_wallet_profile_value.has_value()) {
     if (dev_wallet_profile_value->empty()) {
-      throw std::runtime_error(
-          "Invalid dev wallet profile: profile must not be empty");
+      hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
+                      argv, usage);
     }
     hogd::resolve_dev_wallet_profile(*dev_wallet_profile_value);
     options.bootstrap_config.dev_wallet_profile =

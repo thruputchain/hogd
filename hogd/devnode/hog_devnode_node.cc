@@ -332,14 +332,20 @@ parse_data_dir_metadata(std::string_view bytes)
         kMaxBootstrapAccounts));
   }
 
+  const std::string_view dev_account_tokens =
+      require_string_field(config_json, "devAccountTokens", "bootstrapConfig");
+  const std::optional<std::uint64_t> storage_tokens =
+      try_parse_u64(dev_account_tokens);
+  if (!storage_tokens) {
+    throw std::runtime_error(
+        std::format("Invalid hog-devnode data metadata devAccountTokens: {}",
+                    dev_account_tokens));
+  }
   BootstrapAccountConfig config{
       .count = static_cast<std::uint32_t>(count),
       .seed = std::string(require_string_field(config_json, "devAccountSeed",
                                                "bootstrapConfig")),
-      .storage_tokens =
-          parse_u64(require_string_field(config_json, "devAccountTokens",
-                                         "bootstrapConfig"),
-                    "hog-devnode data metadata devAccountTokens"),
+      .storage_tokens = *storage_tokens,
       .dev_wallet_profile =
           std::string(require_string_field(config_json, "devWalletProfile",
                                            "bootstrapConfig")),

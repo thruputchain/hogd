@@ -86,4 +86,18 @@ parse_port_arg(std::string_view label, std::string_view value, char *argv[],
   return parse_integer_arg<uint16_t>(label, value, argv, usage);
 }
 
+// arg_error reports a rejected command-line value and hands off to the caller's
+// usage(). It exists for validation the parse helpers cannot express (mutually
+// exclusive flags, empty paths, out-of-range counts): the caller does its own
+// check and calls this with a ready-made message. The "error:" prefix matches
+// what these daemons already print when they still translate a failure through
+// a top-level catch, so the two paths read the same.
+[[noreturn]] inline void
+arg_error(std::string_view message, char *argv[], UsageFn usage)
+{
+  std::println(stderr, "error: {}", message);
+  usage(argv);
+  exit(EXIT_FAILURE); // only if usage() returns, which it should not
+}
+
 } // namespace hogd
