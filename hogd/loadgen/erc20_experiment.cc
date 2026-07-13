@@ -179,7 +179,8 @@ ERC20ExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(mint_txs));
 
   // Build result step by step
-  auto genesis_config = builder.build_or_panic(StorageCostModel::default_cost_model());
+  auto genesis_config =
+      builder.build_or_panic(StorageCostModel::default_cost_model());
   LoadgenSuccessResult result;
   result.genesis_configuration = std::move(genesis_config);
   result.initialization_txs = std::move(initialization_txs);
