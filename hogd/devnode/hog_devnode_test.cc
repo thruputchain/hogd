@@ -48,6 +48,7 @@
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
