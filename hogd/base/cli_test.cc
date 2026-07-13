@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
 
 #include "hogd/base/cli.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
