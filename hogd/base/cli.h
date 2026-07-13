@@ -11,8 +11,6 @@
 #include <string_view>
 #include <system_error>
 
-#include "x23/sockio.h"
-
 namespace hogd {
 
 // die reports a fatal startup error and exits.
@@ -68,18 +66,6 @@ inline uint16_t
 parse_port(std::string_view value)
 {
   return parse_integer_or_die<uint16_t>("port", value);
-}
-
-// parse_host_port_or_die parses a joined "host:port" address, or exits naming
-// the offending flag.
-inline x23::HostPort
-parse_host_port_or_die(std::string_view label, std::string_view address)
-{
-  x23::HostPort host_port;
-  if (!host_port.parse(address)) {
-    die(std::format("Invalid {}: {}", label, address));
-  }
-  return host_port;
 }
 
 } // namespace hogd

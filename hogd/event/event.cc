@@ -21,6 +21,7 @@
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -29,9 +30,11 @@ namespace {
 auto
 connect_to_event_sched_server(std::string const &address)
 {
-  return make_srpc_client<SchedEvent1>(parse_host_port_or_die("mempool address",
-                                                              address),
-                                       true);
+  x23::HostPort host_port;
+  if (!host_port.parse(address)) {
+    die(std::format("Invalid mempool address: {}", address));
+  }
+  return make_srpc_client<SchedEvent1>(host_port, true);
 }
 
 int

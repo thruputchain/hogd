@@ -4,7 +4,6 @@
 #include <cstdlib>
 
 #include "hogd/base/cli.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -40,22 +39,7 @@ TEST(CliTest, ParseIntegerOrDieAutoDetectsBase)
   EXPECT_EQ(parse_integer_or_die<size_t>("ram bytes", "0755", 0), 755U);
 }
 
-TEST(CliTest, ParseHostPortAcceptsJoinedAddress)
-{
-  x23::HostPort hp =
-      parse_host_port_or_die("mempool address", "127.0.0.1:8080");
-  EXPECT_EQ(std::string(hp.host.begin(), hp.host.end()), "127.0.0.1");
-  EXPECT_EQ(std::string(hp.port.begin(), hp.port.end()), "8080");
-}
-
 using CliDeathTest = ::testing::Test;
-
-TEST(CliDeathTest, ParseHostPortRejectsMalformed)
-{
-  EXPECT_EXIT(parse_host_port_or_die("mempool address", "not-an-address"),
-              ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid mempool address: not-an-address");
-}
 
 // The hand-rolled std::stoul parsers this replaces threw an *uncaught*
 // std::invalid_argument here (and std::out_of_range on a huge value): stoul

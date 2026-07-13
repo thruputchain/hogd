@@ -6,7 +6,7 @@
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
-#include "hogd/base/cli.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -16,11 +16,17 @@ namespace hogd {
 
 using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
 
+// address_for_auth comes from the mempool's intro response, not from the
+// command line: a malformed one means the peer sent us garbage, so panic
+// rather than reporting it as user error.
 inline x23::Async<dbauth_client_t>
 make_dbauth_client(const std::string &address_for_auth)
 {
-  return make_rpc_client<DBAuth1>(
-      parse_host_port_or_die("database shard address", address_for_auth));
+  x23::HostPort host_port;
+  if (!host_port.parse(address_for_auth)) {
+    panic("Failed to parse database shard address: {}", address_for_auth);
+  }
+  return make_rpc_client<DBAuth1>(host_port);
 }
 
 class DBAuthClient {

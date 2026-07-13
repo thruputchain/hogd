@@ -53,8 +53,10 @@ namespace {
 auto
 create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 {
-  const x23::HostPort host_port =
-      parse_host_port_or_die("coordinator address", coordinator_addr);
+  x23::HostPort host_port;
+  if (!host_port.parse(coordinator_addr)) {
+    die(std::format("Invalid coordinator address: {}", coordinator_addr));
+  }
 
   return std::make_unique<
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(

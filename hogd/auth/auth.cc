@@ -38,8 +38,10 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT auth.metrics={}", actual_metrics_port);
 
-  const x23::HostPort host_port =
-      parse_host_port_or_die("mempool address", mempool_address);
+  x23::HostPort host_port;
+  if (!host_port.parse(mempool_address)) {
+    die(std::format("Invalid mempool address: {}", mempool_address));
+  }
 
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
