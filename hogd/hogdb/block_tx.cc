@@ -210,7 +210,22 @@ BlockTX::commit_change(const ItemKey &key, ItemChange change)
   CHECK_PTR(lock);
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  return lock->commit_change(std::move(change), ctx);
+  auto r = lock->commit_change(std::move(change), ctx);
+
+  // Reject the commit if a sibling invalidated this block. An exclusive RCQ
+  // commit revalidates against the live DAO and computes its committed cost
+  // from that live metadata; a sibling that published a larger queue at this
+  // key would make the committed cost exceed the reservation and trip
+  // InvokeTX::commit()'s CHECK_LE (#2997). begin_commit_publication()
+  // invalidates siblings *before* mutating the live DAO, so if this commit read
+  // sibling-drifted metadata the invalidate is visible to this acquire load
+  // (both the live-DAO read and the sibling's write serialize on the same
+  // scalable_map bucket mutex). Bailing here lets InvokeTX::commit() abort the
+  // doomed block before the CHECK_LE.
+  if (is_invalidated()) [[unlikely]] {
+    return HogDBError(HogDBCode::kStaleBlock);
+  }
+  return r;
 }
 
 HogDBStatus<std::optional<QueueEntry>>
