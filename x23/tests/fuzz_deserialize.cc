@@ -2,8 +2,8 @@
 //
 // Tests that arbitrary byte sequences never cause undefined behavior,
 // memory corruption, or unexpected exceptions when deserialized as
-// various XDR types. XdrBadInput/CxsBadInput/XdrException are expected
-// for invalid input; any other exception or crash indicates a real bug.
+// various XDR types. Parse errors are expected for invalid input; any other
+// exception or crash indicates a real bug.
 
 #include <cstddef>
 #include <cstdint>
@@ -52,12 +52,8 @@ void
 try_cxs(const uint8_t *data, size_t size)
 {
   T val{};
-  try {
-    std::span<const uint8_t> sp(data, size);
-    x23::deserialize_cxs(&val, sp);
-  } catch (const x23::XdrException &) {
-    // Expected for invalid input
-  }
+  std::span<const uint8_t> sp(data, size);
+  (void)x23::deserialize_cxs(&val, sp);
 }
 
 } // namespace

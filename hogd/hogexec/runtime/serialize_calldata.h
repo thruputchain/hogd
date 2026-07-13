@@ -66,12 +66,12 @@ template<> struct Serializer<SerializationFormat::kCxs> {
   template<typename... Args>
   static std::optional<Calldata> serialize(Args const &...args)
   {
-    try {
-      return x23::serialize_cxs(args...);
-    } catch (const x23::XdrException &e) {
-      trace("CXS Serialize failed: {}", e.what());
+    auto serialized = x23::serialize_cxs(args...);
+    if (!serialized) {
+      trace("CXS Serialize failed: {}", serialized.error());
       return std::nullopt;
     }
+    return std::move(*serialized);
   }
 
   template<typename... Args>
@@ -79,12 +79,10 @@ template<> struct Serializer<SerializationFormat::kCxs> {
       -> detail::deserialize_return_t<Args...>
   {
     auto args = std::tuple<std::remove_cvref_t<Args>...>{};
-    try {
-      x23::deserialize_cxs(&args,
-                           {reinterpret_cast<const uint8_t *>(data.data()),
-                            data.size()});
-    } catch (const x23::XdrException &e) {
-      trace("CXS Deserialize failed: {}", e.what());
+    auto status = x23::deserialize_cxs(
+        &args, {reinterpret_cast<const uint8_t *>(data.data()), data.size()});
+    if (!status) {
+      trace("CXS Deserialize failed: {}", status.error());
       return std::nullopt;
     }
     if constexpr (sizeof...(Args) == 1) {

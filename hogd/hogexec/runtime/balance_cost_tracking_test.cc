@@ -1206,9 +1206,11 @@ TEST_F(BalanceCostTrackingTest,
                                      .to_address = kZeroAddr,
                                      .amount = to_xdr(kTransferAmount),
                                  });
-  ASSERT_EQ(event.serialized_event.size(), expected_event.size());
+  ASSERT_TRUE(expected_event);
+  ASSERT_EQ(event.serialized_event.size(), expected_event->size());
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
-                         event.serialized_event.end(), expected_event.begin()));
+                         event.serialized_event.end(),
+                         expected_event->begin()));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
