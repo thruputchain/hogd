@@ -209,25 +209,20 @@ BlockTX::commit_change(const ItemKey &key, ItemChange change)
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
 
-  // An exclusive RCQ commit revalidates against the live DAO (get_meta) and
-  // computes its committed cost from that live metadata, while retaining the
-  // stale snapshot baseline used when the transaction reserved storage. On a
-  // stale block a sibling may have published a larger queue at this key after
-  // the RPC-layer stale check, making the committed cost exceed the reservation
-  // and tripping InvokeTX::commit()'s CHECK_LE (#2997). #2242 already rejects
-  // exclusive commits whose revalidation *fails* against the live DAO, but an
-  // insert-only delta always revalidates successfully, so it slips through.
-  const bool is_exclusive = change.is_exclusive();
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   auto r = lock->commit_change(std::move(change), ctx);
 
-  // Recheck staleness after the exclusive commit has read the live DAO.
-  // begin_commit_publication() invalidates siblings *before* mutating the live
-  // DAO, so if this commit observed sibling-drifted metadata the invalidate is
-  // visible here (this acquire load is ordered after the live-DAO read that saw
-  // the sibling's release-published write). Returning kStaleBlock lets
-  // InvokeTX::commit() poison the doomed block and bail before its CHECK_LE.
-  if (is_exclusive && r.has_value() && is_invalidated()) [[unlikely]] {
+  // Reject the commit if a sibling invalidated this block. An exclusive RCQ
+  // commit revalidates against the live DAO and computes its committed cost
+  // from that live metadata; a sibling that published a larger queue at this
+  // key would make the committed cost exceed the reservation and trip
+  // InvokeTX::commit()'s CHECK_LE (#2997). begin_commit_publication()
+  // invalidates siblings *before* mutating the live DAO, so if this commit read
+  // sibling-drifted metadata the invalidate is visible to this acquire load
+  // (both the live-DAO read and the sibling's write serialize on the same
+  // scalable_map bucket mutex). Bailing here lets InvokeTX::commit() abort the
+  // doomed block before the CHECK_LE.
+  if (is_invalidated()) [[unlikely]] {
     return HogDBError(HogDBCode::kStaleBlock);
   }
   return r;
