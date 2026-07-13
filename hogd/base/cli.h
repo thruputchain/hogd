@@ -1,4 +1,8 @@
-// cli.h - helpers for parsing command-line arguments in daemon startup paths.
+// cli.h - parsers for command-line argument values.
+//
+// These only parse: they return std::nullopt on bad input and leave the policy
+// to the caller. Daemons report the offending flag and call their usage(),
+// which is friendlier than a panic for what is usually a typo.
 
 #pragma once
 
@@ -6,38 +10,25 @@
 #include <concepts>
 #include <cstdint>
 #include <cstdlib>
-#include <format>
+#include <optional>
 #include <print>
 #include <string_view>
 #include <system_error>
 
 namespace hogd {
 
-// die reports a fatal startup error and exits.
-//
-// Bad command-line input is a user error, not a violated invariant: report it
-// and exit rather than terminating on an uncaught throw.
-[[noreturn]] inline void
-die(std::string_view message)
-{
-  std::println(stderr, "{}", message);
-  exit(EXIT_FAILURE);
-}
-
-// parse_integer_or_die parses a complete, in-range number in the given base,
-// or exits via die() naming the offending flag. A base of 0 auto-detects: a
-// "0x" prefix means hex, anything else is decimal.
+// try_parse_integer parses a complete, in-range number in the given base. A
+// base of 0 auto-detects: a "0x" prefix means hex, anything else is decimal.
 //
 // It rejects trailing characters, so hogd::parse_integer (which accepts them:
 // "80abc" -> 80) is not a substitute. std::stoul / std::stoi are not either:
 // they throw on non-numeric or out-of-range input.
 //
 // Unlike std::stoul with base 0, a leading zero does NOT mean octal: "0755" is
-// 755. No flag here takes an octal argument, and silent octal is a footgun.
+// 755. No flag takes an octal argument, and silent octal is a footgun.
 template<std::integral T>
-T
-parse_integer_or_die(std::string_view label, std::string_view value,
-                     int base = 10)
+std::optional<T>
+try_parse_integer(std::string_view value, int base = 10)
 {
   // std::from_chars rejects a "0x" prefix, but std::stoul (which this replaces)
   // accepted one for base 16 and base 0, so keep taking it.
@@ -55,17 +46,44 @@ parse_integer_or_die(std::string_view label, std::string_view value,
   const char *const end = begin + digits.size();
   const auto res = std::from_chars(begin, end, parsed, base);
   if (res.ec != std::errc{} || res.ptr != end) {
-    die(std::format("Invalid {}: {}", label, value));
+    return std::nullopt;
   }
   return parsed;
 }
 
-// parse_port parses a TCP/UDP port, or exits. Out-of-range values are rejected
-// by the uint16_t parse itself.
-inline uint16_t
-parse_port(std::string_view value)
+// try_parse_port parses a TCP/UDP port. Out-of-range values are rejected by the
+// uint16_t parse itself.
+inline std::optional<uint16_t>
+try_parse_port(std::string_view value)
 {
-  return parse_integer_or_die<uint16_t>("port", value);
+  return try_parse_integer<uint16_t>(value);
+}
+
+// UsageFn is a daemon's usage(): prints the usage message and exits.
+using UsageFn = void (*)(char *argv[]);
+
+// parse_integer_arg parses a flag value, or names the offending flag and hands
+// off to the caller's usage(). A mistyped flag is a user error, so it gets the
+// usage message rather than a panic and a stack trace.
+template<std::integral T>
+T
+parse_integer_arg(std::string_view label, std::string_view value, char *argv[],
+                  UsageFn usage, int base = 10)
+{
+  std::optional<T> parsed = try_parse_integer<T>(value, base);
+  if (parsed) {
+    return *parsed;
+  }
+  std::println(stderr, "Invalid {}: {}", label, value);
+  usage(argv);
+  exit(EXIT_FAILURE); // only if usage() returns, which it should not
+}
+
+inline uint16_t
+parse_port_arg(std::string_view label, std::string_view value, char *argv[],
+               UsageFn usage)
+{
+  return parse_integer_arg<uint16_t>(label, value, argv, usage);
 }
 
 } // namespace hogd

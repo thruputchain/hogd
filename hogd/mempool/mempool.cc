@@ -178,7 +178,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = hogd::parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
@@ -186,42 +187,45 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--num-db-shards" && i + 1 < argc) {
-      num_db_shards =
-          hogd::parse_integer_or_die<size_t>("num db shards", argv[++i]);
+      num_db_shards = hogd::parse_integer_arg<size_t>("--num-db-shards",
+                                                      argv[++i], argv, usage);
       continue;
     }
     if (arg == "--num-exec-shards" && i + 1 < argc) {
-      num_exec_shards =
-          hogd::parse_integer_or_die<size_t>("num exec shards", argv[++i]);
+      num_exec_shards = hogd::parse_integer_arg<size_t>("--num-exec-shards",
+                                                        argv[++i], argv, usage);
       continue;
     }
     if (arg == "--network-id" && i + 1 < argc) {
-      network_id = hogd::parse_integer_or_die<uint64_t>("network id", argv[++i],
-                                                        /*base=*/16);
+      network_id = hogd::parse_integer_arg<uint64_t>("--network-id", argv[++i],
+                                                     argv, usage, /*base=*/16);
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
-      db_port = hogd::parse_port(argv[++i]);
+      db_port = hogd::parse_port_arg("--db-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--event-port" && i + 1 < argc) {
-      event_port = hogd::parse_port(argv[++i]);
+      event_port = hogd::parse_port_arg("--event-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--executor-port" && i + 1 < argc) {
-      executor_port = hogd::parse_port(argv[++i]);
+      executor_port =
+          hogd::parse_port_arg("--executor-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--auth-port" && i + 1 < argc) {
-      auth_port = hogd::parse_port(argv[++i]);
+      auth_port = hogd::parse_port_arg("--auth-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--coordinator-port" && i + 1 < argc) {
-      coordinator_port = hogd::parse_port(argv[++i]);
+      coordinator_port =
+          hogd::parse_port_arg("--coordinator-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--gateway-port" && i + 1 < argc) {
-      gateway_port = hogd::parse_port(argv[++i]);
+      gateway_port =
+          hogd::parse_port_arg("--gateway-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);

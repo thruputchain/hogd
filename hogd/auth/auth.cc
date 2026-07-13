@@ -40,7 +40,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 
   x23::HostPort host_port;
   if (!host_port.parse(mempool_address)) {
-    die(std::format("Invalid mempool address: {}", mempool_address));
+    panic("Invalid mempool address: {}", mempool_address);
   }
 
   sched_auth_client_t mempool_client =
@@ -71,7 +71,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
                      .address_for_mempool = auth_mempool_address.c_str()};
   IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
   if (intro.shards().empty()) {
-    die("No db shards registered with mempool");
+    panic("No db shards registered with mempool");
   }
   ShardCard &shard = intro.shards()[0];
   const std::string address_for_auth = shard.address_for_auth.c_str();
@@ -132,7 +132,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = hogd::parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--mempool-addr" && i + 1 < argc) {
@@ -144,11 +145,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
-      db_port = hogd::parse_port(argv[++i]);
+      db_port = hogd::parse_port_arg("--db-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = hogd::parse_port(argv[++i]);
+      mempool_port =
+          hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);

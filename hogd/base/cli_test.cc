@@ -1,98 +1,65 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdlib>
+#include <optional>
 
 #include "hogd/base/cli.h"
 
 namespace hogd {
 
-TEST(CliTest, ParsePortAcceptsFullRange)
+TEST(CliTest, TryParsePortAcceptsFullRange)
 {
-  EXPECT_EQ(parse_port("0"), 0);
-  EXPECT_EQ(parse_port("80"), 80);
-  EXPECT_EQ(parse_port("8080"), 8080);
-  EXPECT_EQ(parse_port("65535"), 65535);
+  EXPECT_EQ(try_parse_port("0"), 0);
+  EXPECT_EQ(try_parse_port("80"), 80);
+  EXPECT_EQ(try_parse_port("8080"), 8080);
+  EXPECT_EQ(try_parse_port("65535"), 65535);
 }
-
-TEST(CliTest, ParseIntegerOrDieAcceptsFullRange)
-{
-  EXPECT_EQ(parse_integer_or_die<uint64_t>("gas limit", "0"), 0U);
-  EXPECT_EQ(parse_integer_or_die<int32_t>("offset", "-5"), -5);
-}
-
-TEST(CliTest, ParseIntegerOrDieAcceptsHex)
-{
-  EXPECT_EQ(parse_integer_or_die<uint64_t>("network id", "ff", 16), 0xffU);
-  EXPECT_EQ(parse_integer_or_die<uint64_t>("network id", "deadbeef", 16),
-            0xdeadbeefU);
-  // std::stoul accepted a 0x prefix for base 16; preserve that.
-  EXPECT_EQ(parse_integer_or_die<uint64_t>("network id", "0xff", 16), 0xffU);
-}
-
-TEST(CliTest, ParseIntegerOrDieAutoDetectsBase)
-{
-  EXPECT_EQ(parse_integer_or_die<size_t>("ram bytes", "10000000000", 0),
-            10000000000U);
-  EXPECT_EQ(parse_integer_or_die<size_t>("ram bytes", "0x40", 0), 0x40U);
-  // Deliberately NOT octal, unlike std::stoul with base 0.
-  EXPECT_EQ(parse_integer_or_die<size_t>("ram bytes", "0755", 0), 755U);
-}
-
-using CliDeathTest = ::testing::Test;
 
 // The hand-rolled std::stoul parsers this replaces threw an *uncaught*
-// std::invalid_argument here (and std::out_of_range on a huge value): stoul
-// throws before their own range check runs, so the daemon aborted on an
-// uncaught exception instead of reporting the bad flag.
-TEST(CliDeathTest, ParsePortRejectsNonNumeric)
+// std::invalid_argument on non-numeric input (and std::out_of_range on a huge
+// value): stoul throws before their own range check runs, so the daemon died on
+// an uncaught exception rather than reporting which flag was bad.
+TEST(CliTest, TryParsePortRejectsBadInput)
 {
-  EXPECT_EXIT(parse_port("abc"), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: abc");
+  EXPECT_EQ(try_parse_port("abc"), std::nullopt);
+  EXPECT_EQ(try_parse_port("80abc"), std::nullopt);
+  EXPECT_EQ(try_parse_port("65536"), std::nullopt);
+  EXPECT_EQ(try_parse_port("99999999999999999999"), std::nullopt);
+  EXPECT_EQ(try_parse_port("-1"), std::nullopt);
+  EXPECT_EQ(try_parse_port(""), std::nullopt);
+  EXPECT_EQ(try_parse_port(" 80"), std::nullopt);
 }
 
-TEST(CliDeathTest, ParsePortRejectsHugeValue)
+TEST(CliTest, TryParseIntegerAcceptsFullRange)
 {
-  EXPECT_EXIT(parse_port("99999999999999999999"),
-              ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: 99999999999999999999");
+  EXPECT_EQ(try_parse_integer<uint64_t>("0"), 0U);
+  EXPECT_EQ(try_parse_integer<int32_t>("-5"), -5);
+  EXPECT_EQ(try_parse_integer<size_t>("10000000000"), 10000000000U);
 }
 
-TEST(CliDeathTest, ParsePortRejectsTrailingCharacters)
+TEST(CliTest, TryParseIntegerAcceptsHex)
 {
-  EXPECT_EXIT(parse_port("80abc"), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: 80abc");
+  EXPECT_EQ(try_parse_integer<uint64_t>("ff", 16), 0xffU);
+  EXPECT_EQ(try_parse_integer<uint64_t>("deadbeef", 16), 0xdeadbeefU);
+  // std::stoul accepted a 0x prefix for base 16; preserve that.
+  EXPECT_EQ(try_parse_integer<uint64_t>("0xff", 16), 0xffU);
 }
 
-TEST(CliDeathTest, ParsePortRejectsOutOfRange)
+TEST(CliTest, TryParseIntegerAutoDetectsBase)
 {
-  EXPECT_EXIT(parse_port("65536"), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: 65536");
+  EXPECT_EQ(try_parse_integer<size_t>("4096", 0), 4096U);
+  EXPECT_EQ(try_parse_integer<size_t>("0x40", 0), 0x40U);
+  // Deliberately NOT octal, unlike std::stoul with base 0.
+  EXPECT_EQ(try_parse_integer<size_t>("0755", 0), 755U);
 }
 
-TEST(CliDeathTest, ParsePortRejectsNegative)
+TEST(CliTest, TryParseIntegerRejectsBadInput)
 {
-  EXPECT_EXIT(parse_port("-1"), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: -1");
-}
-
-TEST(CliDeathTest, ParsePortRejectsEmpty)
-{
-  EXPECT_EXIT(parse_port(""), ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid port: ");
-}
-
-TEST(CliDeathTest, ParseIntegerOrDieReportsLabel)
-{
-  EXPECT_EXIT(parse_integer_or_die<uint16_t>("metrics port", "nope"),
-              ::testing::ExitedWithCode(EXIT_FAILURE),
-              "Invalid metrics port: nope");
-}
-
-TEST(CliDeathTest, DiePrintsMessage)
-{
-  EXPECT_EXIT(die("something went wrong"),
-              ::testing::ExitedWithCode(EXIT_FAILURE), "something went wrong");
+  EXPECT_EQ(try_parse_integer<uint64_t>("nope"), std::nullopt);
+  EXPECT_EQ(try_parse_integer<uint64_t>("12x"), std::nullopt);
+  EXPECT_EQ(try_parse_integer<uint8_t>("256"), std::nullopt);
+  // Hex digits are not valid in the default base.
+  EXPECT_EQ(try_parse_integer<uint64_t>("ff"), std::nullopt);
 }
 
 } // namespace hogd

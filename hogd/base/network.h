@@ -8,8 +8,8 @@
 #include <string>
 #include <string_view>
 
-#include "hogd/base/cli.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "x23/sockio.h"
@@ -24,14 +24,14 @@
 
 namespace hogd {
 
-// The bind IP always comes from startup configuration, so a bad one is a user
-// error to report and exit on, not an exception to unwind through main().
+// The bind IP always comes from startup configuration, so a bad one is fatal:
+// panic rather than unwinding an exception out through main().
 inline x23::HostPort
 make_bind_host_port(std::string_view bind_ip, uint16_t port)
 {
   x23::HostPort bind_addr(std::string(bind_ip), port);
   if (!bind_addr.to_addr(/*dns=*/false).has_value()) {
-    die(std::format("Invalid bind IP: {}", bind_ip));
+    panic("Invalid bind IP: {}", bind_ip);
   }
   return bind_addr;
 }

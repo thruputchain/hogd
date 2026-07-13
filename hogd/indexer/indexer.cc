@@ -124,7 +124,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = hogd::parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--event-addr" && i + 1 < argc) {
@@ -140,11 +141,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--event-port" && i + 1 < argc) {
-      event_port = hogd::parse_port(argv[++i]);
+      event_port = hogd::parse_port_arg("--event-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--block-explorer-port" && i + 1 < argc) {
-      block_explorer_port = hogd::parse_port(argv[++i]);
+      block_explorer_port =
+          hogd::parse_port_arg("--block-explorer-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);

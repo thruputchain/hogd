@@ -17,7 +17,6 @@
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
-#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -261,8 +260,8 @@ GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
 
   if (allocated_hogs_ >
       GenesisConfigurationLoader::initial_hog_token_supply()) {
-    die("GenesisConfigurationBuilder::build: allocated hogs "
-        "exceeds initial hog token supply");
+    panic("GenesisConfigurationBuilder::build: allocated hogs "
+          "exceeds initial hog token supply");
   }
   return genesis_configuration;
 }
