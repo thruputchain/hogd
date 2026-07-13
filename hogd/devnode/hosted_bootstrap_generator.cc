@@ -471,9 +471,18 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     };
   }
 
+  // The allocations come from the hosted bootstrap config, so over-allocating
+  // is a reportable input error. devnode's main() turns this into a clean
+  // message; it still reports failures by exception (see hogd #3001).
+  std::optional<GenesisConfiguration> genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+  if (!genesis_configuration) {
+    throw std::runtime_error("hosted bootstrap config allocates more hogs than "
+                             "the initial hog token supply");
+  }
+
   HostedBootstrapArtifact artifact{
-      .genesis_configuration =
-          builder.build(StorageCostModel::default_cost_model()),
+      .genesis_configuration = std::move(*genesis_configuration),
       .initialization_txs = builder.make_unfurl_genesis_transactions(),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),

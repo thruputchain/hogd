@@ -204,7 +204,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
-          builder.build(StorageCostModel::default_cost_model()),
+          builder.build_or_panic(StorageCostModel::default_cost_model()),
       .initialization_txs = std::move(initialization_txs),
   };
 }

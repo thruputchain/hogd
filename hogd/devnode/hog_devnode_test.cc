@@ -870,7 +870,7 @@ build_test_data_dir_genesis(BootstrapAccountConfig const &config)
 {
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
-    return builder.build(StorageCostModel::default_cost_model());
+    return builder.build_or_panic(StorageCostModel::default_cost_model());
   }
 
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
@@ -964,7 +964,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   GenesisConfigurationBuilder builder;
   GenesisConfiguration genesis =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 

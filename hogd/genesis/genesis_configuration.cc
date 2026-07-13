@@ -245,9 +245,14 @@ GenesisConfigurationBuilder::add_initial_config(
   allocated_hogs_ += amount;
 }
 
-GenesisConfiguration
+std::optional<GenesisConfiguration>
 GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
 {
+  if (allocated_hogs_ >
+      GenesisConfigurationLoader::initial_hog_token_supply()) {
+    return std::nullopt;
+  }
+
   GenesisConfiguration genesis_configuration;
   for (auto const &entry : entries_) {
     genesis_configuration.initial_config.push_back(InitialConfigurationEntry{
@@ -257,12 +262,18 @@ GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
   }
 
   genesis_configuration.storage_cost_model = cost_model.to_xdr();
-
-  if (allocated_hogs_ >
-      GenesisConfigurationLoader::initial_hog_token_supply()) {
-    panic("GenesisConfigurationBuilder::build: allocated hogs "
-          "exceeds initial hog token supply");
-  }
   return genesis_configuration;
+}
+
+GenesisConfiguration
+GenesisConfigurationBuilder::build_or_panic(
+    StorageCostModel const &cost_model) const
+{
+  std::optional<GenesisConfiguration> genesis_configuration = build(cost_model);
+  if (!genesis_configuration) {
+    panic("GenesisConfigurationBuilder: allocated hogs exceeds initial hog "
+          "token supply");
+  }
+  return std::move(*genesis_configuration);
 }
 } // namespace hogd
