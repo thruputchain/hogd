@@ -164,7 +164,7 @@ build_genesis_configuration(BootstrapAccountConfig const &config,
 {
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
-    return builder.build(cost_model);
+    return builder.build_or_panic(cost_model);
   }
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
   artifact.genesis_configuration.storage_cost_model = cost_model.to_xdr();
@@ -805,7 +805,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
     genesis_configuration_ =
-        builder.build(StorageCostModel::default_cost_model());
+        builder.build_or_panic(StorageCostModel::default_cost_model());
     CHECK_EQ(client.schedcoord_load_genesis_configuration(
                  GenesisConfiguration(genesis_configuration_))(),
              DbSchedResult::DbSchedResultOK);

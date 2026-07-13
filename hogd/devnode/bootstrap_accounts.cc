@@ -4,12 +4,15 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -62,9 +65,18 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
   std::vector<BootstrapAccountMetadata> accounts =
       append_bootstrap_accounts(builder, config);
 
+  // The allocations come from the caller's bootstrap config, so over-allocating
+  // is a reportable input error. devnode's main() turns this into a clean
+  // message; it still reports failures by exception (see hogd #3001).
+  std::optional<GenesisConfiguration> genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+  if (!genesis_configuration) {
+    throw std::runtime_error("bootstrap accounts allocate more hogs than the "
+                             "initial hog token supply");
+  }
+
   return BootstrapAccountArtifact{
-      .genesis_configuration =
-          builder.build(StorageCostModel::default_cost_model()),
+      .genesis_configuration = std::move(*genesis_configuration),
       .initialization_txs = builder.make_unfurl_genesis_transactions(),
       .accounts = std::move(accounts),
   };

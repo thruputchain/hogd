@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -37,7 +38,18 @@ public:
                           ContractEntrypointID entrypoint, Calldata calldata,
                           int128_t amount);
 
-  GenesisConfiguration build(StorageCostModel const &cost_model) const;
+  // Returns std::nullopt if the configured allocations exceed the initial hog
+  // token supply. Callers build this from user-supplied data (devnode bootstrap
+  // manifests), so an over-allocation is reportable input, not an invariant:
+  // report it rather than taking the process down from inside a shared builder.
+  std::optional<GenesisConfiguration>
+  build(StorageCostModel const &cost_model) const;
+
+  // build() for callers whose allocations are hardcoded and therefore cannot
+  // exceed the supply -- tests, benchmarks, loadgen. Panics if they somehow do.
+  // Anything assembling a config from user input must use build() and report
+  // the failure instead.
+  GenesisConfiguration build_or_panic(StorageCostModel const &cost_model) const;
 
   // The set of transactions that claim the balances that are set up
   // in the genesis block.

@@ -324,7 +324,7 @@ CommonBenchState::run_genesis_configuration(
       genesis_configuration_builder.make_unfurl_genesis_transactions();
   InitializationBlock initialization_txs = {unfurl_txs.begin(),
                                             unfurl_txs.end()};
-  run_genesis_configuration(genesis_configuration_builder.build(
+  run_genesis_configuration(genesis_configuration_builder.build_or_panic(
                                 StorageCostModel::default_cost_model()),
                             {initialization_txs});
 }

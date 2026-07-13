@@ -8,8 +8,8 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -18,6 +18,7 @@
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -65,9 +66,10 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
                                     contract->rv32_contract().data.size()),
                                 .contract_type = ContractType::kRv32};
   }
-  throw std::runtime_error(
-      std::format("make_deployed_contract_hash: unsupported contract type: {}",
-                  contract->contract_type()));
+  // ContractType is an XDR union discriminant, rejected at parse time if it is
+  // not one of the arms above, so this is unreachable.
+  panic("make_deployed_contract_hash: unsupported contract type: {}",
+        contract->contract_type());
 }
 } // namespace
 
@@ -244,9 +246,14 @@ GenesisConfigurationBuilder::add_initial_config(
   allocated_hogs_ += amount;
 }
 
-GenesisConfiguration
+std::optional<GenesisConfiguration>
 GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
 {
+  if (allocated_hogs_ >
+      GenesisConfigurationLoader::initial_hog_token_supply()) {
+    return std::nullopt;
+  }
+
   GenesisConfiguration genesis_configuration;
   for (auto const &entry : entries_) {
     genesis_configuration.initial_config.push_back(InitialConfigurationEntry{
@@ -256,13 +263,18 @@ GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
   }
 
   genesis_configuration.storage_cost_model = cost_model.to_xdr();
-
-  if (allocated_hogs_ >
-      GenesisConfigurationLoader::initial_hog_token_supply()) {
-    throw std::runtime_error(
-        "GenesisConfigurationBuilder::build: allocated hogs "
-        "exceeds initial hog token supply");
-  }
   return genesis_configuration;
+}
+
+GenesisConfiguration
+GenesisConfigurationBuilder::build_or_panic(
+    StorageCostModel const &cost_model) const
+{
+  std::optional<GenesisConfiguration> genesis_configuration = build(cost_model);
+  if (!genesis_configuration) {
+    panic("GenesisConfigurationBuilder: allocated hogs exceeds initial hog "
+          "token supply");
+  }
+  return std::move(*genesis_configuration);
 }
 } // namespace hogd

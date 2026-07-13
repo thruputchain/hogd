@@ -107,7 +107,7 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
   auto genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -204,7 +204,7 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
   auto genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -312,7 +312,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
       caller_meta_t::make_calldata<"initialize">(expected_fibonacci_address),
       GenesisConfigurationLoader::initial_hog_token_supply() -
           int128_t{1'000'000'000} - genesis_deployer_storage_costs(cost_model));
-  auto block = builder.build(cost_model);
+  auto block = builder.build_or_panic(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -374,7 +374,7 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
       fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
       GenesisConfigurationLoader::initial_hog_token_supply() -
           genesis_deployer_storage_costs(cost_model));
-  auto genesis_configuration = builder.build(cost_model);
+  auto genesis_configuration = builder.build_or_panic(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 1);
@@ -420,7 +420,7 @@ TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
       manual_revert_meta_t::make_calldata<"test_basic_manual_revert">(true),
       int128_t{1'000'000'000});
   auto genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   ASSERT_EQ(unfurl_txns.size(), 1);
@@ -450,7 +450,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
                                  uint32_t{0}),
                              int128_t{1'000'000'000});
   auto genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   ASSERT_EQ(unfurl_txns.size(), 1);

@@ -102,7 +102,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
     GenesisConfigurationBuilder builder;
     CHECK_EQ(
         mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
-            builder.build(StorageCostModel::default_cost_model()))(),
+            builder.build_or_panic(StorageCostModel::default_cost_model()))(),
         DbSchedResult::DbSchedResultOK);
   }
 }

@@ -25,6 +25,7 @@ add_library(base_test_objects OBJECT
   atomic_test.cc
   base_test.cc
   bits_test.cc
+  cli_test.cc
   cpputil_test.cc
   io_test.cc
   json_test.cc

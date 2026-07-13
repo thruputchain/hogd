@@ -4,9 +4,9 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
@@ -32,7 +32,7 @@ connect_to_event_sched_server(std::string const &address)
 {
   x23::HostPort host_port;
   if (!host_port.parse(address)) {
-    throw std::runtime_error("Failed to parse db server address");
+    panic("Invalid mempool address: {}", address);
   }
   return make_srpc_client<SchedEvent1>(host_port, true);
 }
@@ -67,12 +67,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   info("PORT event.indexer={}", actual_indexer_port);
   info("PORT event.mempool={}", actual_mempool_port);
 
-  // Register with the mempool.
-  x23::HostPort host_port;
-  if (!host_port.parse(mempool_address)) {
-    throw std::runtime_error(
-        std::format("Invalid mempool address: {}", mempool_address));
-  }
+  // Register with the mempool. connect_to_event_sched_server validates the
+  // address.
   auto client = connect_to_event_sched_server(mempool_address);
   std::string address_for_exec =
       format_advertised_address(bind_ip, actual_exec_port);
@@ -111,17 +107,6 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
 int
@@ -145,7 +130,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--mempool-addr" && i + 1 < argc) {
@@ -161,15 +147,18 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--executor-port" && i + 1 < argc) {
-      exec_port = parse_port(argv[++i]);
+      exec_port =
+          hogd::parse_port_arg("--executor-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--indexer-port" && i + 1 < argc) {
-      indexer_port = parse_port(argv[++i]);
+      indexer_port =
+          hogd::parse_port_arg("--indexer-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port =
+          hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);
