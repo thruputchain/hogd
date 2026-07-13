@@ -134,7 +134,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     auto sl = bases_lock_.hold_shared();
     auto it = bases_.find(block_height);
     if (it != bases_.end()) {
-      return it->second.get();
+      return &it->second;
     }
   }
 
@@ -144,13 +144,12 @@ ReplayCacheLock::get_base(const LockContext &ctx,
   // and I'd rather not have wasted accesses to the db.
   auto it = bases_.find(block_height);
   if (it != bases_.end()) {
-    return it->second.get();
+    return &it->second;
   }
 
   auto base = ctx.dao->read_address_replay_cache_data(ctx.key.get_address(),
                                                       block_height);
 
-  std::unique_ptr<ActiveHeight> entry{nullptr};
   if (!base) {
     if (base.error() != HogDBCode::kNotFound) {
       return base.error();
@@ -174,14 +173,15 @@ ReplayCacheLock::get_base(const LockContext &ctx,
       pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
       return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
     }
-    entry = std::make_unique<ActiveHeight>();
-  }
-  else {
-    entry = std::make_unique<ActiveHeight>(std::move(*base));
+    auto [res, inserted] = bases_.try_emplace(block_height);
+    CHECK(inserted);
+    return &res->second;
   }
 
-  auto res = bases_.emplace(block_height, std::move(entry));
-  return res.first->second.get();
+  auto [res, inserted] =
+      bases_.try_emplace(block_height, std::move(*base));
+  CHECK(inserted);
+  return &res->second;
 }
 
 namespace {
