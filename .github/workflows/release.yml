@@ -355,15 +355,77 @@ jobs:
             done < <(otool -L "$binary" | awk 'NR > 1 { print $1 }')
           done
 
+          # install_name_tool invalidates the Homebrew dylibs' existing code
+          # signatures. Re-sign every rewritten dependency before signing the
+          # executable so macOS does not kill the packaged process on launch.
+          for dylib in lib/*.dylib; do
+            [ -e "$dylib" ] || continue
+            codesign --force --sign - "$dylib"
+            codesign --verify --verbose=4 "$dylib"
+          done
+          codesign --force --sign - hog-devnode
+          codesign --verify --verbose=4 hog-devnode
+
           file hog-devnode
           otool -L hog-devnode
-          set +e
-          ./hog-devnode --help
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
-            exit "$status"
+
+          readiness_file="$(mktemp)"
+          log_file="$(mktemp)"
+          ./hog-devnode \
+            --listen-host 127.0.0.1 \
+            --scheduler-port 0 \
+            --readiness stdout \
+            --dev-accounts 1 \
+            --dev-account-seed groundhog-dev-accounts \
+            --dev-account-tokens 1000000000 \
+            >"$readiness_file" 2>"$log_file" &
+          devnode_pid=$!
+          cleanup_devnode() {
+            if kill -0 "$devnode_pid" 2>/dev/null; then
+              kill "$devnode_pid" 2>/dev/null || true
+              for _ in {1..40}; do
+                kill -0 "$devnode_pid" 2>/dev/null || break
+                sleep 0.25
+              done
+              if kill -0 "$devnode_pid" 2>/dev/null; then
+                kill -9 "$devnode_pid" 2>/dev/null || true
+              fi
+            fi
+            wait "$devnode_pid" 2>/dev/null || true
+            rm -f "$readiness_file" "$log_file"
+          }
+          trap cleanup_devnode EXIT
+
+          ready=0
+          for _ in {1..240}; do
+            if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' "$readiness_file"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$devnode_pid" 2>/dev/null; then
+              cat "$log_file" >&2
+              echo "packaged hog-devnode exited before readiness" >&2
+              exit 1
+            fi
+            sleep 0.25
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat "$log_file" >&2
+            echo "timed out waiting for packaged hog-devnode readiness" >&2
+            exit 1
           fi
+          python3 - "$readiness_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              readiness = json.loads(handle.readline())
+          if readiness.get("status") != "ready":
+              raise SystemExit(f"unexpected readiness payload: {readiness}")
+          PY
+          cat "$readiness_file"
+          cleanup_devnode
+          trap - EXIT
           popd >/dev/null
 
           tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.rv32a lib
