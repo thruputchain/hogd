@@ -3,9 +3,9 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
@@ -100,22 +100,10 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
-// NOLINTBEGIN(bugprone-exception-escape)
 int
-main(int argc, char *argv[])
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   if (hogd::print_version_and_exit_if_requested(argc, argv)) {
     return EXIT_SUCCESS;
@@ -136,7 +124,7 @@ main(int argc, char *argv[])
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--event-addr" && i + 1 < argc) {
@@ -152,11 +140,11 @@ main(int argc, char *argv[])
       continue;
     }
     if (arg == "--event-port" && i + 1 < argc) {
-      event_port = parse_port(argv[++i]);
+      event_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--block-explorer-port" && i + 1 < argc) {
-      block_explorer_port = parse_port(argv[++i]);
+      block_explorer_port = hogd::parse_port(argv[++i]);
       continue;
     }
     usage(argv);
@@ -168,5 +156,3 @@ main(int argc, char *argv[])
   return hogd::indexer_init(path, event_server_addr, bind_ip, event_port,
                             block_explorer_port, metrics_port);
 };
-
-// NOLINTEND(bugprone-exception-escape)

@@ -5,11 +5,11 @@
 #include <future>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
@@ -150,17 +150,6 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
 int
@@ -189,7 +178,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
@@ -197,39 +186,42 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--num-db-shards" && i + 1 < argc) {
-      num_db_shards = std::stoul(argv[++i], nullptr, /*base=*/10);
+      num_db_shards =
+          hogd::parse_integer_or_die<size_t>("num db shards", argv[++i]);
       continue;
     }
     if (arg == "--num-exec-shards" && i + 1 < argc) {
-      num_exec_shards = std::stoul(argv[++i], nullptr, /*base=*/10);
+      num_exec_shards =
+          hogd::parse_integer_or_die<size_t>("num exec shards", argv[++i]);
       continue;
     }
     if (arg == "--network-id" && i + 1 < argc) {
-      network_id = std::stoul(argv[++i], nullptr, /*base=*/16);
+      network_id = hogd::parse_integer_or_die<uint64_t>("network id", argv[++i],
+                                                        /*base=*/16);
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
-      db_port = parse_port(argv[++i]);
+      db_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--event-port" && i + 1 < argc) {
-      event_port = parse_port(argv[++i]);
+      event_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--executor-port" && i + 1 < argc) {
-      executor_port = parse_port(argv[++i]);
+      executor_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--auth-port" && i + 1 < argc) {
-      auth_port = parse_port(argv[++i]);
+      auth_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--coordinator-port" && i + 1 < argc) {
-      coordinator_port = parse_port(argv[++i]);
+      coordinator_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--gateway-port" && i + 1 < argc) {
-      gateway_port = parse_port(argv[++i]);
+      gateway_port = hogd::parse_port(argv[++i]);
       continue;
     }
     usage(argv);

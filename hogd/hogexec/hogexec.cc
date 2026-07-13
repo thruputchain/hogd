@@ -1,5 +1,3 @@
-#include <charconv>
-#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -10,8 +8,8 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
-#include <system_error>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/os.h"
@@ -24,36 +22,6 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "x23/sockio.h"
-
-namespace {
-
-// Bad command-line input is a user error, not a violated invariant: report it
-// and exit rather than terminating on an uncaught throw.
-[[noreturn]] void
-die(std::string_view message)
-{
-  std::println(stderr, "{}", message);
-  exit(EXIT_FAILURE);
-}
-
-// parse_full_integer accepts only a complete, in-range decimal number.
-// std::stoul / std::stoi throw on non-numeric or out-of-range input, and
-// hogd::parse_integer accepts trailing characters ("80abc" -> 80), so neither
-// preserves the strict validation these flags need.
-template<std::integral T>
-T
-parse_full_integer(const std::string &label, const std::string &value)
-{
-  T parsed{};
-  const auto *const end = value.data() + value.size();
-  const auto res = std::from_chars(value.data(), end, parsed);
-  if (res.ec != std::errc{} || res.ptr != end) {
-    die(std::format("Invalid {}: {}", label, value));
-  }
-  return parsed;
-}
-
-} // namespace
 
 namespace hogd {
 
@@ -73,9 +41,8 @@ parse_host_port(const std::string &label, const std::string &address)
   }
   return ParsedHostPort{
       .host = std::string{host_port.host.begin(), host_port.host.end()},
-      .port = parse_full_integer<uint16_t>(label,
-                                           std::string{host_port.port.begin(),
-                                                       host_port.port.end()})};
+      .port = parse_integer_or_die<uint16_t>(
+          label, std::string{host_port.port.begin(), host_port.port.end()})};
 }
 
 int
@@ -154,18 +121,12 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  return parse_full_integer<uint16_t>("port", value);
-}
-
 int
 parse_nthreads(const std::string &value)
 {
-  const int nthreads = parse_full_integer<int>("nthreads", value);
+  const int nthreads = hogd::parse_integer_or_die<int>("nthreads", value);
   if (nthreads <= 0) {
-    die(std::format("Invalid nthreads: {}", value));
+    hogd::die(std::format("Invalid nthreads: {}", value));
   }
   return nthreads;
 }
@@ -195,7 +156,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--coordinator-addr" && i + 1 < argc) {
@@ -211,7 +172,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--db-executor-addr" && i + 1 < argc) {
@@ -223,7 +184,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--view-gateway-port" && i + 1 < argc) {
-      view_gateway_port = parse_port(argv[++i]);
+      view_gateway_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "-n" && i + 1 < argc) {
@@ -231,7 +192,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "-p" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "-h" || arg == "--help") {

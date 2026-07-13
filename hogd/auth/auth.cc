@@ -3,7 +3,6 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -11,6 +10,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
@@ -38,11 +38,8 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
       metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT auth.metrics={}", actual_metrics_port);
 
-  x23::HostPort host_port;
-  if (!host_port.parse(mempool_address)) {
-    throw std::runtime_error(
-        std::format("Invalid mempool address: {}", mempool_address));
-  }
+  const x23::HostPort host_port =
+      parse_host_port_or_die("mempool address", mempool_address);
 
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
@@ -72,7 +69,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
                      .address_for_mempool = auth_mempool_address.c_str()};
   IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
   if (intro.shards().empty()) {
-    throw std::runtime_error("No db shards registered with mempool");
+    die("No db shards registered with mempool");
   }
   ShardCard &shard = intro.shards()[0];
   const std::string address_for_auth = shard.address_for_auth.c_str();
@@ -110,17 +107,6 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
 int
@@ -144,7 +130,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--mempool-addr" && i + 1 < argc) {
@@ -156,11 +142,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
-      db_port = parse_port(argv[++i]);
+      db_port = hogd::parse_port(argv[++i]);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port = hogd::parse_port(argv[++i]);
       continue;
     }
     usage(argv);
