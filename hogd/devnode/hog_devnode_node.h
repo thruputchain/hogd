@@ -158,11 +158,12 @@ private:
   // [finish_init()], and that callback broadcasts on the coordinator's
   // [auth_data_height_]. The coordinator is constructed from
   // [mempool_auth_server_->impl()], so it must be declared first and would
-  // otherwise be destroyed last -- after the coordinator -- letting an in-flight
-  // callback race the coordinator's destructor. Hold it behind a pointer so
-  // teardown can drain it (via [~RpcServer], which waits for in-flight handlers)
-  // before the coordinator is torn down. See [~HogDevnodeNode] and
-  // [prepare_for_failed_construction].
+  // otherwise be destroyed last -- after the coordinator -- letting an
+  // in-flight callback race the coordinator's destructor. Hold it behind a
+  // pointer so the failed-construction cleanup can drain it (via [~RpcServer],
+  // which waits for in-flight handlers) before the coordinator is torn down.
+  // See [prepare_for_failed_construction]. (The normal ~HogDevnodeNode path
+  // instead drains via the DB subscription manager in [ctx_.reset()].)
   std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
       std::make_unique<RpcServer<MempoolAuthRpc>>();
   RpcServer<MempoolDbRpc> sched_db_server_;
