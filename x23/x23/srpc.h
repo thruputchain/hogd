@@ -433,7 +433,10 @@ protected:
   {
     super2::populate(
         [&ss, logfd](const CpuSet &set) -> SRpcStream<Logger>::ClientRef {
-          int fd = tcpconnect(ss).release();
+          auto conn = tcpconnect(ss);
+          if (!conn)
+            conn.error().raise("connect({})", HostPort(ss));
+          int fd = conn->release();
           set_nodelay(fd);
           typename super2::value_type ret =
               *new SRpcStream<Logger>(UniqueFd{fd}, Logger{fd, logfd});

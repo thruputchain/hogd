@@ -157,16 +157,25 @@ namespace x23 {
 
 // Create a TCP connection.  You can bind the socket or make the file
 // descriptor non-blocking in prep_fd.
-UniqueFd tcpconnect(const sockaddr_storage &ss,
-                    std::function<void(int)> prep_fd = nullptr);
+//
+// The sockaddr_storage overload reports failure through std::expected and
+// does not throw.  The host/port overload resolves the address first and
+// throws on failure: the GaiError from address resolution, or the connect
+// error re-raised as a std::system_error.
+std::expected<UniqueFd, Errno>
+tcpconnect(const sockaddr_storage &ss,
+           std::function<void(int)> prep_fd = nullptr);
 inline UniqueFd
 tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
     requires requires { HostPort{std::move(host), std::move(port)}; }
 {
-  if (auto addr = HostPort{host, port}.to_addr())
-    return tcpconnect(*addr, std::move(prep_fd));
-  else
+  auto addr = HostPort{host, port}.to_addr();
+  if (!addr)
     throw addr.error();
+  auto conn = tcpconnect(*addr, std::move(prep_fd));
+  if (!conn)
+    conn.error().raise("connect({})", HostPort(*addr));
+  return std::move(*conn);
 }
 
 } // namespace x23

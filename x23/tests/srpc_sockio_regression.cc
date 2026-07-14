@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <expected>
 #include <string_view>
 #include <sys/socket.h>
+#include <system_error>
 #include <unistd.h>
 
 #include <utility>
@@ -88,6 +90,43 @@ TEST(SockioRegression, BoundedStrCStr)
   BoundedStr<12> bs = "Hello, world";
   ASSERT_EQ(bs.size(), 12U);
   bs.c_str();
+}
+
+TEST(SockioRegression, TcpConnectSockaddrReturnsFdOnSuccess)
+{
+  UniqueFd listener = stcplisten(0);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_TRUE(res.has_value());
+  EXPECT_TRUE(*res);
+}
+
+TEST(SockioRegression, TcpConnectSockaddrReturnsErrnoOnRefusal)
+{
+  // Bind a listener to claim a free port, then close it so nothing is
+  // listening.  Connecting to the now-vacant port must fail with an
+  // unexpected Errno rather than throwing.
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+
+  uint16_t port = 0;
+  {
+    UniqueFd listener = stcplisten(*bind_addr);
+    ASSERT_TRUE(listener);
+    port = get_port(local_addr(listener));
+  }
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().error_code(), std::errc::connection_refused);
 }
 
 } // namespace x23
