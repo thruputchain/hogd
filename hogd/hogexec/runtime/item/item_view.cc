@@ -258,8 +258,15 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   auto const *next_block = next_block_status.value();
 
   if (next_block) {
-    assert(!next_block->entries.empty());
-    assert(partial_consume_quantity < next_block->entries.size());
+    // Recovered/corrupt metadata can point the cursor past the block, or the
+    // block can be empty; fail-stop rather than index OOB. (#2944, #2978)
+    if (partial_consume_quantity >= next_block->entries.size()) {
+      error("Unrecoverable: recovered RCQ consume cursor {} is past block {} "
+            "entry count {}",
+            partial_consume_quantity, next_block->block_number,
+            next_block->entries.size());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
 
     if (advance_cursor) {
       size_t blk_size = next_block->entries.size();
