@@ -266,6 +266,68 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
   EXPECT_EQ(auth_server().verify_batch(1, {stx})(), AuthErrorCode::kAuthFailed);
 }
 
+TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  ContractAddress address = sha256(preimage);
+
+  AddressAuthData auth_data{};
+  add_pk_to_auth_data(auth_data, 0, pk);
+  auth_data.required_weight = 1;
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  Transaction pubkey_tx{};
+  pubkey_tx.invocation.invoked_address = address;
+  pubkey_tx.auth_claim = make_pubkey_claim(preimage);
+  SignedTransaction pubkey_stx{};
+  pubkey_stx.tx = pubkey_tx;
+  pubkey_stx.signatures.push_back(
+      make_signature(sk, pubkey_tx, /*public_key_id=*/0));
+
+  Transaction source_tx{};
+  source_tx.invocation.invoked_address = address;
+  source_tx.auth_claim = make_self_individual_key_claim(0);
+  SignedTransaction source_stx{};
+  source_stx.tx = source_tx;
+  source_stx.signatures.push_back(
+      make_signature(sk, source_tx, /*public_key_id=*/0));
+
+  x23::Vec<SignedTransaction> stx_vec{pubkey_stx, source_stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+
+  // Registered accounts must use their source-address auth data.
+  auto result0 = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result0.size(), 2);
+  EXPECT_EQ(result0[0], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(result0[1], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {pubkey_stx})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {source_stx})(),
+            AuthErrorCode::kAuthSuccess);
+
+  // Deleting the auth entry reverses which claim type is accepted.
+  mock_db().increment_height(); // height 1
+  mock_db().delete_address(address);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  auto result1 = auth_server().verify_transactions(1, stx_span)();
+  ASSERT_EQ(result1.size(), 2);
+  EXPECT_EQ(result1[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(result1[1], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(1, {pubkey_stx})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(1, {source_stx})(),
+            AuthErrorCode::kAuthFailed);
+}
+
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 {
   constexpr size_t kNumAddresses = 4;

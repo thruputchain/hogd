@@ -703,6 +703,53 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   }
 }
 
+TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [wrong_pk, wrong_sk] = make_key_pair();
+
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage() = preimage;
+
+  Transaction tx{};
+  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.gas_limit = 100'000;
+  tx.auth_claim = claim;
+
+  SignedTransaction stx{.tx = tx,
+                        .signatures = {
+                            make_signature(sk, tx, /*public_key_id=*/0)}};
+
+  // Leave the derived address absent from the database. Pubkey claims are the
+  // only claim type authorized without registered AddressAuthData.
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+
+  auto serialized_stx = x23::serialize(stx);
+  VerifyAuthResultFromDBResult result =
+      verify_signed_transaction_auth_from_db(db, {.data = serialized_stx.data(),
+                                                  .len = static_cast<uint32_t>(
+                                                      serialized_stx.size())});
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(result.auth_error_code,
+            std::to_underlying(AuthErrorCode::kAuthSuccess));
+
+  SignedTransaction wrong_stx{
+      .tx = tx,
+      .signatures = {make_signature(wrong_sk, tx, /*public_key_id=*/0)}};
+  auto serialized_wrong_stx = x23::serialize(wrong_stx);
+  VerifyAuthResultFromDBResult wrong_result =
+      verify_signed_transaction_auth_from_db(
+          db, {.data = serialized_wrong_stx.data(),
+               .len = static_cast<uint32_t>(serialized_wrong_stx.size())});
+  EXPECT_EQ(wrong_result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(wrong_result.auth_error_code,
+            std::to_underlying(AuthErrorCode::kAuthFailed));
+}
+
 // Test roundtrip on cost model: create a DB with a non-default cost model,
 // retrieve it via get_cost_model, and verify the serialized form matches.
 TEST(TestBindingsTest, CostModelRoundtrip)
