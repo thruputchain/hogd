@@ -98,19 +98,24 @@ source ./scripts/ci/prepare_env.sh
 export ASAN_OPTIONS=abort_on_error=1
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
+# Work around GCC PR 120201 in GCC 16.1 by avoiding the affected AVX-512
+# codegen. Remove this once the CI compiler includes
+# db1b9f9d978a0708e684cd33b5ba8da3accf541d (expected in GCC 16.2).
+GCC_ASAN_ARCH="-DBUILD_ARCHITECTURE=x86-64-v3"
+
 # Cap build parallelism at 64: the gcc asan TUs can each peak around 5GB in
 # cc1plus, so fanning out to all 128 hyperthreads OOMs the host (the OOM killer
 # took out the login session's sd-pam, dropping the SSH job). Applies to both
 # the Debug and Release builds below.
 echo 'build gcc asan'
-./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests'
 ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 # gcc release seems to be more likely broken than clang release?
 echo 'build gcc asan release'
-./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests release'
 ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
