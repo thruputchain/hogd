@@ -2311,6 +2311,19 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   CHECK(ready());
   CHECK_EQ(height, auth_data_height_.load() + 1);
 
+  // [auth_data_changed] is invoked asynchronously by the auth server via the
+  // callback registered in [finish_init()], on a thread the coordinator does
+  // not own, and finishes by broadcasting on [auth_data_height_]. Register it
+  // as a pending detached coroutine so [~MempoolCoordinatorRpc()] waits for the
+  // broadcast to complete before destroying [auth_data_height_]. Otherwise
+  // teardown (e.g. the failed-construction path, where the coordinator is
+  // destroyed while the auth server is still live) races the in-flight
+  // callback.
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  x23::Defer decrement_pending([this] {
+    pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+  });
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
