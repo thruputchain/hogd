@@ -204,9 +204,24 @@ def inputs_for_full(root: Path, compile_db: Path) -> set[str]:
     return sources | (headers - referenced_headers)
 
 
-def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> set[str]:
+def representative_source(
+    header: str, affected_sources: set[str], changed_sources: set[str]
+) -> str:
+    companion = Path(header).with_suffix(".cc").as_posix()
+    if companion in affected_sources:
+        return companion
+    changed_dependents = affected_sources & changed_sources
+    if changed_dependents:
+        return min(changed_dependents)
+    return min(affected_sources)
+
+
+def inputs_for_changed(
+    root: Path, compile_db: Path, base: str, head: str
+) -> set[str]:
     changed = changed_files(root, base, head)
-    result = {path for path in changed if path.endswith(".cc")}
+    changed_sources = {path for path in changed if path.endswith(".cc")}
+    result = set(changed_sources)
     changed_headers = sorted(path for path in changed if path.endswith(".h"))
     if not changed_headers:
         return result
@@ -214,10 +229,11 @@ def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> se
     for header in changed_headers:
         affected_sources = header_to_sources.get(header, set())
         if affected_sources:
-            result.update(affected_sources)
+            representative = representative_source(
+                header, affected_sources, changed_sources
+            )
+            result.add(representative)
         else:
-            # Referenced headers are checked through their real translation
-            # units, which preserve target-specific include paths and defines.
             # Only standalone headers need a synthetic translation unit.
             result.add(header)
     return result
