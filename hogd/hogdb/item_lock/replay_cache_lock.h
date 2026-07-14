@@ -66,7 +66,7 @@ private:
                                        BlockHeight block_height) const;
   HogDBStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
-  mutable std::map<BlockHeight, std::unique_ptr<ActiveHeight>> bases_;
+  mutable std::map<BlockHeight, ActiveHeight> bases_;
   mutable x23::SharedLock bases_lock_;
 
   mutable std::atomic<ReplayCacheMetadata *> meta_;
