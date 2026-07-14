@@ -1,12 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstring>
 #include <limits>
 #include <span>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/alias_guard.h"
+#include "hogd/hogexec/components/ffi_helpers.h"
+#include "hogd/hogexec/components/ffi_types.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 
@@ -237,6 +241,53 @@ TEST(SyscallParseTests, WritableOutputBool)
   EXPECT_EQ(memory[3], 1);
   memory[3] = 3;
   EXPECT_EQ(memory, (std::array<uint8_t, 8>{0, 1, 2, 3, 4, 5, 6, 7}));
+}
+
+// End-to-end over the real GetAuthClaim output path: a claim staged through
+// WritableOutput lands in contract memory with its reserved bytes zeroed, even
+// when the stack the value was built on was full of junk.  WritableOutput
+// copies the whole object representation, so this is what the contract sees.
+TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
+{
+  constexpr size_t kSize = sizeof(generated::AuthClaim);
+  std::array<uint8_t, kSize> memory{};
+  memory.fill(0xFF);
+
+  // Leave junk on the stack that the to_ffi call below will build its result
+  // on.
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,hicpp-member-init)
+    std::array<uint8_t, 1024> scratch;
+    volatile uint8_t *scratch_bytes = scratch.data();
+    for (size_t i = 0; i < scratch.size(); i++) {
+      scratch_bytes[i] = 0xAB;
+    }
+  }
+
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
+  claim.pubkey_preimage().pubkey.ed25519().fill(0x11);
+  claim.pubkey_preimage().nonce = 0x2222222222222222ULL;
+
+  {
+    WritableOutput<generated::AuthClaim> output(memory.data());
+    // Exactly what syscall_GetAuthClaim_inner does.
+    output.get() = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
+  }
+
+  EXPECT_EQ(memory[0], 1); // tag: kPubkeySignature
+  for (size_t i = sizeof(generated::AuthClaim::Tag); i < 8; i++) {
+    EXPECT_EQ(memory[i], 0) << "reserved byte " << i << " reached the contract";
+  }
+  // The payload itself survives.
+  EXPECT_EQ(memory[8], 0); // nested PublicKey tag: Ed25519
+  EXPECT_EQ(memory[12], 0x11);
+  EXPECT_EQ(memory[43], 0x11);
+  // The reserved gap before nonce.
+  for (size_t i = 44; i < 48; i++) {
+    EXPECT_EQ(memory[i], 0) << "reserved byte " << i << " reached the contract";
+  }
+  EXPECT_EQ(memory[48], 0x22);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

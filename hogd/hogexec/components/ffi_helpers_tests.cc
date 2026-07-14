@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 
@@ -18,6 +21,46 @@ roundtrip_auth_claim(AuthClaim const &auth_claim)
 {
   auto ffi_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(auth_claim);
   return FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
+}
+
+// Fill the stack that to_ffi is about to build its result on with a
+// recognizable pattern.
+//
+// This is what gives the padding assertions below their teeth: padding bytes
+// take whatever the stack already held, so on a clean stack a buggy to_ffi
+// would emit zero padding and the tests would pass by luck.  Poisoning first
+// makes any byte that is not deliberately written show up as 0xAB.
+[[gnu::noinline]] void
+poison_stack()
+{
+  constexpr size_t kScratchBytes = 1024;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,hicpp-member-init)
+  std::array<uint8_t, kScratchBytes> scratch;
+  volatile uint8_t *scratch_bytes = scratch.data();
+  for (size_t i = 0; i < kScratchBytes; i++) {
+    scratch_bytes[i] = 0xAB;
+  }
+}
+
+// The exact bytes GetAuthClaim copies into contract memory: the object
+// representation of to_ffi's result, which WritableOutput memcpy's out
+// wholesale.
+std::array<std::byte, sizeof(generated::AuthClaim)>
+contract_visible_bytes(AuthClaim const &auth_claim)
+{
+  poison_stack();
+  auto ffi_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(auth_claim);
+
+  std::array<std::byte, sizeof(generated::AuthClaim)> raw{};
+  std::memcpy(raw.data(), &ffi_auth_claim, raw.size());
+  return raw;
+}
+
+int
+byte_at(std::array<std::byte, sizeof(generated::AuthClaim)> const &raw,
+        size_t index)
+{
+  return std::to_integer<int>(raw[index]);
 }
 
 } // namespace
@@ -142,6 +185,66 @@ TEST(FFIHelpers, AuthClaimInvalidTags)
     auto result = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
     EXPECT_FALSE(result.has_value())
         << "Expected nullopt for invalid tag value " << tag_val;
+  }
+}
+
+// GetAuthClaim hands the contract every byte of generated::AuthClaim, so every
+// byte must be a function of the auth claim.  The bytes that hold no payload --
+// the gap between a variant's tag and its 8-aligned payload, the gap before
+// nonce, and the tail of the union left over by the shorter variant -- are
+// named `reserved` fields, so initializing the claim zeroes them.  They must
+// reach the contract as zeros, not as whatever the host stack last held.
+
+TEST(FFIHelpers, PubkeySignatureClaimExposesNoStackBytes)
+{
+  AuthClaim a(AuthClaimType::kPubkeySignature);
+  a.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
+  for (size_t i = 0; i < 32; i++) {
+    a.pubkey_preimage().pubkey.ed25519()[i] = static_cast<uint8_t>(0x40 + i);
+  }
+  a.pubkey_preimage().nonce = 0x0102030405060708ULL;
+
+  auto const raw = contract_visible_bytes(a);
+
+  using PubkeyBody = generated::AuthClaim::AuthClaim_kPubkeySignature_Body;
+  using Preimage = generated::PubkeyAccountPreimage;
+
+  // Gap between the 4-byte tag and the 8-aligned payload.
+  constexpr size_t kReservedOffset = offsetof(PubkeyBody, reserved);
+  constexpr size_t kPayloadOffset = offsetof(PubkeyBody, pubkey_preimage);
+
+  // Gap between the 36-byte pubkey and the 8-aligned nonce.
+  constexpr size_t kPreimageReserved =
+      kPayloadOffset + offsetof(Preimage, reserved);
+  constexpr size_t kNonceOffset = kPayloadOffset + offsetof(Preimage, nonce);
+
+  for (size_t i = kReservedOffset; i < kPayloadOffset; i++) {
+    EXPECT_EQ(byte_at(raw, i), 0)
+        << "tag/payload reserved byte " << i << " is visible to the contract";
+  }
+  for (size_t i = kPreimageReserved; i < kNonceOffset; i++) {
+    EXPECT_EQ(byte_at(raw, i), 0)
+        << "pubkey/nonce reserved byte " << i << " is visible to the contract";
+  }
+}
+
+TEST(FFIHelpers, SourceAddressClaimExposesNoUnionTail)
+{
+  AuthClaim a(AuthClaimType::kSourceAddressAuthData);
+  a.source_address_claim().allowed_keys = 0x15;
+  a.source_address_claim().required_weight = 3;
+
+  auto const raw = contract_visible_bytes(a);
+
+  // The source-address payload is far shorter than the union, so most of what
+  // the contract receives is this variant's reserved tail.
+  using SourceBody =
+      generated::AuthClaim::AuthClaim_kSourceAddressAuthData_Body;
+  constexpr size_t kTailOffset = offsetof(SourceBody, reserved_tail);
+
+  for (size_t i = kTailOffset; i < sizeof(generated::AuthClaim); i++) {
+    EXPECT_EQ(byte_at(raw, i), 0)
+        << "reserved tail byte " << i << " is visible to the contract";
   }
 }
 

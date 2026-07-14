@@ -23,6 +23,21 @@ static_assert(std::endian::native == std::endian::little);
 static_assert(sizeof(bool) == 1);
 
 template<typename T> class WritableOutput {
+  // The destructor copies all sizeof(T) bytes of the staged value into contract
+  // memory, so no byte of T may be indeterminate. Implicit padding bytes are:
+  // they hold whatever the host stack last left there. Writing them back leaks
+  // host memory to an untrusted contract, and makes the bytes the contract
+  // observes depend on the compiler rather than on the value, so two honest
+  // validators could hand the same contract different bytes.
+  //
+  // If this fires, T has padding. Give the gaps names -- declare them as
+  // `reserved` fields, so that initializing T zeroes them like any other field
+  // -- rather than scrubbing T at the call site, which only holds until the
+  // next person adds a variant. See generated::AuthClaim in ffi_types.h.
+  static_assert(std::has_unique_object_representations_v<T>,
+                "syscall output types must not have padding bytes: name the "
+                "gaps as reserved fields (see ffi_types.h)");
+
 public:
   WritableOutput(void *ptr) : value_(T{}), original_pointer_(ptr) {}
 
