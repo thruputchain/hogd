@@ -1168,7 +1168,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
                      x23::BufView{source_auth_data.data, source_auth_data.len});
 
     // Perform the appropriate level of verification
-    AuthVerifyStatus<void> result = verify_auth(stx, source_data);
+    AuthVerifyStatus<void> result = verify_auth(stx, &source_data);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
