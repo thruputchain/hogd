@@ -356,7 +356,7 @@ private:
     if (!out.has_value()) {
       panic("Failed to encode calldata");
     }
-    return out.value();
+    return *out;
   }
 };
 

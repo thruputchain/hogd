@@ -181,7 +181,7 @@ private:
     if (!server_addr) {
       panic("Failed to connect to event server");
     }
-    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+    return x23::SRpcMulticlient<x23::RpcLogger>::make(*server_addr)
         ->client(EventSched1{});
   }
   client_t event_sched_client_;

@@ -75,7 +75,7 @@ public:
       co_return DbTipResult(DbSchedResult::DbSchedResultError);
     }
     DbTipResult result(DbSchedResult::DbSchedResultOK);
-    result.db_tip() = ret.value();
+    result.db_tip() = *ret;
     co_return result;
   }
 

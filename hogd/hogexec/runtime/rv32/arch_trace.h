@@ -252,8 +252,7 @@ trace_execution(Machine &machine, Host &host, size_t max_steps = 4096)
         result = StepResult::kTrap;
       }
       else {
-        result =
-            machine.complete_ecall(host.ecall(machine.view(), pending.value()));
+        result = machine.complete_ecall(host.ecall(machine.view(), *pending));
       }
     }
     trace.steps.push_back(TraceStep{.result = result,
