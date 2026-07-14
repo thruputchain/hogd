@@ -183,8 +183,7 @@ public:
           if (!return_buffer.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          ctx.handler().set_return_buffer(std::move(*return_buffer),
-                                          false, {});
+          ctx.handler().set_return_buffer(std::move(*return_buffer), false, {});
           return {};
         };
 
