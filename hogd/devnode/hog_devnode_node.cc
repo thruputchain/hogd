@@ -479,7 +479,7 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_coord_server_.start_server(
         make_bind_host_port(bind_host_, requested_scheduler_port));
-    mempool_auth_server_.start_server(
+    mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
     auto sched_db_client = std::make_unique<sched_db_client_t>(
@@ -576,6 +576,14 @@ HogDevnodeNode::~HogDevnodeNode()
   try {
     // Shutdown is intentionally loud while this topology is still mirroring the
     // fragile MempoolTestInfra lifecycle; unexpected exceptions here are bugs.
+    // Note: unlike prepare_for_failed_construction(), we do not need to drain
+    // [mempool_auth_server_] here. [ctx_.reset()] below tears down the DB's
+    // auth-change subscription manager, whose destructor waits for in-flight
+    // [authdb_forward_key_changes] forwards -- and thus the downstream
+    // [auth_data_changed] callbacks -- to finish, before the member destructors
+    // tear down [mempool_coord_server_]. Draining the auth server here would
+    // instead close it while the subscription manager is still forwarding,
+    // surfacing spurious "input too short" RPC errors on shutdown.
     // [sched_db_server_] sends RPCs to [db_scheduler_server_] (via the
     // scheduler). Reset the scheduler pointer before destructing
     // [db_scheduler_server_] so that [sched_db_server_] does not send an RPC to
@@ -612,6 +620,18 @@ void
 HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
+    // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
+    // (which broadcasts on the coordinator's [auth_data_height_]) via the
+    // registered callback, and is destroyed after [mempool_coord_server_].
+    // Unlike ~HogDevnodeNode, this cleanup does not reset [ctx_], so the DB's
+    // auth-change subscription manager does not drain in-flight forwards for
+    // us. Drain the auth server directly -- [~RpcServer] waits for in-flight
+    // handlers -- before the member destructors that run after we rethrow tear
+    // down the coordinator, or an in-flight callback (e.g. the block-0 push
+    // during the post-genesis failure injection) races the coordinator's
+    // destructor. Safe even when construction failed early:
+    // [mempool_auth_server_] is created by its member initializer.
+    mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
     // injection), the scheduler is running a detached coroutine that sends RPCs
@@ -958,7 +978,7 @@ void
 HogDevnodeNode::register_auth_with_mempool()
 {
   sched_auth_client_t client =
-      create_client<MempoolAuth1>(bind_host_, mempool_auth_server_.port())();
+      create_client<MempoolAuth1>(bind_host_, mempool_auth_server_->port())();
   AuthCard auth_card = {
       .protocol = version::kHogdProtocol(),
       .upid = {},
