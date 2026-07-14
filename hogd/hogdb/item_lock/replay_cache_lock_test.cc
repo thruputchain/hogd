@@ -110,6 +110,30 @@ public:
   }
 };
 
+TEST(ReplayCacheLockSnapshotTest, KnownMissingSnapshotAvoidsDaoReads)
+{
+  ReplayCacheLock lock(/*snapshot_missing=*/true);
+  auto ctx = make_dummy_context();
+  PointerItem<ReplayCacheIt> item(u(1, 10));
+
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item, ctx));
+}
+
+TEST(ReplayCacheLockSnapshotTest, KnownPresentSnapshotAvoidsMetadataDaoRead)
+{
+  ReplayCacheMetadata meta{
+      .size = 1,
+      .heights = {{.height = 2, .nonce_count = 1}},
+  };
+  ReplayCacheLock lock(/*snapshot_missing=*/false, &meta);
+  auto ctx = make_dummy_context();
+  PointerItem<ReplayCacheIt> item(u(1, 10));
+
+  // Height 1 is known absent from the cached metadata, so neither the metadata
+  // nor per-height data lookup should dereference the dummy DAO.
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item, ctx));
+}
+
 class ReplayCacheLockTest : public testing::Test {
 protected:
   ReplayCacheLockTest() = default;

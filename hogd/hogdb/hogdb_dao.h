@@ -333,6 +333,14 @@ public:
 
   static ItemLockCacheData from_none() { return ItemLockCacheData(); }
   static ItemLockCacheData from_rcq() { return ItemLockCacheData(CachedRCQ{}); }
+  static ItemLockCacheData from_missing_replay_cache()
+  {
+    return ItemLockCacheData(CachedMissingReplayCache{});
+  }
+  static ItemLockCacheData from_replay_cache(ReplayCacheMetadata meta)
+  {
+    return ItemLockCacheData(CachedReplayCache{std::move(meta)});
+  }
 
   bool is_cached_balance() const
   {
@@ -346,6 +354,14 @@ public:
 
   bool is_none() const { return std::holds_alternative<std::monostate>(data_); }
   bool is_rcq() const { return std::holds_alternative<CachedRCQ>(data_); }
+  bool is_missing_replay_cache() const
+  {
+    return std::holds_alternative<CachedMissingReplayCache>(data_);
+  }
+  bool is_cached_replay_cache() const
+  {
+    return std::holds_alternative<CachedReplayCache>(data_);
+  }
 
   std::optional<int128_t> get_cached_balance() const
   {
@@ -357,6 +373,12 @@ public:
   {
     assert(std::holds_alternative<CachedNNInt128Base>(data_));
     return std::get<CachedNNInt128Base>(data_).base_value;
+  }
+
+  ReplayCacheMetadata take_cached_replay_cache()
+  {
+    assert(std::holds_alternative<CachedReplayCache>(data_));
+    return std::move(std::get<CachedReplayCache>(data_).meta);
   }
 
 private:
@@ -373,12 +395,31 @@ private:
   // type changes that require cleanup of RCQ block entries.
   struct CachedRCQ {};
 
+  // Tag-only: the replay-cache metadata lookup performed while creating the
+  // ItemLock returned kNotFound. ReplayCacheLock uses this to avoid repeating
+  // that lookup and a guaranteed-missing per-height lookup.
+  struct CachedMissingReplayCache {};
+
+  // Replay-cache metadata is read while calculating the snapshot storage
+  // cost. Preserve it so ReplayCacheLock does not deserialize it again and can
+  // avoid reads for heights that the snapshot metadata proves are absent.
+  struct CachedReplayCache {
+    ReplayCacheMetadata meta;
+  };
+
   ItemLockCacheData() : data_(std::monostate{}) {}
   ItemLockCacheData(CachedBalance balance) : data_(balance) {}
   ItemLockCacheData(CachedNNInt128Base nnint128_base) : data_(nnint128_base) {}
   ItemLockCacheData(CachedRCQ /*tag*/) : data_(CachedRCQ{}) {}
+  ItemLockCacheData(CachedMissingReplayCache /*tag*/)
+    : data_(CachedMissingReplayCache{})
+  {}
+  ItemLockCacheData(CachedReplayCache replay_cache)
+    : data_(std::move(replay_cache))
+  {}
 
-  std::variant<std::monostate, CachedBalance, CachedNNInt128Base, CachedRCQ>
+  std::variant<std::monostate, CachedBalance, CachedNNInt128Base, CachedRCQ,
+               CachedMissingReplayCache, CachedReplayCache>
       data_;
 };
 

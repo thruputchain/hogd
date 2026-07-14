@@ -37,6 +37,9 @@ class ReplayCacheLock {
 public:
   using change_type = PointerItem<ReplayCacheIt>;
 
+  explicit ReplayCacheLock(bool snapshot_missing = false,
+                           ReplayCacheMetadata *snapshot_meta = nullptr);
+
   HogDBStatus<void> initialize(LockContext const &ctx);
 
   HogDBStatus<int128_t>

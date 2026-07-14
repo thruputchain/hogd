@@ -604,8 +604,9 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         assert(r.error() == HogDBCode::kNotFound);
         return HogDBError(HogDBCode::kNotFound);
       }
-      return std::make_pair(cost_model->get_replay_cache_cost(r->size),
-                            ItemLockCacheData::from_none());
+      auto cost = cost_model->get_replay_cache_cost(r->size);
+      return std::make_pair(cost, ItemLockCacheData::from_replay_cache(
+                                      std::move(*r)));
     }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());

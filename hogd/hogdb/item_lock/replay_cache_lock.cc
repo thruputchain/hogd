@@ -38,6 +38,17 @@ ReplayConflictSetTraits::hash(const uint128_t &v)
   return SipHash24::get_default()(std::as_bytes(std::span(&v, 1)));
 }
 
+ReplayCacheLock::ReplayCacheLock(bool snapshot_missing,
+                                 ReplayCacheMetadata *snapshot_meta)
+  : meta_(snapshot_meta)
+{
+  CHECK(!snapshot_missing || !snapshot_meta);
+  if (snapshot_missing) {
+    meta_cell_.emplace(ReplayCacheMetadata{});
+    meta_.store(&*meta_cell_, std::memory_order_relaxed);
+  }
+}
+
 HogDBStatus<ReplayCacheMetadata *>
 ReplayCacheLock::get_meta(const LockContext *ctx) const
 {
@@ -147,14 +158,25 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     return it->second.get();
   }
 
-  auto base = ctx.dao->read_address_replay_cache_data(ctx.key.get_address(),
-                                                      block_height);
-
-  std::unique_ptr<ActiveHeight> entry{nullptr};
-  if (!base) {
-    if (base.error() != HogDBCode::kNotFound) {
+  std::optional<ReplayCacheData> base_data;
+  auto *meta = meta_.load(std::memory_order_acquire);
+  bool height_known_missing =
+      meta != nullptr &&
+      !std::ranges::binary_search(meta->heights, block_height, {},
+                                  &ReplayCacheHeightCount::height);
+  if (!height_known_missing) {
+    auto base = ctx.dao->read_address_replay_cache_data(ctx.key.get_address(),
+                                                        block_height);
+    if (!base && base.error() != HogDBCode::kNotFound) {
       return base.error();
     }
+    if (base) {
+      base_data.emplace(std::move(*base));
+    }
+  }
+
+  std::unique_ptr<ActiveHeight> entry{nullptr};
+  if (!base_data) {
     // New height. Check global active height limit. The cap counts only
     // unexpired heights (protocol/storage_item.x): heights below the current
     // block are pruned by stage_committed_changes(), so they must not consume
@@ -177,7 +199,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     entry = std::make_unique<ActiveHeight>();
   }
   else {
-    entry = std::make_unique<ActiveHeight>(std::move(*base));
+    entry = std::make_unique<ActiveHeight>(std::move(*base_data));
   }
 
   auto res = bases_.emplace(block_height, std::move(entry));

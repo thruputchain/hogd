@@ -502,6 +502,27 @@ TEST_F(HogDBTest, ItemLockCacheDataBalance)
   EXPECT_EQ(100000, rbalance->second.get_cached_balance().value());
 }
 
+TEST_F(HogDBTest, ItemLockCacheDataReplayCache)
+{
+  Address addr = make_address(kAddress);
+  ItemKey key = make_replay_cache_item_key(addr);
+  ReplayCacheMetadata meta{
+      .size = 2,
+      .heights = {{.height = 3, .nonce_count = 2}},
+  };
+  ASSERT_TRUE(db_.write_address_replay_cache_meta(addr, meta));
+
+  auto result = db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(cost_model_.get_replay_cache_cost(2), result->first);
+  ASSERT_TRUE(result->second.is_cached_replay_cache());
+  auto cached = result->second.take_cached_replay_cache();
+  EXPECT_EQ(2, cached.size);
+  ASSERT_EQ(1, cached.heights.size());
+  EXPECT_EQ(3, cached.heights[0].height);
+  EXPECT_EQ(2, cached.heights[0].nonce_count);
+}
+
 TEST_F(HogDBTest, NNIntAndBalancePersistenceUseCanonicalXdrBytes)
 {
   constexpr int128_t kNNIntValue =
@@ -702,7 +723,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   auto snapshot_result =
       db_.get_charged_storage_cost_and_cache_data(rckey, &cost_model_);
   ASSERT_TRUE(snapshot_result);
-  ItemLock lock2(snapshot_result->first);
+  ItemLock lock2(std::move(*snapshot_result));
 
   {
     LockContext ctx(&db_, height, rckey, &cost_model_);
