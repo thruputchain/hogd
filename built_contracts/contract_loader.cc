@@ -5,13 +5,12 @@
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -64,8 +63,7 @@ load_raw_file(std::string_view filename)
     }
   }
   if (!f) {
-    throw std::runtime_error("failed to load contract artifact: " +
-                             std::string(filename));
+    panic("failed to load contract artifact: {}", filename);
   }
 
   ContractBlob contents;
@@ -82,8 +80,7 @@ load_raw_file(std::string_view filename)
   const bool read_error = std::ferror(f) != 0;
   std::fclose(f);
   if (read_error) {
-    throw std::runtime_error("failed to read contract artifact: " +
-                             std::string(filename));
+    panic("failed to read contract artifact: {}", filename);
   }
 
   // groundhog build produces already-instrumented wasm; no need to
