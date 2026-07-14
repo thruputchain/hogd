@@ -481,6 +481,14 @@ impl {0}_{1}_Client {{
     prtop("    }}\n");
   }
   prtop("}}\n");
+  prtop(R"(
+impl From<::std::sync::Arc<dyn ::rpc_driver::RpcSender>> for {0}_{1}_Client {{
+    fn from(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
+        Self::new(handle)
+    }}
+}}
+)",
+        prog_name, vers.id);
 }
 
 void
