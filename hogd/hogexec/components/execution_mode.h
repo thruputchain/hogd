@@ -184,7 +184,7 @@ public:
     if (!bit.has_value()) {
       return true;
     }
-    return bit.value();
+    return *bit;
   }
 
   Nondeterministic<bool> view_query_queue_observation_bit()
@@ -194,7 +194,7 @@ public:
       // default to empty queue failing in view mode
       return false;
     }
-    return bit.value();
+    return *bit;
   }
 
   // Returns nullopt if no more queue entries are available (which is a

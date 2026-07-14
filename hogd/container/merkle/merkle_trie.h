@@ -327,7 +327,7 @@ private:
       case Node::Type::kBranch:
         CHECK_LE(info.next_child_to_visit, info.node->branch_children().size());
         if (info.next_child_to_visit == info.node->branch_children().size() ||
-            (max_depth && info.depth == max_depth.value())) {
+            (max_depth && info.depth == *max_depth)) {
           // We have visited all of the branch's children, so now we can "visit"
           // (i.e., call [f] on) the branch. Or, we have reached the maximum
           // depth we want to visit of the trie, so we now visit the extension
@@ -367,7 +367,7 @@ private:
         // for an extension node to have no children.
         CHECK_LE(info.next_child_to_visit, 1UL);
         if (info.next_child_to_visit == 1 ||
-            (max_depth && info.depth == max_depth.value())) {
+            (max_depth && info.depth == *max_depth)) {
           // We have visited the extension node's one child, so now we can visit
           // the extension node. Or, we have reached the maximum depth we want
           // to visit of the trie, so we now visit the extension node because we
@@ -403,7 +403,7 @@ private:
         // encountering it.
         CHECK_EQ(info.next_child_to_visit, 0UL);
         if (max_depth) {
-          CHECK_LE(info.depth, max_depth.value());
+          CHECK_LE(info.depth, *max_depth);
         }
 
         NodeType &n = *info.node;
