@@ -12,7 +12,9 @@
 // invalid C++. There is no config workaround of which I am aware.
 // Rather than post-processing the output, we maintain these types by hand.
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <type_traits>
 #include <utility>
@@ -40,6 +42,29 @@ namespace hogd::generated {
 // with memcpy — well-defined for these trivially copyable types no matter
 // which variant body is active or whether the value was copied in as raw
 // bytes from guest memory.
+//
+// Every byte of these types is a named field: the gaps that the Rust layout
+// leaves between a tag and its aligned payload, and the tail of a union left
+// over by a variant shorter than the union, are spelled out as `reserved`
+// members rather than left as implicit padding.
+//
+// This is load-bearing, not cosmetic. GetAuthClaim writes the whole object
+// representation back into contract memory, and implicit padding bytes are
+// indeterminate — they hold whatever the host stack last left there. Writing
+// them back would leak host memory to an untrusted contract, and would make
+// the bytes a contract observes depend on the compiler rather than on the
+// value, so two honest validators could hand the same contract different
+// bytes. Naming the gaps makes them ordinary fields, which aggregate
+// initialization zeroes for us.
+//
+// The has_unique_object_representations_v asserts below are what keep this
+// honest: they fail if any implicit padding is left anywhere in these types,
+// including padding introduced later by a layout change. WritableOutput
+// asserts the same property of every syscall output type, so a padded type
+// cannot reach contract memory in the first place.
+//
+// On the input side these bytes carry no meaning: the Rust guest leaves the
+// corresponding padding uninitialized, so to_cpp must (and does) ignore them.
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -66,6 +91,7 @@ union PublicKey {
 
 static_assert(std::is_trivially_copyable_v<PublicKey>);
 static_assert(std::is_standard_layout_v<PublicKey>);
+static_assert(std::has_unique_object_representations_v<PublicKey>);
 static_assert(sizeof(PublicKey) == sizeof(hogd::PublicKey));
 static_assert(alignof(PublicKey) == alignof(hogd::PublicKey));
 static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, tag) == 0);
@@ -74,14 +100,18 @@ static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, ed25519) ==
 
 struct PubkeyAccountPreimage {
   PublicKey pubkey;
+  // PublicKey is 36 bytes and nonce is 8-aligned, leaving a 4-byte gap.
+  uint32_t reserved;
   uint64_t nonce;
 };
 
 static_assert(std::is_trivially_copyable_v<PubkeyAccountPreimage>);
 static_assert(std::is_standard_layout_v<PubkeyAccountPreimage>);
+static_assert(std::has_unique_object_representations_v<PubkeyAccountPreimage>);
 static_assert(sizeof(PubkeyAccountPreimage) ==
               sizeof(hogd::PubkeyAccountPreimage));
 static_assert(offsetof(PubkeyAccountPreimage, pubkey) == 0);
+static_assert(offsetof(PubkeyAccountPreimage, reserved) == sizeof(PublicKey));
 static_assert(offsetof(PubkeyAccountPreimage, nonce) ==
               offsetof(hogd::PubkeyAccountPreimage, nonce));
 
@@ -98,11 +128,18 @@ union AuthClaim {
     using source_claim_t = std::remove_cvref_t<
         decltype(std::declval<hogd::AuthClaim>().source_address_claim())>;
     static_assert(std::is_trivially_copyable_v<source_claim_t>);
+    static_assert(std::has_unique_object_representations_v<source_claim_t>);
     source_claim_t source_address_claim;
+    // This variant is shorter than the pubkey-signature one, so it would
+    // otherwise leave the tail of the union unwritten. Name that tail too: the
+    // whole union is copied into contract memory, not just the active variant.
+    std::array<uint8_t, 44> reserved_tail;
   };
 
   struct AuthClaim_kPubkeySignature_Body {
     Tag tag;
+    // pubkey_preimage is 8-aligned, leaving a 4-byte gap after the tag.
+    uint32_t reserved;
     PubkeyAccountPreimage pubkey_preimage;
   };
 
@@ -128,6 +165,16 @@ static_assert(offsetof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body,
                        source_address_claim) == sizeof(AuthClaim::Tag));
 static_assert(offsetof(AuthClaim::AuthClaim_kPubkeySignature_Body,
                        pubkey_preimage) == 8);
+
+// No byte of the union belongs to no field: every gap in the Rust layout is a
+// named `reserved` member above, and each variant body spans the whole union.
+// This is what makes it safe to copy the object representation into contract
+// memory. It fails if a layout change reintroduces implicit padding anywhere.
+static_assert(std::has_unique_object_representations_v<AuthClaim>);
+static_assert(sizeof(AuthClaim::AuthClaim_kSourceAddressAuthData_Body) ==
+              sizeof(AuthClaim));
+static_assert(sizeof(AuthClaim::AuthClaim_kPubkeySignature_Body) ==
+              sizeof(AuthClaim));
 
 // NOLINTEND(readability-identifier-naming)
 

@@ -90,6 +90,7 @@ add_executable(
   item_lock/replay_cache_lock_test.cc
   mock_authdb_rpc.cc
   recovery_tests.cc
+  rpc_context_lifetime_test.cc
   rpc_from_exec_test.cc
   rpc_from_gateway_test.cc
 )

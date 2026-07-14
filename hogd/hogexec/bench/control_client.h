@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,7 +43,7 @@ public:
 
     auto status = client_.ciserver_start(kHogdGitHash, config);
     if (status.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
-      throw std::runtime_error("Failed to start server");
+      panic("Failed to start server");
     }
     return status;
   }

@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <exception>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -25,6 +24,7 @@ usage(char *argv[])
   std::println("  stop            - Stop a process");
   std::println("  wait            - Wait for the most recent process to exit");
   std::println("  expect_running  - Check if a process is running");
+  std::println("  work_dir        - Print the control server work directory");
   std::println("  clear_work_dir  - Clear the work directory");
   exit(EXIT_FAILURE);
 }
@@ -79,7 +79,8 @@ handle_start_command(std::string const &host, std::string const &port,
 {
   try {
     if (args.empty()) {
-      throw std::runtime_error("start requires a program name");
+      hogd::info("Error: start requires a program name");
+      return 1;
     }
     auto client = hogd::connect_to_control_server(host, port);
     // gcc14 has vector<string> format problems in CI
@@ -115,6 +116,25 @@ handle_stop_command(std::string const &host, std::string const &port)
   try {
     auto client = hogd::connect_to_control_server(host, port, false);
     client.stop_server();
+    return 0;
+  } catch (std::exception const &e) {
+    hogd::info("Error: {}", e.what());
+    return 1;
+  }
+}
+
+int
+handle_work_dir_command(std::string const &host, std::string const &port)
+{
+  try {
+    auto client = hogd::connect_to_control_server(host, port);
+    auto status = client.query_work_dir();
+    if (status.error_code() != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: {}", status.error_code());
+      return 1;
+    }
+    std::println("CONTROL_WORK_DIR={}", std::string(status.work_dir().begin(),
+                                                    status.work_dir().end()));
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
@@ -203,6 +223,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
   if (command == "expect_running") {
     return handle_expect_running_command(host, port);
+  }
+  if (command == "work_dir") {
+    return handle_work_dir_command(host, port);
   }
 
   if (command == "clear_work_dir") {

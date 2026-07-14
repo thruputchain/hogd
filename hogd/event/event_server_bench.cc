@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <future>
 #include <print>
 #include <span>
 #include <stdexcept>
@@ -245,13 +247,17 @@ usage(char *argv[])
 {
   std::println("Usage: {} -e <event_exec_server_addr> -s "
                "<event_sched_server_addr> [-n num_events] [-c num_connections] "
-               "[-o coros_per_connection] [-b batch_size]",
-               argv[0]);
+               "[-o coros_per_connection] [-p fake_sched_port] [-S]\n"
+               "       {} -F [-p fake_sched_port]",
+               argv[0], argv[0]);
   std::println("  -e: Event executor server address (e.g., hostname:8090)");
   std::println("  -s: Event scheduler server address (e.g., hostname:8091)");
   std::println("  -n: Number of events (default: 1000000)");
   std::println("  -c: Number of connections (default: 10)");
   std::println("  -o: Coroutines per connection (default: 100)");
+  std::println("  -p: Fake scheduler event server port (default: 8095)");
+  std::println("  -F: Run only the fake scheduler event server");
+  std::println("  -S: Skip starting an internal fake scheduler");
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -268,10 +274,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   size_t num_events = 1'000'000;
   size_t num_connections = 20;
   size_t coros_per_connection = 100;
+  uint16_t fake_sched_port = 8095;
+  bool fake_sched_only = false;
+  bool start_fake_sched = true;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:s:n:c:o:b:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:s:n:c:o:p:FS")) != -1) {
     switch (opt) {
     case 'e':
       exec_server_addr = optarg;
@@ -288,21 +297,44 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'o':
       coros_per_connection = std::stoull(optarg);
       break;
+    case 'p':
+    {
+      const auto port = std::stoul(optarg);
+      if (port > UINT16_MAX) {
+        usage(argv);
+      }
+      fake_sched_port = static_cast<uint16_t>(port);
+      break;
+    }
+    case 'F':
+      fake_sched_only = true;
+      break;
+    case 'S':
+      start_fake_sched = false;
+      break;
     default:
       usage(argv);
     }
   }
   // NOLINTEND(misc-include-cleaner)
 
-  if (exec_server_addr.empty() || sched_server_addr.empty()) {
+  if (!fake_sched_only &&
+      (exec_server_addr.empty() || sched_server_addr.empty())) {
     std::println("Error: Both -e and -s arguments are required");
     usage(argv);
   }
 
   hogd::RpcServer<hogd::TestSchedEvent> test_sched_event_server;
-  if (test_sched_event_server.start_server(8095) != 8095) {
+  if (start_fake_sched && test_sched_event_server.start_server(
+                              fake_sched_port) != fake_sched_port) {
     std::println("Error: Failed to start test sched event server");
     return EXIT_FAILURE;
+  }
+
+  if (fake_sched_only) {
+    std::println("Fake scheduler event server listening on port {}",
+                 fake_sched_port);
+    std::promise<void>().get_future().wait();
   }
 
   for (size_t i = 0; i < 20; i++) {

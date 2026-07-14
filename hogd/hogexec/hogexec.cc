@@ -5,10 +5,11 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/os.h"
@@ -35,13 +36,17 @@ ParsedHostPort
 parse_host_port(const std::string &label, const std::string &address)
 {
   x23::HostPort host_port;
-  if (!host_port.parse(address)) {
-    throw std::runtime_error(std::format("Invalid {}: {}", label, address));
+  const std::optional<uint16_t> port =
+      host_port.parse(address)
+          ? try_parse_port(
+                std::string_view{host_port.port.begin(), host_port.port.end()})
+          : std::nullopt;
+  if (!port) {
+    panic("Invalid {}: {}", label, address);
   }
-  return ParsedHostPort{
-      .host = std::string{host_port.host.begin(), host_port.host.end()},
-      .port = static_cast<uint16_t>(std::stoul(
-          std::string{host_port.port.begin(), host_port.port.end()}))};
+  return ParsedHostPort{.host = std::string{host_port.host.begin(),
+                                            host_port.host.end()},
+                        .port = *port};
 }
 
 int
@@ -66,8 +71,8 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
       db_executor_addr || event_executor_addr || view_gateway_port;
   if (view_gateway_configured &&
       (!db_executor_addr || !event_executor_addr || !view_gateway_port)) {
-    throw std::runtime_error("--db-executor-addr, --event-executor-addr, and "
-                             "--view-gateway-port must be provided together");
+    panic("--db-executor-addr, --event-executor-addr, and --view-gateway-port "
+          "must be provided together");
   }
 
   Executor executor(nthreads);
@@ -107,7 +112,7 @@ hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
 
 namespace {
 
-void
+[[noreturn]] void
 usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
@@ -120,15 +125,15 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
+int
+parse_nthreads(char *argv[], const std::string &value)
 {
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
+  const std::optional<int> nthreads = hogd::try_parse_integer<int>(value);
+  if (!nthreads || *nthreads <= 0) {
+    std::println(stderr, "Invalid --nthreads: {}", value);
+    usage(argv);
   }
-  return static_cast<uint16_t>(port);
+  return *nthreads;
 }
 
 } // namespace
@@ -156,7 +161,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--coordinator-addr" && i + 1 < argc) {
@@ -168,11 +174,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--nthreads" && i + 1 < argc) {
-      nthreads = std::stoi(argv[++i]);
+      nthreads = parse_nthreads(argv, argv[++i]);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port =
+          hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--db-executor-addr" && i + 1 < argc) {
@@ -184,15 +191,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--view-gateway-port" && i + 1 < argc) {
-      view_gateway_port = parse_port(argv[++i]);
+      view_gateway_port =
+          hogd::parse_port_arg("--view-gateway-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "-n" && i + 1 < argc) {
-      nthreads = std::stoi(argv[++i]);
+      nthreads = parse_nthreads(argv, argv[++i]);
       continue;
     }
     if (arg == "-p" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port = hogd::parse_port_arg("-p", argv[++i], argv, usage);
       continue;
     }
     if (arg == "-h" || arg == "--help") {

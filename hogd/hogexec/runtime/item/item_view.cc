@@ -404,12 +404,19 @@ RetrocausalQueueItem::get_next_concurrent_entry(
 {
   assert(base_item_);
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+    auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
+    // Once the observation cap is hit, record nothing further and stop probing
+    // the queue; load_next_queue_entry turns this into a deterministic
+    // InvalidSyscallInput. This bounds observation growth structurally, without
+    // relying on RCQ peek gas pricing (#2894).
+    if (proposal_data.observation_cap_exceeded()) {
+      return {std::nullopt};
+    }
     auto out = base_item_->get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
       return out.error();
     }
 
-    auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
     auto &rcq_entry = out.value();
 
     if (rcq_entry.get().has_value()) {
@@ -430,6 +437,9 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   }
   if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
     auto &viewing_data = std::get<ViewingModeData>(execution_mode_data);
+    if (viewing_data.observation_cap_exceeded()) {
+      return {std::nullopt};
+    }
     auto bit = viewing_data.view_query_queue_observation_bit();
     if (!bit.get()) {
       // no queue entry available
@@ -439,6 +449,13 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     auto entry =
         viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
     if (!entry.has_value()) {
+      // Recorded observations exhausted with the contract wanting more: the
+      // proposer's own cap (flag set) replays as InvalidSyscallInput, while a
+      // sequence shorter than the cap is a malformed proposal, i.e. a
+      // validation failure. (#2894)
+      if (viewing_data.observation_cap_exceeded()) {
+        return {std::nullopt};
+      }
       return SystemError{SystemErrorCode::ValidationFailure};
     }
     return entry.value().get();
@@ -446,6 +463,9 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
+  if (validation_data.observation_cap_exceeded()) {
+    return {std::nullopt};
+  }
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
     return SystemError{SystemErrorCode::ValidationFailure};
@@ -455,6 +475,14 @@ RetrocausalQueueItem::get_next_concurrent_entry(
         validation_data.consume_queue_entry_observation(base_item_->addrkey(),
                                                         index);
     if (!res.has_value()) {
+      // The recorded observation sequence is exhausted but the contract asked
+      // for another observation. If the proposer stopped at exactly the cap
+      // (flag set), replay the same InvalidSyscallInput it returned. Otherwise
+      // the proposer recorded fewer observations than this contract consumes --
+      // a malformed proposal, which is a validation failure. (#2894)
+      if (validation_data.observation_cap_exceeded()) {
+        return {std::nullopt};
+      }
       return SystemError{SystemErrorCode::ValidationFailure};
     }
     return res.value().get();

@@ -940,7 +940,7 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
 
   // This must NOT throw std::bad_alloc. The zero-copy BufView
   // deserialization path validates the declared size against the
-  // actual input buffer via check_size(), which throws CxsBadInput
+  // actual input buffer via check_size(), which returns a parse error
   // (caught by serialize_calldata.h), returning a deterministic error.
   EXPECT_NO_THROW({
     auto res = handler.root_invoke();

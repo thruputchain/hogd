@@ -5,7 +5,6 @@
 #include <format>
 #include <memory>
 #include <regex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,7 +50,7 @@ hog_ip(std::string_view host)
   static const std::regex kHogHostPattern("^hog([0-9]+)$");
   std::match_results<std::string_view::const_iterator> match;
   if (!std::regex_match(host.begin(), host.end(), match, kHogHostPattern)) {
-    throw std::runtime_error(std::format("invalid hog host: {}", host));
+    panic("invalid hog host: {}", host);
   }
 
   unsigned int hog_num = std::stoul(match[1].str());
@@ -223,11 +222,11 @@ private:
   {
     auto r = event_sched_client_->eventsched_open_block(block_number);
     if (r != RPCError::kRPCNone) {
-      throw std::runtime_error("Failed to open event block");
+      panic("Failed to open event block");
     }
     auto r2 = event_exec_client_->eventexecutor_open_block(block_number);
     if (r2 != RPCError::kRPCNone) {
-      throw std::runtime_error("Failed to open executor event handle");
+      panic("Failed to open executor event handle");
     }
   }
   void close_event_block(BlockID block_number)
@@ -236,13 +235,13 @@ private:
     // have been emitted before it finalizes the block.
     auto r1 = event_exec_client_->eventexecutor_close_block(block_number);
     if (r1 != RPCError::kRPCNone) {
-      throw std::runtime_error("Failed to close executor event handle");
+      panic("Failed to close executor event handle");
     }
     // We use [block_number] as the height as well.
     auto r =
         event_sched_client_->eventsched_close_block(block_number, block_number);
     if (r.error() != RPCError::kRPCNone) {
-      throw std::runtime_error("Failed to close event block");
+      panic("Failed to close event block");
     }
   }
 
@@ -285,9 +284,8 @@ CommonBenchState::advance_block()
 {
   auto r = coord_client_->dbsched_close_snapshot(block_number_);
   if (r.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error(
-        std::format("Failed to close snapshot for block {}: {}", block_number_,
-                    r.result()));
+    panic("Failed to close snapshot for block {}: {}", block_number_,
+          r.result());
   }
 
   close_event_block(block_number_);
@@ -296,18 +294,15 @@ CommonBenchState::advance_block()
   value.proposal_header.block_height = block_number_;
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error(
-        std::format("Failed to commit snapshot for block {}: {}", block_number_,
-                    r2.result()));
+    panic("Failed to commit snapshot for block {}: {}", block_number_,
+          r2.result());
   }
 
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
   if (r3 != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error(
-        std::format("Failed to create snapshot for block {}: {}", block_number_,
-                    r3));
+    panic("Failed to create snapshot for block {}: {}", block_number_, r3);
   }
 
   open_event_block(block_number_ + 1);
@@ -327,7 +322,7 @@ CommonBenchState::run_genesis_configuration(
       genesis_configuration_builder.make_unfurl_genesis_transactions();
   InitializationBlock initialization_txs = {unfurl_txs.begin(),
                                             unfurl_txs.end()};
-  run_genesis_configuration(genesis_configuration_builder.build(
+  run_genesis_configuration(genesis_configuration_builder.build_or_panic(
                                 StorageCostModel::default_cost_model()),
                             {initialization_txs});
 }
@@ -346,7 +341,7 @@ CommonBenchState::run_genesis_configuration(
         coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to write genesis configuration");
+      panic("Failed to write genesis configuration");
     }
   }
 
@@ -354,7 +349,7 @@ CommonBenchState::run_genesis_configuration(
     auto r = coord_client_->dbsched_create_snapshot(
         0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to create snapshot");
+      panic("Failed to create snapshot");
     }
   }
 
@@ -370,10 +365,10 @@ CommonBenchState::run_genesis_configuration(
     for (auto const &tx : block) {
       auto handler = make_handler(tx, allocate_txid(), *runtime_context);
       if (!handler.root_invoke().is_root_success()) {
-        throw std::runtime_error("Failed to invoke transaction");
+        panic("Failed to invoke transaction");
       }
       if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
-        throw std::runtime_error("failed to perform commit operation");
+        panic("failed to perform commit operation");
       }
     }
     advance_block();

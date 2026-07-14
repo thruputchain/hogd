@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <mutex>
-#include <stdexcept>
 #include <stop_token>
 #include <thread>
 
@@ -17,9 +16,9 @@ void
 HogexecMetrics::launch_log_worker()
 {
   if (!hogexec_metrics_initialized()) {
-    throw std::runtime_error(
-        "HogexecMetrics::launch_log_worker: executor metrics not initialized; "
-        "call init_hogexec_metrics() (hogd/hogexec/shared.h) first");
+    panic("HogexecMetrics::launch_log_worker: executor metrics not "
+          "initialized; call init_hogexec_metrics() (hogd/hogexec/shared.h) "
+          "first");
   }
 
   HogexecMetrics &instance = get_instance();

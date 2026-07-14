@@ -1607,7 +1607,7 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
 
   GenesisConfigurationBuilder builder;
   GenesisConfiguration genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
 
   constexpr size_t kWarmupReads = 100;
   std::atomic<bool> load_done = false;

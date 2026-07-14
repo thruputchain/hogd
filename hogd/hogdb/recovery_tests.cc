@@ -8,6 +8,7 @@
 #include "consensus.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -238,7 +239,6 @@ insert_into_recovered_rcq(uint64_t live_entries)
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     invoke_tx.rollback_to_savepoint(0);
-    invoke_tx.release_blocktx_reference();
     return insert_result;
   }
 
@@ -246,7 +246,6 @@ insert_into_recovered_rcq(uint64_t live_entries)
   // which exercises the signed cost arithmetic at the boundary.
   EXPECT_TRUE(invoke_tx.sync_balance_locks().has_value());
   EXPECT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   EXPECT_TRUE(block_tx.get().close(DbHash{}).has_value());
   EXPECT_TRUE(block_tx.get().commit().has_value());
@@ -282,6 +281,13 @@ TEST(RecoveryTests, RCQInsertAdmittedJustBelowMaxLiveEntries)
 // moment the metadata is loaded, before any signed cost arithmetic.
 TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
 {
+  if constexpr (!is_debug_build()) {
+    // The "CHECK FAILED" panic message this death test matches is only
+    // produced in debug builds (x23::panic is std::unreachable() under
+    // NDEBUG).
+    GTEST_SKIP();
+  }
+
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
   constexpr uint64_t kHighBitLiveEntries = uint64_t{1} << 63;

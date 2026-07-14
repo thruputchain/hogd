@@ -8,7 +8,6 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -93,7 +92,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
         auto r = handler.root_invoke();
         if (!r.is_root_success()) {
-          throw std::runtime_error("Failed to invoke transaction");
+          panic("Failed to invoke transaction");
         }
         return r.gas_consumed_;
       });
@@ -167,11 +166,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
           auto handler = bs.make_handler(local_tx, k, *runtime_context);
           if (!handler.root_invoke().is_root_success()) {
             error("Failed to invoke transaction");
-            throw std::runtime_error("Failed to invoke transaction");
+            panic("Failed to invoke transaction");
           }
           if (do_commit) {
             if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
-              throw std::runtime_error("failed to perform commit operation");
+              panic("failed to perform commit operation");
             }
           }
         }

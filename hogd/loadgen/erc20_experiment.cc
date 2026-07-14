@@ -12,6 +12,7 @@
 
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet.h"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
@@ -179,7 +180,8 @@ ERC20ExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(mint_txs));
 
   // Build result step by step
-  auto genesis_config = builder.build(StorageCostModel::default_cost_model());
+  auto genesis_config =
+      builder.build_or_panic(StorageCostModel::default_cost_model());
   LoadgenSuccessResult result;
   result.genesis_configuration = std::move(genesis_config);
   result.initialization_txs = std::move(initialization_txs);
@@ -206,6 +208,16 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
 
   std::vector<std::future<void>> futures;
   futures.reserve(nthread);
+  // Wait for every submitted job before work_txs (captured by reference in the
+  // jobs below) can be destroyed. Without this, an exception from submit()
+  // partway through the loop would unwind the coroutine frame and free work_txs
+  // while already-enqueued workers are still writing into it -> use-after-free.
+  // Mirrors the drain guard in WorkerPool::for_each_parallel.
+  Defer drain{[&futures] {
+    for (auto &future : futures) {
+      future.wait();
+    }
+  }};
   for (size_t i = 0; i < nthread; ++i) {
     size_t start = i * batch_size;
     size_t end = std::min<size_t>(start + batch_size, num_txs);
@@ -276,9 +288,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
         }));
   }
 
-  for (auto &future : futures) {
-    future.wait();
-  }
+  // Fill workers must finish before t_to_parallel_batch reads work_txs below.
+  drain.reset();
 
   LoadgenExtension ret;
   co_await t_to_parallel_batch(x23::span<const SignedTransaction>(work_txs),

@@ -572,7 +572,7 @@ SystemCallHandler::try_commit_transaction()
                .try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
     auto abort_res = abort_transaction();
     if (!abort_res.has_value()) {
       return to_exec_result(abort_res.error().code());
@@ -584,7 +584,7 @@ SystemCallHandler::try_commit_transaction()
   // check if any of the 2pc database operations failed
   if (!result) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
 
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
@@ -721,7 +721,7 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   }
   if (!push_res.value()) {
     two_phase_commit_failed_ = true;
-    log_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
       return to_exec_result(abort_status.error().code());
@@ -1083,13 +1083,46 @@ SystemCallHandler::last_commit_conflict() const
 }
 
 void
-SystemCallHandler::log_db_conflict_diagnostic() const
+SystemCallHandler::report_db_conflict_diagnostic() const
 {
   auto const &conflict = db_proxy_.last_push_conflict();
   if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticNone) {
     return;
   }
   trace("two-phase commit conflict diagnostics: {}", x23::show(conflict));
+
+  // Exactly one diagnostic goes on the wire (memory-bounded end to end); under
+  // kDbDiagnosticAll (debug builds) take the first. hogdb only ever sets a
+  // non-None level together with a conflict, so a missing one is an invariant
+  // violation, not a runtime condition -- fail fast rather than paper over it.
+  DbConflictDiagnostic const *first = nullptr;
+  if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst) {
+    first = &conflict.first();
+  }
+  else {
+    CHECK(conflict.level() == DbDiagnosticLevel::kDbDiagnosticAll);
+    CHECK(!conflict.conflicts().empty());
+    first = conflict.conflicts().data();
+  }
+
+  auto height = get_block_height();
+  if (!height.has_value()) {
+    // Best-effort report, but a tip read failing (e.g. the block is being torn
+    // down) is worth surfacing rather than swallowing.
+    warn("dropping tx-failure diagnostic: could not read executing block "
+         "height (db tip unavailable)");
+    return;
+  }
+  // Fire-and-forget: drive the async send in a detached coroutine so execution
+  // never waits on it (the same detached-await shape as the event server's own
+  // detached sends). report_tx_failure copies the client, so the send is
+  // self-contained and safe to outlive us.
+  [](x23::Async<void> send) -> x23::Detached {
+    co_await send;
+  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
+                                          TxFailureDiagnostic{
+                                              .attempt_height = height.value(),
+                                              .conflict = *first}));
 }
 
 void
@@ -1721,6 +1754,16 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
   auto entry = queue_item.get_next_item(execution_mode_data, advance_cursor);
   if (!entry.has_value()) {
     return entry.error();
+  }
+
+  // A read that would exceed the per-tx concurrent-observation cap surfaces as
+  // a deterministic syscall error, so a contract can't drive the bounded
+  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). This is a
+  // dedicated resource-limit code contracts can handle as a stop condition,
+  // not a malformed-input error.
+  if (observation_cap_exceeded(execution_mode_data)) {
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
   }
 
   auto &value = entry.value();

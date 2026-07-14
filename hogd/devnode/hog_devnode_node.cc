@@ -165,7 +165,7 @@ build_genesis_configuration(BootstrapAccountConfig const &config,
 {
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
-    return builder.build(cost_model);
+    return builder.build_or_panic(cost_model);
   }
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
   artifact.genesis_configuration.storage_cost_model = cost_model.to_xdr();
@@ -218,7 +218,8 @@ read_metadata_file(std::filesystem::path const &path)
                     kMaxDataDirMetadataBytes));
   }
 
-  File file = require_io(File::open(path.string(), O_RDONLY),
+  File file = require_io(File::open(path.string(),
+                                    O_RDONLY), // NOLINT(misc-include-cleaner)
                          "open hog-devnode data metadata");
 
   std::string bytes(size, '\0');
@@ -332,14 +333,20 @@ parse_data_dir_metadata(std::string_view bytes)
         kMaxBootstrapAccounts));
   }
 
+  const std::string_view dev_account_tokens =
+      require_string_field(config_json, "devAccountTokens", "bootstrapConfig");
+  const std::optional<std::uint64_t> storage_tokens =
+      try_parse_u64(dev_account_tokens);
+  if (!storage_tokens) {
+    throw std::runtime_error(
+        std::format("Invalid hog-devnode data metadata devAccountTokens: {}",
+                    dev_account_tokens));
+  }
   BootstrapAccountConfig config{
       .count = static_cast<std::uint32_t>(count),
       .seed = std::string(require_string_field(config_json, "devAccountSeed",
                                                "bootstrapConfig")),
-      .storage_tokens =
-          parse_u64(require_string_field(config_json, "devAccountTokens",
-                                         "bootstrapConfig"),
-                    "hog-devnode data metadata devAccountTokens"),
+      .storage_tokens = *storage_tokens,
       .dev_wallet_profile =
           std::string(require_string_field(config_json, "devWalletProfile",
                                            "bootstrapConfig")),
@@ -473,7 +480,7 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_coord_server_.start_server(
         make_bind_host_port(bind_host_, requested_scheduler_port));
-    mempool_auth_server_.start_server(
+    mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
     auto sched_db_client = std::make_unique<sched_db_client_t>(
@@ -570,6 +577,14 @@ HogDevnodeNode::~HogDevnodeNode()
   try {
     // Shutdown is intentionally loud while this topology is still mirroring the
     // fragile MempoolTestInfra lifecycle; unexpected exceptions here are bugs.
+    // Note: unlike prepare_for_failed_construction(), we do not need to drain
+    // [mempool_auth_server_] here. [ctx_.reset()] below tears down the DB's
+    // auth-change subscription manager, whose destructor waits for in-flight
+    // [authdb_forward_key_changes] forwards -- and thus the downstream
+    // [auth_data_changed] callbacks -- to finish, before the member destructors
+    // tear down [mempool_coord_server_]. Draining the auth server here would
+    // instead close it while the subscription manager is still forwarding,
+    // surfacing spurious "input too short" RPC errors on shutdown.
     // [sched_db_server_] sends RPCs to [db_scheduler_server_] (via the
     // scheduler). Reset the scheduler pointer before destructing
     // [db_scheduler_server_] so that [sched_db_server_] does not send an RPC to
@@ -606,6 +621,18 @@ void
 HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
+    // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
+    // (which broadcasts on the coordinator's [auth_data_height_]) via the
+    // registered callback, and is destroyed after [mempool_coord_server_].
+    // Unlike ~HogDevnodeNode, this cleanup does not reset [ctx_], so the DB's
+    // auth-change subscription manager does not drain in-flight forwards for
+    // us. Drain the auth server directly -- [~RpcServer] waits for in-flight
+    // handlers -- before the member destructors that run after we rethrow tear
+    // down the coordinator, or an in-flight callback (e.g. the block-0 push
+    // during the post-genesis failure injection) races the coordinator's
+    // destructor. Safe even when construction failed early:
+    // [mempool_auth_server_] is created by its member initializer.
+    mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
     // injection), the scheduler is running a detached coroutine that sends RPCs
@@ -645,13 +672,15 @@ HogDevnodeNode::init_indexer_backend()
   indexer_db_ = std::make_unique<IndexDB>(std::move(db));
 
   indexer_event_server_ =
-      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_);
+      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_,
+                                                   indexer_failure_cache_);
   indexer_event_server_->max_message_size_ = kDevRpcMaxMessageSize;
   indexer_event_server_->start_server(make_bind_host_port(bind_host_,
                                                           /*port=*/0));
 
   indexer_block_explorer_server_ =
-      std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(*indexer_db_);
+      std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(
+          *indexer_db_, indexer_failure_cache_);
   indexer_block_explorer_server_->max_message_size_ = kDevRpcMaxMessageSize;
   indexer_block_explorer_server_->start_server(
       make_bind_host_port(bind_host_, /*port=*/0));
@@ -803,7 +832,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
     genesis_configuration_ =
-        builder.build(StorageCostModel::default_cost_model());
+        builder.build_or_panic(StorageCostModel::default_cost_model());
     CHECK_EQ(client.schedcoord_load_genesis_configuration(
                  GenesisConfiguration(genesis_configuration_))(),
              DbSchedResult::DbSchedResultOK);
@@ -954,7 +983,7 @@ void
 HogDevnodeNode::register_auth_with_mempool()
 {
   sched_auth_client_t client =
-      create_client<MempoolAuth1>(bind_host_, mempool_auth_server_.port())();
+      create_client<MempoolAuth1>(bind_host_, mempool_auth_server_->port())();
   AuthCard auth_card = {
       .protocol = version::kHogdProtocol(),
       .upid = {},

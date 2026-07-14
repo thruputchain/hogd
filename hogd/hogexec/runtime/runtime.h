@@ -5,13 +5,13 @@
 #include <cstring>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/item/deployed_contract.h"
@@ -47,7 +47,7 @@ get_engine_info(RuntimeEngine engine)
   case RuntimeEngine::kWasmi:
     return kWasmiEngineInfo;
   }
-  throw std::runtime_error("unknown engine");
+  panic("unknown engine");
 }
 
 } // namespace detail

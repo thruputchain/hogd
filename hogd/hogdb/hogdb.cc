@@ -10,7 +10,6 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,6 +18,7 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 
+#include "hogd/base/cli.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -55,8 +55,7 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 {
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
-    throw std::runtime_error(
-        std::format("Invalid coordinator address: {}", coordinator_addr));
+    panic("Invalid coordinator address: {}", coordinator_addr);
   }
 
   return std::make_unique<
@@ -223,17 +222,6 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
 int
@@ -260,7 +248,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--db-path" && i + 1 < argc) {
@@ -272,7 +261,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--ram-bytes" && i + 1 < argc) {
-      ram_bytes = std::stoul(argv[++i], nullptr, 0);
+      ram_bytes = hogd::parse_integer_arg<size_t>("--ram-bytes", argv[++i],
+                                                  argv, usage, /*base=*/0);
       continue;
     }
     if (arg == "--coordinator-addr" && i + 1 < argc) {
@@ -280,19 +270,22 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--executor-port" && i + 1 < argc) {
-      exec_port = parse_port(argv[++i]);
+      exec_port =
+          hogd::parse_port_arg("--executor-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--mempool-port" && i + 1 < argc) {
-      mempool_port = parse_port(argv[++i]);
+      mempool_port =
+          hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--auth-port" && i + 1 < argc) {
-      auth_port = parse_port(argv[++i]);
+      auth_port = hogd::parse_port_arg("--auth-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--gateway-port" && i + 1 < argc) {
-      gateway_port = parse_port(argv[++i]);
+      gateway_port =
+          hogd::parse_port_arg("--gateway-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);

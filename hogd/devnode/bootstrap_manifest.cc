@@ -291,13 +291,20 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     throw std::runtime_error(
         "bootstrap manifest bootstrapAccounts.seed must not be empty");
   }
+  const std::string_view initial_storage_tokens =
+      require_string_field(accounts, "initialStorageTokens",
+                           "bootstrapAccounts");
+  const std::optional<std::uint64_t> storage_tokens =
+      try_parse_u64(initial_storage_tokens);
+  if (!storage_tokens) {
+    throw std::runtime_error(
+        std::format("Invalid bootstrap manifest initialStorageTokens: {}",
+                    initial_storage_tokens));
+  }
   BootstrapAccountConfig config{
       .count = static_cast<std::uint32_t>(count),
       .seed = std::move(seed),
-      .storage_tokens =
-          parse_u64(std::string(require_string_field(
-                        accounts, "initialStorageTokens", "bootstrapAccounts")),
-                    "bootstrap manifest initialStorageTokens"),
+      .storage_tokens = *storage_tokens,
       .dev_wallet_profile = std::string(dev_wallet_profile.name),
   };
   return {

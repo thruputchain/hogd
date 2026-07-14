@@ -17,7 +17,7 @@ TEST(CxsSerialize, Int8RoundTrip)
   for (int8_t i = std::numeric_limits<int8_t>::min();
        i != std::numeric_limits<int8_t>::max(); ++i) {
     x23::Buf buf;
-    CxsSerializer<int8_t>::store(buf, i);
+    ASSERT_TRUE(CxsSerializer<int8_t>::store(buf, i));
     auto view = x23::BufView(buf);
     if (i < kCxsInt81ByteMin || i > kCxsInt81ByteMax) {
       EXPECT_EQ(buf.size(), 2U);
@@ -27,7 +27,9 @@ TEST(CxsSerialize, Int8RoundTrip)
     }
 
     int8_t j;
-    CxsSerializer<int8_t>::load(view, j);
+    auto result = load_cxs_int<int8_t>(view);
+    ASSERT_TRUE(result);
+    j = *result;
     EXPECT_EQ(i, j);
   }
 }
@@ -36,7 +38,7 @@ TEST(CxsSerialize, UInt8RoundTrip)
 {
   for (uint8_t i = 0; i != std::numeric_limits<uint8_t>::max(); ++i) {
     x23::Buf buf;
-    CxsSerializer<uint8_t>::store(buf, i);
+    ASSERT_TRUE(CxsSerializer<uint8_t>::store(buf, i));
     auto view = x23::BufView(buf);
     if (i > kCxsUInt81ByteMax) {
       EXPECT_EQ(buf.size(), 2U);
@@ -46,7 +48,9 @@ TEST(CxsSerialize, UInt8RoundTrip)
     }
 
     uint8_t j;
-    CxsSerializer<uint8_t>::load(view, j);
+    auto result = load_cxs_uint<uint8_t>(view);
+    ASSERT_TRUE(result);
+    j = *result;
     EXPECT_EQ(i, j);
   }
 }
@@ -56,10 +60,12 @@ template<typename T>
 void
 check_roundtrip(T const &input)
 {
-  x23::Buf buf = serialize_cxs(input);
+  auto serialized = serialize_cxs(input);
+  ASSERT_TRUE(serialized);
+  x23::Buf &buf = *serialized;
   auto view = x23::BufView(buf);
   T output;
-  deserialize_cxs(&output, view);
+  ASSERT_TRUE(deserialize_cxs(&output, view));
   EXPECT_EQ(input, output);
 }
 
@@ -67,10 +73,19 @@ template<typename T>
 void
 check_expect(T const &input, x23::Buf const &expected)
 {
-  x23::Buf buf = serialize_cxs(input);
-  EXPECT_EQ(buf, expected);
+  auto serialized = serialize_cxs(input);
+  ASSERT_TRUE(serialized);
+  EXPECT_EQ(*serialized, expected);
 }
 } // namespace
+
+TEST(CxsSerialize, BadDiscriminant)
+{
+  sunion_no_void value(static_cast<senum>(2));
+  auto serialized = serialize_cxs(value);
+  ASSERT_FALSE(serialized);
+  EXPECT_EQ(serialized.error(), CxsErrorCode::kBadDiscriminant);
+}
 
 TEST(CxsSerialize, LargerIntRoundTrip)
 {
@@ -218,9 +233,9 @@ TEST(CxsSerialize, CanonicalCheck)
   buf.push_back(kCxsHeader1Byte);
   buf.push_back(10);
   x23::BufView view(buf);
-  uint8_t value;
-
-  EXPECT_ANY_THROW(CxsSerializer<uint8_t>::load(view, value));
+  auto result = load_cxs_uint<uint8_t>(view);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), CxsErrorCode::kNonCanonical);
 }
 
 TEST(CxsSerialize, Int8Encoding)

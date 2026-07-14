@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <stdexcept>
-
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/shared.h"
 #include "hogd/init.h"
@@ -13,7 +11,7 @@ namespace hogd {
 // init_hogexec_metrics(), which is the state the bench clients were in (#2605).
 TEST(HogexecMetricsTest, LaunchLogWorkerRequiresInitializedMetrics)
 {
-  EXPECT_THROW(HogexecMetrics::launch_log_worker(), std::runtime_error);
+  EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
 
   init_hogexec_metrics();
   HogexecMetrics::launch_log_worker();

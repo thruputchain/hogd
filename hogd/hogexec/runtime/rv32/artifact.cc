@@ -102,8 +102,11 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   }
 
   // The stored image is placed at [start, start + size) in data space; the
-  // runtime zero-fills [0, start) and [start + size, memory_bytes).
-  if (size_t{initial_memory_start} + initial_memory_size > memory_bytes) {
+  // runtime zero-fills [0, start) and [start + size, memory_bytes). Check the
+  // fit with subtraction so the guard is independent of host pointer width:
+  // start + size can wrap when size_t is 32 bits.
+  if (initial_memory_start > memory_bytes ||
+      initial_memory_size > memory_bytes - initial_memory_start) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
   // Canonicality: an empty image has exactly one encoding.

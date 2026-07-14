@@ -20,6 +20,7 @@
 #include <system_error>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/dev_wallet.h"
 #include "genesis.hh"
@@ -48,6 +49,8 @@ namespace {
 
 constexpr std::string_view kStorageCostModelHashTag =
     "groundhog-storage-cost-model-v1";
+constexpr std::string_view kHostedFaucetNonceHashTag =
+    "groundhog-hosted-faucet-nonce-v1";
 constexpr int kHostedBootstrapTempOpenFlags =
     O_WRONLY | O_CREAT | O_EXCL; // NOLINT(misc-include-cleaner)
 
@@ -110,6 +113,16 @@ hash_field(SHA256Hasher &hasher, std::string_view value)
   hasher.update(std::as_bytes(std::span(value.data(), value.size())));
   constexpr char kSeparator = '\0';
   hasher.update(std::as_bytes(std::span(&kSeparator, 1)));
+}
+
+SHA256Hash
+derive_hosted_faucet_nonce(Ed25519PublicKey const &public_key)
+{
+  SHA256Hasher hasher;
+  hash_field(hasher, kHostedFaucetNonceHashTag);
+  auto const public_key_bytes = std::as_bytes(std::span(public_key));
+  hasher.update(std::span<const std::byte>(public_key_bytes));
+  return hasher.finalize();
 }
 
 SHA256Hash
@@ -242,6 +255,15 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         });
       }
     });
+    if (artifact.faucet.has_value()) {
+      w.object_field("faucet", [&](json::Writer &w) {
+        w.field("role", "faucet");
+        w.field("publicKey", hex_string(artifact.faucet->public_key));
+        w.field("walletAddress", hex_string(artifact.faucet->wallet_address));
+        w.field("initialStorageTokens",
+                std::to_string(artifact.faucet->initial_storage_tokens));
+      });
+    }
     w.array_field("initializationTransactions", [&](json::Writer &w) {
       for (std::size_t i = 0; i < artifact.initialization_txs.size(); ++i) {
         w.object([&](json::Writer &w) {
@@ -395,22 +417,75 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
   }
   resolve_dev_wallet_profile(config.bootstrap_config.dev_wallet_profile);
 
-  BootstrapAccountArtifact account_artifact;
-  if (config.bootstrap_config.count == 0) {
-    GenesisConfigurationBuilder builder;
-    account_artifact.genesis_configuration =
-        builder.build(StorageCostModel::default_cost_model());
+  GenesisConfigurationBuilder builder;
+  std::vector<BootstrapAccountMetadata> accounts;
+  if (config.bootstrap_config.count != 0) {
+    accounts = append_bootstrap_accounts(builder, config.bootstrap_config);
   }
-  else {
-    account_artifact =
-        build_bootstrap_account_artifact(config.bootstrap_config);
+  std::optional<HostedFaucetMetadata> faucet;
+  if (config.faucet.has_value()) {
+    if (config.faucet->storage_tokens == 0) {
+      throw std::runtime_error(
+          "hosted bootstrap faucet tokens must be greater than zero");
+    }
+    if (std::ranges::all_of(config.faucet->public_key,
+                            [](std::uint8_t byte) { return byte == 0; })) {
+      throw std::runtime_error(
+          "hosted bootstrap faucet public key must not be all zeroes");
+    }
+    for (std::uint32_t index = 0; index < kMaxBootstrapAccounts; ++index) {
+      if (derive_bootstrap_account_keypair(config.bootstrap_config.seed, index)
+              .first == config.faucet->public_key) {
+        throw std::runtime_error(
+            "hosted bootstrap faucet public key is derived from the published "
+            "dev account seed");
+      }
+    }
+
+    DevWalletProfile wallet_profile =
+        resolve_dev_wallet_profile(config.bootstrap_config.dev_wallet_profile);
+    auto wallet_contract = load_dev_wallet_contract(wallet_profile);
+    const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
+    const SHA256Hash nonce =
+        derive_hosted_faucet_nonce(config.faucet->public_key);
+    const ContractAddress wallet_address =
+        GenesisConfigurationLoader::calculate_deployed_address(
+            wallet_contract_hash, nonce);
+
+    for (BootstrapAccountMetadata const &account : accounts) {
+      if (account.address == wallet_address) {
+        throw std::runtime_error(
+            "hosted bootstrap faucet wallet collides with a dev account");
+      }
+    }
+
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    builder.add_initial_config(
+        wallet_contract, nonce, wallet_meta::entrypoint<"initialize">(),
+        wallet_meta::make_calldata<"initialize">(config.faucet->public_key),
+        static_cast<int128_t>(config.faucet->storage_tokens));
+    faucet = HostedFaucetMetadata{
+        .wallet_address = wallet_address,
+        .public_key = config.faucet->public_key,
+        .initial_storage_tokens = config.faucet->storage_tokens,
+    };
+  }
+
+  // The allocations come from the hosted bootstrap config, so over-allocating
+  // is a reportable input error. devnode's main() turns this into a clean
+  // message; it still reports failures by exception (see hogd #3001).
+  std::optional<GenesisConfiguration> genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+  if (!genesis_configuration) {
+    throw std::runtime_error("hosted bootstrap config allocates more hogs than "
+                             "the initial hog token supply");
   }
 
   HostedBootstrapArtifact artifact{
-      .genesis_configuration =
-          std::move(account_artifact.genesis_configuration),
-      .initialization_txs = std::move(account_artifact.initialization_txs),
-      .accounts = std::move(account_artifact.accounts),
+      .genesis_configuration = std::move(*genesis_configuration),
+      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .accounts = std::move(accounts),
+      .faucet = std::move(faucet),
   };
   artifact.genesis_hash = sha256(artifact.genesis_configuration);
   artifact.genesis_json = build_genesis_json(artifact.genesis_configuration);

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <span>
+#include <utility>
 
 #include <vector>
 #include <x23/serialize.h>
@@ -12,6 +13,20 @@
 #include "x23/x23.h"
 
 namespace x23 {
+
+namespace {
+template<typename... T>
+x23::Buf
+serialize_cxs_for_test(const T &...value)
+{
+  auto serialized = serialize_cxs(value...);
+  if (!serialized) {
+    ADD_FAILURE() << "CXS serialization failed: " << serialized.error();
+    return {};
+  }
+  return std::move(*serialized);
+}
+} // namespace
 
 // NOLINTBEGIN(modernize-type-traits)
 TEST(Deserialize, Vector)
@@ -41,14 +56,14 @@ TEST(Deserialize, CxsStrTooShort)
   uint8_t input[] = {0x0a}; // CXS-encodes length 10, but only 0 bytes follow
   std::span<const uint8_t> sp(input, sizeof(input));
   x23::Str val;
-  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::CxsBadInput);
+  auto status = x23::deserialize_cxs(&val, sp);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kTruncated);
 }
 
 // CXS reserved header bytes: any byte > 62 where the bottom 6 bits
 // are not all 1s (i.e., not one of {63, 127, 191, 255}) is a reserved
-// encoding per the CXS spec.  load_cxs_uint and load_cxs_int guard
-// this with x23assert but no throw, so in NDEBUG builds these are
-// silently accepted.  These tests verify the deserializer rejects them.
+// encoding per the CXS spec. These tests verify the deserializer rejects them.
 TEST(Deserialize, CxsReservedUintHeader)
 {
   // Byte 64 = 0b01000000: s=1, v=0 — reserved (v should be 63)
@@ -56,7 +71,9 @@ TEST(Deserialize, CxsReservedUintHeader)
   uint8_t input[] = {64, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   std::span<const uint8_t> sp(input, sizeof(input));
   uint32_t val = 0;
-  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::XdrException);
+  auto status = x23::deserialize_cxs(&val, sp);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kNonCanonical);
 }
 
 TEST(Deserialize, CxsReservedIntHeader)
@@ -65,7 +82,9 @@ TEST(Deserialize, CxsReservedIntHeader)
   uint8_t input[] = {100, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   std::span<const uint8_t> sp(input, sizeof(input));
   int32_t val = 0;
-  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::XdrException);
+  auto status = x23::deserialize_cxs(&val, sp);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kNonCanonical);
 }
 
 TEST(Deserialize, CxsReservedHeaderVariousBytes)
@@ -76,12 +95,35 @@ TEST(Deserialize, CxsReservedHeaderVariousBytes)
     uint8_t input[] = {byte, 0, 0, 0, 0, 0, 0, 0, 0};
     std::span<const uint8_t> sp(input, sizeof(input));
     uint64_t uval = 0;
-    EXPECT_THROW(x23::deserialize_cxs(&uval, sp), x23::XdrException)
+    EXPECT_FALSE(x23::deserialize_cxs(&uval, sp))
         << "byte " << static_cast<int>(byte) << " should be rejected for uint";
     int64_t ival = 0;
-    EXPECT_THROW(x23::deserialize_cxs(&ival, sp), x23::XdrException)
+    EXPECT_FALSE(x23::deserialize_cxs(&ival, sp))
         << "byte " << static_cast<int>(byte) << " should be rejected for int";
   }
+}
+
+TEST(Deserialize, CxsBadDiscriminant)
+{
+  uint8_t input[] = {2};
+  sunion_no_void value;
+  auto status = x23::deserialize_cxs(&value, input);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kBadDiscriminant);
+}
+
+TEST(Deserialize, CxsTrailingData)
+{
+  uint8_t input[] = {1, 2};
+  uint32_t value = 0;
+  auto status = x23::deserialize_cxs(&value, input);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kTrailingData);
+
+  auto used = x23::deserialize_cxs_from(&value, input);
+  ASSERT_TRUE(used);
+  EXPECT_EQ(*used, 1UZ);
+  EXPECT_EQ(value, 1U);
 }
 
 TEST(Deserialize, OpaqueVectorTooLarge)
@@ -118,7 +160,9 @@ TEST(Deserialize, CxsVectorTooLarge)
   std::vector<uint8_t> input = {0x03, 0x00, 0x00, 0x00};
   input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
   std::span<const uint8_t> sp(input);
-  EXPECT_THROW(x23::deserialize_cxs(&vec, sp), x23::CxsBadInput);
+  auto status = x23::deserialize_cxs(&vec, sp);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kLengthExceeded);
 }
 
 // xdr_size(BorrowedPtr<T>) previously returned 0 for null, but xdr_serialize
@@ -156,17 +200,19 @@ TEST(Deserialize, CxsRecursionLimit)
   // At exactly the limit, deserialization should succeed.
   {
     auto chain = make_recursive_chain(limit);
-    auto buf = serialize_cxs(chain);
+    auto buf = serialize_cxs_for_test(chain);
     test_recursive out;
-    EXPECT_NO_THROW(deserialize_cxs(&out, BufView(buf)));
+    EXPECT_TRUE(deserialize_cxs(&out, BufView(buf)));
   }
 
-  // One beyond the limit, deserialization should throw.
+  // One beyond the limit, deserialization should fail.
   {
     auto chain = make_recursive_chain(limit + 1);
-    auto buf = serialize_cxs(chain);
+    auto buf = serialize_cxs_for_test(chain);
     test_recursive out;
-    EXPECT_THROW(deserialize_cxs(&out, BufView(buf)), CxsBadInput);
+    auto status = deserialize_cxs(&out, BufView(buf));
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
   }
 }
 
@@ -197,9 +243,9 @@ TEST(Deserialize, NonRecursiveRoundtrip)
   // Simple struct
   {
     fix_12 f{.i = 42, .d = 3.14};
-    auto cxs_buf = serialize_cxs(f);
+    auto cxs_buf = serialize_cxs_for_test(f);
     fix_12 cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
     EXPECT_EQ(f, cxs_out);
 
     auto xdr_buf = serialize(f);
@@ -212,9 +258,9 @@ TEST(Deserialize, NonRecursiveRoundtrip)
     StorageDelta sd(StorageDelta::kNonnegativeInt64SetAdd);
     sd.nnint64().set_value = 100;
     sd.nnint64().add_value = 200;
-    auto cxs_buf = serialize_cxs(sd);
+    auto cxs_buf = serialize_cxs_for_test(sd);
     StorageDelta cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
     EXPECT_EQ(sd, cxs_out);
 
     auto xdr_buf = serialize(sd);
@@ -229,9 +275,9 @@ TEST(Deserialize, NonRecursiveRoundtrip)
     os.mid.inner.y = 2.5;
     os.mid.tag = "hello";
     os.count = 99;
-    auto cxs_buf = serialize_cxs(os);
+    auto cxs_buf = serialize_cxs_for_test(os);
     outer_struct cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
     EXPECT_EQ(os, cxs_out);
 
     auto xdr_buf = serialize(os);
@@ -251,9 +297,9 @@ TEST(Deserialize, ContainsRecursiveLimit)
   {
     contains_test_recursive ct;
     ct.t = make_recursive_chain(limit);
-    auto cxs_buf = serialize_cxs(ct);
+    auto cxs_buf = serialize_cxs_for_test(ct);
     contains_test_recursive cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
 
     auto xdr_buf = serialize(ct);
     contains_test_recursive xdr_out;
@@ -263,9 +309,11 @@ TEST(Deserialize, ContainsRecursiveLimit)
   {
     contains_test_recursive ct;
     ct.t = make_recursive_chain(limit + 1);
-    auto cxs_buf = serialize_cxs(ct);
+    auto cxs_buf = serialize_cxs_for_test(ct);
     contains_test_recursive cxs_out;
-    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+    auto status = deserialize_cxs(&cxs_out, BufView(cxs_buf));
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
 
     auto xdr_buf = serialize(ct);
     contains_test_recursive xdr_out;
@@ -287,9 +335,9 @@ TEST(Deserialize, BranchingRecursionLimit)
     for (auto &child : root.nextvec)
       child.elem = "leaf";
 
-    auto cxs_buf = serialize_cxs(root);
+    auto cxs_buf = serialize_cxs_for_test(root);
     test_recursive cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
 
     auto xdr_buf = serialize(root);
     test_recursive xdr_out;
@@ -303,9 +351,11 @@ TEST(Deserialize, BranchingRecursionLimit)
     for (auto &child : root.nextvec)
       child.elem = "leaf";
 
-    auto cxs_buf = serialize_cxs(root);
+    auto cxs_buf = serialize_cxs_for_test(root);
     test_recursive cxs_out;
-    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+    auto status = deserialize_cxs(&cxs_out, BufView(cxs_buf));
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
 
     auto xdr_buf = serialize(root);
     test_recursive xdr_out;
@@ -341,9 +391,9 @@ TEST(Deserialize, MutuallyRecursiveLimit)
   // success struct (also recursive). So limit/3 frames should fit.
   {
     auto chain = make_mutual_chain(limit / 3);
-    auto cxs_buf = serialize_cxs(chain);
+    auto cxs_buf = serialize_cxs_for_test(chain);
     MutualFrame cxs_out;
-    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_TRUE(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
 
     auto xdr_buf = serialize(chain);
     MutualFrame xdr_out;
@@ -352,9 +402,11 @@ TEST(Deserialize, MutuallyRecursiveLimit)
   // One too many should fail.
   {
     auto chain = make_mutual_chain((limit / 3) + 1);
-    auto cxs_buf = serialize_cxs(chain);
+    auto cxs_buf = serialize_cxs_for_test(chain);
     MutualFrame cxs_out;
-    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+    auto status = deserialize_cxs(&cxs_out, BufView(cxs_buf));
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
 
     auto xdr_buf = serialize(chain);
     MutualFrame xdr_out;

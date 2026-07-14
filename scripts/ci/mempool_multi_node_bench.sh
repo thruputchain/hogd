@@ -6,12 +6,13 @@ set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
-WAIT_PORT="$REPO_ROOT/scripts/wait-port.sh"
+. "$SCRIPT_DIR/bench_harness.sh"
+WAIT_PORT=ci_wait_port
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
 CONTROL_CLI="$BUILD_ROOT/hogd/hogexec/bench/control_cli"
-COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
+COMMON_SSH_OPTS=("${CI_SSH_OPTS[@]}")
 COMMON_SCP_OPTS=(-o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 . "$REPO_ROOT/scripts/hog-ip.sh"
@@ -293,16 +294,12 @@ publish_results() {
 }
 
 kill_stale_processes() {
-  local host
-  for host in "${ALL_HOSTS[@]}"; do
-    remote_run "$host" "killall -q loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev" || true
-  done
+  ci_remote_killall_hosts "loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
 cleanup() {
   local exit_code=$1
-  trap - EXIT INT TERM
-  set +e
+  ci_enter_cleanup
   stop_live_log_streams
   publish_results
   kill_stale_processes

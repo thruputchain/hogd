@@ -8,12 +8,12 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -24,13 +24,13 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
+#include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/init.h"
 #include "indexer.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fileio.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
@@ -586,8 +586,12 @@ struct CapturingIndexerRpc {
     co_return;
   }
 
-  static x23::Async<void> indexer_event_report_tx_failure(SignedTransactionHash,
-                                                          TxFailureDiagnostic)
+  // Required for is_IndexerEvent1 conformance; the failure-relay path is
+  // covered by FailureCapturingIndexerRpc in event_rpc_test.cc, so this file's
+  // tests don't record reports.
+  static x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
+                                  const TxFailureDiagnostic & /*diag*/)
   {
     co_return;
   }
@@ -598,16 +602,6 @@ struct CapturingIndexerRpc {
   ProposedTransactionBatch received_bodies;
 };
 static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
-
-indexer_event_client_t
-make_socketpair_indexer_client(CapturingIndexerRpc *server)
-{
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  x23::rpc_stream_logged(default_coropoll(), fds[1], -1)->server(server);
-  auto client_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  return client_stream->client<IndexerEvent1>();
-}
 
 ProposedTransaction
 make_distinct_body(uint64_t nonce)

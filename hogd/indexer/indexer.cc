@@ -3,9 +3,9 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/shared.h"
@@ -46,8 +47,10 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   IndexDB &db = db_status.value();
   Health::instance().set_current_block_height(db.latest_block())();
 
+  RecentTxFailureCache failure_cache;
+
   // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpc> event(db);
+  RpcServer<IndexerEventRpc> event(db, failure_cache);
   event->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
@@ -64,7 +67,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   client.event_indexer_intro(card)();
 
   // Create the RPC server that the block explorers talk to.
-  RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
+  RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
   block_explorer->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
       make_bind_host_port(bind_ip, block_explorer_port));
@@ -97,22 +100,10 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
-uint16_t
-parse_port(const std::string &value)
-{
-  size_t pos = 0;
-  uint64_t port = std::stoul(value, &pos, 10);
-  if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
-  }
-  return static_cast<uint16_t>(port);
-}
-
 } // namespace
 
-// NOLINTBEGIN(bugprone-exception-escape)
 int
-main(int argc, char *argv[])
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   if (hogd::print_version_and_exit_if_requested(argc, argv)) {
     return EXIT_SUCCESS;
@@ -133,7 +124,8 @@ main(int argc, char *argv[])
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
-      metrics_port = parse_port(argv[++i]);
+      metrics_port =
+          hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--event-addr" && i + 1 < argc) {
@@ -149,11 +141,12 @@ main(int argc, char *argv[])
       continue;
     }
     if (arg == "--event-port" && i + 1 < argc) {
-      event_port = parse_port(argv[++i]);
+      event_port = hogd::parse_port_arg("--event-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--block-explorer-port" && i + 1 < argc) {
-      block_explorer_port = parse_port(argv[++i]);
+      block_explorer_port =
+          hogd::parse_port_arg("--block-explorer-port", argv[++i], argv, usage);
       continue;
     }
     usage(argv);
@@ -165,5 +158,3 @@ main(int argc, char *argv[])
   return hogd::indexer_init(path, event_server_addr, bind_ip, event_port,
                             block_explorer_port, metrics_port);
 };
-
-// NOLINTEND(bugprone-exception-escape)

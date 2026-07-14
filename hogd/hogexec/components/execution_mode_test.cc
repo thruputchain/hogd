@@ -93,6 +93,21 @@ make_storage_key(uint8_t value)
   key.contract_data_key() = StorageKeyContractData{value};
   return key;
 }
+
+// Distinct AddressAndKey per index, for filling the observation sequence past
+// its uint8-limited make_storage_key range.
+AddressAndKey
+make_obs_key(uint32_t index)
+{
+  StorageKeyContractData data{};
+  data[0] = static_cast<uint8_t>(index);
+  data[1] = static_cast<uint8_t>(index >> 8U);
+  data[2] = static_cast<uint8_t>(index >> 16U);
+  data[3] = static_cast<uint8_t>(index >> 24U);
+  StorageKey key(StorageKeyType::ContractData);
+  key.contract_data_key() = data;
+  return AddressAndKey{.address = ContractAddress{1}, .key = key};
+}
 } // namespace
 
 TEST(ExecutionModeTest, QueueEntryObservations)
@@ -199,6 +214,62 @@ TEST(ExecutionModeTest, NondeterministicBitOverflowGuard)
 
   ValidationModeData validation(proposal.proposal_data());
   ASSERT_TRUE(validation.validate());
+}
+
+// #2894: the (cap+1)th new concurrent observation flags the cap and records
+// nothing, so the bounded observed_queue_entry_sequence never overflows.
+TEST(ExecutionModeTest, ProposalObservationCapFlagsAndStopsRecording)
+{
+  ProposalModeData proposal;
+  for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx; ++i) {
+    proposal.log_queue_entry_observation(make_obs_key(i), 0, QueueEntry{1});
+    ASSERT_FALSE(proposal.observation_cap_exceeded());
+  }
+  EXPECT_EQ(proposal.proposal_data().observed_queue_entry_sequence.size(),
+            kMaxConcurrentRcqReadsPerTx);
+
+  proposal.log_queue_entry_observation(make_obs_key(
+                                           kMaxConcurrentRcqReadsPerTx),
+                                       0, QueueEntry{1});
+  EXPECT_TRUE(proposal.observation_cap_exceeded());
+  EXPECT_EQ(proposal.proposal_data().observed_queue_entry_sequence.size(),
+            kMaxConcurrentRcqReadsPerTx);
+}
+
+// #2894: validation replay must agree with proposal -- when the recorded
+// sequence is exhausted at exactly the cap, a new observation flags the cap
+// (which surfaces as InvalidSyscallInput), matching what proposal returned.
+TEST(ExecutionModeTest, ValidationObservationCapMatchesProposal)
+{
+  ProposalModeData proposal;
+  for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx; ++i) {
+    proposal.log_queue_entry_observation(make_obs_key(i), 0, QueueEntry{1});
+  }
+  ValidationModeData validation(proposal.proposal_data());
+  for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx; ++i) {
+    ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(i), 0));
+    ASSERT_FALSE(validation.observation_cap_exceeded());
+  }
+  EXPECT_FALSE(validation
+                   .consume_queue_entry_observation(
+                       make_obs_key(kMaxConcurrentRcqReadsPerTx), 0)
+                   .has_value());
+  EXPECT_TRUE(validation.observation_cap_exceeded());
+}
+
+// A recorded sequence shorter than the cap is a malformed proposal, not the
+// cap case: exhausting it is a validation failure, and the cap flag stays off.
+TEST(ExecutionModeTest, ValidationShortSequenceIsFailureNotCap)
+{
+  ProposalModeData proposal;
+  proposal.log_queue_entry_observation(make_obs_key(0), 0, QueueEntry{1});
+  proposal.log_queue_entry_observation(make_obs_key(1), 0, QueueEntry{2});
+  ValidationModeData validation(proposal.proposal_data());
+  ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(0), 0));
+  ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(1), 0));
+  EXPECT_FALSE(validation.consume_queue_entry_observation(make_obs_key(2), 0)
+                   .has_value());
+  EXPECT_FALSE(validation.observation_cap_exceeded());
 }
 
 } // namespace hogd

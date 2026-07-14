@@ -5,12 +5,12 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -38,7 +38,7 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port)
   // Open the database
   auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
   if (!db_result) {
-    throw std::runtime_error("Failed to open database");
+    panic("Failed to open database");
   }
 
   HogDBDAO db(RAMDB(std::move(*db_result)));

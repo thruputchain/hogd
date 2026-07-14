@@ -9,13 +9,13 @@
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -197,7 +197,7 @@ protected:
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("unexpected commit error");
+            panic("unexpected commit error");
           }
           if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
             s.committed = false;

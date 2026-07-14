@@ -1,0 +1,29 @@
+name = "ccache_warmup"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+set -euo pipefail
+set -x
+
+git init -q .
+git remote remove origin 2>/dev/null || true
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git checkout -f -q {{ .git_commit }} -- scripts/ci/warm_ccache_hog_sched_job.sh
+set +x
+CARGO_REGISTRIES_GROUNDHOG_TOKEN="{{ .cargo_registry_token }}" \
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="{{ .cargo_registry_global_credential_providers }}" \
+HOGD_CCACHE_WARMUP_JOBS="{{ .hogd_ccache_warmup_jobs }}" \
+  ./scripts/ci/warm_ccache_hog_sched_job.sh "{{ .github_repo }}" "{{ .git_commit }}" "{{ .hog_host }}"
+"""
+
+[jobs.host]
+hog4 = "hog4"
+hog5 = "hog5"
+hog6 = "hog6"
+hog7 = "hog7"
+hog8 = "hog8"
+hog9 = "hog9"
+hog10 = "hog10"
+hog11 = "hog11"

@@ -236,7 +236,6 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
 
   // Commit InvokeTX (applies changes to BlockTX)
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
@@ -320,7 +319,6 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 
   // Commit InvokeTX (applies changes to BlockTX)
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(DbHash{}));
@@ -402,7 +400,6 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
   // Commit InvokeTX (applies changes to BlockTX)
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   // Shut down the mock server before committing BlockTX
   // This simulates the server going down before auth changes are sent
@@ -479,7 +476,6 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   // Commit InvokeTX (applies changes to BlockTX)
   ASSERT_TRUE(invoke_tx.commit());
-  invoke_tx.release_blocktx_reference();
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(DbHash{}));

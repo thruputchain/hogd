@@ -8,7 +8,6 @@
 #include <optional>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -61,7 +60,7 @@ struct BenchmarkState : public CommonBenchState {
         use_rv32_);
     auto result = exp.generate_experiment()();
     if (!result.has_value()) {
-      throw std::runtime_error("Failed to generate erc20 payments experiment");
+      panic("Failed to generate erc20 payments experiment");
     }
 
     auto genesis_configuration = result.value().genesis_configuration;
@@ -70,7 +69,7 @@ struct BenchmarkState : public CommonBenchState {
 
     auto work_txs_raw = exp.extend_experiment(num_txs, 1'000'000)();
     if (!work_txs_raw.has_value()) {
-      throw std::runtime_error("Failed to extend experiment");
+      panic("Failed to extend experiment");
     }
 
     x23::XdrVec<SignedTransaction> work_txs;
@@ -86,7 +85,7 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
   if (total_work_txs.size() < num_txs_per_rep * num_reps) {
-    throw std::runtime_error("not enough transactions to run the benchmark");
+    panic("not enough transactions to run the benchmark");
   }
   assert((total_work_txs.size() % num_reps) == 0);
   assert(num_txs_per_rep == total_work_txs.size() / num_reps);
@@ -138,10 +137,10 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
               bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
           if (!handler.root_invoke().is_root_success()) {
             error("Failed to invoke transaction");
-            throw std::runtime_error("Failed to invoke transaction");
+            panic("Failed to invoke transaction");
           }
           if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
-            throw std::runtime_error("failed to perform commit operation");
+            panic("failed to perform commit operation");
           }
           handler.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = tx})(

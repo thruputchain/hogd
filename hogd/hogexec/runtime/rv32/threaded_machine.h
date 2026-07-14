@@ -1854,8 +1854,11 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     return std::unexpected(program.error());
   }
 
-  if (total_memory_size > kMaxMemoryBytes ||
-      size_t{memory_start} + memory.size() > total_memory_size) {
+  // Check the fit with subtraction so the guard is independent of host pointer
+  // width: memory_start + memory.size() can wrap when size_t is 32 bits, which
+  // would let an out-of-bounds image slip through to the copy below.
+  if (total_memory_size > kMaxMemoryBytes || memory_start > total_memory_size ||
+      memory.size() > total_memory_size - memory_start) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 

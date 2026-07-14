@@ -183,28 +183,81 @@ verify_weight_key_claim_internal(
   return {};
 }
 
+// Verifies a kPubkeySignature claim: a single signature from a standalone
+// public key, for an account whose address is the hash of the pubkey
+// preimage and which has no AddressAuthData registered onchain (that
+// precondition is enforced by the caller, which has the DB data).
+template<VerificationType VerfType>
+AuthVerifyStatus<void>
+verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
+                             const ContractAddress &invoked_address,
+                             const x23::Vec<const DecoratedSignature *> &sigs,
+                             x23::BufView serialized_tx,
+                             Ed25519SignatureVerifier *signature_verifier)
+{
+  if (sigs.size() != 1) {
+    trace("Auth malformed: pubkey claim requires exactly one signature");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  const DecoratedSignature &sig = *sigs[0];
+  if (sig.public_key_id != kDefaultNewAddressKeyID) {
+    trace("Auth malformed: pubkey claim signature must use key id {}",
+          kDefaultNewAddressKeyID);
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (preimage.pubkey.scheme() != CryptographicScheme::Ed25519 ||
+      sig.signature.scheme() != CryptographicScheme::Ed25519) {
+    warn("Unsupported cryptographic scheme: {}", preimage.pubkey.scheme());
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (sha256(preimage) != invoked_address) {
+    trace("Auth malformed: pubkey preimage hash does not match the invoked "
+          "address");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+
+  if constexpr (verify_signatures(VerfType)) {
+    if (signature_verifier) {
+      signature_verifier->add_signature(preimage.pubkey.ed25519(),
+                                        sig.signature.ed25519(), serialized_tx);
+      return {};
+    }
+    if (!ed25519_verify(preimage.pubkey.ed25519(), sig.signature.ed25519(),
+                        serialized_tx)) {
+      trace("Signature verification failed");
+      return AuthVerifyError{AuthVerifyErrorCode::kSignatureVerificationFailed};
+    }
+  }
+  return {};
+}
+
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
+                           ContractAddress const &invoked_address,
                            x23::Vec<DecoratedSignature const *> const &sigs,
                            const AddressAuthData *auth_data,
                            x23::BufView serialized_tx,
                            Ed25519SignatureVerifier *signature_verifier)
 {
-  if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
-    assert(!auth_data);
-  }
-  else {
-    assert(auth_data);
-  }
-
   switch (claim.claim_type()) {
   case AuthClaimType::kSourceAddressAuthData:
+    if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
+      assert(!auth_data);
+    }
+    else {
+      assert(auth_data);
+    }
     return verify_weight_key_claim_internal<VerfType>(
         claim.source_address_claim().allowed_keys, auth_data, sigs,
         serialized_tx, signature_verifier);
   case AuthClaimType::kPubkeySignature:
-    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+    // The no-auth-entry precondition is checked by the caller (it owns the
+    // DB data); everything here is derivable from the transaction alone.
+    return verify_pubkey_claim_internal<VerfType>(claim.pubkey_preimage(),
+                                                  invoked_address, sigs,
+                                                  serialized_tx,
+                                                  signature_verifier);
   default:
     // This kind of claim should not have been parseable
     panic("Unsupported auth claim type: {}", claim.claim_type());
@@ -219,9 +272,6 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
     assert(!source_auth_data);
-  }
-  else {
-    assert(source_auth_data);
   }
 
   if constexpr (VerfType != VerificationType::kSignaturesValid) {
@@ -242,19 +292,29 @@ verify_auth_claims_internal(const SignedTransaction &stx,
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kSourceAddressAuthData:
+      if (source_auth_data == nullptr) {
+        trace("Auth data mismatch: source address claim on an address with "
+              "no auth data");
+        return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
+      }
       auth_data = source_auth_data;
       break;
     case AuthClaimType::kPubkeySignature:
-      trace("Pubkey signature auth claim not supported");
-      return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+      // Pubkey claims are only for accounts with no registered auth data.
+      if (source_auth_data != nullptr) {
+        trace("Auth data mismatch: pubkey claim on an address with "
+              "registered auth data");
+        return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
+      }
+      break;
     default:
       panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
   }
 
-  if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs, auth_data,
-                                                    serialized_tx,
-                                                    signature_verifier);
+  if (auto r = verify_auth_claim_internal<VerfType>(
+          auth_claim, stx.tx.invocation.invoked_address, sigs, auth_data,
+          serialized_tx, signature_verifier);
       !r) {
     return r;
   }
@@ -287,19 +347,19 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
-            const AddressAuthData &source_auth_data,
+            const AddressAuthData *source_auth_data,
             Ed25519SignatureVerifier *signature_verifier)
 {
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
-      stx, &source_auth_data, signature_verifier);
+      stx, source_auth_data, signature_verifier);
 }
 
 AuthVerifyStatus<void>
 lightweight_validate_auth_claims(const SignedTransaction &stx,
-                                 const AddressAuthData &source_auth_data)
+                                 const AddressAuthData *source_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
-      stx, &source_auth_data, nullptr);
+      stx, source_auth_data, nullptr);
 }
 
 AuthVerifyStatus<void>

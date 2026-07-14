@@ -31,6 +31,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
 #include "consensus.hh"
+#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
@@ -48,6 +50,7 @@
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
@@ -85,6 +88,12 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
+
+std::tuple<uint64_t, uint64_t>
+make_erc20_amount(uint128_t amount)
+{
+  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+}
 
 std::shared_ptr<Contract>
 load_default_dev_wallet_contract()
@@ -879,7 +888,7 @@ build_test_data_dir_genesis(BootstrapAccountConfig const &config)
 {
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
-    return builder.build(StorageCostModel::default_cost_model());
+    return builder.build_or_panic(StorageCostModel::default_cost_model());
   }
 
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
@@ -973,7 +982,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   GenesisConfigurationBuilder builder;
   GenesisConfiguration genesis =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build_or_panic(StorageCostModel::default_cost_model());
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1178,6 +1187,75 @@ TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
         << stderr_output;
     EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
   }
+}
+
+TEST(HogDevnode, InvalidLogLevelPrintsFriendlyUsageBeforeInitialization)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--log-level", "chatty"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Invalid log level: chatty"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, DevAccountCountAboveMaximumPrintsFriendlyUsage)
+{
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--dev-accounts", "2000"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("exceeds maximum")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, BootstrapManifestConflictsWithShorthandPrintsFriendlyUsage)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--bootstrap-manifest", "/nonexistent.json", "--dev-accounts", "1"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(
+      stderr_output.contains("--bootstrap-manifest conflicts with dev-account"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
 TEST(HogDevnode, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
@@ -2336,7 +2414,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
+TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
@@ -2360,6 +2438,20 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
+    auto wait_for_transaction_info =
+        [&reader](const SignedTransactionHash &tx_hash) {
+          const auto deadline =
+              std::chrono::steady_clock::now() + kIndexPollTimeout;
+          TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+          while (std::chrono::steady_clock::now() < deadline) {
+            result = reader.get_transaction_info(tx_hash)();
+            if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+              break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+          }
+          return result;
+        };
 
     auto wallet_contract = load_default_dev_wallet_contract();
     ASSERT_TRUE(wallet_contract);
@@ -2381,6 +2473,45 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
                                                   sponsor_wallet_address,
                                               .nonce = create_wallet_nonce,
                                               .contract_hash = wallet_hash});
+
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+    Calldata transfer_calldata =
+        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                       erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{10'000'000},
+                       erc20_meta::make_calldata<"transfer">(
+                           created_wallet_address,
+                           make_erc20_amount(uint128_t{200'000'000})));
+    Transaction prefund_wallet_tx{
+        .invocation =
+            Invocation{.invoked_address = sponsor_wallet_address,
+                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                       .gas_limit = GasAmount{10'000'000},
+                       .calldata = wallet_meta::make_calldata<"do_action">(
+                           transfer_calldata)},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 30},
+        .auth_claim = source_address_auth_claim(),
+    };
+    SignedTransaction signed_prefund_wallet_tx =
+        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second);
+    const SignedTransactionHash prefund_wallet_tx_hash =
+        sha256(signed_prefund_wallet_tx.tx);
+    SignedTransactionHashBatch prefund_hashes =
+        submit_and_commit(scheduler,
+                          SignedTransactionBatch{signed_prefund_wallet_tx});
+    ASSERT_EQ(prefund_hashes.size(), 1UL);
+    ASSERT_EQ(prefund_hashes[0], prefund_wallet_tx_hash);
+    TxInfoResult prefund_result =
+        wait_for_transaction_info(prefund_wallet_tx_hash);
+    ASSERT_EQ(prefund_result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(prefund_result.info().events.exec_result,
+              ExecResult::ExecResultOK);
+    EXPECT_EQ(prefund_result.info().events.proposed_tx_hash,
+              prefund_wallet_tx_hash);
+    ASSERT_EQ(prefund_result.info().events.root_output.status_code(),
+              InvocationFrameStatusCode::Return);
 
     Transaction create_wallet_tx{
         .invocation =
@@ -2411,16 +2542,7 @@ TEST(HogDevnode, BootstrapAccountCanCreateInitializedDevWallet)
     }
     ASSERT_EQ(create_hashes[0], create_wallet_tx_hash);
 
-    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
-    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-    while (std::chrono::steady_clock::now() < deadline) {
-      result = reader.get_transaction_info(create_wallet_tx_hash)();
-      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
+    TxInfoResult result = wait_for_transaction_info(create_wallet_tx_hash);
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.proposed_tx_hash, create_wallet_tx_hash);

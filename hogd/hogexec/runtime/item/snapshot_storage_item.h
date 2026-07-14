@@ -32,16 +32,6 @@ class DatabaseProxy;
 // and provides lazy access to RetrocausalQueue components.
 class SnapshotStorageItem {
 public:
-  // Construct from a StorageItem (by value)
-  SnapshotStorageItem(WireStorageItem item, AddressAndKey addrkey,
-                      BlockID block_id, DatabaseProxy &db_proxy)
-    : addrkey_(std::move(addrkey)),
-      entry_(make_variant(std::move(item), addrkey_.key)), block_id_(block_id),
-      db_proxy_(db_proxy)
-  {
-    assert(&db_proxy_);
-  }
-
   // Delete copy and move
   SnapshotStorageItem(const SnapshotStorageItem &) = delete;
   SnapshotStorageItem &operator=(const SnapshotStorageItem &) = delete;
@@ -159,10 +149,14 @@ private:
     {}
     RetrocausalQueueEntry() = default;
 
+    // Non-copyable (owns unique_ptr blocks), but movable: make_variant builds
+    // the entry and moves it into the (immovable) SnapshotStorageItem's entry_
+    // during construction, before it is cached or accessed under rcq_mtx_.
     RetrocausalQueueEntry(RetrocausalQueueEntry const &) = delete;
     RetrocausalQueueEntry &operator=(RetrocausalQueueEntry const &) = delete;
-    RetrocausalQueueEntry(RetrocausalQueueEntry &&) = delete;
-    RetrocausalQueueEntry &operator=(RetrocausalQueueEntry &&) = delete;
+    RetrocausalQueueEntry(RetrocausalQueueEntry &&) noexcept = default;
+    RetrocausalQueueEntry &
+    operator=(RetrocausalQueueEntry &&) noexcept = default;
 
     constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
 
@@ -192,9 +186,22 @@ private:
       std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
                    DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry,
                    AddressAuthDataEntry>;
-  static variant_type make_variant(WireStorageItem item,
-                                   StorageKey const &db_key);
-  static variant_type make_contract_key_variant(WireStorageItem item);
+
+public:
+  // Map a wire StorageItem under a given key to its entry variant. Returns
+  // Unrecoverable for an unsupported/unexpected (key_type, item_type)
+  // combination. Single source of truth for the mapping; the cache calls it
+  // and surfaces the status before constructing the (immovable) item.
+  static SystemStatus<variant_type> make_variant(WireStorageItem item,
+                                                 StorageKey const &db_key);
+
+  // Construct from an already-mapped entry (see make_variant).
+  SnapshotStorageItem(variant_type entry, AddressAndKey addrkey,
+                      BlockID block_id, DatabaseProxy &db_proxy);
+
+private:
+  static SystemStatus<variant_type>
+  make_contract_key_variant(WireStorageItem item);
 
   const AddressAndKey addrkey_;
   variant_type entry_;

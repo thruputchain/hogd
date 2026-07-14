@@ -58,6 +58,23 @@ protected:
     sk_wrapper.ed25519() = sk;
     return {pk_wrapper, sk_wrapper};
   }
+
+  static AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)
+  {
+    AuthClaim claim(AuthClaimType::kPubkeySignature);
+    claim.pubkey_preimage() = preimage;
+    return claim;
+  }
+
+  // Builds a transaction whose invoked address is derived from the preimage.
+  static Transaction
+  make_pubkey_transaction(PubkeyAccountPreimage const &preimage)
+  {
+    Transaction tx{};
+    tx.auth_claim = make_pubkey_claim(preimage);
+    tx.invocation.invoked_address = sha256(preimage);
+    return tx;
+  }
 };
 
 TEST_F(AuthClaimTests, IndividualKeyClaim)
@@ -82,9 +99,9 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   AddressAuthData missing_key = AddressAuthData{.required_weight = 1};
 
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data).has_value());
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key).has_value());
-  EXPECT_EQ(lightweight_validate_auth_claims(stx, missing_key).error().code(),
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &good_data).has_value());
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx, &missing_key).has_value());
+  EXPECT_EQ(lightweight_validate_auth_claims(stx, &missing_key).error().code(),
             AuthVerifyErrorCode::kAuthDataMismatch);
 
   AddressAuthData bad_data =
@@ -93,9 +110,9 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
                                               .max_weight = Weight{1}})},
                       .required_weight = 1};
 
-  EXPECT_TRUE(verify_auth(stx, good_data).has_value());
-  EXPECT_FALSE(verify_auth(stx, bad_data).has_value());
-  EXPECT_EQ(verify_auth(stx, bad_data).error().code(),
+  EXPECT_TRUE(verify_auth(stx, &good_data).has_value());
+  EXPECT_FALSE(verify_auth(stx, &bad_data).has_value());
+  EXPECT_EQ(verify_auth(stx, &bad_data).error().code(),
             AuthVerifyErrorCode::kSignatureVerificationFailed);
 }
 
@@ -119,7 +136,7 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx, good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx, &good_data, &signature_verifier).has_value());
     EXPECT_TRUE(signature_verifier.verify());
   }
 
@@ -132,7 +149,7 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx2, good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx2, &good_data, &signature_verifier).has_value());
     EXPECT_FALSE(signature_verifier.verify());
   }
 }
@@ -221,12 +238,12 @@ TEST_F(AuthClaimTests, ClaimRequiredWeightEnforced)
 
   // One signature (weight 2) doesn't meet claim's required_weight of 3
   SignedTransaction stx1{.tx = tx, .signatures = {sig0}};
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx1, auth_data).has_value());
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx1, &auth_data).has_value());
 
   // Two signatures (weight 4) meets claim's required_weight of 3
   DecoratedSignature sig1 = make_signature(sk1, tx, /*public_key_id=*/1);
   SignedTransaction stx2{.tx = tx, .signatures = {sig0, sig1}};
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx2, auth_data).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx2, &auth_data).has_value());
 }
 
 TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)
@@ -267,12 +284,12 @@ TEST_F(AuthClaimTests, AccountRequiredWeightEnforced)
   // One sig (weight 2) passes claim's threshold (1) but not account's (5)
   DecoratedSignature sig0 = make_signature(sk0, tx, /*public_key_id=*/0);
   SignedTransaction stx1{.tx = tx, .signatures = {sig0}};
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx1, auth_data).has_value());
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx1, &auth_data).has_value());
 
   // Two sigs (weight 4) still below account's required_weight of 5
   DecoratedSignature sig1 = make_signature(sk1, tx, /*public_key_id=*/1);
   SignedTransaction stx2{.tx = tx, .signatures = {sig0, sig1}};
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx2, auth_data).has_value());
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx2, &auth_data).has_value());
 
   // Bump key weights so total (6) meets account threshold
   AddressAuthData auth_data2{
@@ -282,7 +299,7 @@ TEST_F(AuthClaimTests, AccountRequiredWeightEnforced)
                           new PublicKeyConfig{.key = pk1, .max_weight = 3})},
       .required_weight = 5,
   };
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx2, auth_data2).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx2, &auth_data2).has_value());
 }
 
 TEST_F(AuthClaimTests, MultiSigHappyPath)
@@ -312,8 +329,8 @@ TEST_F(AuthClaimTests, MultiSigHappyPath)
   SignedTransaction stx{.tx = tx, .signatures = {sig0, sig2}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data).has_value());
-  EXPECT_TRUE(verify_auth(stx, auth_data).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, &auth_data).has_value());
 }
 
 TEST_F(AuthClaimTests, InsufficientTotalWeight)
@@ -338,7 +355,7 @@ TEST_F(AuthClaimTests, InsufficientTotalWeight)
   SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  auto result = lightweight_validate_auth_claims(stx, auth_data);
+  auto result = lightweight_validate_auth_claims(stx, &auth_data);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
@@ -376,35 +393,20 @@ TEST_F(AuthClaimTests, ZeroSignaturesRejectedByWeight)
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
   // But fails weight check
-  auto result = lightweight_validate_auth_claims(stx, auth_data);
+  auto result = lightweight_validate_auth_claims(stx, &auth_data);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
-TEST_F(AuthClaimTests, PubkeySignatureClaimRejectedWithoutPanic)
+TEST_F(AuthClaimTests, EmptyPubkeyClaimStillMalformed)
 {
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   auto tx = make_transaction(claim);
   SignedTransaction stx{.tx = tx, .signatures = {}};
 
-  auto [pk, _] = make_key_pair();
-  AddressAuthData auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = 1})},
-      .required_weight = 1,
-  };
-
   auto well_formed = auth_claim_is_well_formed(stx);
   EXPECT_FALSE(well_formed.has_value());
   EXPECT_EQ(well_formed.error().code(), AuthVerifyErrorCode::kAuthMalformed);
-
-  auto lightweight = lightweight_validate_auth_claims(stx, auth_data);
-  EXPECT_FALSE(lightweight.has_value());
-  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthMalformed);
-
-  auto verified = verify_auth(stx, auth_data);
-  EXPECT_FALSE(verified.has_value());
-  EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthMalformed);
 }
 
 // `allowed_keys` is an author-declared allow-policy (see protocol/auth_claim.x:
@@ -443,14 +445,14 @@ TEST_F(AuthClaimTests, OverbroadAllowedKeysBitmapAccepted)
   // All three verification levels accept the over-broad bitmap because the sole
   // signature uses the registered slot 0 and meets the required weight.
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data).has_value());
-  EXPECT_TRUE(verify_auth(stx, auth_data).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, &auth_data).has_value());
 
   // The unregistered slot grants no authority: a signature that *claims* slot
   // 20 still fails because the slot is not in the auth row.
   DecoratedSignature spoof_sig = make_signature(sk, tx, kUnregisteredSlot);
   SignedTransaction spoof_stx{.tx = tx, .signatures = {spoof_sig}};
-  auto spoof_result = verify_auth(spoof_stx, auth_data);
+  auto spoof_result = verify_auth(spoof_stx, &auth_data);
   EXPECT_FALSE(spoof_result.has_value());
   EXPECT_EQ(spoof_result.error().code(),
             AuthVerifyErrorCode::kAuthDataMismatch);
@@ -488,8 +490,163 @@ TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
 
   // 3 * UINT32_MAX = 12,884,901,885 which exceeds UINT32_MAX.
   // A uint32_t accumulator would wrap to UINT32_MAX - 2 and reject.
-  auto result = lightweight_validate_auth_claims(stx, auth_data);
+  auto result = lightweight_validate_auth_claims(stx, &auth_data);
   EXPECT_TRUE(result.has_value());
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimHappyPath)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, nullptr).has_value());
+  EXPECT_TRUE(verify_auth(stx, nullptr).has_value());
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimNonceBindsAddress)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  // Same pubkey, different nonce: the derived address no longer matches.
+  tx.auth_claim.pubkey_preimage().nonce = 8;
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimWrongAddressRejected)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  tx.invocation.invoked_address[0] ^= 0xFF;
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimSignatureCountEnforced)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+
+  SignedTransaction zero_sigs{.tx = tx, .signatures = {}};
+  auto r0 = auth_claim_is_well_formed(zero_sigs);
+  EXPECT_FALSE(r0.has_value());
+  EXPECT_EQ(r0.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+
+  SignedTransaction two_sigs{.tx = tx, .signatures = {sig, sig}};
+  auto r2 = auth_claim_is_well_formed(two_sigs);
+  EXPECT_FALSE(r2.has_value());
+  EXPECT_EQ(r2.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimKeyIdMustBeZero)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/1);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimBadSignatureRejected)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  // Signed by the wrong key.
+  DecoratedSignature sig = make_signature(sk2, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, nullptr).has_value());
+  auto result = verify_auth(stx, nullptr);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(),
+            AuthVerifyErrorCode::kSignatureVerificationFailed);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimRejectedWhenAuthDataExists)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = 1})},
+      .required_weight = 1,
+  };
+
+  auto lightweight = lightweight_validate_auth_claims(stx, &auth_data);
+  EXPECT_FALSE(lightweight.has_value());
+  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+
+  auto verified = verify_auth(stx, &auth_data);
+  EXPECT_FALSE(verified.has_value());
+  EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+}
+
+TEST_F(AuthClaimTests, SourceClaimRejectedWithoutAuthData)
+{
+  AuthClaim claim = make_claim(1 << 0);
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction(claim);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto lightweight = lightweight_validate_auth_claims(stx, nullptr);
+  EXPECT_FALSE(lightweight.has_value());
+  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+
+  auto verified = verify_auth(stx, nullptr);
+  EXPECT_FALSE(verified.has_value());
+  EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+}
+
+TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 7};
+  Transaction tx = make_pubkey_transaction(preimage);
+
+  {
+    DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+    SignedTransaction stx{.tx = tx, .signatures = {sig}};
+    Ed25519SignatureVerifier signature_verifier;
+    EXPECT_TRUE(verify_auth(stx, nullptr, &signature_verifier).has_value());
+    EXPECT_TRUE(signature_verifier.verify());
+  }
+
+  {
+    auto [pk2, sk2] = make_key_pair();
+    DecoratedSignature bad_sig = make_signature(sk2, tx, /*public_key_id=*/0);
+    SignedTransaction stx{.tx = tx, .signatures = {bad_sig}};
+    Ed25519SignatureVerifier signature_verifier;
+    EXPECT_TRUE(verify_auth(stx, nullptr, &signature_verifier).has_value());
+    EXPECT_FALSE(signature_verifier.verify());
+  }
 }
 
 } // namespace hogd

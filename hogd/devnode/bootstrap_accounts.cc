@@ -4,12 +4,15 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -58,6 +61,31 @@ derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 BootstrapAccountArtifact
 build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
 {
+  GenesisConfigurationBuilder builder;
+  std::vector<BootstrapAccountMetadata> accounts =
+      append_bootstrap_accounts(builder, config);
+
+  // The allocations come from the caller's bootstrap config, so over-allocating
+  // is a reportable input error. devnode's main() turns this into a clean
+  // message; it still reports failures by exception (see hogd #3001).
+  std::optional<GenesisConfiguration> genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+  if (!genesis_configuration) {
+    throw std::runtime_error("bootstrap accounts allocate more hogs than the "
+                             "initial hog token supply");
+  }
+
+  return BootstrapAccountArtifact{
+      .genesis_configuration = std::move(*genesis_configuration),
+      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .accounts = std::move(accounts),
+  };
+}
+
+std::vector<BootstrapAccountMetadata>
+append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
+                          BootstrapAccountConfig const &config)
+{
   CHECK_LE(config.count, kMaxBootstrapAccounts);
 
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
@@ -67,7 +95,6 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
 
-  GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(config.count);
 
@@ -93,12 +120,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
     });
   }
 
-  return BootstrapAccountArtifact{
-      .genesis_configuration =
-          builder.build(StorageCostModel::default_cost_model()),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
-      .accounts = std::move(accounts),
-  };
+  return accounts;
 }
 
 } // namespace hogd

@@ -473,7 +473,26 @@ public:
   // serious error to hold the lock across suspension points, so we
   // return a CrashIfSuspended.
   using CoroSharedHolder = ThreadPool::CrashIfSuspended;
-  Async<CoroSharedHolder> coro_lock_shared()
+  auto coro_lock_shared()
+  {
+    // The CrashIfSuspended holder must capture its suspend count in the
+    // *caller's* coroutine frame, so that it detects the caller
+    // suspending while holding the shared lock.  We therefore construct
+    // it in MapAwait's await_resume (which runs in the caller's frame),
+    // not at a co_return inside coro_lock_shared_impl().  If it were
+    // constructed inside the impl coroutine, its captured count would
+    // reflect the impl's thread and worker-loop iteration.  Those can
+    // differ from the caller's whenever the lock-acquisition result
+    // becomes ready before the caller suspends to await it -- the
+    // kReturning-before-kAwaiting race in Awaitable, where the caller
+    // never suspends and resumes await_resume in its own frame -- which
+    // would spuriously trip the CrashIfSuspended assertion.
+    return MapAwait{[] { return ThreadPool::CrashIfSuspended{}; },
+                    coro_lock_shared_impl()};
+  }
+
+private:
+  Async<void> coro_lock_shared_impl()
   {
     if (ThreadPool::get_thread_pool() != &pool_)
       co_await pool_.bg();
@@ -483,7 +502,6 @@ public:
       else
         co_await pool_.async(&ExLock::block_until_free, this);
     }
-    co_return ThreadPool::CrashIfSuspended{};
   }
 };
 

@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -192,7 +191,9 @@ public:
         // Serialize error as (u64 selector, CXS body) and set as revert buffer.
         auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
           auto buf = err_value.serialize();
-          ctx.handler().set_return_buffer(std::move(buf), true, {});
+          if (!buf)
+            return InvokeError{InvokeErrorCode::Deterministic};
+          ctx.handler().set_return_buffer(std::move(*buf), true, {});
           return {};
         };
 
@@ -227,7 +228,8 @@ public:
 
     auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
     if (!inserted) {
-      throw std::runtime_error("Method ID already exists");
+      // Registration-time programming error: no untrusted input reaches here.
+      panic("Method ID {} already exists", id);
     }
   }
 

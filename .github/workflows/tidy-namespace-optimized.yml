@@ -5,10 +5,16 @@ name: Tidy (Namespace)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 14 * * *"
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -17,11 +23,16 @@ env:
   CARGO_BUILD_JOBS: "6"
 
 jobs:
-  tidy:
+  tidy-partition:
+    name: tidy-${{ matrix.partition }}
     runs-on: namespace-profile-hogd-linux-2604 # Must have custom base image configured
     permissions:
       contents: read
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [prod, exempt, other]
 
     steps:
       - name: Setup SSH Agent
@@ -62,7 +73,27 @@ jobs:
             ~/.cache/hogcache
             ~/.cargo
 
-      # Note: 'apt' cache removed since toolchain is in base image
+      - name: Configure Tidy Scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "TIDY_SCOPE=changed" >> "$GITHUB_ENV"
+            echo "TIDY_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+            echo "TIDY_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_ENV"
+          elif [ "${{ github.event_name }}" = "push" ] &&
+            [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "TIDY_SCOPE=changed" >> "$GITHUB_ENV"
+            echo "TIDY_BASE_SHA=${{ github.event.before }}" >> "$GITHUB_ENV"
+            echo "TIDY_HEAD_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
+          else
+            echo "TIDY_SCOPE=full" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fetch Changed-File Base
+        run: |
+          if [ "$TIDY_SCOPE" = "changed" ]; then
+            git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
+          fi
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -134,17 +165,31 @@ jobs:
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
       - name: Configure Build
+        if: matrix.partition != 'other'
         run: |
           ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
       - name: Build Tidy Targets
+        if: matrix.partition != 'other'
         run: cmake --build build/llvm --parallel "$(nproc)" --target tidy_targets
 
       - name: Run Tidy Checks
         run: |
           set +e
           set -o pipefail
-          ./scripts/tidy-ubuntu.sh -d build/llvm 2>&1 | tee tidy.log
+          if [ "$TIDY_SCOPE" = "changed" ]; then
+            ./scripts/tidy-ubuntu.sh \
+              --scope changed \
+              --partition "${{ matrix.partition }}" \
+              --base "$TIDY_BASE_SHA" \
+              --head "$TIDY_HEAD_SHA" \
+              -d build/llvm 2>&1 | tee tidy.log
+          else
+            ./scripts/tidy-ubuntu.sh \
+              --scope full \
+              --partition "${{ matrix.partition }}" \
+              -d build/llvm 2>&1 | tee tidy.log
+          fi
           TIDY_RESULT=$?
           set +o pipefail
           set -e

@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -17,6 +16,8 @@
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -1174,18 +1175,28 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   ASSERT_NE(invoke_trace.outputs, nullptr);
   ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
   auto const &child_trace = *invoke_trace.outputs->child_trace;
-  // Debug build + HogDB => full vector of conflicts (kDbDiagnosticAll).
-  // MockInMemory does not populate conflict diagnostics; skip that assertion.
+  // HogDB proposal mode reports all conflicts in debug builds, first-only in
+  // release builds. MockInMemory does not populate conflict diagnostics; skip
+  // that assertion.
   if (GetParam() == TestDB::kHogDB) {
-    ASSERT_EQ(child_trace.commit_conflict.level(),
-              DbDiagnosticLevel::kDbDiagnosticAll);
-    bool found_excl = false;
-    for (auto const &c : child_trace.commit_conflict.conflicts()) {
-      if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
-        found_excl = true;
+    if constexpr (is_debug_build()) {
+      ASSERT_EQ(child_trace.commit_conflict.level(),
+                DbDiagnosticLevel::kDbDiagnosticAll);
+      bool found_excl = false;
+      for (auto const &c : child_trace.commit_conflict.conflicts()) {
+        if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
+          found_excl = true;
+        }
       }
+      ASSERT_TRUE(found_excl);
     }
-    ASSERT_TRUE(found_excl);
+    else {
+      // First mode reports whichever conflicting delta hogdb hit first,
+      // which is not deterministic when the batch can conflict more than
+      // once, so don't assert a specific code.
+      ASSERT_EQ(child_trace.commit_conflict.level(),
+                DbDiagnosticLevel::kDbDiagnosticFirst);
+    }
   }
 
   // Now commit the first transaction (should succeed)
@@ -2703,7 +2714,7 @@ check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
 {
   if (!res.has_value() || !res.value().has_value() ||
       !res.value().value().has_value()) {
-    throw std::runtime_error("Failed to invoke method");
+    panic("Failed to invoke method");
   }
   return res.value().value().value();
 };
@@ -3086,14 +3097,13 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           handler.hack_dont_use_test_bypass_allow_reentrance();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
-            throw std::runtime_error("root invoke 0 failed");
+            panic("root invoke 0 failed");
           }
           co_await set.bg();
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " +
-                                     x23::show(commit_res));
+            panic("try_commit_transaction error: {}", x23::show(commit_res));
           }
           co_return;
         },
@@ -3127,8 +3137,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " +
-                                     x23::show(commit_res));
+            panic("try_commit_transaction error: {}", x23::show(commit_res));
           }
           co_return;
         },

@@ -10,6 +10,7 @@
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -408,15 +409,25 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
   // add conflicts: handler3 committed set=0 (locking base_=0 in HogDB), but
   // handler4's executor sees snapshot base=200, so the push is rejected with
   // kDbConflictValueMismatch.
-  ASSERT_EQ(handler4.last_commit_conflict().level(),
-            DbDiagnosticLevel::kDbDiagnosticAll);
-  bool found_conflict = false;
-  for (auto const &c : handler4.last_commit_conflict().conflicts()) {
-    if (c.code == DbConflictCode::kDbConflictValueMismatch) {
-      found_conflict = true;
+  // Proposal mode: hogdb selects All in debug builds, First in release
+  // builds.
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(handler4.last_commit_conflict().level(),
+              DbDiagnosticLevel::kDbDiagnosticAll);
+    bool found_conflict = false;
+    for (auto const &c : handler4.last_commit_conflict().conflicts()) {
+      if (c.code == DbConflictCode::kDbConflictValueMismatch) {
+        found_conflict = true;
+      }
     }
+    ASSERT_TRUE(found_conflict);
   }
-  ASSERT_TRUE(found_conflict);
+  else {
+    ASSERT_EQ(handler4.last_commit_conflict().level(),
+              DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(handler4.last_commit_conflict().first().code,
+              DbConflictCode::kDbConflictValueMismatch);
+  }
 
   advance_block();
 

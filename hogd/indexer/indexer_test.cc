@@ -7,11 +7,13 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
@@ -28,6 +30,7 @@ public:
   IndexDB &db() { return *db_; }
   IndexerEventRpc &event() { return *event_; }
   IndexerBlockExplorerRpc &block_explorer() { return *block_explorer_; }
+  RecentTxFailureCache &failure_cache() { return failure_cache_; }
 
 protected:
   void SetUp() override
@@ -46,14 +49,16 @@ protected:
     }
     CHECK(db_->is_open());
 
-    event_ = std::make_unique<IndexerEventRpc>(*db_);
-    block_explorer_ = std::make_unique<IndexerBlockExplorerRpc>(*db_);
+    event_ = std::make_unique<IndexerEventRpc>(*db_, failure_cache_);
+    block_explorer_ =
+        std::make_unique<IndexerBlockExplorerRpc>(*db_, failure_cache_);
   }
 
   TmpDir tmp_dir_;
   std::unique_ptr<IndexDB> db_;
   std::unique_ptr<IndexerEventRpc> event_;
   std::unique_ptr<IndexerBlockExplorerRpc> block_explorer_;
+  RecentTxFailureCache failure_cache_;
 };
 
 namespace {
@@ -104,6 +109,15 @@ create_tx_bodies(std::size_t n)
     bodies.emplace_back(std::move(body));
   }
   return bodies;
+}
+
+TxFailureDiagnostic
+make_failure_diag(BlockHeight attempt_height)
+{
+  TxFailureDiagnostic diag;
+  diag.attempt_height = attempt_height;
+  diag.conflict.code = DbConflictCode::kDbConflictValueMismatch;
+  return diag;
 }
 
 } // namespace
@@ -387,6 +401,64 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     ASSERT_EQ(page.refs.size(), 1);
     EXPECT_EQ(page.refs[0].tx_hash, logs[i].proposed_tx_hash);
   }
+}
+
+TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
+{
+  TxEventLogBatch events = create_event_logs();
+  ProposedTransactionBatch bodies = create_tx_bodies(events.size());
+  const SignedTransactionHash tx_hash = events[0].proposed_tx_hash;
+
+  // Report a failure for a tx with no committed record.
+  event_->indexer_event_report_tx_failure(tx_hash, make_failure_diag(100))();
+
+  TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
+  ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure);
+  EXPECT_EQ(result.recent_failure().attempt_height, 100);
+  EXPECT_EQ(result.recent_failure().conflict.code,
+            DbConflictCode::kDbConflictValueMismatch);
+
+  // The retried tx commits at height 101: the committed record wins.
+  event_->indexer_event_process_events(101, events, bodies)();
+  result = block_explorer_->get_transaction_info(tx_hash)();
+  ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(result.info().height, 101);
+}
+
+TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
+{
+  SignedTransactionHash failed_hash;
+  std::ranges::fill(failed_hash, 0x7F);
+  event_->indexer_event_report_tx_failure(failed_hash,
+                                          make_failure_diag(100))();
+
+  // Ingest committed blocks 100..105; each ingest prunes against the new
+  // watermark. Give each block one distinct committed tx.
+  for (BlockHeight h = 100; h <= 105; h++) {
+    TxEventLog log;
+    std::ranges::fill(log.proposed_tx_hash, static_cast<uint8_t>(h));
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = h;
+    event_->indexer_event_process_events(h, TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
+    TxInfoResult result = block_explorer_->get_transaction_info(failed_hash)();
+    if (h < 105) {
+      // attempt 100 + delta 5 > watermark h -> still visible.
+      EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure)
+          << "watermark " << h;
+    }
+    else {
+      EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
+    }
+  }
+}
+
+TEST_F(IndexerTest, UnknownTxStillNotFound)
+{
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x03);
+  TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
+  EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
 }
 
 // WAI / regression lock for #2851. Out-of-order ingest persists a tx-index row

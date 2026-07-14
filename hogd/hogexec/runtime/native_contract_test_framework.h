@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <format>
 #include <limits>
 #include <map>
@@ -12,7 +13,6 @@
 #include <optional>
 #include <ostream>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,9 +49,11 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -177,7 +179,7 @@ private:
   {
     auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
     if (!server_addr) {
-      throw std::runtime_error("Failed to connect to event server");
+      panic("Failed to connect to event server");
     }
     return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
         ->client(EventSched1{});
@@ -221,6 +223,13 @@ public:
   // Blocking control for testing delays
   void block_emit_events() { event_server_.block_emit_events(); }
   void unblock_emit_events() { event_server_.unblock_emit_events(); }
+
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports() { return event_server_.get_failure_reports(); }
 
 private:
   TestEventAggregator event_server_;
@@ -275,7 +284,7 @@ public:
       return std::variant<MockDBWrapper, HogdbWrapper>(
           std::in_place_type<HogdbWrapper>);
     default:
-      throw std::runtime_error("make_db_wrapper: invalid test_db");
+      panic("make_db_wrapper: invalid test_db {}", static_cast<int>(test_db));
     }
   }
 
@@ -296,9 +305,17 @@ public:
   // block's resulting storage hash (captured at close), so callers can
   // compare committed-block state (mirrors discard_block).
   StorageShortHash advance_block(
-      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      DbSchedResult expected_dbsched_commit_snapshot_result =
-          DbSchedResult::DbSchedResultOK);
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal);
+
+  //
+  // Aborts if the advance fails. Tests that expect the advance itself to fail
+  // -- e.g. after the db has shut down, or on a rejected block -- must call
+  // try_advance_block and assert on the returned error instead.
+  // As advance_block, but returns the failing DbSchedResult rather than
+  // aborting.
+  std::expected<StorageShortHash, DbSchedResult>
+  try_advance_block(BlockExecutionMode mode =
+                        BlockExecutionMode::kBlockExecutionModeProposal);
 
   // Closes the current block expecting prepare_committed_changes to fail,
   // then abandons (never commits). Asserts the DAO db hash is unchanged —
@@ -362,18 +379,14 @@ public:
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
     auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
   std::optional<Contract> lookup_contract_from_db(SHA256Hash const &hash)
   {
     auto r = db_proxy_->get_contract(block_number_, hash);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_contract_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return std::move(*r);
   }
 
@@ -381,9 +394,7 @@ public:
   lookup_deployment_from_db(ContractAddress const &addr)
   {
     auto r = db_proxy_->get_deployment(block_number_, addr);
-    if (!r.has_value()) {
-      throw std::runtime_error("lookup_deployment_from_db: db lookup failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
@@ -553,9 +564,7 @@ public:
   DbTip get_db_tip() const
   {
     auto r = db_proxy_->get_db_tip(block_number_);
-    if (!r) {
-      throw std::runtime_error("get_db_tip: db_proxy_->get_db_tip failed");
-    }
+    CHECK(r.has_value());
     return *r;
   }
 
@@ -581,6 +590,16 @@ public:
   }
 
   uint16_t get_event_exec_port() { return event_server_wrapper_.exec_port(); }
+
+  x23::Async<void> wait_for_failure_reports(int64_t n)
+  {
+    return event_server_wrapper_.wait_for_failure_reports(n);
+  }
+
+  auto get_failure_reports()
+  {
+    return event_server_wrapper_.get_failure_reports();
+  }
 
   static DeployedContractHash
   make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
@@ -646,7 +665,7 @@ private:
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
+      panic("open_block: dbsched_create_snapshot failed: {}", r);
     }
     open_event_block(block_number_);
     storage_snapshot_cache_ =
@@ -690,8 +709,7 @@ private:
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {
-        throw std::runtime_error(
-            "initialize: dbsched_load_genesis_configuration failed");
+        panic("initialize: dbsched_load_genesis_configuration failed: {}", r);
       }
     }
 

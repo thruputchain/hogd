@@ -58,6 +58,14 @@ add_pk_to_auth_data(AddressAuthData &auth_data, uint8_t id, PublicKey const &pk)
       new PublicKeyConfig{.key = pk, .max_weight = 100});
 }
 
+AuthClaim
+make_pubkey_claim(PubkeyAccountPreimage const &preimage)
+{
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage() = preimage;
+  return claim;
+}
+
 } // namespace
 
 class AuthVerifyTest : public ::testing::Test, public AuthServerTestFramework {
@@ -169,6 +177,155 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
             AuthErrorCode::kAuthFailed);
   EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx2, stx2})(),
             AuthErrorCode::kAuthSuccess);
+}
+
+TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+
+  // No auth data is registered for the derived address.
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  Transaction tx{};
+  tx.invocation.invoked_address = sha256(preimage);
+  tx.auth_claim = make_pubkey_claim(preimage);
+
+  SignedTransaction stx{};
+  stx.tx = tx;
+  stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  x23::Vec<SignedTransaction> stx_vec{stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result.size(), 1);
+  EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
+
+  EXPECT_EQ(auth_server().verify_batch(0, {stx})(),
+            AuthErrorCode::kAuthSuccess);
+
+  // A bad signature still fails.
+  auto [pk2, sk2] = make_key_pair();
+  SignedTransaction bad_stx{};
+  bad_stx.tx = tx;
+  bad_stx.signatures.push_back(make_signature(sk2, tx, /*public_key_id=*/0));
+
+  x23::Vec<SignedTransaction> bad_vec{bad_stx};
+  x23::span<SignedTransaction> bad_span(bad_vec);
+  auto bad_result = auth_server().verify_transactions(0, bad_span)();
+  ASSERT_EQ(bad_result.size(), 1);
+  EXPECT_EQ(bad_result[0], AuthErrorCode::kAuthFailed);
+}
+
+TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  ContractAddress address = sha256(preimage);
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  Transaction tx{};
+  tx.invocation.invoked_address = address;
+  tx.auth_claim = make_pubkey_claim(preimage);
+
+  SignedTransaction stx{};
+  stx.tx = tx;
+  stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  x23::Vec<SignedTransaction> stx_vec{stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+
+  // Valid at height 0 (no auth entry).
+  auto result0 = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result0.size(), 1);
+  EXPECT_EQ(result0[0], AuthErrorCode::kAuthSuccess);
+
+  // Register auth data for the address at height 1.
+  AddressAuthData auth_data{};
+  add_pk_to_auth_data(auth_data, 0, pk);
+  auth_data.required_weight = 1;
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  // The same pubkey-claim tx is now rejected.
+  auto result1 = auth_server().verify_transactions(1, stx_span)();
+  ASSERT_EQ(result1.size(), 1);
+  EXPECT_EQ(result1[0], AuthErrorCode::kAuthFailed);
+
+  EXPECT_EQ(auth_server().verify_batch(1, {stx})(), AuthErrorCode::kAuthFailed);
+}
+
+TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  ContractAddress address = sha256(preimage);
+
+  AddressAuthData auth_data{};
+  add_pk_to_auth_data(auth_data, 0, pk);
+  auth_data.required_weight = 1;
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  Transaction pubkey_tx{};
+  pubkey_tx.invocation.invoked_address = address;
+  pubkey_tx.auth_claim = make_pubkey_claim(preimage);
+  SignedTransaction pubkey_stx{};
+  pubkey_stx.tx = pubkey_tx;
+  pubkey_stx.signatures.push_back(
+      make_signature(sk, pubkey_tx, /*public_key_id=*/0));
+
+  Transaction source_tx{};
+  source_tx.invocation.invoked_address = address;
+  source_tx.auth_claim = make_self_individual_key_claim(0);
+  SignedTransaction source_stx{};
+  source_stx.tx = source_tx;
+  source_stx.signatures.push_back(
+      make_signature(sk, source_tx, /*public_key_id=*/0));
+
+  x23::Vec<SignedTransaction> stx_vec{pubkey_stx, source_stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+
+  // Registered accounts must use their source-address auth data.
+  auto result0 = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result0.size(), 2);
+  EXPECT_EQ(result0[0], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(result0[1], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {pubkey_stx})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {source_stx})(),
+            AuthErrorCode::kAuthSuccess);
+
+  // Deleting the auth entry reverses which claim type is accepted.
+  mock_db().increment_height(); // height 1
+  mock_db().delete_address(address);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  auto result1 = auth_server().verify_transactions(1, stx_span)();
+  ASSERT_EQ(result1.size(), 2);
+  EXPECT_EQ(result1[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(result1[1], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(1, {pubkey_stx})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(1, {source_stx})(),
+            AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)

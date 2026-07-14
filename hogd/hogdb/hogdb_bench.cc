@@ -363,7 +363,6 @@ Benchmark::run()
       fail(ret.error());
     if (auto ret = tx.commit(); !ret)
       fail(ret.error());
-    tx.release_blocktx_reference();
   };
 
   // run invoke_tx in parallel on the workers for all payment ops.
@@ -558,7 +557,6 @@ RCQBenchmark::run_sequential()
           fail(ret.error());
         if (auto ret = tx.commit(); !ret)
           fail(ret.error());
-        tx.release_blocktx_reference();
       };
 
       constexpr size_t kBatchesPerWorker = 4;
@@ -641,7 +639,6 @@ RCQBenchmark::run_sequential()
           fail(ret.error());
         if (auto ret = tx.commit(); !ret)
           fail(ret.error());
-        tx.release_blocktx_reference();
       };
 
       workers_.for_each_parallel(queue_indices, consume_fn, 1);
@@ -734,7 +731,6 @@ RCQBenchmark::run_concurrent()
               fail(ret.error());
             if (auto ret = tx.commit(); !ret)
               fail(ret.error());
-            tx.release_blocktx_reference();
             committed_counts_ptr->at(q).fetch_add(1, std::memory_order_release);
           }
           atomic_fetch_max(block_insert_done_ns,
@@ -804,7 +800,6 @@ RCQBenchmark::run_concurrent()
               fail(ret.error());
             if (auto ret = tx.commit(); !ret)
               fail(ret.error());
-            tx.release_blocktx_reference();
           }
           atomic_fetch_max(block_consume_done_ns,
                            hrc::now().time_since_epoch().count());

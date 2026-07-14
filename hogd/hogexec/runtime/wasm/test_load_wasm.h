@@ -1,24 +1,29 @@
 #pragma once
 
 #include <cstdio>
+#include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 
 namespace hogd ::test {
 
-static ContractBlob
-load_raw_file(std::string_view filename)
+// Returns std::nullopt if the file cannot be read or fails instrumentation.
+// Instrumentation legitimately rejects some inputs (e.g. modules with a start
+// section), and tests assert on that, so this must report rather than abort.
+static std::optional<ContractBlob>
+try_load_raw_file(std::string_view filename)
 {
   std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
   if (f == nullptr)
-    throw std::runtime_error("failed to load wasm file: " + file);
+    return std::nullopt;
 
   ContractBlob contents;
   constexpr size_t kBufferSize = 65536;
@@ -41,12 +46,33 @@ load_raw_file(std::string_view filename)
                                contents.data.size()),
       kTestMaxImportedFunctions);
   if (!instrumented) {
-    throw std::runtime_error("failed to instrument wasm file: " + file);
+    return std::nullopt;
   }
   contents.data.clear();
   contents.data.append_range(instrumented->data());
 
   return contents;
+}
+
+[[maybe_unused]]
+static std::optional<ContractBlob>
+try_load_wasm_from_file(std::string_view filename)
+{
+  return try_load_raw_file("/hogd/hogexec/runtime/wasm/" +
+                           std::string(filename));
+}
+
+// Aborts if the file cannot be loaded. Tests that expect a load to fail must
+// use try_load_wasm_from_file and assert on the empty result.
+[[maybe_unused]]
+static ContractBlob
+load_raw_file(std::string_view filename)
+{
+  auto contents = try_load_raw_file(filename);
+  if (!contents) {
+    panic("failed to load wasm file: {}{}", CMAKE_ROOT_BINARY_DIR, filename);
+  }
+  return std::move(contents).value();
 }
 
 [[maybe_unused]]

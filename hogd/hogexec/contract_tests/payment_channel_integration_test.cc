@@ -205,7 +205,12 @@ protected:
             },
         .nonce = state_nonce,
     };
-    return x23::serialize_cxs(state);
+    auto serialized = x23::serialize_cxs(state);
+    if (!serialized) {
+      ADD_FAILURE() << "CXS serialization failed: " << serialized.error();
+      return {};
+    }
+    return std::move(*serialized);
   }
 
   // Sign a state update with both parties

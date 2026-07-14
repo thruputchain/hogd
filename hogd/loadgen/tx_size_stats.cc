@@ -71,7 +71,11 @@ print_tx_size_stats()
 
     // CXS serialization
     auto cxs_buf = x23::serialize_cxs(tx);
-    size_t cxs_size = cxs_buf.size();
+    if (!cxs_buf) {
+      std::println(stderr, "CXS serialization failed: {}", cxs_buf.error());
+      return;
+    }
+    size_t cxs_size = cxs_buf->size();
     cxs_size_counts[cxs_size]++;
     cxs_min_size = std::min<size_t>(cxs_min_size, cxs_size);
     cxs_max_size = std::max<size_t>(cxs_max_size, cxs_size);

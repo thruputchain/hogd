@@ -235,26 +235,11 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
   return get_db().write_dbtip(new_tip);
 }
 
-RPCContext::~RPCContext()
-{
-  // This destructor only matters for debugging -- making sure that refcounts
-  // are properly maintained. We could just silently drop both the InvokeTXs and
-  // the references they have to the BlockTXs.
-
-  try {
-    invoke_txes_.for_each(
-        [](auto &tx) { tx.second.release_blocktx_reference(); });
-  } catch (std::exception const &e) {
-    try {
-      error("failed to release RPCContext block reference: {}", e.what());
-    } catch (...) { // NOLINT(bugprone-empty-catch)
-    }
-  } catch (...) {
-    try {
-      error("failed to release RPCContext block reference");
-    } catch (...) { // NOLINT(bugprone-empty-catch)
-    }
-  }
-}
+// Members are destroyed in reverse declaration order: invoke_txes_ goes
+// first, so each leftover InvokeTX releases its BlockTX reference (possibly
+// garbage collecting an abandoned block through remove_shutdown_block_tx(),
+// whose state is declared before invoke_txes_ and is therefore still alive),
+// and only then are the remaining BlockTXs destroyed.
+RPCContext::~RPCContext() = default;
 
 } // namespace hogd

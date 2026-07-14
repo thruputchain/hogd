@@ -63,13 +63,24 @@ void
 ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
                                               uint32_t index, QueueEntry entry)
 {
-  auto &entries = queue_entry_observations_[addrkey];
-  if (entries.size() > index) {
-    assert(entries[index] == entry);
+  auto it = queue_entry_observations_.find(addrkey);
+  if (it != queue_entry_observations_.end() && index < it->second.size()) {
+    assert(it->second[index] == entry);
     return;
   }
-  // new observation: log to the entries list for this addrkey,
-  // and push to the end of the overall nondeterministic sequence
+  // A new observation appends to observed_queue_entry_sequence, which is
+  // XDR-bounded at kMaxConcurrentRcqReadsPerTx. If it is full, flag the tx and
+  // record nothing (no map insert, no append): the RCQ read syscall surfaces
+  // this as a deterministic InvalidSyscallInput rather than overflowing the
+  // vector across the noexcept syscall boundary (#2894).
+  if (proposal_data_.observed_queue_entry_sequence.size() >=
+      kMaxConcurrentRcqReadsPerTx) {
+    observation_cap_exceeded_ = true;
+    return;
+  }
+  auto &entries = (it != queue_entry_observations_.end())
+                      ? it->second
+                      : queue_entry_observations_[addrkey];
   assert(entries.size() == index);
   entries.emplace_back(std::move(entry));
   proposal_data_.observed_queue_entry_sequence.emplace_back(entries.back());
@@ -88,7 +99,14 @@ ValidationModeData::consume_queue_entry_observation(
   // observing a new entry
   if (next_queue_entry_index_ >=
       proposal_data_.observed_queue_entry_sequence.size()) {
-    // validation failure -- no new entries to observe
+    // No new entries to observe. If the recorded sequence is exactly at the
+    // cap, the proposer hit the observation limit and surfaced
+    // InvalidSyscallInput; flag so replay agrees (#2894). A shorter sequence is
+    // a malformed proposal, which stays a plain validation failure.
+    if (proposal_data_.observed_queue_entry_sequence.size() >=
+        kMaxConcurrentRcqReadsPerTx) {
+      observation_cap_exceeded_ = true;
+    }
     return std::nullopt;
   }
   auto out =

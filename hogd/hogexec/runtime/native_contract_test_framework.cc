@@ -1,9 +1,9 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 
 #include <cassert>
+#include <expected>
 #include <format>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 #include <variant>
 
@@ -25,10 +25,8 @@
 
 namespace hogd {
 
-StorageShortHash
-NativeContractTestFramework::advance_block(
-    BlockExecutionMode mode,
-    DbSchedResult expected_dbsched_commit_snapshot_result)
+std::expected<StorageShortHash, DbSchedResult>
+NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
 {
   // Closing finalizes the block's resulting storage hash; capture it so callers
   // can compare committed-block state (mirrors discard_block's return).
@@ -36,7 +34,7 @@ NativeContractTestFramework::advance_block(
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
+      return std::unexpected(r.result());
     }
     closed_hash = r.block().storage_hash;
   }
@@ -45,10 +43,8 @@ NativeContractTestFramework::advance_block(
     value.proposal_header.block_height = block_number_;
     auto r =
         coord_wrapper_->client().dbsched_commit_snapshot(block_number_, value);
-    if (r.result() != expected_dbsched_commit_snapshot_result) {
-      throw std::runtime_error(std::format(
-          "advance_block: mismatching dbsched_commit_snapshot result: {} != {}",
-          r.result(), expected_dbsched_commit_snapshot_result));
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      return std::unexpected(r.result());
     }
   }
   close_event_block(block_number_);
@@ -60,7 +56,7 @@ NativeContractTestFramework::advance_block(
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
+      return std::unexpected(r);
     }
   }
   open_event_block(block_number_);
@@ -69,6 +65,16 @@ NativeContractTestFramework::advance_block(
       std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
 
   return closed_hash;
+}
+
+StorageShortHash
+NativeContractTestFramework::advance_block(BlockExecutionMode mode)
+{
+  auto res = try_advance_block(mode);
+  if (!res.has_value()) {
+    panic("advance_block failed: {}", res.error());
+  }
+  return res.value();
 }
 
 void
@@ -82,8 +88,8 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultError) {
-      throw std::runtime_error(
-          "reject_block: expected dbsched_close_snapshot to fail");
+      panic("reject_block: expected dbsched_close_snapshot to fail, got {}",
+            r.result());
     }
   }
 
@@ -91,7 +97,7 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("reject_block: dbsched_abandon_snapshot failed");
+      panic("reject_block: dbsched_abandon_snapshot failed: {}", r);
     }
   }
 
@@ -103,13 +109,11 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   assert(std::holds_alternative<HogdbWrapper>(db_wrapper_));
   auto tip_after = std::get<HogdbWrapper>(db_wrapper_).get_db().read_dbtip();
   if (!tip_after) {
-    throw std::runtime_error(
-        "reject_block: failed to read dbtip from DAO after abandon");
+    panic("reject_block: failed to read dbtip from DAO after abandon");
   }
   if (tip_before.storage_long_hash != tip_after->storage_long_hash) {
-    throw std::runtime_error(
-        "reject_block: db hash changed after block rejection — "
-        "DAO was mutated before prepare failure");
+    panic("reject_block: db hash changed after block rejection — "
+          "DAO was mutated before prepare failure");
   }
 
   close_event_block(block_number_);
@@ -121,7 +125,7 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("reject_block: dbsched_create_snapshot failed");
+      panic("reject_block: dbsched_create_snapshot failed: {}", r);
     }
   }
   open_event_block(block_number_);
@@ -142,15 +146,14 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("discard_block: dbsched_close_snapshot failed");
+      panic("discard_block: dbsched_close_snapshot failed: {}", r.result());
     }
     closed_hash = r.block().storage_hash;
   }
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error(
-          "discard_block: dbsched_abandon_snapshot failed");
+      panic("discard_block: dbsched_abandon_snapshot failed: {}", r);
     }
   }
 
@@ -162,7 +165,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("discard_block: dbsched_create_snapshot failed");
+      panic("discard_block: dbsched_create_snapshot failed: {}", r);
     }
   }
   open_event_block(block_number_);
@@ -249,8 +252,8 @@ NativeContractTestFramework::run_genesis_initialization(
   auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
       genesis_configuration, genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error(
-        "run_genesis_initialization: dbsched_load_genesis_block failed");
+    panic("run_genesis_initialization: dbsched_load_genesis_block failed: {}",
+          r);
   }
   open_block(mode);
 }
@@ -269,8 +272,7 @@ NativeContractTestFramework::close_event_block(BlockID block_id)
   auto r =
       event_sched_wrapper_->client().eventsched_close_block(block_id, block_id);
   if (r.error() != RPCError::kRPCNone) {
-    throw std::runtime_error(
-        "close_event_block: eventsched_close_block failed");
+    panic("close_event_block: eventsched_close_block failed: {}", r.error());
   }
 }
 

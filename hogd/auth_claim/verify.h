@@ -49,9 +49,11 @@ AuthVerifyStatus<void> auth_claim_is_well_formed(const SignedTransaction &stx);
 // Performs all of the checks of auth_claim_is_well_formed,
 // as well as checks that the signatures correspond to public keys that exist,
 // and that claims about signature weights are satisfied.
+// source_auth_data is nullptr when the invoked address has no auth entry
+// onchain; that is only valid for kPubkeySignature claims.
 AuthVerifyStatus<void>
 lightweight_validate_auth_claims(const SignedTransaction &stx,
-                                 const AddressAuthData &source_auth_data);
+                                 const AddressAuthData *source_auth_data);
 
 // Verifies that the signatures on the transaction match the claims about the
 // transaction in the auth claims field.
@@ -59,7 +61,7 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
 // verification.
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
-            const AddressAuthData &source_auth_data,
+            const AddressAuthData *source_auth_data,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
 
 } // namespace hogd

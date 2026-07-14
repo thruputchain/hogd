@@ -30,13 +30,14 @@ TxEmittedEvent make_tx_emitted_event(ContractAddress const &contract_address,
 // `#[derive(Event)]` (signature topic + raw 32-byte address topics + a
 // CXS-encoded payload), so native contracts emit events that are byte-identical
 // to the canonical wasm contracts.
-x23::Buf
+[[nodiscard]] x23::CxsStatus<x23::Buf>
 make_event_from_cxs_struct(Topic const &signature,
                            x23::is_xdr_struct auto const &t)
 {
   x23::Buf buf;
   buf.append_range(signature);
-  x23::serialize_cxs_to(buf, t);
+  if (auto status = x23::serialize_cxs_to(buf, t); !status)
+    return status.error();
   return buf;
 }
 } // namespace hogd

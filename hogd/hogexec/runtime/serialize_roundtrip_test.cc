@@ -5,7 +5,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -17,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -274,7 +274,7 @@ protected:
   {
     if (!res.has_value() || !res.value().has_value() ||
         !res.value().value().has_value()) {
-      throw std::runtime_error("Failed to invoke method");
+      panic("Failed to invoke method");
     }
     return res.value().value().value();
   };

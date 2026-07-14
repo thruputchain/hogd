@@ -1,36 +1,25 @@
 #include "hogd/devnode/manifest_parse.h"
 
-#include <cstddef>
 #include <cstdint>
-#include <exception>
-#include <format>
 #include <limits>
-#include <stdexcept>
-#include <string>
+#include <optional>
 #include <string_view>
+
+#include "hogd/base/cli.h"
 
 namespace hogd {
 
-std::uint64_t
-parse_u64(std::string_view value, std::string_view name)
+std::optional<std::uint64_t>
+try_parse_u64(std::string_view value)
 {
   // JSON integers are represented as int64_t in hogd::json, so decimal strings
-  // use the same upper bound for round-trip compatibility.
-  if (value.empty() || value.front() == '+' || value.front() == '-' ||
-      static_cast<unsigned char>(value.front()) <= ' ') {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  std::size_t pos = 0;
-  std::uint64_t parsed = 0;
-  try {
-    parsed = std::stoull(std::string(value), &pos, 10);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
-  }
-  if (pos != value.size() ||
-      parsed > static_cast<std::uint64_t>(
-                   std::numeric_limits<std::int64_t>::max())) {
-    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  // use the same upper bound for round-trip compatibility. try_parse_integer
+  // already rejects empty input, a leading sign, leading whitespace, and
+  // trailing characters, so only the int64_t ceiling is left to enforce.
+  std::optional<std::uint64_t> parsed = try_parse_integer<std::uint64_t>(value);
+  if (!parsed || *parsed > static_cast<std::uint64_t>(
+                               std::numeric_limits<std::int64_t>::max())) {
+    return std::nullopt;
   }
   return parsed;
 }

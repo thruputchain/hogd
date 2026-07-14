@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -528,6 +529,120 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+namespace {
+// Distinct queue key per index, so peeking them accumulates one concurrent
+// observation each in the global observed_queue_entry_sequence.
+StorageKeyContractData
+make_obs_cap_key(uint32_t index)
+{
+  StorageKeyContractData key{};
+  key[0] = 'o';
+  key[1] = 'c';
+  key[2] = 'k';
+  key[4] = static_cast<uint8_t>(index);
+  key[5] = static_cast<uint8_t>(index >> 8U);
+  key[6] = static_cast<uint8_t>(index >> 16U);
+  key[7] = static_cast<uint8_t>(index >> 24U);
+  return key;
+}
+} // namespace
+
+// #2894: observing kMaxConcurrentRcqReadsPerTx + 1 concurrent RCQ entries must
+// return a deterministic InvalidSyscallInput at the cap rather than overflowing
+// the bounded observed_queue_entry_sequence and terminating the executor. A
+// contract that handles the error commits normally.
+TEST_F(SyscallRcqPeekTest,
+       ObservationCapReturnsSyscallErrorInsteadOfTerminating)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  constexpr uint32_t kObservationCount = kMaxConcurrentRcqReadsPerTx + 1;
+
+  NativeContractBuilder builder;
+  // method 8: insert one entry into each of `count` distinct queue keys.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      8, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          auto payload = static_cast<uint8_t>(i);
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          if (!status.has_value() ||
+              status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+  // method 9: peek `count` keys. The first kMaxConcurrentRcqReadsPerTx succeed;
+  // the cap-plus-one peek returns InvalidSyscallInput (not a crash).
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      9, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              make_obs_cap_key(i), len);
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                len != 1) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          else if (status.value() !=
+                   SyscallErrorCode::
+                       kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto make_tx = [&](uint32_t method, Calldata calldata) {
+    return SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = std::move(calldata)},
+                          .uniquifier = make_new_uniquifier()}};
+  };
+
+  // Commit the inserts first so the peeking tx observes them as concurrent.
+  auto insert_calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kObservationCount);
+  ASSERT_TRUE(insert_calldata.has_value());
+  auto insert_handler =
+      make_new_system_call_handler(make_tx(8, insert_calldata.value()),
+                                   *context);
+  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // The cap-plus-one observation returns InvalidSyscallInput; the process stays
+  // alive and the contract (which handles the error) commits.
+  auto peek_calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kObservationCount);
+  ASSERT_TRUE(peek_calldata.has_value());
+  auto peek_handler =
+      make_new_system_call_handler(make_tx(9, peek_calldata.value()), *context);
+  ASSERT_TRUE(peek_handler.root_invoke().is_root_success());
+  EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

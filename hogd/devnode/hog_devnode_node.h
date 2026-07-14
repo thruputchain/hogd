@@ -26,6 +26,7 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -34,6 +35,8 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
+#include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -123,6 +126,10 @@ private:
   HogDevnodeTmpDir event_dir_;
   HogDevnodeTmpDir indexer_dir_;
   std::unique_ptr<IndexDB> indexer_db_;
+  // Declaration order matters: the indexer RPC servers below borrow
+  // indexer_failure_cache_ by reference, so it must be declared before (and
+  // thus outlive) them.
+  RecentTxFailureCache indexer_failure_cache_;
   // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.
   std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
@@ -146,7 +153,19 @@ private:
 
   RpcServer<DevCoordinatorSchedRpc> coordinator_sched_server_;
 
-  RpcServer<MempoolAuthRpc> mempool_auth_server_;
+  // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
+  // via the [this]-capturing callback the coordinator registers in
+  // [finish_init()], and that callback broadcasts on the coordinator's
+  // [auth_data_height_]. The coordinator is constructed from
+  // [mempool_auth_server_->impl()], so it must be declared first and would
+  // otherwise be destroyed last -- after the coordinator -- letting an
+  // in-flight callback race the coordinator's destructor. Hold it behind a
+  // pointer so the failed-construction cleanup can drain it (via [~RpcServer],
+  // which waits for in-flight handlers) before the coordinator is torn down.
+  // See [prepare_for_failed_construction]. (The normal ~HogDevnodeNode path
+  // instead drains via the DB subscription manager in [ctx_.reset()].)
+  std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
+      std::make_unique<RpcServer<MempoolAuthRpc>>();
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(

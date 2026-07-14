@@ -24,12 +24,21 @@ public:
   // in turn will send the indexer's address to the event server?
   x23::Async<void> event_indexer_intro(IndexerCard card)
   {
-    CHECK_EQ(std::string_view(card.protocol),
-             std::string_view(version::kHogdProtocol()));
+    // The protocol string is remote RPC input, not an internal invariant: a
+    // peer speaking a different protocol must be rejected without aborting the
+    // event server. Reject before dialing the peer's advertised address.
+    if (std::string_view(card.protocol) !=
+        std::string_view(version::kHogdProtocol())) {
+      warn("event_indexer_intro: rejecting indexer with mismatched protocol "
+           "(got {}, expected {})",
+           std::string_view(card.protocol),
+           std::string_view(version::kHogdProtocol()));
+      co_return;
+    }
     indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
-    co_await ctx_.add_indexer(std::move(client));
+    ctx_.add_indexer(std::move(client));
     co_return;
   }
 
