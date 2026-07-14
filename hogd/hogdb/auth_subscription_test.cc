@@ -620,7 +620,7 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
 TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
 {
   AuthCard empty_protocol_card =
-      AuthCard{.protocol = Protocol{},
+      AuthCard{.protocol = ProtocolCommit{},
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -635,7 +635,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   nul_suffixed.push_back('\0');
   nul_suffixed += "suffix";
   AuthCard nul_protocol_card =
-      AuthCard{.protocol = Protocol(nul_suffixed.data(), nul_suffixed.size()),
+      AuthCard{.protocol =
+                   ProtocolCommit(nul_suffixed.data(), nul_suffixed.size()),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};

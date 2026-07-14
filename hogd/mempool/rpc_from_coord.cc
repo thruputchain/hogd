@@ -2088,22 +2088,15 @@ MempoolCoordinatorRpc::schedulercoord_validate_impl(
 
 x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
-                                                     ConsensusValue value,
-                                                     ProposalTxs proposal_txs)
+                                                     Proposal proposal)
 {
   DbTip db_tip = last_committed_block_;
   if (db_tip.id != parent_id) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
-  if (value.proposal_txs_hash != sha256(proposal_txs)) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  Proposal proposal{.header = value.proposal_header,
-                    .transactions = std::move(proposal_txs)};
   co_return co_await schedulercoord_validate_impl(
-      db_tip, nomination_from_proposal(proposal), value.proposal_header);
+      db_tip, nomination_from_proposal(proposal), proposal.header);
 }
 
 // TODO(jhumphri): We could livelock in this method if we continue to receive

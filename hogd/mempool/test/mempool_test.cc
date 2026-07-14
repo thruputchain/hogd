@@ -1276,18 +1276,15 @@ TEST(Mempool, ValidateBlockRejectsTamperedHeaderRoots)
             parent_tip.id, ProposalContext{})();
     ASSERT_EQ(res_propose.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
-    const Proposal &proposal = res_propose.proposed_block().proposal;
-    ConsensusValue value{};
-    value.proposal_header = proposal.header;
-    value.proposal_txs_hash = sha256(proposal.transactions);
-    tamper(value.proposal_header);
+    Proposal proposal = res_propose.proposed_block().proposal;
+    tamper(proposal.header);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
     SchedulerValidationResult res_validate =
         server.mempool_coord_rpc().schedulercoord_validate_block(
-            parent_tip.id, value, proposal.transactions)();
+            parent_tip.id, std::move(proposal))();
     EXPECT_EQ(res_validate.outcome(),
               SchedulerValidationResult::SchedulerValidationInvalid);
   };
@@ -1296,40 +1293,6 @@ TEST(Mempool, ValidateBlockRejectsTamperedHeaderRoots)
       [](ProposalHeader &header) { header.storage_hash[0] ^= 0xff; });
   expect_tampered_root_rejected(
       [](ProposalHeader &header) { header.events_hash[0] ^= 0xff; });
-}
-
-TEST(Mempool, ValidateBlockRejectsMismatchedProposalTxsHash)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-
-  SchedulerGetTipResult get_tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  const DbTip parent_tip = get_tip.db_tip();
-
-  SchedulerProposalResult res_propose =
-      server.mempool_coord_rpc().schedulercoord_propose_block(
-          parent_tip.id, ProposalContext{})();
-  ASSERT_EQ(res_propose.outcome(),
-            SchedulerProposalOutcome::SchedulerProposalOK);
-  const Proposal &proposal = res_propose.proposed_block().proposal;
-
-  ConsensusValue value{};
-  value.proposal_header = proposal.header;
-  value.proposal_txs_hash = sha256(proposal.transactions);
-  value.proposal_txs_hash[0] ^= 0xff;
-
-  SchedulerValidationResult res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate_block(
-          parent_tip.id, value, proposal.transactions)();
-  EXPECT_EQ(res_validate.outcome(),
-            SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
 TEST(Mempool, ValidateTwo)

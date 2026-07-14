@@ -23,7 +23,7 @@ public:
   {}
 
   static x23::Async<IndexerBlockExplorerIntroOutcome>
-  indexer_block_explorer_intro(Protocol protocol)
+  indexer_block_explorer_intro(ProtocolCommit protocol)
   {
     if (std::string_view(protocol) !=
         std::string_view(version::kHogdProtocol())) {

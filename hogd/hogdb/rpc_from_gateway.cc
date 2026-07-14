@@ -143,7 +143,7 @@ read_one_item(HogDBDAO &db, AddressAndKey const &addrkey)
 } // namespace
 
 DbGatewayIntroOutcome
-HogDBGatewayRpc::dbgateway_intro(Protocol const &protocol)
+HogDBGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 {
   if (std::string_view(protocol) !=
       std::string_view(version::kHogdProtocol())) {

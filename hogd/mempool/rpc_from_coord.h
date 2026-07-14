@@ -157,8 +157,7 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
   x23::Async<SchedulerValidationResult>
-  schedulercoord_validate_block(BlockID parent_id, ConsensusValue value,
-                                ProposalTxs proposal_txs);
+  schedulercoord_validate_block(BlockID parent_id, Proposal proposal);
 
   // Commits the block with ID [block_id].
   x23::Async<SchedulerCommitOutcome>

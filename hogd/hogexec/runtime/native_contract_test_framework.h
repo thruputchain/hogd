@@ -304,8 +304,9 @@ public:
   // Commits the current block and creates a new one. Returns the committed
   // block's resulting storage hash (captured at close), so callers can
   // compare committed-block state (mirrors discard_block).
-  StorageShortHash advance_block(
-      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal);
+  StorageShortHash
+  advance_block(BlockExecutionMode mode =
+                    BlockExecutionMode::kBlockExecutionModeProposal);
 
   //
   // Aborts if the advance fails. Tests that expect the advance itself to fail
