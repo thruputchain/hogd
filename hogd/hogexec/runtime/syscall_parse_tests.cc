@@ -13,6 +13,7 @@
 #include "hogd/hogexec/components/ffi_types.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
+#include "types.hh"
 
 namespace hogd {
 
