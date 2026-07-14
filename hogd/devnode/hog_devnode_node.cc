@@ -839,8 +839,9 @@ void
 HogDevnodeNode::materialize_bootstrap_accounts(
     BootstrapAccountConfig const &config)
 {
-  auto client_res = create_client<SchedulerCoord1>(
-      bind_host_, mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
   if (!client_res)
     panic("devnode materialize_bootstrap_accounts connect failed: {}",
           client_res.error().error_code().message());
@@ -877,8 +878,9 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
     return;
   }
 
-  auto client_res = create_client<SchedulerCoord1>(
-      bind_host_, mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
   if (!client_res)
     panic("devnode commit_initialization_batch connect failed: {}",
           client_res.error().error_code().message());
@@ -1037,8 +1039,9 @@ HogDevnodeNode::register_executor_with_mempool()
 x23::Async<void>
 HogDevnodeNode::register_coordinator_with_mempool()
 {
-  auto client_res = create_client<SchedulerCoord1>(
-      bind_host_, mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
   if (!client_res)
     panic("devnode register_coordinator_with_mempool connect failed: {}",
           client_res.error().error_code().message());

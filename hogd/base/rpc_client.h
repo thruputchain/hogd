@@ -23,8 +23,8 @@
 namespace hogd {
 
 template<typename RpcService>
-using rpc_client_t =
-    typename RpcService::template client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+using rpc_client_t = typename RpcService::template client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 template<typename RpcService>
 x23::Async<hogd::ErrnoStatus<rpc_client_t<RpcService>>>

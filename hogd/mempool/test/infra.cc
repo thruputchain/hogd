@@ -66,8 +66,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
 
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
-  dbauth_client_t dbauth_client =
-      make_dbauth_client(dbauth_address)().value();
+  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
   auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
 
   auth_db_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;

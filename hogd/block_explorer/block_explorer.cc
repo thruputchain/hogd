@@ -38,11 +38,9 @@ block_explorer_init(const std::string &indexer_server_addr,
   }
 
   // Register with the indexer server.
-  auto client_res =
-      make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
-                                                 indexer_server_addr),
-                                             /*retry=*/true,
-                                             LoadgenRpc::kRpcMaxMessageSize)();
+  auto client_res = make_rpc_client<IndexerBlockExplorer1>(
+      server_address_to_sockaddr(indexer_server_addr),
+      /*retry=*/true, LoadgenRpc::kRpcMaxMessageSize)();
   if (!client_res)
     panic("block_explorer connect to indexer failed: {}",
           client_res.error().error_code().message());

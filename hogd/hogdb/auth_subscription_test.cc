@@ -769,7 +769,8 @@ TEST(MakeRpcClientTest, ConnectionRefusedReturnsUnexpected)
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ASSERT_EQ(::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
+  ASSERT_EQ(::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)),
+            0);
   socklen_t len = sizeof(addr);
   ASSERT_EQ(::getsockname(probe, reinterpret_cast<sockaddr *>(&addr), &len), 0);
   const uint16_t port = ntohs(addr.sin_port);

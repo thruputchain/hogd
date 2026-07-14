@@ -42,11 +42,11 @@ public:
     }
 
     // Connect to the loadgen server.
-    client_ =
-        std::make_unique<loadgen_client_t>(create_client<LoadgenInterfaceV1>(
+    client_ = std::make_unique<loadgen_client_t>(
+        create_client<LoadgenInterfaceV1>(
             host_port, /*retry=*/true,
             /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)()
-                                               .value());
+            .value());
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We

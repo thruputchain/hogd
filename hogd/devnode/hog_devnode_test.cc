@@ -1691,7 +1691,8 @@ TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
     sched_coord_client_t client =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
 
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1710,7 +1711,8 @@ TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
   {
     auto client = create_client<DbGateway1>(readiness.db_gateway.host,
                                             readiness.db_gateway.port,
-                                            /*retry=*/true)().value();
+                                            /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocol())(),
               DbGatewayIntroOutcome::DbGatewayIntroSuccess);
@@ -1740,7 +1742,8 @@ TEST(HogDevnode, ViewGatewayEndpointAnswersIntro)
   {
     auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
                                               readiness.view_gateway.port,
-                                              /*retry=*/true)().value();
+                                              /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
@@ -1765,7 +1768,8 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
   {
     auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
                                               readiness.view_gateway.port,
-                                              /*retry=*/true)().value();
+                                              /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
@@ -1808,7 +1812,8 @@ TEST(HogDevnode, IndexerEndpointServesBlockExplorer)
   {
     auto client = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(client.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
@@ -1838,10 +1843,12 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
@@ -1929,10 +1936,12 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
 
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     ASSERT_TRUE(fibonacci_contract);
@@ -2015,14 +2024,16 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     EXPECT_EQ(tip.db_tip().height, 2);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
     TxInfoResult result = reader.get_transaction_info(tx_hash)();
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().height, 2);
@@ -2059,7 +2070,8 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     EXPECT_EQ(tip.db_tip().height, 2);
@@ -2325,10 +2337,12 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
@@ -2422,10 +2436,12 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
-                                       /*retry=*/true)().value();
+                                       /*retry=*/true)()
+            .value();
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
-                                                       /*retry=*/true)().value();
+                                                       /*retry=*/true)()
+                      .value();
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);

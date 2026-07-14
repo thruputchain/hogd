@@ -58,8 +58,9 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   info("PORT indexer.event={}", actual_event_port);
 
   // Register with the event server.
-  auto client_res = make_rpc_client<EventIndexer1>(
-      server_address_to_sockaddr(event_server_addr), /*retry=*/true)();
+  auto client_res = make_rpc_client<EventIndexer1>(server_address_to_sockaddr(
+                                                       event_server_addr),
+                                                   /*retry=*/true)();
   if (!client_res)
     panic("indexer connect to event server failed: {}",
           client_res.error().error_code().message());

@@ -373,10 +373,9 @@ private:
 
   x23::Async<void> register_coordinator_with_mempool()
   {
-    auto client =
-        create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
-                                       mempool_coord_server_.port())()
-            .value();
+    auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                                 mempool_coord_server_.port())()
+                      .value();
     std::string coord_address =
         make_address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol(),
