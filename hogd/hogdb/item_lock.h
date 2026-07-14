@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <type_traits>
@@ -35,9 +36,9 @@ namespace hogd {
 class ItemLock {
 public:
   ItemLock(int128_t snapshot_cost) : snapshot_cost_(snapshot_cost) {}
-  explicit ItemLock(std::pair<int128_t, ItemLockCacheData> const &snapshot)
+  explicit ItemLock(std::pair<int128_t, ItemLockCacheData> snapshot)
   {
-    set_snapshot_data(snapshot);
+    set_snapshot_data(std::move(snapshot));
   }
   ItemLock(auto const &lambda)
       requires std::invocable<decltype(lambda)> &&
@@ -55,7 +56,17 @@ public:
       snapshot_cost_ = std::numeric_limits<int128_t>::min();
       return;
     }
-    set_snapshot_data(*status);
+    set_snapshot_data(std::move(*status));
+  }
+
+  ~ItemLock()
+  {
+    if (snapshot_type_ == kItemLockCacheDataReplayCache) {
+      // A ReplayCacheLock borrows this metadata. Destroy the active lock
+      // contents before releasing the backing snapshot.
+      lock_contents_ = std::monostate{};
+      replay_cache_meta_.~unique_ptr();
+    }
   }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
@@ -128,7 +139,7 @@ private:
                                   const LockContext &ctx,
                                   std::unique_lock<x23::TestLock> const &ul);
 
-  void set_snapshot_data(std::pair<int128_t, ItemLockCacheData> const &snapshot)
+  void set_snapshot_data(std::pair<int128_t, ItemLockCacheData> snapshot)
   {
     snapshot_cost_ = snapshot.first;
 
@@ -144,6 +155,15 @@ private:
     }
     else if (snapshot.second.is_rcq()) {
       snapshot_type_ = kItemLockCacheDataRCQ;
+    }
+    else if (snapshot.second.is_missing_replay_cache()) {
+      snapshot_type_ = kItemLockCacheDataMissingReplayCache;
+    }
+    else if (snapshot.second.is_cached_replay_cache()) {
+      new (&replay_cache_meta_) std::unique_ptr<ReplayCacheMetadata>(
+          std::make_unique<ReplayCacheMetadata>(
+              snapshot.second.take_cached_replay_cache()));
+      snapshot_type_ = kItemLockCacheDataReplayCache;
     }
     else {
       CHECK(snapshot.second.is_none());
@@ -201,12 +221,15 @@ private:
     kItemLockCacheDataNNInt128BaseValue = 1,
     kItemLockCacheDataBalance = 2,
     kItemLockCacheDataRCQ = 3,
+    kItemLockCacheDataMissingReplayCache = 4,
+    kItemLockCacheDataReplayCache = 5,
   };
 
   union {
     std::monostate padding_none_;
     int128_t nnint_base_;
     int128_t balance_base_;
+    std::unique_ptr<ReplayCacheMetadata> replay_cache_meta_;
   };
   uint8_t snapshot_type_ = kItemLockCacheDataTypeNone;
 

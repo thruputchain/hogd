@@ -500,9 +500,11 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_replay_cache()) {
-    // ReplayCacheLock lazily loads replay cache data in try_atomic_change_lock,
-    // so we don't pass in base snapshot data here like we do with most types.
-    lock_contents_.emplace<PointerLock<ReplayCacheLock>>();
+    lock_contents_.emplace<PointerLock<ReplayCacheLock>>(
+        snapshot_type_ == kItemLockCacheDataMissingReplayCache,
+        snapshot_type_ == kItemLockCacheDataReplayCache
+            ? replay_cache_meta_.get()
+            : nullptr);
     return;
   }
 

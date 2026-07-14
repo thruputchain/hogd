@@ -99,9 +99,12 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
     assert(snapshot_cost.error() == HogDBCode::kNotFound);
     assert(!key.is_address_balance());
 
+    if (key.is_replay_cache()) {
+      return std::make_pair(0, ItemLockCacheData::from_missing_replay_cache());
+    }
     return std::make_pair(0, ItemLockCacheData::from_none());
   }
-  return *snapshot_cost;
+  return std::move(*snapshot_cost);
 }
 
 HogDBStatus<int128_t>
