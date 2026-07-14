@@ -67,8 +67,8 @@ protected:
   }
 
   // Builds a transaction whose invoked address is derived from the preimage.
-  static Transaction make_pubkey_transaction(
-      PubkeyAccountPreimage const &preimage)
+  static Transaction
+  make_pubkey_transaction(PubkeyAccountPreimage const &preimage)
   {
     Transaction tx{};
     tx.auth_claim = make_pubkey_claim(preimage);
@@ -601,8 +601,7 @@ TEST_F(AuthClaimTests, PubkeyClaimRejectedWhenAuthDataExists)
 
   auto lightweight = lightweight_validate_auth_claims(stx, &auth_data);
   EXPECT_FALSE(lightweight.has_value());
-  EXPECT_EQ(lightweight.error().code(),
-            AuthVerifyErrorCode::kAuthDataMismatch);
+  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
   auto verified = verify_auth(stx, &auth_data);
   EXPECT_FALSE(verified.has_value());
@@ -619,8 +618,7 @@ TEST_F(AuthClaimTests, SourceClaimRejectedWithoutAuthData)
 
   auto lightweight = lightweight_validate_auth_claims(stx, nullptr);
   EXPECT_FALSE(lightweight.has_value());
-  EXPECT_EQ(lightweight.error().code(),
-            AuthVerifyErrorCode::kAuthDataMismatch);
+  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
   auto verified = verify_auth(stx, nullptr);
   EXPECT_FALSE(verified.has_value());

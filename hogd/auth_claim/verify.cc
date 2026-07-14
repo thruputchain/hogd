@@ -219,15 +219,13 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
   if constexpr (verify_signatures(VerfType)) {
     if (signature_verifier) {
       signature_verifier->add_signature(preimage.pubkey.ed25519(),
-                                        sig.signature.ed25519(),
-                                        serialized_tx);
+                                        sig.signature.ed25519(), serialized_tx);
       return {};
     }
     if (!ed25519_verify(preimage.pubkey.ed25519(), sig.signature.ed25519(),
                         serialized_tx)) {
       trace("Signature verification failed");
-      return AuthVerifyError{
-          AuthVerifyErrorCode::kSignatureVerificationFailed};
+      return AuthVerifyError{AuthVerifyErrorCode::kSignatureVerificationFailed};
     }
   }
   return {};
@@ -256,9 +254,10 @@ verify_auth_claim_internal(AuthClaim const &claim,
   case AuthClaimType::kPubkeySignature:
     // The no-auth-entry precondition is checked by the caller (it owns the
     // DB data); everything here is derivable from the transaction alone.
-    return verify_pubkey_claim_internal<VerfType>(
-        claim.pubkey_preimage(), invoked_address, sigs, serialized_tx,
-        signature_verifier);
+    return verify_pubkey_claim_internal<VerfType>(claim.pubkey_preimage(),
+                                                  invoked_address, sigs,
+                                                  serialized_tx,
+                                                  signature_verifier);
   default:
     // This kind of claim should not have been parseable
     panic("Unsupported auth claim type: {}", claim.claim_type());

@@ -263,8 +263,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
   ASSERT_EQ(result1.size(), 1);
   EXPECT_EQ(result1[0], AuthErrorCode::kAuthFailed);
 
-  EXPECT_EQ(auth_server().verify_batch(1, {stx})(),
-            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(1, {stx})(), AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)

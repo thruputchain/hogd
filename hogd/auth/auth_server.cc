@@ -243,8 +243,9 @@ AuthServer::verify_transactions(BlockHeight height,
             const std::optional<AddressAuthData> &source_auth_data =
                 account_it->second->second;
 
-            AuthVerifyStatus<void> verify_result = verify_auth(
-                tx, source_auth_data ? &*source_auth_data : nullptr);
+            AuthVerifyStatus<void> verify_result =
+                verify_auth(tx,
+                            source_auth_data ? &*source_auth_data : nullptr);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
