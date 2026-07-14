@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -529,10 +530,13 @@ parse_args(int argc, char *argv[])
   hogd::set_contract_artifact_directories(
       options.contract_artifact_directories);
   if (bootstrap_manifest_path.has_value()) {
-    hogd::BootstrapManifestConfig manifest_config =
+    std::expected<hogd::BootstrapManifestConfig, std::string> manifest_config =
         hogd::load_bootstrap_manifest(*bootstrap_manifest_path);
-    options.runtime_network_id = std::move(manifest_config.network_id);
-    options.bootstrap_config = std::move(manifest_config.bootstrap_config);
+    if (!manifest_config) {
+      hogd::arg_error(manifest_config.error(), argv, usage);
+    }
+    options.runtime_network_id = std::move(manifest_config->network_id);
+    options.bootstrap_config = std::move(manifest_config->bootstrap_config);
   }
   return options;
 }

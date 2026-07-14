@@ -12,7 +12,6 @@
 #include <filesystem>
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,7 +40,7 @@ constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
 constexpr std::string_view kBootstrapProfile = "local-dev";
 constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
-std::string
+std::expected<std::string, std::string>
 read_bootstrap_manifest_file(std::filesystem::path const &path)
 {
   // Open with O_NOFOLLOW to close the final-component TOCTOU window: if the
@@ -58,11 +57,11 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
     // for the symlink_status-rejection path so existing assertions still
     // match.
     if (err == ELOOP) {
-      throw std::runtime_error(
+      return std::unexpected(
           std::format("bootstrap manifest must be a regular file: {}",
                       path.string()));
     }
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("failed to open bootstrap manifest: {}: {}", path.string(),
                     std::strerror(err)));
   }
@@ -71,12 +70,12 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   struct stat st{};
   if (::fstat(fd, &st) < 0) {
     const int err = errno;
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("failed to stat bootstrap manifest: {}: {}", path.string(),
                     std::strerror(err)));
   }
   if (!S_ISREG(st.st_mode)) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest must be a regular file: {}",
                     path.string()));
   }
@@ -93,7 +92,7 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
         continue;
       }
       const int err = errno;
-      throw std::runtime_error(
+      return std::unexpected(
           std::format("failed to read bootstrap manifest: {}: {}",
                       path.string(), std::strerror(err)));
     }
@@ -104,48 +103,48 @@ read_bootstrap_manifest_file(std::filesystem::path const &path)
   }
   bytes.resize(total);
   if (bytes.size() > kMaxBootstrapManifestBytes) {
-    throw std::runtime_error(std::format("bootstrap manifest exceeds {} bytes",
-                                         kMaxBootstrapManifestBytes));
+    return std::unexpected(std::format("bootstrap manifest exceeds {} bytes",
+                                       kMaxBootstrapManifestBytes));
   }
   return bytes;
 }
 
-const json::Value &
+std::expected<const json::Value *, std::string>
 require_object_field(const json::Value &parent, std::string_view key,
                      std::string_view context)
 {
   const json::Value *field = parent.find(key);
   if (field == nullptr) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest missing {}.{}", context, key));
   }
   if (field->type() != json::Value::Type::kObject) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest field {}.{} is not an object", context,
                     key));
   }
-  return *field;
+  return field;
 }
 
-std::string_view
+std::expected<std::string_view, std::string>
 require_string_field(const json::Value &parent, std::string_view key,
                      std::string_view context)
 {
   const json::Value *field = parent.find(key);
   if (field == nullptr) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest missing {}.{}", context, key));
   }
   std::optional<std::string_view> value = field->as_string();
   if (!value.has_value()) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest field {}.{} is not a string", context,
                     key));
   }
   return *value;
 }
 
-std::optional<std::string_view>
+std::expected<std::optional<std::string_view>, std::string>
 optional_string_field(const json::Value &parent, std::string_view key,
                       std::string_view context)
 {
@@ -155,159 +154,270 @@ optional_string_field(const json::Value &parent, std::string_view key,
   }
   std::optional<std::string_view> value = field->as_string();
   if (!value.has_value()) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest field {}.{} is not a string", context,
                     key));
   }
   return value;
 }
 
-std::int64_t
+std::expected<std::int64_t, std::string>
 require_integer_field(const json::Value &parent, std::string_view key,
                       std::string_view context)
 {
   const json::Value *field = parent.find(key);
   if (field == nullptr) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest missing {}.{}", context, key));
   }
   std::optional<std::int64_t> value = field->as_integer();
   if (!value.has_value()) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest field {}.{} is not an integer", context,
                     key));
   }
   return *value;
 }
 
-void
+std::expected<void, std::string>
 require_string_value(std::string_view actual, std::string_view expected,
                      std::string_view field)
 {
   if (actual != expected) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("unsupported bootstrap manifest {} '{}', expected '{}'",
                     field, actual, expected));
   }
+  return {};
 }
 
 // hog-devnode only: this asserts that the manifest matches the dev-wallet
 // artifact the binary already has. In a non-dev backend the relationship
 // reverses: the manifest names the artifact bytes to deploy and the backend
 // verifies its deployed sha256 against the manifest's contentHash.
-DevWalletProfile
+std::expected<DevWalletProfile, std::string>
 validate_dev_wallet_assertions(const json::Value &dev_wallet)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
-  std::string_view profile_name =
+  std::expected<std::string_view, std::string> profile_name =
       require_string_field(dev_wallet, "profile", "devWallet");
-  require_string_value(profile_name, kDefaultDevWalletProfile,
-                       "devWallet.profile");
-  DevWalletProfile profile = resolve_dev_wallet_profile(profile_name);
+  if (!profile_name) {
+    return std::unexpected(std::move(profile_name.error()));
+  }
+  if (std::expected<void, std::string> valid =
+          require_string_value(*profile_name, kDefaultDevWalletProfile,
+                               "devWallet.profile");
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  DevWalletProfile profile = resolve_dev_wallet_profile(*profile_name);
 
-  if (std::optional<std::string_view> content_hash =
-          optional_string_field(dev_wallet, "contentHash", "devWallet")) {
+  std::expected<std::optional<std::string_view>, std::string> content_hash =
+      optional_string_field(dev_wallet, "contentHash", "devWallet");
+  if (!content_hash) {
+    return std::unexpected(std::move(content_hash.error()));
+  }
+  if (content_hash->has_value()) {
     auto wallet_contract = load_dev_wallet_contract(profile);
     const std::string wallet_hash = hex_string(sha256(*wallet_contract));
-    require_string_value(*content_hash, wallet_hash, "devWallet.contentHash");
+    if (std::expected<void, std::string> valid =
+            require_string_value(**content_hash, wallet_hash,
+                                 "devWallet.contentHash");
+        !valid) {
+      return std::unexpected(std::move(valid.error()));
+    }
   }
-  if (std::optional<std::string_view> deploy_entrypoint =
-          optional_string_field(dev_wallet, "deployEntrypoint", "devWallet")) {
-    require_string_value(*deploy_entrypoint,
-                         entrypoint_hex(wallet_meta::entrypoint<"deploy">()),
-                         "devWallet.deployEntrypoint");
+
+  std::expected<std::optional<std::string_view>, std::string>
+      deploy_entrypoint =
+          optional_string_field(dev_wallet, "deployEntrypoint", "devWallet");
+  if (!deploy_entrypoint) {
+    return std::unexpected(std::move(deploy_entrypoint.error()));
   }
-  if (std::optional<std::string_view> do_action_entrypoint =
-          optional_string_field(dev_wallet, "doActionEntrypoint",
-                                "devWallet")) {
-    require_string_value(*do_action_entrypoint,
-                         entrypoint_hex(wallet_meta::entrypoint<"do_action">()),
-                         "devWallet.doActionEntrypoint");
+  if (deploy_entrypoint->has_value()) {
+    if (std::expected<void, std::string> valid =
+            require_string_value(**deploy_entrypoint,
+                                 entrypoint_hex(
+                                     wallet_meta::entrypoint<"deploy">()),
+                                 "devWallet.deployEntrypoint");
+        !valid) {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  std::expected<std::optional<std::string_view>, std::string>
+      do_action_entrypoint =
+          optional_string_field(dev_wallet, "doActionEntrypoint", "devWallet");
+  if (!do_action_entrypoint) {
+    return std::unexpected(std::move(do_action_entrypoint.error()));
+  }
+  if (do_action_entrypoint->has_value()) {
+    if (std::expected<void, std::string> valid =
+            require_string_value(**do_action_entrypoint,
+                                 entrypoint_hex(
+                                     wallet_meta::entrypoint<"do_action">()),
+                                 "devWallet.doActionEntrypoint");
+        !valid) {
+      return std::unexpected(std::move(valid.error()));
+    }
   }
   return profile;
 }
 
 } // namespace
 
-BootstrapManifestConfig
+std::expected<BootstrapManifestConfig, std::string>
 load_bootstrap_manifest(std::filesystem::path const &path)
 {
-  std::string bytes = read_bootstrap_manifest_file(path);
-  std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
+  std::expected<std::string, std::string> bytes =
+      read_bootstrap_manifest_file(path);
+  if (!bytes) {
+    return std::unexpected(std::move(bytes.error()));
+  }
+  std::expected<json::Value, json::ParseError> parsed = json::parse(*bytes);
   if (!parsed.has_value()) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("bootstrap manifest JSON parse failed at {}: {}",
                     parsed.error().offset, parsed.error().message));
   }
   if (parsed->type() != json::Value::Type::kObject) {
-    throw std::runtime_error("bootstrap manifest root is not an object");
+    return std::unexpected("bootstrap manifest root is not an object");
   }
 
-  const std::int64_t schema_version =
+  std::expected<std::int64_t, std::string> schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
+  if (!schema_version) {
+    return std::unexpected(std::move(schema_version.error()));
+  }
   // Additive optional fields do not bump schemaVersion, so exact-match is
   // correct under the additive-only contract.
-  if (schema_version != 1) {
-    throw std::runtime_error(std::format(
+  if (*schema_version != 1) {
+    return std::unexpected(std::format(
         "unsupported bootstrap manifest schemaVersion {}, expected 1",
-        schema_version));
+        *schema_version));
   }
-  require_string_value(require_string_field(*parsed, "kind", "root"),
-                       kBootstrapManifestKind, "kind");
-  std::string network_id =
-      std::string(require_string_field(*parsed, "networkId", "root"));
+
+  std::expected<std::string_view, std::string> kind =
+      require_string_field(*parsed, "kind", "root");
+  if (!kind) {
+    return std::unexpected(std::move(kind.error()));
+  }
+  if (std::expected<void, std::string> valid =
+          require_string_value(*kind, kBootstrapManifestKind, "kind");
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+
+  std::expected<std::string_view, std::string> network_id_field =
+      require_string_field(*parsed, "networkId", "root");
+  if (!network_id_field) {
+    return std::unexpected(std::move(network_id_field.error()));
+  }
+  std::string network_id(*network_id_field);
   if (network_id.empty()) {
-    throw std::runtime_error("bootstrap manifest networkId must not be empty");
-  }
-  require_string_value(require_string_field(*parsed, "profile", "root"),
-                       kBootstrapProfile, "profile");
-  if (std::optional<std::string_view> protocol =
-          optional_string_field(*parsed, "protocol", "root")) {
-    require_string_value(*protocol, version::kHogdProtocol(), "protocol");
+    return std::unexpected("bootstrap manifest networkId must not be empty");
   }
 
-  DevWalletProfile dev_wallet_profile = validate_dev_wallet_assertions(
-      require_object_field(*parsed, "devWallet", "root"));
-  const json::Value &storage_cost_model =
+  std::expected<std::string_view, std::string> profile =
+      require_string_field(*parsed, "profile", "root");
+  if (!profile) {
+    return std::unexpected(std::move(profile.error()));
+  }
+  if (std::expected<void, std::string> valid =
+          require_string_value(*profile, kBootstrapProfile, "profile");
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+
+  std::expected<std::optional<std::string_view>, std::string> protocol =
+      optional_string_field(*parsed, "protocol", "root");
+  if (!protocol) {
+    return std::unexpected(std::move(protocol.error()));
+  }
+  if (protocol->has_value()) {
+    if (std::expected<void, std::string> valid =
+            require_string_value(**protocol, version::kHogdProtocol(),
+                                 "protocol");
+        !valid) {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  std::expected<const json::Value *, std::string> dev_wallet_field =
+      require_object_field(*parsed, "devWallet", "root");
+  if (!dev_wallet_field) {
+    return std::unexpected(std::move(dev_wallet_field.error()));
+  }
+  std::expected<DevWalletProfile, std::string> dev_wallet_profile =
+      validate_dev_wallet_assertions(**dev_wallet_field);
+  if (!dev_wallet_profile) {
+    return std::unexpected(std::move(dev_wallet_profile.error()));
+  }
+
+  std::expected<const json::Value *, std::string> storage_cost_model =
       require_object_field(*parsed, "storageCostModel", "root");
-  require_string_value(require_string_field(storage_cost_model, "profile",
-                                            "storageCostModel"),
-                       kStorageCostModelProfile, "storageCostModel.profile");
+  if (!storage_cost_model) {
+    return std::unexpected(std::move(storage_cost_model.error()));
+  }
+  std::expected<std::string_view, std::string> storage_cost_profile =
+      require_string_field(**storage_cost_model, "profile", "storageCostModel");
+  if (!storage_cost_profile) {
+    return std::unexpected(std::move(storage_cost_profile.error()));
+  }
+  if (std::expected<void, std::string> valid =
+          require_string_value(*storage_cost_profile, kStorageCostModelProfile,
+                               "storageCostModel.profile");
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
 
-  const json::Value &accounts =
+  std::expected<const json::Value *, std::string> accounts =
       require_object_field(*parsed, "bootstrapAccounts", "root");
-  const std::int64_t count =
-      require_integer_field(accounts, "count", "bootstrapAccounts");
-  if (count < 0 || std::cmp_greater(count, kMaxBootstrapAccounts)) {
-    throw std::runtime_error(
+  if (!accounts) {
+    return std::unexpected(std::move(accounts.error()));
+  }
+  std::expected<std::int64_t, std::string> count =
+      require_integer_field(**accounts, "count", "bootstrapAccounts");
+  if (!count) {
+    return std::unexpected(std::move(count.error()));
+  }
+  if (*count < 0 || std::cmp_greater(*count, kMaxBootstrapAccounts)) {
+    return std::unexpected(
         std::format("bootstrap manifest bootstrapAccounts.count {} exceeds "
                     "maximum {}",
-                    count, kMaxBootstrapAccounts));
+                    *count, kMaxBootstrapAccounts));
   }
-  std::string seed =
-      std::string(require_string_field(accounts, "seed", "bootstrapAccounts"));
+  std::expected<std::string_view, std::string> seed_field =
+      require_string_field(**accounts, "seed", "bootstrapAccounts");
+  if (!seed_field) {
+    return std::unexpected(std::move(seed_field.error()));
+  }
+  std::string seed(*seed_field);
   if (seed.empty()) {
-    throw std::runtime_error(
+    return std::unexpected(
         "bootstrap manifest bootstrapAccounts.seed must not be empty");
   }
-  const std::string_view initial_storage_tokens =
-      require_string_field(accounts, "initialStorageTokens",
+  std::expected<std::string_view, std::string> initial_storage_tokens =
+      require_string_field(**accounts, "initialStorageTokens",
                            "bootstrapAccounts");
+  if (!initial_storage_tokens) {
+    return std::unexpected(std::move(initial_storage_tokens.error()));
+  }
   const std::optional<std::uint64_t> storage_tokens =
-      try_parse_u64(initial_storage_tokens);
+      try_parse_u64(*initial_storage_tokens);
   if (!storage_tokens) {
-    throw std::runtime_error(
+    return std::unexpected(
         std::format("Invalid bootstrap manifest initialStorageTokens: {}",
-                    initial_storage_tokens));
+                    *initial_storage_tokens));
   }
   BootstrapAccountConfig config{
-      .count = static_cast<std::uint32_t>(count),
+      .count = static_cast<std::uint32_t>(*count),
       .seed = std::move(seed),
       .storage_tokens = *storage_tokens,
-      .dev_wallet_profile = std::string(dev_wallet_profile.name),
+      .dev_wallet_profile = std::string(dev_wallet_profile->name),
   };
-  return {
+  return BootstrapManifestConfig{
       .network_id = std::move(network_id),
       .bootstrap_config = std::move(config),
   };
