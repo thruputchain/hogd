@@ -212,10 +212,14 @@ def inputs_for_changed(root: Path, compile_db: Path, base: str, head: str) -> se
         return result
     _, header_to_sources = dependency_graph(compile_db, root)
     for header in changed_headers:
-        result.add(header)
         affected_sources = header_to_sources.get(header, set())
         if affected_sources:
             result.update(affected_sources)
+        else:
+            # Referenced headers are checked through their real translation
+            # units, which preserve target-specific include paths and defines.
+            # Only standalone headers need a synthetic translation unit.
+            result.add(header)
     return result
 
 
