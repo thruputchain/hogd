@@ -624,6 +624,52 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
   }
 }
 
+TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
+{
+  auto [pk, sk] = make_key_pair();
+  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage() = preimage;
+
+  Transaction tx{};
+  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.gas_limit = 100'000;
+  tx.auth_claim = claim;
+
+  SignedTransaction stx{.tx = tx,
+                        .signatures = {
+                            make_signature(sk, tx, /*public_key_id=*/0)}};
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
+
+  auto serialized_stx = x23::serialize(stx);
+
+  // No registered auth data: the pubkey claim succeeds.
+  VerifyAuthResult success =
+      verify_signed_transaction_auth({.data = serialized_stx.data(),
+                                      .len = static_cast<uint32_t>(
+                                          serialized_stx.size())},
+                                     {.data = nullptr, .len = 0});
+  EXPECT_EQ(success.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(success.auth_error_code, 0);
+
+  // Supplying auth data means the address is already registered, so a pubkey
+  // claim is no longer valid.
+  auto serialized_auth = x23::serialize(auth_data);
+  VerifyAuthResult result =
+      verify_signed_transaction_auth({.data = serialized_stx.data(),
+                                      .len = static_cast<uint32_t>(
+                                          serialized_stx.size())},
+                                     make_source_auth_data(serialized_auth));
+
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(result.auth_error_code,
+            std::to_underlying(AuthVerifyErrorCode::kAuthDataMismatch));
+}
+
 TEST(TestBindingsTest, VerifyAuthFromDB)
 {
   // Test verifying a transaction using auth data from the database

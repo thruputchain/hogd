@@ -1158,17 +1158,23 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
   const SignedTransaction &stx = *stx_opt;
 
   try {
-    // Deserialize source auth data
-    if (!source_auth_data.data) {
+    // A null, empty buffer represents an address with no registered auth data.
+    // Pubkey claims require this state; source-address claims require a
+    // serialized AddressAuthData value.
+    if (!source_auth_data.data && source_auth_data.len != 0) {
       return kNullptrError;
     }
 
-    AddressAuthData source_data;
-    x23::deserialize(&source_data,
-                     x23::BufView{source_auth_data.data, source_auth_data.len});
+    std::optional<AddressAuthData> source_data;
+    if (source_auth_data.data) {
+      source_data.emplace();
+      x23::deserialize(&*source_data, x23::BufView{source_auth_data.data,
+                                                   source_auth_data.len});
+    }
 
     // Perform the appropriate level of verification
-    AuthVerifyStatus<void> result = verify_auth(stx, &source_data);
+    AuthVerifyStatus<void> result =
+        verify_auth(stx, source_data ? &*source_data : nullptr);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
