@@ -12,6 +12,10 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
@@ -204,16 +208,3 @@ jobs:
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
-
-  tidy:
-    name: tidy
-    runs-on: ubuntu-latest
-    needs: [tidy-partition]
-    if: always()
-    steps:
-      - name: Check tidy partitions
-        run: |
-          if [ "${{ needs['tidy-partition'].result }}" != "success" ]; then
-            echo "tidy partitions finished with result: ${{ needs['tidy-partition'].result }}"
-            exit 1
-          fi
