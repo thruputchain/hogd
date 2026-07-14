@@ -101,11 +101,12 @@ class FullInputsTest(unittest.TestCase):
             tidy_inputs,
             "all_files",
             return_value={"hogd/referenced.h", "hogd/standalone.h"},
-        ):
+        ) as mock_all_files:
             inputs = tidy_inputs.inputs_for_full(
                 Path("."), Path("compile_commands.json")
             )
 
+        mock_all_files.assert_called_once_with(Path("."), ".h")
         self.assertEqual(
             inputs, {"hogd/one.cc", "hogd/two.cc", "hogd/standalone.h"}
         )
