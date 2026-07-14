@@ -59,9 +59,13 @@ public:
     ret.reserve(cards.size());
 
     for (const ExecCard &card : cards) {
-      ret.push_back(co_await create_client<ExecutorSched1>(
+      auto client = co_await create_client<ExecutorSched1>(
           server_address_to_sockaddr(card.address), /*retry=*/false,
-          /*max_message_size=*/Executor::kMessageSize));
+          /*max_message_size=*/Executor::kMessageSize);
+      if (!client)
+        panic("rpc_from_exec get_clients connect failed: {}",
+              client.error().error_code().message());
+      ret.push_back(std::move(*client));
     }
     co_return ret;
   }

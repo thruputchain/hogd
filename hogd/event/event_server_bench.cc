@@ -60,7 +60,11 @@ connect_to_event_exec_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event exec server address: {}", address));
   }
-  return make_rpc_client<EventExecutor1>(host_port, false)();
+  auto client = make_rpc_client<EventExecutor1>(host_port, false)();
+  if (!client)
+    panic("connect_to_event_exec_server failed: {}",
+          client.error().error_code().message());
+  return std::move(*client);
 }
 
 auto
@@ -71,7 +75,11 @@ connect_to_event_sched_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event sched server address: {}", address));
   }
-  return make_rpc_client<EventSched1>(host_port, false)();
+  auto client = make_rpc_client<EventSched1>(host_port, false)();
+  if (!client)
+    panic("connect_to_event_sched_server failed: {}",
+          client.error().error_code().message());
+  return std::move(*client);
 }
 
 const SHA256Hash topic0 = sha256(std::string_view{"topic0"});

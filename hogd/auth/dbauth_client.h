@@ -14,11 +14,11 @@
 
 namespace hogd {
 
-using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
+using dbauth_client_t = rpc_client_t<DBAuth1>;
 
 // address_for_auth comes from the mempool's intro response: a malformed one
 // means the peer sent us garbage, so there is nothing to fall back to.
-inline x23::Async<dbauth_client_t>
+inline x23::Async<ErrnoStatus<dbauth_client_t>>
 make_dbauth_client(const std::string &address_for_auth)
 {
   x23::HostPort host_port;

@@ -60,7 +60,8 @@ public:
     x23::HostPort loadgen_host_port{"localhost", loadgen_port_};
     loadgen_client_ = std::make_unique<loadgen_client_t>(
         create_client<LoadgenInterfaceV1>(loadgen_host_port, false,
-                                          LoadgenRpc::kRpcMaxMessageSize)());
+                                          LoadgenRpc::kRpcMaxMessageSize)()
+            .value());
 
     event_client_ = make_srpc_multiclient<EventSched1>(
         x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);

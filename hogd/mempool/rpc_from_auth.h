@@ -60,9 +60,13 @@ public:
     AuthCard card;
     CHECK(Registration::registration().auth_registered(&card));
 
-    co_return co_await create_client<AuthMempool1>(
+    auto ret = co_await create_client<AuthMempool1>(
         server_address_to_sockaddr(card.address_for_mempool), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+    if (!ret)
+      panic("rpc_from_auth get_client connect failed: {}",
+            ret.error().error_code().message());
+    co_return std::move(*ret);
   }
 
 private:

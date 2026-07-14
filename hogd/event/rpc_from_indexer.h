@@ -35,10 +35,16 @@ public:
            std::string_view(version::kHogdProtocol()));
       co_return;
     }
-    indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
+    auto client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
-    ctx_.add_indexer(std::move(client));
+    if (!client) {
+      warn("event_indexer_intro: failed to connect to indexer {}: {}",
+           std::string_view(card.address_for_event),
+           client.error().error_code().message());
+      co_return;
+    }
+    ctx_.add_indexer(std::move(*client));
     co_return;
   }
 

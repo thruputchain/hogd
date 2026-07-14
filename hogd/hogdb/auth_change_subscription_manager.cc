@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <exception>
 #include <optional>
 #include <sys/socket.h>
 #include <utility>
@@ -74,14 +73,14 @@ x23::Async<std::optional<AuthChangeSubscriptionManager::auth_db_client_t>>
 AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
                                              const AuthCard &card)
 {
-  try {
-    co_return co_await make_rpc_client<AuthDB1>(address, false);
-  } catch (const std::exception &e) {
+  auto client = co_await make_rpc_client<AuthDB1>(address, false);
+  if (!client) {
     error("AuthChangeSubscriptionManager: Failed to create RPC client for "
           "{}: {}",
-          card.address_for_db, e.what());
+          card.address_for_db, client.error().error_code().message());
     co_return std::nullopt;
   }
+  co_return std::move(*client);
 }
 
 x23::Async<std::optional<BlockHeight>>

@@ -29,7 +29,8 @@ public:
     server_port_ = port;
     // Create ShardCard with the auth address
     std::string address_for_auth = std::format("localhost:{}", port);
-    dbauth_client_t dbauth_client = make_dbauth_client(address_for_auth)();
+    dbauth_client_t dbauth_client =
+        make_dbauth_client(address_for_auth)().value();
 
     // Create AuthServer
     auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client), 16);
