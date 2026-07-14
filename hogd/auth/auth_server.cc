@@ -185,10 +185,9 @@ AuthServer::populate_auth_data(BlockHeight height,
 
   CHECK_PTR(entry.value().get());
 
-  if (!entry.value()->second.has_value()) {
-    co_return AuthError(AuthErrorCode::kAuthFailed);
-  }
-
+  // A missing auth entry (nullopt) is returned as-is: whether that is
+  // acceptable depends on the transaction's claim type (pubkey claims
+  // require it), so the policy lives in verify_auth.
   co_return std::move(entry.value());
 }
 
@@ -241,11 +240,12 @@ AuthServer::verify_transactions(BlockHeight height,
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const auto account_it = auth_data.find(account);
             CHECK(account_it != auth_data.end());
-            const AddressAuthData &source_auth_data =
-                account_it->second->second.value();
+            const std::optional<AddressAuthData> &source_auth_data =
+                account_it->second->second;
 
             AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data);
+                verify_auth(tx,
+                            source_auth_data ? &*source_auth_data : nullptr);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -274,13 +274,11 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
       co_return source_addr.error().code();
     }
     CHECK_PTR(source_addr.value().get());
-    if (!source_addr.value()->second.has_value()) {
-      co_return AuthErrorCode::kAuthFailed;
-    }
-    const AddressAuthData *source_auth_data =
-        &(source_addr.value()->second.value());
+    const std::optional<AddressAuthData> &source_auth_data =
+        source_addr.value()->second;
 
-    auto verify_result = verify_auth(tx, *source_auth_data);
+    auto verify_result =
+        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }

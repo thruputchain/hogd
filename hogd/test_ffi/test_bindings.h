@@ -287,7 +287,8 @@ struct VerifyAuthResult {
 // Verify authorization on a SignedTransaction
 //
 // signed_tx: serialized SignedTransaction
-// source_auth_data: serialized AddressAuthData for the source address
+// source_auth_data: serialized AddressAuthData for the source address, or
+// {nullptr, 0} when the address has no registered auth data
 struct VerifyAuthResult
 verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
                                struct FFISourceAuthData source_auth_data);
