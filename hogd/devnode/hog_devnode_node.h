@@ -153,7 +153,18 @@ private:
 
   RpcServer<DevCoordinatorSchedRpc> coordinator_sched_server_;
 
-  RpcServer<MempoolAuthRpc> mempool_auth_server_;
+  // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
+  // via the [this]-capturing callback the coordinator registers in
+  // [finish_init()], and that callback broadcasts on the coordinator's
+  // [auth_data_height_]. The coordinator is constructed from
+  // [mempool_auth_server_->impl()], so it must be declared first and would
+  // otherwise be destroyed last -- after the coordinator -- letting an in-flight
+  // callback race the coordinator's destructor. Hold it behind a pointer so
+  // teardown can drain it (via [~RpcServer], which waits for in-flight handlers)
+  // before the coordinator is torn down. See [~HogDevnodeNode] and
+  // [prepare_for_failed_construction].
+  std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
+      std::make_unique<RpcServer<MempoolAuthRpc>>();
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(
