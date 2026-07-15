@@ -22,7 +22,7 @@ public:
 
   // TODO(jhumphri): Should the indexer instead register with the mempool, which
   // in turn will send the indexer's address to the event server?
-  x23::Async<void> event_indexer_intro(IndexerCard card)
+  x23::Async<EventIndexerIntroOutcome> event_indexer_intro(IndexerCard card)
   {
     // The protocol string is remote RPC input, not an internal invariant: a
     // peer speaking a different protocol must be rejected without aborting the
@@ -33,19 +33,22 @@ public:
            "(got {}, expected {})",
            std::string_view(card.protocol),
            std::string_view(version::kHogdProtocol()));
-      co_return;
+      co_return EventIndexerIntroOutcome::EventIntroMismatchedProtocol;
     }
     auto client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
     if (!client) {
+      // The dial back to the indexer's advertised address failed. Report it so
+      // the indexer fails startup instead of treating registration as
+      // successful while we hold no client for it.
       warn("event_indexer_intro: failed to connect to indexer {}: {}",
            std::string_view(card.address_for_event),
            client.error().error_code().message());
-      co_return;
+      co_return EventIndexerIntroOutcome::EventIntroConnectFailed;
     }
     ctx_.add_indexer(std::move(*client));
-    co_return;
+    co_return EventIndexerIntroOutcome::EventIntroSuccess;
   }
 
 private:

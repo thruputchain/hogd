@@ -744,7 +744,11 @@ HogDevnodeNode::register_indexer_with_event_service()
       format_advertised_address(bind_host_, indexer_event_server_->port());
   IndexerCard card{.protocol = version::kHogdProtocol(),
                    .address_for_event = indexer_event_address.c_str()};
-  client.event_indexer_intro(card)();
+  const EventIndexerIntroOutcome intro_outcome =
+      client.event_indexer_intro(card)();
+  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
+    panic("devnode: event server rejected/failed indexer registration: {}",
+          intro_outcome);
 }
 
 BootstrapAccountConfig

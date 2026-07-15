@@ -69,7 +69,11 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
       format_advertised_address(bind_ip, /*port=*/actual_event_port);
   const IndexerCard card{.protocol = version::kHogdProtocol(),
                          .address_for_event = indexer_server_addr.c_str()};
-  client.event_indexer_intro(card)();
+  const EventIndexerIntroOutcome intro_outcome =
+      client.event_indexer_intro(card)();
+  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
+    panic("indexer: event server rejected/failed registration: {}",
+          intro_outcome);
 
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
