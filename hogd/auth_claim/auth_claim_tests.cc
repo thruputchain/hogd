@@ -10,6 +10,7 @@
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/init.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -72,7 +73,7 @@ protected:
   {
     Transaction tx{};
     tx.auth_claim = make_pubkey_claim(preimage);
-    tx.invocation.invoked_address = sha256(preimage);
+    tx.invocation.invoked_address = pubkey_auth_address(preimage);
     return tx;
   }
 };

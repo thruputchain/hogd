@@ -1,10 +1,12 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 
+#include "auth_claim.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
+#include "hogd/crypto/crypto.h"
 #include "preimage.hh"
 #include "x23/serialize_cxs.h"
 
@@ -32,5 +34,14 @@ domain_separator_cxs()
 
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
     domain_separator_cxs<"PubkeyAccount">();
+
+inline ContractAddress pubkey_auth_address(PubkeyAccountPreimage const& preimage) {
+  SHA256Hasher hasher;
+  hasher.update(kPubkeyAuthDomainSeparatorCxs);
+  auto status = x23::serialize_cxs(preimage);
+  CHECK(status.has_value());
+  hasher.update(*status);
+  return hasher.finalize();
+}
 
 } // namespace hogd

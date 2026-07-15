@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -210,7 +211,7 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
     warn("Unsupported cryptographic scheme: {}", preimage.pubkey.scheme());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (sha256(preimage) != invoked_address) {
+  if (pubkey_auth_address(preimage) != invoked_address) {
     trace("Auth malformed: pubkey preimage hash does not match the invoked "
           "address");
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};

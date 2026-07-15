@@ -8,6 +8,7 @@
 #include "auth_server_test_framework.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -191,7 +192,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
                                                0))();
 
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = pubkey_auth_address(preimage);
   tx.auth_claim = make_pubkey_claim(preimage);
 
   SignedTransaction stx{};
@@ -224,7 +225,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = sha256(preimage);
+  ContractAddress address = pubkey_auth_address(preimage);
 
   mock_db().compute_key_changes_for_current_height();
   auth_server().register_auth_data_updates(0,
@@ -270,7 +271,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = sha256(preimage);
+  ContractAddress address = pubkey_auth_address(preimage);
 
   AddressAuthData auth_data{};
   add_pk_to_auth_data(auth_data, 0, pk);

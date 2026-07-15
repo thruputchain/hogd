@@ -22,6 +22,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
@@ -633,7 +634,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   claim.pubkey_preimage() = preimage;
 
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = pubkey_auth_address(preimage);
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -759,7 +760,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   claim.pubkey_preimage() = preimage;
 
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = pubkey_auth_address(preimage);
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
