@@ -305,7 +305,7 @@ struct auto_t {};
 // not by reference so that it can convert to a compile-time constant.
 template<size_t Max, size_t Min = 0, typename R = auto_t, typename F>
 requires (Max >= Min)
-inline decltype(auto)
+constexpr inline decltype(auto)
 with_n(size_t n, F &&f)
 {
   return [n, &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {

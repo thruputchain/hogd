@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <expected>
 #include <limits>
@@ -47,8 +49,11 @@ public:
 struct CxsError : public ErrorBase {
   constexpr explicit CxsError(CxsErrorCode code) : code_(code) {}
 
-  CxsErrorCode code() const { return code_; }
-  int raw_code() const { return static_cast<int>(std::to_underlying(code_)); }
+  constexpr CxsErrorCode code() const { return code_; }
+  constexpr int raw_code() const
+  {
+    return static_cast<int>(std::to_underlying(code_));
+  }
   static const std::error_category &category()
   {
     static const CxsErrorCategory cat;
@@ -59,7 +64,7 @@ private:
   CxsErrorCode code_;
 };
 
-inline bool
+constexpr bool
 operator==(const CxsError &lhs, CxsErrorCode rhs)
 {
   return lhs.code() == rhs;
@@ -242,7 +247,7 @@ load_cxs_uint(std::span<const uint8_t> &data)
   }
 }
 
-inline void
+constexpr void
 store_cxs_int8_0_extra_byte(x23::Buf &buf, int64_t value)
 {
   x23assert(value >= kCxsInt81ByteMin && value <= kCxsInt81ByteMax);
@@ -258,7 +263,7 @@ store_cxs_int8_0_extra_byte(x23::Buf &buf, int64_t value)
 }
 
 template<size_t N> requires (N > 0)
-void
+constexpr void
 store_cxs_int_extra_bytes(x23::Buf &buf, int64_t value)
 {
   x23assert(value < int_canonical_bounds<N / 2>().first ||
@@ -267,11 +272,18 @@ store_cxs_int_extra_bytes(x23::Buf &buf, int64_t value)
   size_t offset = buf.size();
   buf.resize_uninitialized(offset + 1 + N);
   buf[offset] = lookup_header_byte<N>();
-  std::memcpy(buf.data() + offset + 1, &value, N);
+  if consteval {
+    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(value)>>(value);
+    for (size_t i = 0; i < N; ++i)
+      buf[offset + 1 + i] = bytes[i];
+  }
+  else {
+    std::memcpy(buf.data() + offset + 1, &value, N);
+  }
 }
 
 template<std::signed_integral T>
-uint8_t
+constexpr uint8_t
 cxs_int_get_function_index(T value)
 {
   if (value >= int_canonical_bounds<0>().first &&
@@ -293,7 +305,7 @@ cxs_int_get_function_index(T value)
   return 4;
 }
 
-inline void
+constexpr inline void
 store_cxs_uint8_0_extra_byte(x23::Buf &buf, uint64_t value)
 {
   x23assert(value <= kCxsUInt81ByteMax);
@@ -301,7 +313,7 @@ store_cxs_uint8_0_extra_byte(x23::Buf &buf, uint64_t value)
 }
 
 template<size_t N> requires (N > 0)
-void
+constexpr void
 store_cxs_uint_extra_bytes(x23::Buf &buf, uint64_t value)
 {
   x23assert(value >
@@ -310,11 +322,18 @@ store_cxs_uint_extra_bytes(x23::Buf &buf, uint64_t value)
   size_t offset = buf.size();
   buf.resize_uninitialized(offset + 1 + N);
   buf[offset] = lookup_header_byte<N>();
-  std::memcpy(buf.data() + offset + 1, &value, N);
+  if consteval {
+    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(value)>>(value);
+    for (size_t i = 0; i < N; ++i)
+      buf[offset + 1 + i] = bytes[i];
+  }
+  else {
+    std::memcpy(buf.data() + offset + 1, &value, N);
+  }
 }
 
 template<std::unsigned_integral T>
-uint8_t
+constexpr uint8_t
 cxs_uint_get_function_index(T value)
 {
   if (value <= kCxsUInt81ByteMax) {
@@ -333,7 +352,7 @@ cxs_uint_get_function_index(T value)
 }
 
 template<std::unsigned_integral T>
-inline void
+constexpr inline void
 store_cxs_uint(x23::Buf &buf, T value)
 {
   switch (cxs_uint_get_function_index(value)) {
@@ -353,7 +372,7 @@ store_cxs_uint(x23::Buf &buf, T value)
 }
 
 template<std::signed_integral T>
-inline void
+constexpr inline void
 store_cxs_int(x23::Buf &buf, T value)
 {
   switch (cxs_int_get_function_index(value)) {
@@ -372,7 +391,7 @@ store_cxs_int(x23::Buf &buf, T value)
   }
 }
 
-inline void
+constexpr inline void
 store_cxs_bool(x23::Buf &buf, bool value)
 {
   store_cxs_uint<uint8_t>(buf, value ? 1 : 0);
@@ -429,7 +448,7 @@ load_cxs_int(std::span<const uint8_t> &data)
 template<typename T> struct CxsSerializer;
 
 template<std::integral T> struct CxsSerializer<T> {
-  static CxsStatus<void> store(x23::Buf &buf, T value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, T value)
   {
     if constexpr (std::is_same_v<T, bool>) {
       store_cxs_bool(buf, value);
@@ -450,7 +469,7 @@ template<std::integral T> struct CxsSerializer<T> {
 template<typename T> requires (std::is_enum_v<T>)
 struct CxsSerializer<T> {
   static_assert(std::is_integral_v<std::underlying_type_t<T>>);
-  static CxsStatus<void> store(x23::Buf &buf, T value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, T value)
   {
     return CxsSerializer<std::underlying_type_t<T>>::store(
         buf, static_cast<std::underlying_type_t<T>>(value));
@@ -458,7 +477,7 @@ struct CxsSerializer<T> {
 };
 
 template<is_xdr_struct T> struct CxsSerializer<T> {
-  static CxsStatus<void> store(x23::Buf &buf, const T &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const T &value)
   {
     CxsStatus<void> status;
     [&]<size_t... I>(std::index_sequence<I...>) {
@@ -475,7 +494,7 @@ template<is_xdr_struct T> struct CxsSerializer<T> {
 };
 
 template<is_xdr_union T> struct CxsSerializer<T> {
-  static CxsStatus<void> store(x23::Buf &buf, const T &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const T &value)
   {
     if (!union_valid(value)) [[unlikely]]
       return CxsError{CxsErrorCode::kBadDiscriminant};
@@ -495,7 +514,7 @@ template<is_xdr_union T> struct CxsSerializer<T> {
 };
 
 template<is_xdr_cat<XdrCategory::kArray> X> struct CxsSerializer<X> {
-  static CxsStatus<void> store(x23::Buf &buf, const X &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const X &value)
   {
     for (const auto &element : value) {
       if (auto status =
@@ -508,7 +527,7 @@ template<is_xdr_cat<XdrCategory::kArray> X> struct CxsSerializer<X> {
 };
 
 template<is_xdr_cat<XdrCategory::kVec> X> struct CxsSerializer<X> {
-  static CxsStatus<void> store(x23::Buf &buf, const X &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const X &value)
   {
     if (auto status = CxsSerializer<uint32_t>::store(buf, value.size());
         !status) [[unlikely]]
@@ -525,7 +544,7 @@ template<is_xdr_cat<XdrCategory::kVec> X> struct CxsSerializer<X> {
 
 template<is_xdr_cat<XdrCategory::kOpaqueVec, XdrCategory::kString> X>
 struct CxsSerializer<X> {
-  static CxsStatus<void> store(x23::Buf &buf, const X &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const X &value)
   {
     if (auto status = CxsSerializer<uint32_t>::store(buf, value.size());
         !status) [[unlikely]]
@@ -536,7 +555,7 @@ struct CxsSerializer<X> {
 };
 
 template<> struct CxsSerializer<x23::BufView> {
-  static CxsStatus<void> store(x23::Buf &buf, x23::BufView value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, x23::BufView value)
   {
     if (auto status = CxsSerializer<uint32_t>::store(buf, value.size());
         !status) [[unlikely]]
@@ -547,7 +566,7 @@ template<> struct CxsSerializer<x23::BufView> {
 };
 
 template<is_xdr_cat<XdrCategory::kOpaqueArray> X> struct CxsSerializer<X> {
-  static CxsStatus<void> store(x23::Buf &buf, const X &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const X &value)
   {
     buf.append_range(value);
     return {};
@@ -555,7 +574,7 @@ template<is_xdr_cat<XdrCategory::kOpaqueArray> X> struct CxsSerializer<X> {
 };
 
 template<is_xdr_cat<XdrCategory::kPtr> X> struct CxsSerializer<X> {
-  static CxsStatus<void> store(x23::Buf &buf, const X &value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const X &value)
   {
     bool b = value.get() != nullptr;
     if (auto status = CxsSerializer<bool>::store(buf, b); !status) [[unlikely]]
@@ -575,20 +594,20 @@ struct CxsSerializer<T> {
   static_assert(sizeof(uint_type) == sizeof(T),
                 "uint_type must be the same size as T");
 
-  static CxsStatus<void> store(x23::Buf &buf, T value)
+  static constexpr CxsStatus<void> store(x23::Buf &buf, T value)
   {
     return CxsSerializer<uint_type>::store(buf,
                                            std::bit_cast<uint_type>(value));
   }
 };
 
-[[nodiscard]] inline CxsStatus<void>
+[[nodiscard]] constexpr CxsStatus<void>
 serialize_cxs_to(x23::Buf &buf, const is_xdr_type auto &value)
 {
   return CxsSerializer<std::remove_cvref_t<decltype(value)>>::store(buf, value);
 }
 
-[[nodiscard]] inline CxsStatus<x23::Buf>
+[[nodiscard]] constexpr CxsStatus<x23::Buf>
 serialize_cxs(const is_xdr_type auto &...value)
 {
   x23::Buf buf;
@@ -602,6 +621,113 @@ serialize_cxs(const is_xdr_type auto &...value)
   if (!status) [[unlikely]]
     return status.error();
   return buf;
+}
+
+// Encoded byte length of a CXS integer (header + payload).
+constexpr size_t
+cxs_integral_encoded_size(uint8_t function_index) noexcept
+{
+  switch (function_index) {
+  case 0:
+    return 1;
+  case 1:
+    return 2;
+  case 2:
+    return 3;
+  case 3:
+    return 5;
+  case 4:
+    return 9;
+  default:
+    std::unreachable();
+  }
+}
+
+constexpr size_t
+cxs_size(std::monostate /*unused*/) noexcept
+{
+  return 0;
+}
+
+// Exact CXS byte length of a concrete value (value-dependent, constexpr).
+template<typename T>
+constexpr size_t
+cxs_size(const T &x)
+{
+  using X = std::remove_cvref_t<T>;
+  using enum XdrCategory;
+  if constexpr (std::same_as<X, bool>)
+    return 1;
+  else if constexpr (std::signed_integral<X>)
+    return cxs_integral_encoded_size(cxs_int_get_function_index(x));
+  else if constexpr (std::unsigned_integral<X>)
+    return cxs_integral_encoded_size(cxs_uint_get_function_index(x));
+  else if constexpr (std::is_enum_v<X>)
+    return cxs_size(static_cast<std::underlying_type_t<X>>(x));
+  else if constexpr (std::same_as<X, float> || std::same_as<X, double>) {
+    using uint_type = std::conditional_t<sizeof(X) == 4, uint32_t, uint64_t>;
+    return cxs_size(std::bit_cast<uint_type>(x));
+  }
+  else if constexpr (is_xdr_cat<X, kOpaqueArray>)
+    return std::tuple_size_v<X>;
+  else if constexpr (is_xdr_cat<X, kOpaqueVec, kString>)
+    return cxs_size(static_cast<uint32_t>(x.size())) + x.size();
+  else if constexpr (is_xdr_cat<X, kArray>) {
+    size_t size = 0;
+    for (const auto &e : x)
+      size += cxs_size(e);
+    return size;
+  }
+  else if constexpr (is_xdr_cat<X, kVec>) {
+    size_t size = cxs_size(static_cast<uint32_t>(x.size()));
+    for (const auto &e : x)
+      size += cxs_size(e);
+    return size;
+  }
+  else if constexpr (is_xdr_cat<X, kPtr>)
+    return cxs_size(bool{x.get() != nullptr}) + (x.get() ? cxs_size(*x) : 0UZ);
+  else if constexpr (is_xdr_union<X>)
+    return cxs_size(get<0>(x)) +
+           union_visit_arm([](const auto &a) { return cxs_size(a); }, x, 0UZ);
+  else if constexpr (is_xdr_struct<X>) {
+    size_t size = 0;
+    visit_fields([&size](const auto &f) { size += cxs_size(f); }, x);
+    return size;
+  }
+  else
+    std::unreachable();
+}
+
+// Serialize a concrete value into an array sized to its exact CXS encoding.
+// N must equal cxs_size(value); call as
+// serialize_cxs_array<cxs_size(obj)>(obj).
+namespace detail {
+[[noreturn]] inline void
+cxs_array_serialization_failed()
+{
+  std::abort();
+}
+
+[[noreturn]] inline void
+cxs_array_size_mismatch()
+{
+  std::abort();
+}
+} // namespace detail
+
+template<size_t N, is_xdr_type T>
+consteval std::array<std::uint8_t, N>
+serialize_cxs_array(const T &value)
+{
+  x23::Buf buf;
+  if (auto status = serialize_cxs_to(buf, value); !status) [[unlikely]]
+    detail::cxs_array_serialization_failed();
+  if (buf.size() != N) [[unlikely]]
+    detail::cxs_array_size_mismatch();
+  std::array<std::uint8_t, N> out{};
+  for (size_t i = 0; i < N; ++i)
+    out[i] = buf[i];
+  return out;
 }
 
 template<bool CheckRecursion> struct CxsRecursionTracker {};

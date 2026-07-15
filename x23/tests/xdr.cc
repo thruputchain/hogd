@@ -202,6 +202,17 @@ TEST(ExtensionPoint, CompileCheck)
   }
 }
 
+TEST(ExtensionPoint, Constexpr)
+{
+  constexpr ExtensionPoint ep(0);
+  static_assert(ep.v() == 0);
+  constexpr ExtensionPoint ep_default{};
+  static_assert(ep_default.v() == 0);
+  constexpr ParseFailure pf{.ext = ExtensionPoint(0), .value = 1};
+  static_assert(pf.ext.v() == 0);
+  static_assert(pf.value == 1);
+}
+
 TEST(XdrPtr, Constructor)
 {
   {
