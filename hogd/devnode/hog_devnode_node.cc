@@ -866,18 +866,18 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   client.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
 
   SchedulerGetTipResult tip = client.schedcoord_get_tip()();
-  CHECK(tip.outcome() == SchedulerGetTipOutcome::SchedulerGetTipOK);
+  CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
   SchedulerProposalResult proposal =
       client.schedulercoord_propose_block(tip.db_tip().id, ProposalContext{})();
-  CHECK(proposal.outcome() == SchedulerProposalOutcome::SchedulerProposalOK);
+  CHECK_EQ(proposal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
   ConsensusValue value{};
   value.proposal_header = proposal.proposed_block().proposal.header;
   value.proposal_txs_hash =
       sha256(proposal.proposed_block().proposal.transactions);
-  CHECK(client.schedulercoord_commit_block(proposal.proposed_block().block_id,
-                                           value)() ==
-        SchedulerCommitOutcome::SchedulerCommitOK);
+  CHECK_EQ(client.schedulercoord_commit_block(
+               proposal.proposed_block().block_id, value)(),
+           SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 void

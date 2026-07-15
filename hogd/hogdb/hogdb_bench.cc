@@ -340,8 +340,8 @@ Benchmark::run()
 
     InvokeTX tx(block);
     if (p.uniquifier) {
-      CHECK(p.uniquifier->block_expiry_height >=
-            tip.value.proposal_header.block_height);
+      CHECK_GE(p.uniquifier->block_expiry_height,
+               tip.value.proposal_header.block_height);
       auto ret =
           tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
                                         std::to_underlying(
