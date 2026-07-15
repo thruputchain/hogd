@@ -18,6 +18,11 @@
 #include "x23/vec.h"
 #include "x23/x23.h"
 
+// clang-tidy's dataflow does not treat ASSERT_TRUE(x.has_value()) as a guard,
+// so it flags the subsequent unchecked *x. These tests only dereference
+// optionals after asserting presence; suppress the check file-wide.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 namespace hogd {
 
 class AuthClaimTests : public ::testing::Test {
@@ -655,6 +660,8 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
 }
 
 } // namespace hogd
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 int
 main(int argc, char *argv[])
