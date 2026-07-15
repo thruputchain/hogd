@@ -18,7 +18,23 @@ permissions:
 
 jobs:
   release:
-    runs-on: namespace-profile-hogd-linux-2604
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: namespace-profile-hogd-linux-2604
+            machine: x86_64
+            build_architecture: x86-64-v2
+            rust_build_cpu: x86-64-v2
+            nproc: 18
+          - architecture: arm64
+            runner: namespace-profile-hogd-linux-arm64
+            machine: aarch64
+            build_architecture: armv8.2-a
+            rust_build_cpu: neoverse-n1
+            nproc: 8
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       actions: read
@@ -91,6 +107,9 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
+      - name: Verify native Linux architecture
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -100,11 +119,11 @@ jobs:
         run: |
           echo 'GCC_CC=gcc-15' > ./scripts/conf.sh
           echo 'GCC_CXX=g++-15' >> ./scripts/conf.sh
-          echo 'NPROC=18' >> ./scripts/conf.sh
+          echo 'NPROC=${{ matrix.nproc }}' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
+          echo "CCACHE_NAMESPACE=gcc-release-${{ matrix.architecture }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
           if [[ "$GITHUB_REF_NAME" == v* ]]; then
@@ -123,8 +142,8 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
-            -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
-            -x "-DRUST_BUILD_CPU=x86-64-v2" \
+            -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
+            -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
             hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
 
       - name: Build GCC Debug
@@ -134,11 +153,12 @@ jobs:
             -t Debug \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
-            -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
-            -x "-DRUST_BUILD_CPU=x86-64-v2" \
+            -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
+            -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
             hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
 
       - name: Check Linux binaries for unexpected AVX-512
+        if: matrix.architecture == 'x86_64'
         run: |
           ./scripts/check-no-unexpected-avx512.sh \
             build/release/hogd/hogdb/hogdb \
@@ -160,13 +180,15 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          ./scripts/package_hogd_validator_release.sh build/release artifacts
-          ./scripts/package_hogd_validator_release.sh build/debug artifacts debug
+          ./scripts/package_hogd_validator_release.sh \
+            build/release artifacts release "${{ matrix.architecture }}"
+          ./scripts/package_hogd_validator_release.sh \
+            build/debug artifacts debug "${{ matrix.architecture }}"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: hogd-linux-release-artifacts
+          name: hogd-linux-${{ matrix.architecture }}-release-artifacts
           path: artifacts/*.tar.gz
 
       - name: Show ccache stats
@@ -452,10 +474,16 @@ jobs:
       contents: write
       actions: read
     steps:
-      - name: Download Linux artifacts
+      - name: Download Linux x86_64 artifacts
         uses: actions/download-artifact@v6
         with:
-          name: hogd-linux-release-artifacts
+          name: hogd-linux-x86_64-release-artifacts
+          path: artifacts/
+
+      - name: Download Linux ARM64 artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: hogd-linux-arm64-release-artifacts
           path: artifacts/
 
       - name: Download macOS hog-devnode artifact
