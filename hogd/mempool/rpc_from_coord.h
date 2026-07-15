@@ -100,11 +100,14 @@ public:
     CoordCard card;
     CHECK(Registration::registration().coordinator_registered(&card));
 
-    auto ret = create_client<CoordScheduler1>(
+    auto ret = co_await create_client<CoordScheduler1>(
         server_address_to_sockaddr(card.address_for_sched),
         /*retry=*/false,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
-    return ret;
+    if (!ret)
+      panic("rpc_from_coord get_client connect failed: {}",
+            ret.error().error_code().message());
+    co_return std::move(*ret);
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }

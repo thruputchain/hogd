@@ -36,8 +36,7 @@ public:
   ~AuthChangeSubscriptionManager() { inhibit_.destroy_wait(); }
 
 private:
-  using auth_db_client_t =
-      decltype(make_rpc_client<AuthDB1>(x23::HostPort{})());
+  using auth_db_client_t = rpc_client_t<AuthDB1>;
   using rpc_stream_t = x23::RpcStream<x23::RpcLogger>;
   using client_ref_t = rpc_stream_t::ClientRef;
 

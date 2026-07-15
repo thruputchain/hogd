@@ -106,7 +106,8 @@ HogdbWrapper::make_sched_db_client()
   return std::make_unique<
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
       make_rpc_client<SchedDb1>(x23::HostPort{"localhost", sched_db_port},
-                                false)());
+                                false)()
+          .value());
 }
 
 } // namespace hogd

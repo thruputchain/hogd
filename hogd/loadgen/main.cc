@@ -3,7 +3,6 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 
 #include "hogd/base/log.h"
@@ -42,7 +41,7 @@ parse_port(const std::string &value)
   size_t pos = 0;
   uint64_t port = std::stoul(value, &pos, 10);
   if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
+    hogd::panic("Invalid port: {}", value);
   }
   return static_cast<uint16_t>(port);
 }

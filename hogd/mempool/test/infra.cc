@@ -48,7 +48,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   mempool_auth_server_.start_server(/*port=*/0);
 
   auto sched_db_client = std::make_unique<sched_db_client_t>(
-      create_client<SchedDb1>(kAddress, sched_db_server_.port())());
+      create_client<SchedDb1>(kAddress, sched_db_server_.port())().value());
   // Initialize backend and blockchain state for tests.
   init_db_backend(std::move(sched_db_client));
   init_contracts();
@@ -66,7 +66,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
 
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
-  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
+  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
   auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
 
   auth_db_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;

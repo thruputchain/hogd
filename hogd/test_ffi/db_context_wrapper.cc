@@ -34,7 +34,11 @@ namespace {
 dbauth_client_t
 make_dbauth_client(x23::HostPort const &hostport)
 {
-  return make_rpc_client<DBAuth1>(hostport)();
+  auto client = make_rpc_client<DBAuth1>(hostport)();
+  if (!client)
+    panic("make_dbauth_client failed: {}",
+          client.error().error_code().message());
+  return std::move(*client);
 }
 } // namespace
 

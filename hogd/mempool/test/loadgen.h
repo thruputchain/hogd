@@ -37,15 +37,15 @@ public:
     // Parse the loadgen address.
     x23::HostPort host_port;
     if (!host_port.parse(loadgen_address)) {
-      throw std::runtime_error(
-          std::format("Invalid loadgen address: {}", loadgen_address));
+      panic("Invalid loadgen address: {}", loadgen_address);
     }
 
     // Connect to the loadgen server.
-    client_ =
-        std::make_unique<loadgen_client_t>(create_client<LoadgenInterfaceV1>(
+    client_ = std::make_unique<loadgen_client_t>(
+        create_client<LoadgenInterfaceV1>(
             host_port, /*retry=*/true,
-            /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)());
+            /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)()
+            .value());
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We

@@ -120,10 +120,14 @@ public:
     ret.reserve(cards.size());
 
     for (const ShardCard &card : cards) {
-      ret.push_back(co_await create_client<DbSched1>(
+      auto client = co_await create_client<DbSched1>(
           server_address_to_sockaddr(card.address_for_sched),
           /*retry=*/false,
-          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
+          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+      if (!client)
+        panic("rpc_from_db get_clients connect failed: {}",
+              client.error().error_code().message());
+      ret.push_back(std::move(*client));
     }
     co_return ret;
   }

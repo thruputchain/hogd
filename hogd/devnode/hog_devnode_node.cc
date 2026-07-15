@@ -484,8 +484,13 @@ HogDevnodeNode::HogDevnodeNode(
     mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
-    auto sched_db_client = std::make_unique<sched_db_client_t>(
-        create_client<SchedDb1>(bind_host_, sched_db_server_.port())());
+    auto sched_db_client_res =
+        create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+    if (!sched_db_client_res)
+      panic("devnode connect to sched_db failed: {}",
+            sched_db_client_res.error().error_code().message());
+    auto sched_db_client =
+        std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
     init_db_backend(std::move(sched_db_client));
 
     // [db_executor_server_] handles RPCs from the executor.
@@ -506,7 +511,11 @@ HogDevnodeNode::HogDevnodeNode(
 
     std::string dbauth_address =
         format_advertised_address(bind_host_, db_auth_server_->port());
-    dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
+    auto dbauth_res = make_dbauth_client(dbauth_address)();
+    if (!dbauth_res)
+      panic("devnode connect to dbauth failed: {}",
+            dbauth_res.error().error_code().message());
+    dbauth_client_t dbauth_client = std::move(*dbauth_res);
     auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
 
     auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -727,13 +736,21 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 void
 HogDevnodeNode::register_indexer_with_event_service()
 {
-  auto client =
+  auto client_res =
       create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
+  if (!client_res)
+    panic("devnode register_indexer_with_event_service connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   std::string indexer_event_address =
       format_advertised_address(bind_host_, indexer_event_server_->port());
   IndexerCard card{.protocol = version::kHogdProtocol(),
                    .address_for_event = indexer_event_address.c_str()};
-  client.event_indexer_intro(card)();
+  const EventIndexerIntroOutcome intro_outcome =
+      client.event_indexer_intro(card)();
+  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
+    panic("devnode: event server rejected/failed indexer registration: {}",
+          intro_outcome);
 }
 
 BootstrapAccountConfig
@@ -828,8 +845,13 @@ void
 HogDevnodeNode::materialize_bootstrap_accounts(
     BootstrapAccountConfig const &config)
 {
-  auto client = create_client<SchedulerCoord1>(bind_host_,
-                                               mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode materialize_bootstrap_accounts connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
     genesis_configuration_ =
@@ -862,8 +884,13 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
     return;
   }
 
-  auto client = create_client<SchedulerCoord1>(bind_host_,
-                                               mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode commit_initialization_batch connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   client.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
 
   SchedulerGetTipResult tip = client.schedcoord_get_tip()();
@@ -947,7 +974,12 @@ HogDevnodeNode::init_db_backend(
 void
 HogDevnodeNode::register_db_with_mempool()
 {
-  auto client = create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+  auto client_res =
+      create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+  if (!client_res)
+    panic("devnode register_db_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   std::string exec_address =
       format_advertised_address(bind_host_, db_executor_server_->port());
   std::string sched_address =
@@ -967,8 +999,12 @@ HogDevnodeNode::register_db_with_mempool()
 void
 HogDevnodeNode::register_event_with_mempool()
 {
-  auto client =
+  auto client_res =
       create_client<SchedEvent1>(bind_host_, sched_event_server_.port())();
+  if (!client_res)
+    panic("devnode register_event_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   RPCError r = client.schedevent_intro_event(
       {.protocol = version::kHogdProtocol(),
        .upid = {},
@@ -984,8 +1020,12 @@ HogDevnodeNode::register_event_with_mempool()
 void
 HogDevnodeNode::register_auth_with_mempool()
 {
-  sched_auth_client_t client =
+  auto client_res =
       create_client<MempoolAuth1>(bind_host_, mempool_auth_server_->port())();
+  if (!client_res)
+    panic("devnode register_auth_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  sched_auth_client_t client = std::move(*client_res);
   AuthCard auth_card = {
       .protocol = version::kHogdProtocol(),
       .upid = {},
@@ -1010,8 +1050,13 @@ HogDevnodeNode::register_executor_with_mempool()
 x23::Async<void>
 HogDevnodeNode::register_coordinator_with_mempool()
 {
-  auto client = create_client<SchedulerCoord1>(bind_host_,
-                                               mempool_coord_server_.port())();
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode register_coordinator_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
   std::string coord_address =
       format_advertised_address(bind_host_, coordinator_sched_server_.port());
   CoordCard card{.protocol = version::kHogdProtocol(),

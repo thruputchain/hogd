@@ -136,7 +136,11 @@ connect_to_event_sched_server(const ServerAddress &address)
   if (!host_port.parse(address)) {
     panic("Failed to parse event sched server address");
   }
-  return make_rpc_client<EventSched1>(host_port, false)();
+  auto client = make_rpc_client<EventSched1>(host_port, false)();
+  if (!client)
+    panic("connect_to_event_sched_server failed: {}",
+          client.error().error_code().message());
+  return std::move(*client);
 }
 
 auto
@@ -156,7 +160,11 @@ connect_to_exec_server(const ExecCard &card)
   if (!host_port.parse(card.address)) {
     panic("Failed to parse exec server address");
   }
-  return make_rpc_client<ExecutorSched1>(host_port, false)();
+  auto client = make_rpc_client<ExecutorSched1>(host_port, false)();
+  if (!client)
+    panic("connect_to_exec_server failed: {}",
+          client.error().error_code().message());
+  return std::move(*client);
 }
 
 } // namespace

@@ -4,6 +4,7 @@
 #include <future>
 #include <print>
 #include <string>
+#include <utility>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
@@ -58,13 +59,22 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   info("PORT indexer.event={}", actual_event_port);
 
   // Register with the event server.
-  event_indexer_client_t client = make_rpc_client<EventIndexer1>(
-      server_address_to_sockaddr(event_server_addr), /*retry=*/true)();
+  auto client_res = make_rpc_client<EventIndexer1>(server_address_to_sockaddr(
+                                                       event_server_addr),
+                                                   /*retry=*/true)();
+  if (!client_res)
+    panic("indexer connect to event server failed: {}",
+          client_res.error().error_code().message());
+  event_indexer_client_t client = std::move(*client_res);
   const std::string indexer_server_addr =
       format_advertised_address(bind_ip, /*port=*/actual_event_port);
   const IndexerCard card{.protocol = version::kHogdProtocol(),
                          .address_for_event = indexer_server_addr.c_str()};
-  client.event_indexer_intro(card)();
+  const EventIndexerIntroOutcome intro_outcome =
+      client.event_indexer_intro(card)();
+  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
+    panic("indexer: event server rejected/failed registration: {}",
+          intro_outcome);
 
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);

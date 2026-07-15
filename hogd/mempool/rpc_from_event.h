@@ -43,8 +43,12 @@ public:
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));
 
-    return create_client<EventSched1>(
+    auto ret = co_await create_client<EventSched1>(
         server_address_to_sockaddr(card.address_for_sched));
+    if (!ret)
+      panic("rpc_from_event get_client connect failed: {}",
+            ret.error().error_code().message());
+    co_return std::move(*ret);
   }
 
   void shut_down()
