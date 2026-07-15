@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <expected>
 #include <limits>
@@ -700,14 +701,29 @@ cxs_size(const T &x)
 // Serialize a concrete value into an array sized to its exact CXS encoding.
 // N must equal cxs_size(value); call as
 // serialize_cxs_array<cxs_size(obj)>(obj).
+namespace detail {
+[[noreturn]] inline void
+cxs_array_serialization_failed()
+{
+  std::abort();
+}
+
+[[noreturn]] inline void
+cxs_array_size_mismatch()
+{
+  std::abort();
+}
+} // namespace detail
+
 template<size_t N, is_xdr_type T>
 consteval std::array<std::uint8_t, N>
 serialize_cxs_array(const T &value)
 {
   x23::Buf buf;
-  if (auto status = serialize_cxs_to(buf, value); !status || buf.size() != N)
-      [[unlikely]]
-    std::unreachable();
+  if (auto status = serialize_cxs_to(buf, value); !status) [[unlikely]]
+    detail::cxs_array_serialization_failed();
+  if (buf.size() != N) [[unlikely]]
+    detail::cxs_array_size_mismatch();
   std::array<std::uint8_t, N> out{};
   for (size_t i = 0; i < N; ++i)
     out[i] = buf[i];
