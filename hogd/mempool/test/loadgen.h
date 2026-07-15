@@ -99,6 +99,7 @@ public:
         }
 
         ConsensusValue value{};
+        value.prev_hash = sha256(ret.value);
         value.proposal_header = proposed.proposal.header;
         value.proposal_txs_hash = sha256(proposed.proposal.transactions);
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
@@ -184,6 +185,7 @@ public:
                SchedulerProposalOutcome::SchedulerProposalOK);
       const SchedulerProposedBlock &proposed = res_propose.proposed_block();
       ConsensusValue value{};
+      value.prev_hash = sha256(db_tip.value);
       value.proposal_header = proposed.proposal.header;
       value.proposal_txs_hash = sha256(proposed.proposal.transactions);
       x23::Async<SchedulerCommitOutcome> commit_handle =

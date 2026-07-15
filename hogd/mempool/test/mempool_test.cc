@@ -23,12 +23,10 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/init.h"
-#include "hogd/mempool/nomination_compat.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "parallel.hh"
 #include "rpc_types.hh"
@@ -66,6 +64,42 @@ make_validator_id(uint8_t value)
   ValidatorID validator_id{};
   validator_id.fill(value);
   return validator_id;
+}
+
+SchedulerProposalResult
+propose_block(MempoolTestInfra &server, const DbTip &parent,
+              ProposalContext context = {})
+{
+  context.protocol = 0;
+  return server.mempool_coord_rpc().schedulercoord_propose_block(
+      parent.id, std::move(context))();
+}
+
+ConsensusValue
+consensus_value(const DbTip &parent, const Proposal &proposal)
+{
+  return ConsensusValue{.protocol = 0,
+                        .ext = {},
+                        .prev_hash = sha256(parent.value),
+                        .proposal_header = proposal.header,
+                        .proposal_txs_hash = sha256(proposal.transactions),
+                        .upgrades = {}};
+}
+
+SchedulerCommitOutcome
+commit_block(MempoolTestInfra &server, const DbTip &parent,
+             const SchedulerProposedBlock &proposed)
+{
+  return server.mempool_coord_rpc().schedulercoord_commit_block(
+      proposed.block_id, consensus_value(parent, proposed.proposal))();
+}
+
+SchedulerCommitOutcome
+commit_block(MempoolTestInfra &server, BlockID block_id, const DbTip &parent,
+             const Proposal &proposal)
+{
+  return server.mempool_coord_rpc().schedulercoord_commit_block(
+      block_id, consensus_value(parent, proposal))();
 }
 
 } // namespace
@@ -126,25 +160,23 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
     DbTip db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
 
-    auto res_nominate =
-        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+              SchedulerProposalOutcome::SchedulerProposalOK);
 
-    const Nomination &nomination = res_nominate.nominated_block().nomination;
-    EXPECT_EQ(nomination.block_height, i + 1);
+    const Proposal &proposal = res_nominate.proposed_block().proposal;
+    EXPECT_EQ(proposal.header.block_height, i + 1);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
-    EXPECT_TRUE(
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nondeterministic_data)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                    tx_nondeterministic_data)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -168,8 +200,8 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDB)
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
-    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-        res_nominate.nominated_block().block_id)();
+    auto res_commit =
+        commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
@@ -254,25 +286,23 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
     DbTip db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
 
-    auto res_nominate =
-        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+              SchedulerProposalOutcome::SchedulerProposalOK);
 
-    const Nomination &nomination = res_nominate.nominated_block().nomination;
-    EXPECT_EQ(nomination.block_height, i + 1);
+    const Proposal &proposal = res_nominate.proposed_block().proposal;
+    EXPECT_EQ(proposal.header.block_height, i + 1);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
-    EXPECT_TRUE(
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nondeterministic_data)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                    tx_nondeterministic_data)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -296,8 +326,8 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDB)
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
-    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-        res_nominate.nominated_block().block_id)();
+    auto res_commit =
+        commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
@@ -343,7 +373,7 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
-TEST(Mempool, Nominate)
+TEST(Mempool, Propose)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -358,18 +388,18 @@ TEST(Mempool, Nominate)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  auto res = propose_block(server, db_tip);
+  EXPECT_EQ(res.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(
-        parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
+        parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
     EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
@@ -392,12 +422,12 @@ TEST(Mempool, NominateBatch)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  auto res = propose_block(server, db_tip);
+  EXPECT_EQ(res.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), txs.size());
     std::set<SignedTransaction> parsed_txs_set(parsed_txs.begin(),
                                                parsed_txs.end());
@@ -406,7 +436,7 @@ TEST(Mempool, NominateBatch)
 
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(
-        parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
+        parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
     std::set<SignedTransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
@@ -429,12 +459,12 @@ TEST(Mempool, NominateEmpty)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  auto res = propose_block(server, db_tip);
+  EXPECT_EQ(res.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
     EXPECT_TRUE(parsed_txs.empty());
   }
 }
@@ -462,25 +492,23 @@ TEST(Mempool, NominateTxWithError)
     DbTip db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
 
-    auto res_nominate =
-        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+              SchedulerProposalOutcome::SchedulerProposalOK);
 
-    const Nomination &nomination = res_nominate.nominated_block().nomination;
-    EXPECT_EQ(nomination.block_height, i + 1);
+    const Proposal &proposal = res_nominate.proposed_block().proposal;
+    EXPECT_EQ(proposal.header.block_height, i + 1);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
-    EXPECT_TRUE(
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nondeterministic_data)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                    tx_nondeterministic_data)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -504,8 +532,8 @@ TEST(Mempool, NominateTxWithError)
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
-    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-        res_nominate.nominated_block().block_id)();
+    auto res_commit =
+        commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
@@ -527,16 +555,15 @@ TEST(Mempool, BlockHeightsIncrement)
     DbTip db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
 
-    auto res_nominate =
-        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+              SchedulerProposalOutcome::SchedulerProposalOK);
 
-    const Nomination &nomination = res_nominate.nominated_block().nomination;
-    EXPECT_EQ(nomination.block_height, i + 1);
+    const Proposal &proposal = res_nominate.proposed_block().proposal;
+    EXPECT_EQ(proposal.header.block_height, i + 1);
 
-    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-        res_nominate.nominated_block().block_id)();
+    auto res_commit =
+        commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
@@ -561,28 +588,26 @@ TEST(Mempool, NominateCommit)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   EXPECT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
   {
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(
-        res_nominate.nominated_block().nomination.transactions_hash,
-        tx_hashes)());
+        res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
     EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
   }
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
+  auto res_commit =
+      commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
@@ -626,26 +651,24 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+  auto res_nominate = propose_block(server, get_tip.db_tip());
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
   SignedTransactionBatch parsed_txs;
   ASSERT_TRUE(
-      parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+      parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
   ASSERT_EQ(parsed_txs.size(), 1UL);
   EXPECT_EQ(parsed_txs[0], tx);
 
   SignedTransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.nominated_block().nomination.transactions_hash,
-      tx_hashes)());
+      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
   EXPECT_EQ(tx_hashes[0], sha256(tx.tx));
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
+  auto res_commit =
+      commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   HogDBStatus<DeployedContractHash> deployed_metadata =
@@ -659,7 +682,7 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   EXPECT_GT(*deployed_balance, 0);
 
   server.mempool_coord_rpc().wait_for_transfer_data(
-      res_nominate.nominated_block().nomination.block_height)();
+      res_nominate.proposed_block().proposal.header.block_height)();
   auto [deployed_hog_age, deployed_hog_age_lock] =
       server.mempool_coord_rpc().scheduler()->get_cached_hog_age(
           deployed_address);
@@ -689,7 +712,7 @@ TEST(Mempool, CommitBlockNotFound)
   MempoolTestInfra server;
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      /*block_id=*/1)();
+      /*block_id=*/1, ConsensusValue{})();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
 }
 
@@ -703,21 +726,20 @@ TEST(Mempool, Validate)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  // We nominate a block first and then reuse the returned [Nomination] struct
-  // for the validation below. The [Nomination] struct contains some data, such
+  // We propose a block first and then reuse the returned [Proposal] struct
+  // for the validation below. The [Proposal] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // We reuse the [Nomination] struct.
-  Nomination nomination = res_nominate.nominated_block().nomination;
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -727,12 +749,13 @@ TEST(Mempool, Validate)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
-TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
+TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;
 
@@ -744,27 +767,29 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  Nomination nomination{
-      .block_height = db_tip.value.proposal_header.block_height + 1,
-      .prev_block_hash = db_tip.value.proposal_header.txs_hash,
-      .transactions_hash = t_to_parallel_batch(tx_hashes)(),
-      .transactions_nondeterministic_data =
-          t_to_parallel_batch(tx_nondeterministic_data)(),
-  };
+  Proposal proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height = db_tip.value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
 
-  ASSERT_EQ(nomination.transactions_hash.segment_tokens.size(), 1UL);
-  ASSERT_EQ(nomination.transactions_nondeterministic_data.segment_tokens.size(),
+  ASSERT_EQ(proposal.transactions.hash.segment_tokens.size(), 1UL);
+  ASSERT_EQ(proposal.transactions.nondeterministic_data.segment_tokens.size(),
             1UL);
-  nomination.transactions_hash.segment_tokens[0]++;
-  nomination.transactions_nondeterministic_data.segment_tokens[0]++;
+  proposal.transactions.hash.segment_tokens[0]++;
+  proposal.transactions.nondeterministic_data.segment_tokens[0]++;
 
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
 
-TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
+TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
 {
   MempoolTestInfra server;
 
@@ -777,16 +802,18 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  Nomination nomination{
-      .block_height = db_tip.value.proposal_header.block_height + 1,
-      .prev_block_hash = db_tip.value.proposal_header.txs_hash,
-      .transactions_hash = t_to_parallel_batch(tx_hashes)(),
-      .transactions_nondeterministic_data =
-          t_to_parallel_batch(tx_nondeterministic_data)(),
-  };
+  Proposal proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height = db_tip.value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
 
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
@@ -807,13 +834,12 @@ TEST(Mempool, ValidateBatch)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // We reuse the [Nomination] struct.
-  Nomination nomination = res_nominate.nominated_block().nomination;
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -825,7 +851,8 @@ TEST(Mempool, ValidateBatch)
                                                           t_to_parallel_batch(
                                                               txs)())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }
@@ -845,36 +872,21 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  SchedulerNominationResult res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
   SchedulerCommitOutcome res_commit =
-      server.mempool_coord_rpc().schedulercoord_commit_block(
-          res_nominate.nominated_block().block_id)();
+      commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  nomination.block_height++;
-  nomination.prev_block_hash = nomination.block_hash;
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  proposal.header.block_height++;
   {
-    SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
     ASSERT_EQ(db_tip.value.proposal_header.block_height, 1);
-
-    nomination.block_hash = sha256(
-        BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
-                    .block_height = nomination.block_height,
-                    .txset_hash =
-                        MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-                    .db_hash = db_tip.storage_long_hash,
-                    .events_hash = db_tip.value.proposal_header.events_hash,
-                    .prev_block_hash = nomination.prev_block_hash});
   }
 
   // Submit the same tx again so that hogdb detects the duplicate tx and hogexec
@@ -883,7 +895,8 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
   SchedulerValidationResult res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -894,16 +907,13 @@ TEST(Mempool, ValidateEmpty)
 
   MempoolTestInfra server;
 
-  ConsensusValue value{};
-  value.proposal_header.block_height = 1;
-  DbTip db_tip{.id = 0, .storage_long_hash = {}, .value = value};
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, Nomination{.block_height = 1})();
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
+      std::numeric_limits<BlockID>::max(), Proposal{})();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
-TEST(Mempool, ValidateWrongBlockHeight)
+TEST(Mempool, ValidateWrongTxsHash)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -918,47 +928,33 @@ TEST(Mempool, ValidateWrongBlockHeight)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  nomination.block_height++;
-  nomination.prev_block_hash = nomination.block_hash;
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  proposal.header.block_height++;
   {
-    SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
 
-    // Compute block_hash with a wrong block_height. This should cause
-    // validation to fail because block_height is part of the block hash.
-    nomination.block_hash = sha256(
-        BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
-                    .block_height = nomination.block_height + 1,
-                    .txset_hash =
-                        MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-                    .db_hash = db_tip.storage_long_hash,
-                    .events_hash = db_tip.value.proposal_header.events_hash,
-                    .prev_block_hash = nomination.prev_block_hash});
+    proposal.header.txs_hash[0] ^= 0xff;
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
-TEST(Mempool, ValidateBatchRemoveTxFromNomination)
+TEST(Mempool, ValidateBatchRemoveTxFromProposal)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -974,48 +970,35 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  // We reuse the [Nomination] struct and make some adjustments for the
+  // We reuse the [Proposal] struct and make some adjustments for the
   // validation.
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  nomination.block_height++;
-  nomination.prev_block_hash = nomination.block_hash;
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  proposal.header.block_height++;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
 
-    nomination.block_hash = sha256(
-        BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
-                    .block_height = nomination.block_height,
-                    .txset_hash =
-                        MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-                    .db_hash = db_tip.storage_long_hash,
-                    .events_hash = db_tip.value.proposal_header.events_hash,
-                    .prev_block_hash = nomination.prev_block_hash});
-
-    // Remove a transaction from the nomination.
+    // Remove a transaction from the proposal.
     tx_hashes.pop_back();
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
-    EXPECT_TRUE(
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nondeterministic_data)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                    tx_nondeterministic_data)());
     tx_nondeterministic_data.pop_back();
 
-    nomination.transactions_hash = t_to_parallel_batch(tx_hashes)();
-    nomination.transactions_nondeterministic_data =
+    proposal.transactions.hash = t_to_parallel_batch(tx_hashes)();
+    proposal.transactions.nondeterministic_data =
         t_to_parallel_batch(tx_nondeterministic_data)();
   }
 
@@ -1023,7 +1006,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
                                                           t_to_parallel_batch(
                                                               txs)())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -1044,34 +1028,22 @@ TEST(Mempool, ValidateBatchMissingTx)
                                                           t_to_parallel_batch(
                                                               txs)())();
 
-  SchedulerNominationResult res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  nomination.block_height++;
-  nomination.prev_block_hash = nomination.block_hash;
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  proposal.header.block_height++;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
-
-    nomination.block_hash = sha256(
-        BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
-                    .block_height = nomination.block_height,
-                    .txset_hash =
-                        MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-                    .db_hash = db_tip.storage_long_hash,
-                    .events_hash = db_tip.value.proposal_header.events_hash,
-                    .prev_block_hash = nomination.prev_block_hash});
   }
 
   // Remove a transaction.
@@ -1082,7 +1054,8 @@ TEST(Mempool, ValidateBatchMissingTx)
                                                               txs)())();
 
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMissingTxs);
 }
@@ -1097,21 +1070,20 @@ TEST(Mempool, ValidateCommit)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  // We nominate a block first and then reuse the returned [Nomination] struct
-  // for the validation below. The [Nomination] struct contains some data,
+  // We propose a block first and then reuse the returned [Proposal] struct
+  // for the validation below. The [Proposal] struct contains some data,
   // such as the nondeterministic data, that I would prefer not to have to
   // construct myself in this test.
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // We reuse the [Nomination] struct.
-  Nomination nomination = res_nominate.nominated_block().nomination;
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1121,16 +1093,17 @@ TEST(Mempool, ValidateCommit)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.block().block_id)();
+  auto res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-TEST(Mempool, NominationHashUsesClosedStorageRoot)
+TEST(Mempool, ProposalUsesTransactionRoot)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -1145,32 +1118,21 @@ TEST(Mempool, NominationHashUsesClosedStorageRoot)
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   const DbTip parent_tip = get_tip.db_tip();
 
-  SchedulerNominationResult res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(parent_tip)();
+  SchedulerProposalResult res_nominate = propose_block(server, parent_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
-  const Nomination nomination = res_nominate.nominated_block().nomination;
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal proposal = res_nominate.proposed_block().proposal;
 
   SchedulerCommitOutcome res_commit =
-      server.mempool_coord_rpc().schedulercoord_commit_block(
-          res_nominate.nominated_block().block_id)();
+      commit_block(server, parent_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  const DbTip committed_tip = get_tip.db_tip();
-
   SignedTransactionHashBatch tx_hashes;
-  ASSERT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-  const ProposalHeaderHash expected_block_hash = sha256(BlockHeader{
-      .network_id = MempoolTestInfra::kNetworkId,
-      .block_height = nomination.block_height,
-      .txset_hash = MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-      .db_hash = committed_tip.storage_long_hash,
-      .events_hash = committed_tip.value.proposal_header.events_hash,
-      .prev_block_hash = parent_tip.value.proposal_header.txs_hash});
-
-  EXPECT_EQ(nomination.block_hash, expected_block_hash);
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+  EXPECT_EQ(proposal.header.txs_hash,
+            MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
 TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
@@ -1188,6 +1150,13 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   const DbTip parent_tip = get_tip.db_tip();
 
+  ProposalContext unsupported_context{.protocol = 1};
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_propose_block(parent_tip.id,
+                                              unsupported_context)()
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+
   ProposalContext context{.proposer = make_validator_id(0x42),
                           .block_timepoint = 123456789};
   SchedulerProposalResult res_propose =
@@ -1201,9 +1170,7 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
   EXPECT_EQ(proposed.proposal.header.block_timepoint, context.block_timepoint);
   EXPECT_NE(proposed.proposal.header.storage_hash, StorageShortHash{});
 
-  ConsensusValue value{};
-  value.proposal_header = proposed.proposal.header;
-  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+  ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
   SchedulerCommitOutcome res_commit =
       server.mempool_coord_rpc().schedulercoord_commit_block(proposed.block_id,
                                                              value)();
@@ -1236,22 +1203,35 @@ TEST(Mempool, CommitBlockRejectsMismatchedConsensusValue)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
 
-  ConsensusValue value{};
-  value.proposal_header = proposed.proposal.header;
-  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
-  value.proposal_header.events_hash[0] ^= 0xff;
+  const ConsensusValue expected =
+      consensus_value(parent_tip, proposed.proposal);
+  auto expect_rejected = [&](ConsensusValue value) {
+    EXPECT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(
+                  proposed.block_id, std::move(value))(),
+              SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+  };
 
-  SchedulerCommitOutcome res_commit =
-      server.mempool_coord_rpc().schedulercoord_commit_block(proposed.block_id,
-                                                             value)();
-  EXPECT_EQ(res_commit,
-            SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+  ConsensusValue wrong_header = expected;
+  wrong_header.proposal_header.events_hash[0] ^= 0xff;
+  expect_rejected(std::move(wrong_header));
+
+  ConsensusValue wrong_protocol = expected;
+  wrong_protocol.protocol = 1;
+  expect_rejected(std::move(wrong_protocol));
+
+  ConsensusValue unexpected_upgrade = expected;
+  unexpected_upgrade.upgrades.push_back(Upgrade{1});
+  expect_rejected(std::move(unexpected_upgrade));
+
+  EXPECT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(
+                proposed.block_id, expected)(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().id, parent_tip.id);
+  EXPECT_EQ(get_tip.db_tip().id, proposed.block_id);
   EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
-            parent_tip.value.proposal_header.block_height);
+            proposed.proposal.header.block_height);
 }
 
 TEST(Mempool, ValidateBlockRejectsTamperedHeaderRoots)
@@ -1305,21 +1285,20 @@ TEST(Mempool, ValidateTwo)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  // We nominate a block first and then reuse the returned [Nomination] struct
-  // for the validation below. The [Nomination] struct contains some data, such
+  // We propose a block first and then reuse the returned [Proposal] struct
+  // for the validation below. The [Proposal] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // We reuse the [Nomination] struct.
-  Nomination nomination = res_nominate.nominated_block().nomination;
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1329,15 +1308,16 @@ TEST(Mempool, ValidateTwo)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.block().block_id)();
+  auto res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  // Now nominate another block.
+  // Now propose another block.
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
@@ -1346,12 +1326,12 @@ TEST(Mempool, ValidateTwo)
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
 
-  res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
   // Now validate another block.
-  nomination = res_nominate.nominated_block().nomination;
+  proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1361,11 +1341,12 @@ TEST(Mempool, ValidateTwo)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
-  res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.block().block_id)();
+  res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -1391,17 +1372,16 @@ TEST(Mempool, GetTip)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  // We nominate a block first and then reuse the returned [Nomination] struct
-  // for the validation below. The [Nomination] struct contains some data,
+  // We propose a block first and then reuse the returned [Proposal] struct
+  // for the validation below. The [Proposal] struct contains some data,
   // such as the nondeterministic data, that I would prefer not to have to
   // construct myself in this test.
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // We reuse the [Nomination] struct.
-  Nomination nomination = res_nominate.nominated_block().nomination;
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
   {
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1413,7 +1393,8 @@ TEST(Mempool, GetTip)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 
@@ -1422,8 +1403,8 @@ TEST(Mempool, GetTip)
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
 
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.block().block_id)();
+  auto res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -1519,17 +1500,19 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
     SignedTransactionHashBatch tx_hashes{tx_hash};
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
         NondeterministicProposalData{}};
-    Nomination nomination{
-        .block_height = get_tip.db_tip().value.proposal_header.block_height + 1,
-        .prev_block_hash = get_tip.db_tip().value.proposal_header.txs_hash,
-        .transactions_hash = t_to_parallel_batch(tx_hashes)(),
-        .transactions_nondeterministic_data =
-            t_to_parallel_batch(tx_nondeterministic_data)(),
-    };
+    Proposal proposal{
+        .header = {.ext = {},
+                   .network_hash = MempoolTestInfra::kNetworkHash,
+                   .block_height =
+                       get_tip.db_tip().value.proposal_header.block_height + 1},
+        .transactions = {.ext = {},
+                         .hash = t_to_parallel_batch(tx_hashes)(),
+                         .nondeterministic_data =
+                             t_to_parallel_batch(tx_nondeterministic_data)()}};
 
     SchedulerValidationResult res_validate =
-        server.mempool_coord_rpc().schedulercoord_validate(get_tip.db_tip(),
-                                                           nomination)();
+        server.mempool_coord_rpc().schedulercoord_validate_block(
+            get_tip.db_tip().id, proposal)();
     EXPECT_EQ(res_validate.outcome(), expected_outcome);
     return res_validate;
   };
@@ -1546,14 +1529,13 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-    SchedulerNominationResult res_nominate =
-        server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+    SchedulerProposalResult res_nominate =
+        propose_block(server, get_tip.db_tip());
     ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+              SchedulerProposalOutcome::SchedulerProposalOK);
 
     SchedulerCommitOutcome res_commit =
-        server.mempool_coord_rpc().schedulercoord_commit_block(
-            res_nominate.nominated_block().block_id)();
+        commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   }
 
@@ -1648,14 +1630,14 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-  SchedulerNominationResult res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(get_tip.db_tip())();
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
   ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
   SignedTransactionBatch parsed_txs;
   ASSERT_TRUE(
-      parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+      parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
   ASSERT_EQ(parsed_txs.size(), 1UL);
   ASSERT_TRUE(parsed_txs[0] == txs[0] || parsed_txs[0] == txs[1]);
 
@@ -1664,16 +1646,14 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 
   SignedTransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.nominated_block().nomination.transactions_hash,
-      tx_hashes)());
+      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
   ASSERT_TRUE(tx_hashes[0] == tx0_hash || tx_hashes[0] == tx1_hash);
 
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
-  ASSERT_TRUE(
-      parallel_batch_to_t(res_nominate.nominated_block()
-                              .nomination.transactions_nondeterministic_data,
-                          tx_nondeterministic_data)());
+  ASSERT_TRUE(parallel_batch_to_t(
+      res_nominate.proposed_block().proposal.transactions.nondeterministic_data,
+      tx_nondeterministic_data)());
   EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
 
   const SignedTransactionHash included_hash = tx_hashes[0];
@@ -1686,8 +1666,7 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   EXPECT_TRUE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
 
   SchedulerCommitOutcome res_commit =
-      server.mempool_coord_rpc().schedulercoord_commit_block(
-          res_nominate.nominated_block().block_id)();
+      commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);

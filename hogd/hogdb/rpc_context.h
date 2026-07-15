@@ -141,22 +141,22 @@ public:
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
   HogDBStatus<void> update_dbtip(BlockTXID bid, ConsensusValue value,
-                                 const DbHash &db_hash);
+                                 const StorageLongHash &db_hash);
 
-  void cache_db_hash(BlockTXID bid, const DbHash &db_hash)
+  void cache_db_hash(BlockTXID bid, const StorageLongHash &db_hash)
   {
     std::scoped_lock g(lock_);
     db_hashes_[bid] = db_hash;
   }
 
-  std::optional<DbHash> take_db_hash(BlockTXID bid)
+  std::optional<StorageLongHash> take_db_hash(BlockTXID bid)
   {
     std::scoped_lock g(lock_);
     auto it = db_hashes_.find(bid);
     if (it == db_hashes_.end()) {
       return std::nullopt;
     }
-    DbHash out = it->second;
+    StorageLongHash out = it->second;
     db_hashes_.erase(it);
     return out;
   }
@@ -258,7 +258,7 @@ private:
   // invoke_txes_: destroying an InvokeTX can garbage collect an abandoned
   // block through remove_shutdown_block_tx(), which touches all of them, so
   // they must outlive invoke_txes_ during ~RPCContext().
-  std::map<BlockTXID, DbHash> db_hashes_;
+  std::map<BlockTXID, StorageLongHash> db_hashes_;
   // pending invocation transactions.
   SynchronizedMap<InvokeTxKey, InvokeTX, InvokeTxKey::Hash> invoke_txes_;
 

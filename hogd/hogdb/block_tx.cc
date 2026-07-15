@@ -27,7 +27,6 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/protocol/block_compat.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -378,8 +377,8 @@ BlockTX::close_skip_hash_for_testing()
   return {};
 }
 
-HogDBStatus<DbHash>
-BlockTX::close(const DbHash &base_hash)
+HogDBStatus<StorageLongHash>
+BlockTX::close(const StorageLongHash &base_hash)
 {
   if (is_poisoned()) {
     return HogDBError(HogDBCode::kInternal);

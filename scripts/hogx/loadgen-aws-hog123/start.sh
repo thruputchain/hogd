@@ -33,6 +33,6 @@ rm -rf ~/.hogx
 # [$SCRIPT_DIR].
 cp -R $HOGX_HOME/ ~/.hogx
 
-"$HOGX" -m 2 start -a loadgen --network-id 1
+"$HOGX" -m 2 start -a loadgen --network-hash 0000000000000000000000000000000000000000000000000000000000000001
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"

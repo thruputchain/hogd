@@ -1,5 +1,7 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 
+#include "hogd/base/network_hash.h"
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -309,14 +311,16 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     return std::unexpected(std::move(valid.error()));
   }
 
-  std::expected<std::string_view, std::string> network_id_field =
-      require_string_field(*parsed, "networkId", "root");
-  if (!network_id_field) {
-    return std::unexpected(std::move(network_id_field.error()));
+  std::expected<std::string_view, std::string> network_hash_field =
+      require_string_field(*parsed, "networkHash", "root");
+  if (!network_hash_field) {
+    return std::unexpected(std::move(network_hash_field.error()));
   }
-  std::string network_id(*network_id_field);
-  if (network_id.empty()) {
-    return std::unexpected("bootstrap manifest networkId must not be empty");
+  std::optional<NetworkHash> network_hash =
+      parse_network_hash(*network_hash_field);
+  if (!network_hash) {
+    return std::unexpected("bootstrap manifest networkHash must be exactly 64 "
+                           "hexadecimal characters");
   }
 
   std::expected<std::string_view, std::string> profile =
@@ -418,7 +422,7 @@ load_bootstrap_manifest(std::filesystem::path const &path)
       .dev_wallet_profile = std::string(dev_wallet_profile->name),
   };
   return BootstrapManifestConfig{
-      .network_id = std::move(network_id),
+      .network_hash = *network_hash,
       .bootstrap_config = std::move(config),
   };
 }

@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "hogd/base/network_hash.h"
 #include "hogd/base/span.h"
 #include "hogd/base/string.h"
 
@@ -67,6 +68,22 @@ TEST(StringTest, DecodeHexOddLengthDeath)
 {
   // Odd-length hex string should CHECK-fail (out-of-bounds read)
   EXPECT_DEATH(decode_hex("abc"), "");
+}
+
+TEST(NetworkHashTest, ParsesAndFormatsCanonicalHex)
+{
+  constexpr std::string_view text = "000102030405060708090a0b0c0d0e0f"
+                                    "101112131415161718191a1b1c1d1e1f";
+  std::optional<NetworkHash> hash = parse_network_hash(text);
+  ASSERT_TRUE(hash.has_value());
+  EXPECT_EQ(format_network_hash(*hash), text);
+}
+
+TEST(NetworkHashTest, RejectsNonCanonicalLengthsAndInvalidHex)
+{
+  EXPECT_FALSE(parse_network_hash("1").has_value());
+  EXPECT_FALSE(parse_network_hash(std::string(64, 'g')).has_value());
+  EXPECT_FALSE(parse_network_hash(std::string(66, '0')).has_value());
 }
 
 } // namespace hogd

@@ -89,7 +89,7 @@ public:
 
   // Stage all finalized lock changes into a ChangeSet and compute the hash
   // delta. Returns the final db hash. Must be called before commit().
-  HogDBStatus<DbHash> close(const DbHash &base_hash);
+  HogDBStatus<StorageLongHash> close(const StorageLongHash &base_hash);
 
   // Test/benchmark only: stage changes without computing the hash.
   // Do not use in production code — the db hash is required for consensus.

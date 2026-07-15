@@ -458,13 +458,14 @@ read_event_log_file(std::filesystem::path const &path)
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     BootstrapAccountConfig const &bootstrap_config,
-    std::optional<std::filesystem::path> const &data_dir)
-  : bind_host_(std::move(bind_host)), data_dir_(data_dir),
-    bootstrap_config_(bootstrap_config), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), event_ctx_(event_dir_.directory()),
-    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
-    event_indexer_server_(event_ctx_)
+    std::optional<std::filesystem::path> const &data_dir,
+    NetworkHash network_hash)
+  : bind_host_(std::move(bind_host)), network_hash_(network_hash),
+    data_dir_(data_dir), bootstrap_config_(bootstrap_config),
+    runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
+    event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
+    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
     // Genesis bootstrap payloads can be larger than the transport default.
@@ -872,6 +873,7 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
       client.schedulercoord_propose_block(tip.db_tip().id, ProposalContext{})();
   CHECK_EQ(proposal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
   ConsensusValue value{};
+  value.prev_hash = sha256(tip.db_tip().value);
   value.proposal_header = proposal.proposed_block().proposal.header;
   value.proposal_txs_hash =
       sha256(proposal.proposed_block().proposal.transactions);

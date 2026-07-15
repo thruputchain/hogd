@@ -38,7 +38,6 @@
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/metrics/shared.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
@@ -94,7 +93,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
-  DbHash db_hash = db_tmp.compute_full_db_hash();
+  StorageLongHash db_hash = db_tmp.compute_full_db_hash();
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -128,7 +127,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     }
   }
   else {
-    CHECK_EQ(db_hash, DbHash{});
+    CHECK_EQ(db_hash, StorageLongHash{});
     ConsensusValue value{};
     value.proposal_header.block_height = -1;
     ctx.set_tip(DbTip{.id = std::numeric_limits<BlockTXID>::max(),

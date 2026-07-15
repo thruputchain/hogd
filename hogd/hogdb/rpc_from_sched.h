@@ -91,7 +91,7 @@ private:
   // should be the last reference that is open for the btx..
   HogDBStatus<void> commit_block(BlockID id, ConsensusValue value,
                                  PerThreadARC<BlockTX> *btx,
-                                 const DbHash &db_hash);
+                                 const StorageLongHash &db_hash);
 };
 static_assert(is_DbSched1<HogDBSchedRpc *, x23::Async>);
 

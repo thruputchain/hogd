@@ -24,7 +24,6 @@
 #include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -57,13 +56,13 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
   ASSERT_TRUE(dir.has_value());
   DbTip initial_tip{};
-  DbHash db_hash;
+  StorageLongHash db_hash;
   {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    EXPECT_EQ(dao.compute_full_db_hash(), DbHash{});
+    EXPECT_EQ(dao.compute_full_db_hash(), StorageLongHash{});
 
     // add some items to the database
     // some items that are not in the db hash
@@ -247,7 +246,7 @@ insert_into_recovered_rcq(uint64_t live_entries)
   EXPECT_TRUE(invoke_tx.sync_balance_locks().has_value());
   EXPECT_TRUE(invoke_tx.commit());
 
-  EXPECT_TRUE(block_tx.get().close(DbHash{}).has_value());
+  EXPECT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
   EXPECT_TRUE(block_tx.get().commit().has_value());
 
   auto updated = dao.read_retrocausal_queue_metadata(rcq_key);

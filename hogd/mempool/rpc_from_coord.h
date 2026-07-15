@@ -29,7 +29,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/nomination_compat.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_db.h"
@@ -75,8 +74,9 @@ public:
   static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
-                        uint64_t network_id, size_t mempool_tx_size_limit)
-    : db_rpc_(db_rpc), auth_rpc_(auth_rpc), network_id_(network_id),
+                        NetworkHash network_hash, size_t mempool_tx_size_limit)
+    : db_rpc_(db_rpc), auth_rpc_(auth_rpc),
+      network_hash_(std::move(network_hash)),
       mempool_tx_size_limit_(static_cast<ssize_t>(mempool_tx_size_limit))
   {}
 
@@ -146,22 +146,12 @@ public:
   schedulercoord_submit_vetted(ValidatorID validator_id,
                                ParallelSignedTransactionBatch batch);
 
-  // Have the mempool put together a block of transactions and nominate the
-  // block. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerNominationResult> schedulercoord_nominate(DbTip db_tip);
   x23::Async<SchedulerProposalResult>
   schedulercoord_propose_block(BlockID parent_id, ProposalContext context);
 
-  // Have the mempool validate a block. [nomination] holds the block to
-  // validate. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerValidationResult>
-  schedulercoord_validate(DbTip db_tip, Nomination nomination);
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate_block(BlockID parent_id, Proposal proposal);
 
-  // Commits the block with ID [block_id].
-  x23::Async<SchedulerCommitOutcome>
-  schedulercoord_commit_block(BlockID block_id);
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id, ConsensusValue value);
 
@@ -354,7 +344,7 @@ private:
 
     x23::XdrVec<SignedTransactionHash> result_tx_hashes;
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
-    SchedulerNominationResult nomination_result;
+    SchedulerProposalResult proposal_result;
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
@@ -521,18 +511,17 @@ private:
                                    x23::DagDeps scheduling_deps,
                                    const x23::DagDeps &proposal_deps);
   FinishNominationNodes add_finish_nominating_block_nodes(
-      x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
-      const x23::DagDeps &proposal_deps,
+      x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
+      PendingBlock &cache, const x23::DagDeps &proposal_deps,
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block_impl(BlockID block_id,
-                                   const ConsensusValue *expected_value);
+                                   const ConsensusValue &expected_value);
   x23::Async<SchedulerValidationResult>
-  schedulercoord_validate_impl(DbTip db_tip, Nomination nomination,
-                               std::optional<ProposalHeader> expected_header);
+  schedulercoord_validate_impl(DbTip db_tip, Proposal proposal);
 
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,
@@ -684,7 +673,7 @@ private:
 
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
-  const uint64_t network_id_;
+  const NetworkHash network_hash_;
   const ssize_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;

@@ -34,7 +34,6 @@
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -152,7 +151,7 @@ protected:
     PerThreadARC<BlockTX> *block_tx = ctx.get_block_tx(kBlockId, false);
     ASSERT_NE(block_tx, nullptr);
     ASSERT_EQ(block_tx->get().get_height(), kNextHeight);
-    HogDBStatus<DbHash> db_hash =
+    HogDBStatus<StorageLongHash> db_hash =
         block_tx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(db_hash.has_value());
     ASSERT_TRUE(block_tx->get().commit().has_value());
@@ -238,7 +237,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -321,7 +320,7 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -407,7 +406,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
   // Close and commit BlockTX (should succeed even though auth server is down)
   // The subscription manager should handle the error gracefully
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result)
       << "BlockTX commit should succeed even if auth server is down";
@@ -478,7 +477,7 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 

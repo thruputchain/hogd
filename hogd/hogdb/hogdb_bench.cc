@@ -36,7 +36,6 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
@@ -372,7 +371,7 @@ Benchmark::run()
 
   // Close the block: stage changes and optionally compute the hash.
   if (compute_db_hash_) {
-    auto hash_result = block.get().close(DbHash{});
+    auto hash_result = block.get().close(StorageLongHash{});
     CHECK(hash_result.has_value());
     asm volatile("" : : "m"(*hash_result) : "memory");
   }
@@ -441,7 +440,7 @@ private:
   void close_block(BlockTX &btx) const
   {
     if (compute_db_hash_) {
-      CHECK(btx.close(DbHash{}).has_value());
+      CHECK(btx.close(StorageLongHash{}).has_value());
     }
     else {
       CHECK(btx.close_skip_hash_for_testing().has_value());

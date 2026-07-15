@@ -30,7 +30,6 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_gateway.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -136,7 +135,7 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
                                                   nullptr);
   StorageCostModel cost_model = StorageCostModel::default_cost_model();
   {
-    DbHash base_hash = dao.compute_full_db_hash();
+    StorageLongHash base_hash = dao.compute_full_db_hash();
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model, background_commit_worker, BlockHeight{1},
         BlockExecutionMode::kBlockExecutionModeProposal);
@@ -234,7 +233,8 @@ TEST(HogDBGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
 
   ConsensusValue value{};
   value.proposal_header.block_height = 7;
-  ASSERT_TRUE(ctx.update_dbtip(BlockTXID{7}, value, DbHash{}).has_value());
+  ASSERT_TRUE(
+      ctx.update_dbtip(BlockTXID{7}, value, StorageLongHash{}).has_value());
 
   // The pre-advance snapshot is now stale; the current tip is not.
   EXPECT_TRUE(ctx.is_committed_read_stale(before));

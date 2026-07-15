@@ -18,7 +18,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/metrics/metrics.h"
-#include "hogd/protocol/block_compat.h"
 #include "loadgen.hh"
 #include "parallel.hh"
 #include "sched_coord.hh"
@@ -81,12 +80,6 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
 {
   x23::HostPort host_port{host.c_str(), port};
   return create_client<T>(host_port, retry, max_message_size);
-}
-
-inline SHA256Hash
-generate_block_hash(const BlockHeader &header)
-{
-  return sha256(header);
 }
 
 class MempoolMetrics {

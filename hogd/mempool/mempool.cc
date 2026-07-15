@@ -12,6 +12,7 @@
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
@@ -31,15 +32,15 @@ namespace hogd {
 namespace {
 
 int
-mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
-             std::string_view bind_ip, uint16_t db_port, uint16_t event_port,
-             uint16_t executor_port, uint16_t auth_port,
-             uint16_t coordinator_port, uint16_t gateway_port,
-             uint16_t metrics_port)
+mempool_init(size_t num_db_shards, size_t num_exec_shards,
+             NetworkHash network_hash, std::string_view bind_ip,
+             uint16_t db_port, uint16_t event_port, uint16_t executor_port,
+             uint16_t auth_port, uint16_t coordinator_port,
+             uint16_t gateway_port, uint16_t metrics_port)
 {
   Registration &registration = Registration::registration();
 
-  info("NETWORK ID={:#x}", network_id);
+  info("NETWORK HASH={}", format_network_hash(network_hash));
 
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
@@ -95,7 +96,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   // TODO(jhumphri): Make [mempool_tx_size_limit] a command line arg.
   RpcServer<MempoolCoordinatorRpc> coord(
-      db->impl(), auth->impl(), network_id,
+      db->impl(), auth->impl(), std::move(network_hash),
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
@@ -142,7 +143,7 @@ usage(char *argv[])
 {
   std::println(
       "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
-      "--network-id <hex> [--db-port <port>] [--event-port <port>] "
+      "--network-hash <64 hex digits> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
       "[--metrics-port <port>] [--version]",
@@ -166,7 +167,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string bind_ip;
   std::optional<size_t> num_db_shards;
   std::optional<size_t> num_exec_shards;
-  std::optional<uint64_t> network_id;
+  std::optional<hogd::NetworkHash> network_hash;
   uint16_t db_port = 0;
   uint16_t event_port = 0;
   uint16_t executor_port = 0;
@@ -196,9 +197,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                                         argv[++i], argv, usage);
       continue;
     }
-    if (arg == "--network-id" && i + 1 < argc) {
-      network_id = hogd::parse_integer_arg<uint64_t>("--network-id", argv[++i],
-                                                     argv, usage, /*base=*/16);
+    if (arg == "--network-hash" && i + 1 < argc) {
+      network_hash = hogd::parse_network_hash(argv[++i]);
+      if (!network_hash) {
+        usage(argv);
+      }
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
@@ -232,7 +235,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   if (bind_ip.empty() || !num_db_shards.has_value() ||
-      !num_exec_shards.has_value() || !network_id.has_value()) {
+      !num_exec_shards.has_value() || !network_hash.has_value()) {
     usage(argv);
   }
 
@@ -246,8 +249,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
-  return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
-                            bind_ip, db_port, event_port, executor_port,
-                            auth_port, coordinator_port, gateway_port,
-                            metrics_port);
+  return hogd::mempool_init(*num_db_shards, *num_exec_shards,
+                            std::move(*network_hash), bind_ip, db_port,
+                            event_port, executor_port, auth_port,
+                            coordinator_port, gateway_port, metrics_port);
 }

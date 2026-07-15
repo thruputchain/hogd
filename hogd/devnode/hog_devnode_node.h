@@ -45,7 +45,8 @@ public:
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
       BootstrapAccountConfig const &bootstrap_config = {},
-      std::optional<std::filesystem::path> const &data_dir = std::nullopt);
+      std::optional<std::filesystem::path> const &data_dir = std::nullopt,
+      NetworkHash network_hash = {});
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -84,9 +85,6 @@ public:
   std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
-  // Numeric chain network id. The readiness network_id is a human protocol
-  // label consumed by the supervisor.
-  static constexpr std::uint64_t kNetworkId = 0;
   // RAMDB maps this capacity but does not consume it as steady-state RSS.
   static constexpr std::size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
   static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
@@ -112,6 +110,7 @@ private:
   void prepare_for_failed_construction() noexcept;
 
   std::string bind_host_;
+  const NetworkHash network_hash_;
   std::optional<std::filesystem::path> data_dir_;
   BootstrapAccountConfig bootstrap_config_;
   GenesisConfiguration genesis_configuration_;
@@ -169,7 +168,7 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(
-          sched_db_server_->impl(), mempool_auth_server_->impl(), kNetworkId,
+          sched_db_server_->impl(), mempool_auth_server_->impl(), network_hash_,
           MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;

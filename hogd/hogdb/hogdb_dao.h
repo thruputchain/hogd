@@ -24,7 +24,6 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
-#include "hogd/protocol/block_compat.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -133,8 +132,8 @@ private:
 // without migrating existing data.
 //
 // Not every prefix type is included in the db hash: state-item prefixes (see
-// is_state_item) are folded into the consensus DbHash, while kHogAge and
-// kGlobalMetadata are not.
+// is_state_item) are folded into the consensus StorageLongHash, while kHogAge
+// and kGlobalMetadata are not.
 //
 // Because these bytes are persisted verbatim as the first byte of each key --
 // and, for state items, hashed into consensus -- they must be fixed protocol
@@ -473,7 +472,7 @@ public:
   void for_each_state_item(GetEachCallback fn);
 
   // computes the db hash from scratch.
-  DbHash compute_full_db_hash();
+  StorageLongHash compute_full_db_hash();
 
   //
   // Global Operations

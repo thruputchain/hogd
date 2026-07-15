@@ -101,10 +101,10 @@ wait_for_shutdown(const ShutdownSignals &signals)
 
 void
 emit_readiness(const HogDevnodeNode &node, ReadinessSink sink,
-               std::string_view runtime_network_id)
+               NetworkHash const &runtime_network_hash)
 {
   RuntimeManifestPointer manifest =
-      write_hog_devnode_runtime_manifest(node, runtime_network_id);
+      write_hog_devnode_runtime_manifest(node, runtime_network_hash);
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{}", manifest.readiness_payload);
@@ -116,7 +116,7 @@ int
 hog_devnode_init(std::string listen_host,
                  std::uint16_t requested_scheduler_port,
                  ReadinessSink readiness_sink,
-                 std::string_view runtime_network_id,
+                 NetworkHash const &runtime_network_hash,
                  BootstrapAccountConfig const &bootstrap_config,
                  std::optional<std::filesystem::path> const &data_dir)
 {
@@ -134,8 +134,8 @@ hog_devnode_init(std::string listen_host,
   init_hogexec_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir);
-  emit_readiness(node, readiness_sink, runtime_network_id);
+                      bootstrap_config, data_dir, runtime_network_hash);
+  emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
   wait_for_shutdown(shutdown_signals);
@@ -171,7 +171,7 @@ namespace {
 
 struct HogDevnodeOptions {
   std::string listen_host = "127.0.0.1";
-  std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
+  hogd::NetworkHash runtime_network_hash = hogd::kDefaultRuntimeNetworkHash;
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   std::optional<std::filesystem::path> data_dir;
@@ -535,7 +535,7 @@ parse_args(int argc, char *argv[])
     if (!manifest_config) {
       hogd::arg_error(manifest_config.error(), argv, usage);
     }
-    options.runtime_network_id = std::move(manifest_config->network_id);
+    options.runtime_network_hash = manifest_config->network_hash;
     options.bootstrap_config = std::move(manifest_config->bootstrap_config);
   }
   return options;
@@ -570,7 +570,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return hogd::hog_devnode_init(std::move(options.listen_host),
                                   options.scheduler_port,
                                   options.readiness_sink,
-                                  options.runtime_network_id,
+                                  options.runtime_network_hash,
                                   options.bootstrap_config, options.data_dir);
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());

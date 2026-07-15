@@ -20,7 +20,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
-#include "hogd/protocol/block_compat.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -134,7 +133,8 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, ConsensusValue value,
-                            PerThreadARC<BlockTX> *btx, const DbHash &db_hash)
+                            PerThreadARC<BlockTX> *btx,
+                            const StorageLongHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -232,7 +232,7 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  std::optional<DbHash> db_hash = ctx_.take_db_hash(id);
+  std::optional<StorageLongHash> db_hash = ctx_.take_db_hash(id);
   if (!db_hash.has_value()) {
     error("dbsched_commit_snapshot called before close for block {}", id);
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
@@ -351,7 +351,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // account for these writes in the db hash. Thus, we compute the db hash with
   // those items alone in the db, then we use this hash as the base hash when
   // calling close() below.
-  DbHash base_hash = ctx_.get_db().compute_full_db_hash();
+  StorageLongHash base_hash = ctx_.get_db().compute_full_db_hash();
 
   auto r = ctx_.open_block_tx(kGenesisBlockID,
                               BlockExecutionMode::kBlockExecutionModeProposal);
@@ -451,7 +451,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     error("genesis close failed: {}", db_hash_result.error());
     co_return DbSchedResult::DbSchedResultError;
   }
-  DbHash db_hash = *db_hash_result;
+  StorageLongHash db_hash = *db_hash_result;
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   value.proposal_header.storage_hash =
@@ -464,7 +464,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   }
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.
-  DbHash full_hash = ctx_.get_db().compute_full_db_hash();
+  StorageLongHash full_hash = ctx_.get_db().compute_full_db_hash();
   CHECK_EQ(full_hash, db_hash);
   co_return ret;
 }

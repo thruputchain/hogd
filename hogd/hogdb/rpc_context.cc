@@ -13,7 +13,6 @@
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/protocol/block_compat.h"
 #include "rpc_types.hh"
 
 namespace hogd {
@@ -221,7 +220,7 @@ RPCContext::CommitPublicationGuard::~CommitPublicationGuard()
 
 HogDBStatus<void>
 RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
-                         const DbHash &db_hash)
+                         const StorageLongHash &db_hash)
 {
   DbTip new_tip;
   tip_.with([&](DbTip &tip) {
