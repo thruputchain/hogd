@@ -133,17 +133,8 @@ private:
         pool_.go(std::move(ready));
         lk.lock();
       }
-      else if (!done_) {
-#if HAVE_BROKEN_WAIT_UNTIL
-        auto wake_time = next_wake();
-        if (wake_time == Clock::time_point::max())
-          recheck_.wait(lk);
-        else
-          recheck_.wait_until(lk, wake_time);
-#else  // !HAVE_BROKEN_WAIT_UNTIL
+      else if (!done_)
         recheck_.wait_until(lk, next_wake());
-#endif // !HAVE_BROKEN_WAIT_UNTIL
-      }
       else
         return;
   }

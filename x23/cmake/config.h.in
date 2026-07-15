@@ -58,7 +58,3 @@
 
 // Define to 1 if you have getprogname() in stdlib.h
 #cmakedefine01 HAVE_GETPROGNAME
-
-// Does std::condition_variable::wait_until mishandle a custom clock
-// with an unsigned duration rep and time_point::max()?
-#cmakedefine01 HAVE_BROKEN_WAIT_UNTIL

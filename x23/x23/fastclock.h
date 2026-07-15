@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <thread>
+#include <type_traits>
 
 #if defined(__APPLE__)
 #define FASTCLOCK_USE_TSC 0
@@ -33,7 +34,7 @@ namespace x23 {
 #if FASTCLOCK_USE_TSC
 
 struct fastclock {
-  using rep = std::uint64_t;
+  using rep = std::int64_t;
   using period = std::nano;
   using duration = std::chrono::duration<rep, period>;
   using time_point = std::chrono::time_point<fastclock>;
@@ -119,5 +120,14 @@ struct fastclock : std::chrono::steady_clock {
 };
 
 #endif // !FASTCLOCK_USE_TSC
+
+// The rep must be signed.  For user-defined clocks, libc++'s
+// condition_variable::wait_until re-reads Clock::now() after its
+// initial deadline check and computes (deadline - now()) in the
+// clock's own rep.  If the deadline passes between the two reads, an
+// unsigned rep wraps to ~584 years and the wait saturates to
+// "forever" instead of timing out immediately (observed: CoroSleep
+// service thread hang under TSAN).
+static_assert(std::is_signed_v<fastclock::rep>);
 
 } // namespace x23
