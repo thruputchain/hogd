@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <exception>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
