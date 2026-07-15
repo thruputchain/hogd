@@ -186,7 +186,7 @@ jobs:
             build/debug artifacts debug "${{ matrix.architecture }}"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hogd-linux-${{ matrix.architecture }}-release-artifacts
           path: artifacts/*.tar.gz
@@ -453,7 +453,7 @@ jobs:
           tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.rv32a lib
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hog-devnode-macos-arm64
           path: artifacts/hog-devnode-macos-arm64.tar.gz
@@ -475,19 +475,19 @@ jobs:
       actions: read
     steps:
       - name: Download Linux x86_64 artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: hogd-linux-x86_64-release-artifacts
           path: artifacts/
 
       - name: Download Linux ARM64 artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: hogd-linux-arm64-release-artifacts
           path: artifacts/
 
       - name: Download macOS hog-devnode artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: hog-devnode-macos-arm64
           path: artifacts/
