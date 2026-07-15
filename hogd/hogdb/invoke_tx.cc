@@ -351,7 +351,7 @@ InvokeTX::release_savepoint(int depth)
     vec.push_back(std::move(tmp));
   }
 
-  throw std::runtime_error("not implemented releasing balance versions");
+  panic("not implemented releasing balance versions");
 }
 
 void
