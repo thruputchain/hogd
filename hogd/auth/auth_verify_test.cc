@@ -8,11 +8,17 @@
 #include "auth_server_test_framework.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
+
+// clang-tidy's dataflow does not treat ASSERT_TRUE(x.has_value()) as a guard,
+// so it flags the subsequent unchecked *x. These tests only dereference
+// optionals after asserting presence; suppress the check file-wide.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 namespace hogd {
 
@@ -190,8 +196,11 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
                                            mock_db().get_key_changes_at_height(
                                                0))();
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.auth_claim = make_pubkey_claim(preimage);
 
   SignedTransaction stx{};
@@ -224,7 +233,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = sha256(preimage);
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  ContractAddress address = *derived_address;
 
   mock_db().compute_key_changes_for_current_height();
   auth_server().register_auth_data_updates(0,
@@ -270,7 +281,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = sha256(preimage);
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  ContractAddress address = *derived_address;
 
   AddressAuthData auth_data{};
   add_pk_to_auth_data(auth_data, 0, pk);
@@ -381,3 +394,5 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 }
 
 } // namespace hogd
+
+// NOLINTEND(bugprone-unchecked-optional-access)

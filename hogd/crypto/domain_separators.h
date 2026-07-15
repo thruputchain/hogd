@@ -1,10 +1,12 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
+#include "auth_claim.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/crypto/crypto.h"
 #include "preimage.hh"
 #include "x23/serialize_cxs.h"
 
@@ -32,5 +34,24 @@ domain_separator_cxs()
 
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
     domain_separator_cxs<"PubkeyAccount">();
+
+// Derives the address of a standalone-pubkey account:
+// SHA256(domain_separator || cxs(preimage)). Returns std::nullopt if the
+// preimage cannot be CXS-serialized (e.g. an unrecognized pubkey scheme),
+// so callers on the (guest-reachable) auth-verification path can reject the
+// claim instead of aborting the process.
+inline std::optional<ContractAddress>
+pubkey_auth_address(PubkeyAccountPreimage const &preimage)
+{
+  auto serialized = x23::serialize_cxs(preimage);
+  if (!serialized.has_value()) {
+    return std::nullopt;
+  }
+  SHA256Hasher hasher;
+  hasher.update(kPubkeyAuthDomainSeparatorCxs);
+  hasher.update(*serialized);
+  ContractAddress address = hasher.finalize();
+  return address;
+}
 
 } // namespace hogd

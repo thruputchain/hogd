@@ -10,12 +10,18 @@
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/init.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
+
+// clang-tidy's dataflow does not treat ASSERT_TRUE(x.has_value()) as a guard,
+// so it flags the subsequent unchecked *x. These tests only dereference
+// optionals after asserting presence; suppress the check file-wide.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 namespace hogd {
 
@@ -72,7 +78,11 @@ protected:
   {
     Transaction tx{};
     tx.auth_claim = make_pubkey_claim(preimage);
-    tx.invocation.invoked_address = sha256(preimage);
+    auto derived_address = pubkey_auth_address(preimage);
+    EXPECT_TRUE(derived_address.has_value());
+    if (derived_address.has_value()) {
+      tx.invocation.invoked_address = *derived_address;
+    }
     return tx;
   }
 };
@@ -650,6 +660,8 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
 }
 
 } // namespace hogd
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 int
 main(int argc, char *argv[])
