@@ -6,7 +6,6 @@
 #include <expected>
 #include <optional>
 #include <random>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
