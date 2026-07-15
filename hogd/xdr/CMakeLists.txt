@@ -34,6 +34,7 @@ add_xdr(
   ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
+  ../../protocol/preimage.x
   ../../protocol/rpc_types.x
   ../../protocol/scp.x
   ../../protocol/sc_types.x

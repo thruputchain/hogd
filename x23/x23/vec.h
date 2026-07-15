@@ -492,7 +492,7 @@ public:
     std::move(pos + 1, end(), pos);
     shrink(size() - 1);
   }
-  template<typename... Args> reference emplace_back(Args &&...args)
+  template<typename... Args> constexpr reference emplace_back(Args &&...args)
   {
     ensure();
     std::construct_at(b_.end, std::forward<Args>(args)...);

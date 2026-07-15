@@ -375,7 +375,7 @@ Gen::show_type(const StructBody &s, string t)
   bottom_ += std::format(R"(
 template<size_t I, x23::references<struct {1}> T>
 requires (I < {0})
-decltype(auto)
+constexpr decltype(auto)
 get(T &&t)
 {{)",
                          nonvoid_count, scope());
@@ -452,16 +452,16 @@ Gen::show_type(const UnionBody &b, string t)
       non_enum_switch_types.end()) {
     prtop("using enum x23::AlwaysEnum<{}>::type;\n", switch_type);
   }
-  prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
-  prtop("inline explicit {0}({1}) noexcept;\n", t, switch_type);
+  prtop("constexpr {0}() noexcept : {0}({1}) {{}}\n", t, first_case);
+  prtop("constexpr explicit {0}({1}) noexcept;\n", t, switch_type);
   prtop("inline {0}({0} &&) noexcept;\n", t);
   prtop("inline {0}(const {0} &);\n", t);
-  prtop("inline ~{0}();\n", t);
+  prtop("constexpr ~{0}();\n", t);
   prtop("inline {0} &operator=({0} &&other) noexcept;\n", t);
   prtop("inline {0} &operator=(const {0} &other);\n", t);
   top_ += '\n';
   prtop("// get and set discriminant\n");
-  prtop("{0} {1}() const noexcept "
+  prtop("constexpr {0} {1}() const noexcept "
         "{{ return __xdr_union_field_{1}; }}\n",
         switch_type, b.switch_id);
   prtop("inline {2} &{1}({0}) noexcept;\n", switch_type, b.switch_id, t);
@@ -545,7 +545,7 @@ Gen::show_type(const UnionBody &b, string t)
   prtop("template<std::size_t I, x23::references<{}> U>"
         " requires (I <= {})\n",
         t, num_non_void);
-  prtop("friend decltype(auto) get(U &&);\n");
+  prtop("friend constexpr decltype(auto) get(U &&);\n");
 
   bottom_ += '\n';
 
@@ -630,7 +630,7 @@ constexpr auto
   bottom_ += "\n}\n"s;
 
   bottom_ +=
-      std::format(R"(inline
+      std::format(R"(constexpr
 {1}::{0}({2} d) noexcept
 {{
   using ops = x23::union_ops<struct {0}>;
@@ -648,7 +648,7 @@ inline
   using ops = x23::union_ops<struct {0}>;
   ops::construct(*this, other);
 }}
-inline
+constexpr
 {1}::~{0}()
 {{
   using ops = x23::union_ops<struct {0}>;
@@ -677,7 +677,7 @@ inline struct {1} &
 }}
 template<size_t I, x23::references<struct {1}> U>
 requires (I <= {4})
-inline decltype(auto)
+constexpr inline decltype(auto)
 get(U &&u)
 {{
   using ops = x23::union_ops<struct {1}>;
