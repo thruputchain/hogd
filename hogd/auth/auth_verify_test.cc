@@ -191,8 +191,11 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
                                            mock_db().get_key_changes_at_height(
                                                0))();
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = pubkey_auth_address(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.auth_claim = make_pubkey_claim(preimage);
 
   SignedTransaction stx{};
@@ -225,7 +228,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = pubkey_auth_address(preimage);
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  ContractAddress address = *derived_address;
 
   mock_db().compute_key_changes_for_current_height();
   auth_server().register_auth_data_updates(0,
@@ -271,7 +276,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 {
   auto [pk, sk] = make_key_pair();
   PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
-  ContractAddress address = pubkey_auth_address(preimage);
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  ContractAddress address = *derived_address;
 
   AddressAuthData auth_data{};
   add_pk_to_auth_data(auth_data, 0, pk);

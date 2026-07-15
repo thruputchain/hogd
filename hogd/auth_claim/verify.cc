@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -211,7 +212,13 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
     warn("Unsupported cryptographic scheme: {}", preimage.pubkey.scheme());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (pubkey_auth_address(preimage) != invoked_address) {
+  std::optional<ContractAddress> derived_address =
+      pubkey_auth_address(preimage);
+  if (!derived_address.has_value()) {
+    trace("Auth malformed: failed to serialize pubkey preimage");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (*derived_address != invoked_address) {
     trace("Auth malformed: pubkey preimage hash does not match the invoked "
           "address");
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};

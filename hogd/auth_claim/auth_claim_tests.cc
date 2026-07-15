@@ -73,7 +73,11 @@ protected:
   {
     Transaction tx{};
     tx.auth_claim = make_pubkey_claim(preimage);
-    tx.invocation.invoked_address = pubkey_auth_address(preimage);
+    auto derived_address = pubkey_auth_address(preimage);
+    EXPECT_TRUE(derived_address.has_value());
+    if (derived_address.has_value()) {
+      tx.invocation.invoked_address = *derived_address;
+    }
     return tx;
   }
 };

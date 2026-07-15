@@ -633,8 +633,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = pubkey_auth_address(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -759,8 +762,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = pubkey_auth_address(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
