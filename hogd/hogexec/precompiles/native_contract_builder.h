@@ -183,8 +183,7 @@ public:
           if (!return_buffer.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          ctx.handler().set_return_buffer(std::move(return_buffer.value()),
-                                          false, {});
+          ctx.handler().set_return_buffer(std::move(*return_buffer), false, {});
           return {};
         };
 
@@ -198,7 +197,7 @@ public:
         };
 
         if constexpr (is_contract_result_type<return_t>) {
-          auto const &r = return_value.value();
+          auto const &r = *return_value;
 
           if (r.is_ok()) {
             // void is so annoying
@@ -213,11 +212,11 @@ public:
         }
         else {
           // otherwise, return the received value
-          if constexpr (std::is_same_v<decltype(return_value.value()), void>) {
+          if constexpr (std::is_same_v<decltype(*return_value), void>) {
             return do_return(std::tuple<>{});
           }
           else {
-            return do_return(return_value.value());
+            return do_return(*return_value);
           }
         }
       } catch (...) {

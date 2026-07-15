@@ -149,7 +149,7 @@ public:
   {
     CHECK(last_frame_.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return last_frame_.value().get_events();
+    return (*last_frame_).get_events();
   }
   // Called after the root invocation frame finishes (by root_invoke or
   // the mock path).  Runs final validation on cumulative_invoke_result_

@@ -1,15 +1,15 @@
 // In-process unit tests for hogd::load_bootstrap_manifest.
 //
-// These tests call the parser function directly and inspect the thrown
-// exception's what() text. They are much faster than the subprocess-based
-// tests in hog_devnode_test.cc because they avoid spawning hog-devnode.
+// These tests call the parser function directly and inspect the returned
+// error string. They are much faster than the subprocess-based tests in
+// hog_devnode_test.cc because they avoid spawning hog-devnode.
 //
 // NOLINTNEXTLINE(misc-include-cleaner)
 #include <unistd.h>
 
 #include <chrono>
 #include <cstdint>
-#include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -170,19 +170,30 @@ write_temp_manifest_with_cleanup(std::string_view contents,
   return path;
 }
 
-// Asserts that calling load_bootstrap_manifest(path) throws a runtime_error
-// whose what() contains `needle`. Match the existing find()-based pattern.
+// Asserts that load_bootstrap_manifest(path) fails with an error string that
+// contains `needle`. Matches the existing find()-based pattern.
 void
-expect_throws_with(std::filesystem::path const &path, std::string_view needle)
+expect_error_with(std::filesystem::path const &path, std::string_view needle)
 {
-  try {
-    (void)load_bootstrap_manifest(path);
-    ADD_FAILURE() << "expected load_bootstrap_manifest to throw (needle: "
+  std::expected<BootstrapManifestConfig, std::string> result =
+      load_bootstrap_manifest(path);
+  if (result.has_value()) {
+    ADD_FAILURE() << "expected load_bootstrap_manifest to fail (needle: "
                   << needle << ")";
-  } catch (const std::exception &e) {
-    EXPECT_NE(std::string(e.what()).find(needle), std::string::npos)
-        << "actual: " << e.what() << "\nneedle: " << needle;
+    return;
   }
+  EXPECT_NE(result.error().find(needle), std::string::npos)
+      << "actual: " << result.error() << "\nneedle: " << needle;
+}
+
+// Asserts that load_bootstrap_manifest(path) succeeds, surfacing the error
+// string if it does not.
+void
+expect_ok(std::filesystem::path const &path)
+{
+  std::expected<BootstrapManifestConfig, std::string> result =
+      load_bootstrap_manifest(path);
+  EXPECT_TRUE(result.has_value()) << "unexpected failure: " << result.error();
 }
 
 TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
@@ -196,7 +207,10 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
 
-  BootstrapManifestConfig config = load_bootstrap_manifest(path);
+  std::expected<BootstrapManifestConfig, std::string> result =
+      load_bootstrap_manifest(path);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const BootstrapManifestConfig &config = *result;
   EXPECT_EQ(config.network_id, "groundhog-bench-local");
   EXPECT_EQ(config.bootstrap_config.count, 2U);
   EXPECT_EQ(config.bootstrap_config.seed, "manifest-seed");
@@ -208,7 +222,7 @@ TEST(BootstrapManifest, RejectsNonObjectRoot)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup("[1, 2, 3]", cleanup);
-  expect_throws_with(path, "root is not an object");
+  expect_error_with(path, "root is not an object");
 }
 
 TEST(BootstrapManifest, RejectsInvalidJson)
@@ -216,7 +230,7 @@ TEST(BootstrapManifest, RejectsInvalidJson)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup("{not-json", cleanup);
-  expect_throws_with(path, "JSON parse failed");
+  expect_error_with(path, "JSON parse failed");
 }
 
 TEST(BootstrapManifest, RejectsWrongSchemaVersion)
@@ -226,7 +240,7 @@ TEST(BootstrapManifest, RejectsWrongSchemaVersion)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "schemaVersion");
+  expect_error_with(path, "schemaVersion");
 }
 
 TEST(BootstrapManifest, RejectsMissingSchemaVersion)
@@ -236,7 +250,7 @@ TEST(BootstrapManifest, RejectsMissingSchemaVersion)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing root.schemaVersion");
+  expect_error_with(path, "missing root.schemaVersion");
 }
 
 TEST(BootstrapManifest, RejectsWrongKind)
@@ -246,7 +260,7 @@ TEST(BootstrapManifest, RejectsWrongKind)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "kind");
+  expect_error_with(path, "kind");
 }
 
 TEST(BootstrapManifest, RejectsWrongProfile)
@@ -256,7 +270,7 @@ TEST(BootstrapManifest, RejectsWrongProfile)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "profile");
+  expect_error_with(path, "profile");
 }
 
 TEST(BootstrapManifest, RejectsProtocolMismatch)
@@ -266,7 +280,7 @@ TEST(BootstrapManifest, RejectsProtocolMismatch)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "protocol");
+  expect_error_with(path, "protocol");
 }
 
 TEST(BootstrapManifest, AcceptsAbsentProtocol)
@@ -276,7 +290,7 @@ TEST(BootstrapManifest, AcceptsAbsentProtocol)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  EXPECT_NO_THROW((void)load_bootstrap_manifest(path));
+  expect_ok(path);
 }
 
 TEST(BootstrapManifest, RejectsEmptyNetworkId)
@@ -286,7 +300,7 @@ TEST(BootstrapManifest, RejectsEmptyNetworkId)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "networkId must not be empty");
+  expect_error_with(path, "networkId must not be empty");
 }
 
 TEST(BootstrapManifest, RejectsMissingNetworkId)
@@ -296,7 +310,7 @@ TEST(BootstrapManifest, RejectsMissingNetworkId)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing root.networkId");
+  expect_error_with(path, "missing root.networkId");
 }
 
 TEST(BootstrapManifest, RejectsMissingDevWallet)
@@ -306,7 +320,7 @@ TEST(BootstrapManifest, RejectsMissingDevWallet)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing root.devWallet");
+  expect_error_with(path, "missing root.devWallet");
 }
 
 TEST(BootstrapManifest, RejectsWrongDevWalletProfile)
@@ -316,7 +330,7 @@ TEST(BootstrapManifest, RejectsWrongDevWalletProfile)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "devWallet.profile");
+  expect_error_with(path, "devWallet.profile");
 }
 
 TEST(BootstrapManifest, RejectsMismatchedContentHash)
@@ -327,7 +341,7 @@ TEST(BootstrapManifest, RejectsMismatchedContentHash)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "devWallet.contentHash");
+  expect_error_with(path, "devWallet.contentHash");
 }
 
 TEST(BootstrapManifest, RejectsMismatchedDeployEntrypoint)
@@ -337,7 +351,7 @@ TEST(BootstrapManifest, RejectsMismatchedDeployEntrypoint)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "devWallet.deployEntrypoint");
+  expect_error_with(path, "devWallet.deployEntrypoint");
 }
 
 TEST(BootstrapManifest, RejectsMismatchedDoActionEntrypoint)
@@ -347,7 +361,7 @@ TEST(BootstrapManifest, RejectsMismatchedDoActionEntrypoint)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "devWallet.doActionEntrypoint");
+  expect_error_with(path, "devWallet.doActionEntrypoint");
 }
 
 TEST(BootstrapManifest, AcceptsOmittedContentHash)
@@ -357,7 +371,7 @@ TEST(BootstrapManifest, AcceptsOmittedContentHash)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  EXPECT_NO_THROW((void)load_bootstrap_manifest(path));
+  expect_ok(path);
 }
 
 TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
@@ -367,7 +381,7 @@ TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing root.bootstrapAccounts");
+  expect_error_with(path, "missing root.bootstrapAccounts");
 }
 
 TEST(BootstrapManifest, RejectsNegativeCount)
@@ -377,7 +391,7 @@ TEST(BootstrapManifest, RejectsNegativeCount)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "bootstrapAccounts.count");
+  expect_error_with(path, "bootstrapAccounts.count");
 }
 
 TEST(BootstrapManifest, RejectsCountAboveLimit)
@@ -387,7 +401,7 @@ TEST(BootstrapManifest, RejectsCountAboveLimit)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "maximum");
+  expect_error_with(path, "maximum");
 }
 
 TEST(BootstrapManifest, RejectsEmptySeed)
@@ -397,7 +411,7 @@ TEST(BootstrapManifest, RejectsEmptySeed)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "bootstrapAccounts.seed must not be empty");
+  expect_error_with(path, "bootstrapAccounts.seed must not be empty");
 }
 
 TEST(BootstrapManifest, RejectsMissingSeed)
@@ -407,7 +421,7 @@ TEST(BootstrapManifest, RejectsMissingSeed)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing bootstrapAccounts.seed");
+  expect_error_with(path, "missing bootstrapAccounts.seed");
 }
 
 TEST(BootstrapManifest, RejectsMissingStorageCostModel)
@@ -417,7 +431,7 @@ TEST(BootstrapManifest, RejectsMissingStorageCostModel)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "missing root.storageCostModel");
+  expect_error_with(path, "missing root.storageCostModel");
 }
 
 TEST(BootstrapManifest, RejectsWrongStorageCostModelProfile)
@@ -427,7 +441,7 @@ TEST(BootstrapManifest, RejectsWrongStorageCostModelProfile)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "storageCostModel.profile");
+  expect_error_with(path, "storageCostModel.profile");
 }
 
 TEST(BootstrapManifest, RejectsInitialStorageTokensWithLeadingWhitespace)
@@ -437,7 +451,7 @@ TEST(BootstrapManifest, RejectsInitialStorageTokensWithLeadingWhitespace)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "initialStorageTokens");
+  expect_error_with(path, "initialStorageTokens");
 }
 
 TEST(BootstrapManifest, RejectsInitialStorageTokensWithPlusSign)
@@ -447,7 +461,7 @@ TEST(BootstrapManifest, RejectsInitialStorageTokensWithPlusSign)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "initialStorageTokens");
+  expect_error_with(path, "initialStorageTokens");
 }
 
 TEST(BootstrapManifest, RejectsInitialStorageTokensEmpty)
@@ -457,7 +471,7 @@ TEST(BootstrapManifest, RejectsInitialStorageTokensEmpty)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_throws_with(path, "initialStorageTokens");
+  expect_error_with(path, "initialStorageTokens");
 }
 
 TEST(BootstrapManifest, RejectsMissingFile)
@@ -468,7 +482,7 @@ TEST(BootstrapManifest, RejectsMissingFile)
                   std::chrono::steady_clock::now().time_since_epoch().count());
   // Ensure the file truly does not exist.
   std::filesystem::remove(path);
-  expect_throws_with(path, path.string());
+  expect_error_with(path, path.string());
 }
 
 TEST(BootstrapManifest, RejectsDirectoryAsManifest)
@@ -479,7 +493,7 @@ TEST(BootstrapManifest, RejectsDirectoryAsManifest)
                   std::chrono::steady_clock::now().time_since_epoch().count());
   std::filesystem::create_directories(dir);
   Defer cleanup([dir] { std::filesystem::remove_all(dir); });
-  expect_throws_with(dir, "must be a regular file");
+  expect_error_with(dir, "must be a regular file");
 }
 
 TEST(BootstrapManifest, RejectsOversizedManifest)
@@ -490,7 +504,7 @@ TEST(BootstrapManifest, RejectsOversizedManifest)
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(std::string((64 * 1024) + 1, ' '),
                                        cleanup);
-  expect_throws_with(path, "exceeds");
+  expect_error_with(path, "exceeds");
 }
 
 TEST(BootstrapManifest, AcceptsManifestAtExactSizeLimit)
@@ -503,7 +517,7 @@ TEST(BootstrapManifest, AcceptsManifestAtExactSizeLimit)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(manifest, cleanup);
-  EXPECT_NO_THROW((void)load_bootstrap_manifest(path));
+  expect_ok(path);
 }
 
 // A dangling symlink (target does not exist) is a regression test for the
@@ -537,7 +551,7 @@ TEST(BootstrapManifest, RejectsDanglingSymlink)
     std::filesystem::remove(symlink_path, ec);
   });
 
-  expect_throws_with(symlink_path, "must be a regular file");
+  expect_error_with(symlink_path, "must be a regular file");
 }
 
 // /dev/null is a character device: open() succeeds without follow, but
@@ -546,7 +560,7 @@ TEST(BootstrapManifest, RejectsDanglingSymlink)
 // implementation also had but at a different layer.
 TEST(BootstrapManifest, RejectsCharacterDeviceAsManifest)
 {
-  expect_throws_with("/dev/null", "must be a regular file");
+  expect_error_with("/dev/null", "must be a regular file");
 }
 
 TEST(BootstrapManifest, RejectsSymlink)
@@ -566,7 +580,7 @@ TEST(BootstrapManifest, RejectsSymlink)
     std::filesystem::remove(symlink_path, ec);
   });
 
-  expect_throws_with(symlink_path, "must be a regular file");
+  expect_error_with(symlink_path, "must be a regular file");
 }
 
 } // namespace

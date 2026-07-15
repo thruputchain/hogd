@@ -78,9 +78,9 @@ public:
     // ran. When a frame ran (code == None), the outcome (Return / Abort /
     // Fault) is reported via outputs.frame_status; a Fault carries no return
     // buffer and is surfaced below via get_return_buffer().
-    if (invoke_result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      trace("Invoke SyscallStatus error: {}", invoke_result.value());
-      return SyscallError{invoke_result.value()};
+    if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
+      trace("Invoke SyscallStatus error: {}", *invoke_result);
+      return SyscallError{*invoke_result};
     }
 
     auto return_buffer = ctx.handler().get_return_buffer();
@@ -92,7 +92,7 @@ public:
     // succeeded but the child frame produced no buffer), so this must be
     // handled, not asserted: surface it as the syscall error.
     if (!(*return_buffer).has_value()) {
-      trace("No return buffer available: {}", return_buffer.value().error());
+      trace("No return buffer available: {}", (*return_buffer).error());
       return (*return_buffer).error();
     }
     assert(*return_buffer);
@@ -120,7 +120,7 @@ public:
       trace("Invoke Error: Decode Return Failed");
       return std::nullopt;
     }
-    return return_value.value();
+    return *return_value;
   }
 
 private:

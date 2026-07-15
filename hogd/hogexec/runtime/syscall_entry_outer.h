@@ -329,7 +329,7 @@ show_type(T const &arg)
   else if constexpr (is_std_optional<T>) {
     static_assert(!std::same_as<T, ContractAddress>);
     if (arg) {
-      return "[" + show_type<typename T::value_type>(arg.value()) + "]";
+      return "[" + show_type<typename T::value_type>(*arg) + "]";
     }
     return "[null]";
   }
@@ -406,8 +406,8 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
       return std::format("Host Error ({})\n", x23::show(status.error().code()));
     }
   }
-  assert(status.value() != SyscallErrorCode::kSyscallErrorCodeNone);
-  return std::format("Syscall Error: {}", x23::show(status.value()));
+  assert(*status != SyscallErrorCode::kSyscallErrorCodeNone);
+  return std::format("Syscall Error: {}", x23::show(*status));
 }
 
 template<typename T>

@@ -11,6 +11,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -229,9 +230,11 @@ public:
 
   const SnapshotStorageItem &base_item() const
   {
-    assert(base_item_.has_value());
-    assert(base_item_.value());
-    return *base_item_.value(); // NOLINT(bugprone-unchecked-optional-access)
+    CHECK(base_item_.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    CHECK_PTR(*base_item_);
+    return **base_item_;
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
 
 private:

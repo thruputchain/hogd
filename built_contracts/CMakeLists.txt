@@ -8,6 +8,7 @@ add_library(contract_loader
 )
 
 target_link_libraries(contract_loader
+  base
   x23
   protocol
   unified_lib

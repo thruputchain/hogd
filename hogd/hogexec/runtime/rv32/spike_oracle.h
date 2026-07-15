@@ -291,7 +291,7 @@ run_spike_commits(const std::string &binary, const std::vector<uint8_t> &elf,
       const std::optional<SpikeCommit> commit =
           parse_spike_commit(std::string(buf.data()), text_base, code_bytes);
       if (commit.has_value()) {
-        commits.push_back(commit.value());
+        commits.push_back(*commit);
       }
     }
     pclose(pipe);

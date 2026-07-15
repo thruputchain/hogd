@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -19,9 +20,11 @@ struct BootstrapManifestConfig {
   BootstrapAccountConfig bootstrap_config;
 };
 
-// Reads, parses, and validates a bootstrap manifest file.
-// Throws std::runtime_error on any validation failure.
-BootstrapManifestConfig
+// Reads, parses, and validates a bootstrap manifest file. On any failure --
+// I/O, JSON syntax, or schema validation -- returns the human-readable
+// diagnostic instead of the config. The message is for display only: callers
+// print it and exit; nothing branches on its text.
+std::expected<BootstrapManifestConfig, std::string>
 load_bootstrap_manifest(std::filesystem::path const &path);
 
 } // namespace hogd
