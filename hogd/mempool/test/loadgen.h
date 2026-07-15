@@ -77,7 +77,7 @@ public:
     constexpr ValidatorID kValidatorId{};
     SchedulerGetTipResult tip_result =
         sched_coord_client.schedcoord_get_tip()();
-    CHECK(tip_result.outcome() == SchedulerGetTipOutcome::SchedulerGetTipOK);
+    CHECK_EQ(tip_result.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip ret = tip_result.db_tip();
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
@@ -89,8 +89,8 @@ public:
       while (num_nominated_txs < init_tx.size()) {
         auto res_propose = sched_coord_client.schedulercoord_propose_block(
             ret.id, ProposalContext{})();
-        CHECK(res_propose.outcome() ==
-              SchedulerProposalOutcome::SchedulerProposalOK);
+        CHECK_EQ(res_propose.outcome(),
+                 SchedulerProposalOutcome::SchedulerProposalOK);
         const SchedulerProposedBlock &proposed = res_propose.proposed_block();
         {
           SignedTransactionBatch proposed_txs;
@@ -101,9 +101,9 @@ public:
         ConsensusValue value{};
         value.proposal_header = proposed.proposal.header;
         value.proposal_txs_hash = sha256(proposed.proposal.transactions);
-        CHECK(sched_coord_client.schedulercoord_commit_block(proposed.block_id,
-                                                             value)() ==
-              SchedulerCommitOutcome::SchedulerCommitOK);
+        CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
+                     proposed.block_id, value)(),
+                 SchedulerCommitOutcome::SchedulerCommitOK);
         ret = {.id = proposed.block_id,
                .storage_long_hash = {},
                .value = value};
@@ -180,8 +180,8 @@ public:
           sched_coord_client_.schedulercoord_submit_vetted(kValidatorId, txs);
 
       SchedulerProposalResult res_propose = co_await propose_handle;
-      CHECK(res_propose.outcome() ==
-            SchedulerProposalOutcome::SchedulerProposalOK);
+      CHECK_EQ(res_propose.outcome(),
+               SchedulerProposalOutcome::SchedulerProposalOK);
       const SchedulerProposedBlock &proposed = res_propose.proposed_block();
       ConsensusValue value{};
       value.proposal_header = proposed.proposal.header;
