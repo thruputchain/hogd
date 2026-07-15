@@ -35,7 +35,9 @@ domain_separator_cxs()
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
     domain_separator_cxs<"PubkeyAccount">();
 
-inline ContractAddress pubkey_auth_address(PubkeyAccountPreimage const& preimage) {
+inline ContractAddress
+pubkey_auth_address(PubkeyAccountPreimage const &preimage)
+{
   SHA256Hasher hasher;
   hasher.update(kPubkeyAuthDomainSeparatorCxs);
   auto status = x23::serialize_cxs(preimage);
