@@ -17,10 +17,10 @@ namespace hogd {
 
 TEST(DomainSeparators, PubkeyAuthCxs)
 {
-  constexpr std::array<uint8_t, 15> expected{
+  constexpr std::array<uint8_t, 15> kExpected{
       0, 13, 'P', 'u', 'b', 'k', 'e', 'y', 'A', 'c', 'c', 'o', 'u', 'n', 't',
   };
-  static_assert(kPubkeyAuthDomainSeparatorCxs == expected);
+  static_assert(kPubkeyAuthDomainSeparatorCxs == kExpected);
 }
 
 TEST(SHA256, BasicUsage)

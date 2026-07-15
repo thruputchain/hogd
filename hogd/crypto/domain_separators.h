@@ -26,8 +26,8 @@ template<StringLiteral Name>
 consteval auto
 domain_separator_cxs()
 {
-  return x23::serialize_cxs_array<x23::cxs_size(make_domain_separator(Name.buf))>(
-      make_domain_separator(Name.buf));
+  return x23::serialize_cxs_array<x23::cxs_size(
+      make_domain_separator(Name.buf))>(make_domain_separator(Name.buf));
 }
 
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
