@@ -76,7 +76,9 @@ TEST(NetworkHashTest, ParsesAndFormatsCanonicalHex)
                                      "101112131415161718191a1b1c1d1e1f";
   const auto hash = parse_network_hash(kText);
   ASSERT_TRUE(hash.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(format_network_hash(hash.value()), kText);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(NetworkHashTest, RejectsNonCanonicalLengthsAndInvalidHex)
