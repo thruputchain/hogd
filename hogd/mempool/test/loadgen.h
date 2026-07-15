@@ -37,8 +37,7 @@ public:
     // Parse the loadgen address.
     x23::HostPort host_port;
     if (!host_port.parse(loadgen_address)) {
-      throw std::runtime_error(
-          std::format("Invalid loadgen address: {}", loadgen_address));
+      panic("Invalid loadgen address: {}", loadgen_address);
     }
 
     // Connect to the loadgen server.

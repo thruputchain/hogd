@@ -6,7 +6,6 @@
 #include <expected>
 #include <optional>
 #include <random>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -351,7 +350,7 @@ InvokeTX::release_savepoint(int depth)
     vec.push_back(std::move(tmp));
   }
 
-  throw std::runtime_error("not implemented releasing balance versions");
+  panic("not implemented releasing balance versions");
 }
 
 void
