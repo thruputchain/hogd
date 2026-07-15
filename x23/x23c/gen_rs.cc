@@ -545,7 +545,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
     }
 
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
+    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
       prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
@@ -743,7 +743,7 @@ GenRs::show_type(const EnumBody &e, string const &tname)
 {
   prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
   prtop("{}\n", feature_attr("serde", "serde(transparent)"));
-  prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
+  prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
   prtop("{}\n", feature_attr("spec", "derive(XDR)"));
   prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
@@ -885,7 +885,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   {
     prtop("{}\n", kDefaultDerives);
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
+    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
     prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
