@@ -7,10 +7,10 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 
-#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -47,6 +47,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {

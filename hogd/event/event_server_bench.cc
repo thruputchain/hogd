@@ -19,6 +19,7 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"

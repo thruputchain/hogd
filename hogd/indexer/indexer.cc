@@ -4,6 +4,7 @@
 #include <future>
 #include <print>
 #include <string>
+#include <utility>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
