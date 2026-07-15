@@ -12,6 +12,7 @@
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -29,6 +30,7 @@
 #include "hogd/mempool/test/txs.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "parallel.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -907,8 +909,15 @@ TEST(Mempool, ValidateEmpty)
 
   MempoolTestInfra server;
 
+  const SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  Proposal proposal{};
+  proposal.header.block_height =
+      get_tip.db_tip().value.proposal_header.block_height + 1;
   auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
-      std::numeric_limits<BlockID>::max(), Proposal{})();
+      get_tip.db_tip().id, std::move(proposal))();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }

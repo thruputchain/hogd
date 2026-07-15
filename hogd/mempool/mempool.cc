@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
@@ -26,6 +27,7 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/metrics/shared.h"
+#include "types.hh"
 
 namespace hogd {
 

@@ -72,11 +72,11 @@ TEST(StringTest, DecodeHexOddLengthDeath)
 
 TEST(NetworkHashTest, ParsesAndFormatsCanonicalHex)
 {
-  constexpr std::string_view text = "000102030405060708090a0b0c0d0e0f"
-                                    "101112131415161718191a1b1c1d1e1f";
-  std::optional<NetworkHash> hash = parse_network_hash(text);
+  constexpr std::string_view kText = "000102030405060708090a0b0c0d0e0f"
+                                     "101112131415161718191a1b1c1d1e1f";
+  const auto hash = parse_network_hash(kText);
   ASSERT_TRUE(hash.has_value());
-  EXPECT_EQ(format_network_hash(*hash), text);
+  EXPECT_EQ(format_network_hash(hash.value()), kText);
 }
 
 TEST(NetworkHashTest, RejectsNonCanonicalLengthsAndInvalidHex)

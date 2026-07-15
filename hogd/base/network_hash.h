@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -32,7 +34,7 @@ parse_network_hash(std::string_view text)
   NetworkHash hash{};
   for (size_t i = 0; i < hash.size(); ++i) {
     const std::optional<uint8_t> high = hex_value(text[i * 2]);
-    const std::optional<uint8_t> low = hex_value(text[i * 2 + 1]);
+    const std::optional<uint8_t> low = hex_value(text[(i * 2) + 1]);
     if (!high || !low) {
       return std::nullopt;
     }

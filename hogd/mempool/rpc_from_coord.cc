@@ -13,7 +13,6 @@
 #include <ios>
 #include <iterator>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <unordered_set>
