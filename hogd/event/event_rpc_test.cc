@@ -93,8 +93,9 @@ TEST_F(EventRpcTest, IndexerIntroProtocolMismatchIsRejectedNotAborted)
   const IndexerCard card{.protocol = "definitely-not-the-hogd-protocol",
                          .address_for_event = "127.0.0.1:1"};
 
-  indexer_rpc.event_indexer_intro(card)();
-  SUCCEED();
+  const EventIndexerIntroOutcome outcome =
+      indexer_rpc.event_indexer_intro(card)();
+  EXPECT_EQ(outcome, EventIndexerIntroOutcome::EventIntroMismatchedProtocol);
 }
 
 TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)

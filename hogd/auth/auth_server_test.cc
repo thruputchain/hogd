@@ -369,7 +369,7 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   RpcServer<BlockingIntroDBAuthRpc> db_server;
   const uint16_t db_port = db_server.start_server(0);
   const std::string db_address = std::format("localhost:{}", db_port);
-  dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
+  dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
   AuthServer race_auth_server(std::move(dbauth_client), 16);
 
   AuthCard auth_card{.protocol = {},
@@ -460,7 +460,7 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   RpcServer<SimpleDBAuthRpc> db_server(kIntroHeight);
   uint16_t port = db_server.start_server(0);
   std::string db_address = std::format("localhost:{}", port);
-  dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
+  dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
   AuthServer auth_server(std::move(dbauth_client), 16);
 
   std::atomic<bool> lookup_started = false;

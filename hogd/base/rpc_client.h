@@ -3,13 +3,13 @@
 #include <chrono>
 #include <expected>
 #include <format>
-#include <stdexcept>
 #include <sys/socket.h>
 #include <system_error>
 #include <thread>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -23,8 +23,11 @@
 namespace hogd {
 
 template<typename RpcService>
-x23::Async<typename RpcService::template client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
+using rpc_client_t = typename RpcService::template client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+template<typename RpcService>
+x23::Async<hogd::ErrnoStatus<rpc_client_t<RpcService>>>
 // This function creates a coroutine, so be careful to only pass parameters by
 // reference if you know their lifetime will outlast the coroutine.
 make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
@@ -41,10 +44,7 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
       }
       error("could not create RPC client on {}: {}", x23::show_ipaddr(ss),
             res.error().error_code().message());
-      throw std::runtime_error(
-          std::format("could not create RPC client on {}: {}",
-                      x23::show_ipaddr(ss),
-                      res.error().error_code().message()));
+      co_return std::unexpected(res.error());
     }
     x23::UniqueFd fd = x23::UniqueFd(*res);
 

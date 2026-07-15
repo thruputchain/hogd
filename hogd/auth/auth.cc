@@ -43,8 +43,12 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
     panic("Invalid mempool address: {}", mempool_address);
   }
 
-  sched_auth_client_t mempool_client =
+  auto mempool_client_res =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
+  if (!mempool_client_res)
+    panic("auth connect to mempool failed: {}",
+          mempool_client_res.error().error_code().message());
+  sched_auth_client_t mempool_client = std::move(*mempool_client_res);
 
   RpcServer<AuthDBRpc> auth_db_rpc;
   auth_db_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
@@ -75,7 +79,11 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   }
   ShardCard &shard = intro.shards()[0];
   const std::string address_for_auth = shard.address_for_auth.c_str();
-  dbauth_client_t dbauth_client = make_dbauth_client(address_for_auth)();
+  auto dbauth_res = make_dbauth_client(address_for_auth)();
+  if (!dbauth_res)
+    panic("auth connect to dbauth failed: {}",
+          dbauth_res.error().error_code().message());
+  dbauth_client_t dbauth_client = std::move(*dbauth_res);
   AuthServer auth_server(std::move(dbauth_client));
 
   auth_server.set_mempool_client(std::move(mempool_client));

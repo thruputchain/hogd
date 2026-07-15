@@ -317,7 +317,8 @@ private:
 
   void register_db_with_mempool()
   {
-    auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
+    auto client =
+        create_client<SchedDb1>(kAddress, sched_db_server_.port())().value();
     std::string exec_address =
         make_address(kAddress, db_executor_server_->port());
     std::string sched_address =
@@ -333,7 +334,8 @@ private:
   void register_event_with_mempool()
   {
     auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
-                                             sched_event_server_.port())();
+                                             sched_event_server_.port())()
+                      .value();
     auto r = client.schedevent_intro_event(
         {.protocol = version::kHogdProtocol(),
          .upid = {},
@@ -347,7 +349,8 @@ private:
   void register_auth_with_mempool()
   {
     sched_auth_client_t client =
-        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
+        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())()
+            .value();
     AuthCard auth_card = {
         .protocol = version::kHogdProtocol(),
         .upid = {},
@@ -370,9 +373,9 @@ private:
 
   x23::Async<void> register_coordinator_with_mempool()
   {
-    auto client =
-        create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
-                                       mempool_coord_server_.port())();
+    auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                                 mempool_coord_server_.port())()
+                      .value();
     std::string coord_address =
         make_address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol(),

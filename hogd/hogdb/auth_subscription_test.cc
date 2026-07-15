@@ -7,8 +7,13 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
+
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -19,6 +24,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -41,6 +47,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -749,5 +756,33 @@ TEST_F(AuthSubscriptionTest, SchedRpcRejectsFutureAuthRowBeforeTipUpdate)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+// Regression test for the -fno-exceptions migration: make_rpc_client must
+// return an error value (not throw) when the TCP connect fails. Added after the
+// behavior change landed, so it verifies rather than drives that change.
+TEST(MakeRpcClientTest, ConnectionRefusedReturnsUnexpected)
+{
+  // Reserve a loopback port, then release it so nothing is listening there;
+  // connecting to it is a deterministic ECONNREFUSED.
+  int probe = ::socket(AF_INET, SOCK_STREAM, 0);
+  ASSERT_GE(probe, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  ASSERT_EQ(::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)),
+            0);
+  socklen_t len = sizeof(addr);
+  ASSERT_EQ(::getsockname(probe, reinterpret_cast<sockaddr *>(&addr), &len), 0);
+  const uint16_t port = ntohs(addr.sin_port);
+  ASSERT_EQ(::close(probe), 0);
+
+  x23::HostPort host_port{"127.0.0.1", port};
+  ErrnoStatus<rpc_client_t<AuthDB1>> result =
+      make_rpc_client<AuthDB1>(host_port, /*retry=*/false)();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().error_code(), std::errc::connection_refused);
+}
 
 } // namespace hogd
