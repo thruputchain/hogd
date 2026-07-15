@@ -356,11 +356,11 @@ Gen::show_type(const StructBody &s, string t)
   top_ += '\n';
   prtop("bool operator==(const {} &) const noexcept = default;\n", t);
   if (scopes_.size() > 1) {
-    prtop("friend auto\n");
+    prtop("friend constexpr auto\n");
     prtop("operator<=>(const {0} &, const {0} &) noexcept;\n", t);
   }
   else {
-    prtop("friend std::partial_ordering\n");
+    prtop("friend constexpr std::partial_ordering\n");
     prtop("operator<=> (const {0} &, const {0} &) noexcept;\n", t);
   }
 
@@ -420,7 +420,7 @@ struct x23::xdr_meta<struct {1}> {{
     bottom_ += format("\nnamespace {} {{\n", ns());
 
   bottom_ +=
-      std::format(R"(inline {1}
+      std::format(R"(constexpr {1}
 operator<=>(const struct {0} &a, const struct {0} &b) noexcept
 {{
   return x23::xdr_cmp(a, b);
@@ -454,17 +454,17 @@ Gen::show_type(const UnionBody &b, string t)
   }
   prtop("constexpr {0}() noexcept : {0}({1}) {{}}\n", t, first_case);
   prtop("constexpr explicit {0}({1}) noexcept;\n", t, switch_type);
-  prtop("inline {0}({0} &&) noexcept;\n", t);
-  prtop("inline {0}(const {0} &);\n", t);
+  prtop("constexpr {0}({0} &&) noexcept;\n", t);
+  prtop("constexpr {0}(const {0} &);\n", t);
   prtop("constexpr ~{0}();\n", t);
-  prtop("inline {0} &operator=({0} &&other) noexcept;\n", t);
-  prtop("inline {0} &operator=(const {0} &other);\n", t);
+  prtop("constexpr {0} &operator=({0} &&other) noexcept;\n", t);
+  prtop("constexpr {0} &operator=(const {0} &other);\n", t);
   top_ += '\n';
   prtop("// get and set discriminant\n");
   prtop("constexpr {0} {1}() const noexcept "
         "{{ return __xdr_union_field_{1}; }}\n",
         switch_type, b.switch_id);
-  prtop("inline {2} &{1}({0}) noexcept;\n", switch_type, b.switch_id, t);
+  prtop("constexpr {2} &{1}({0}) noexcept;\n", switch_type, b.switch_id, t);
   top_ += '\n';
 
   bool has_default = false;
@@ -510,7 +510,8 @@ Gen::show_type(const UnionBody &b, string t)
       }
     info.type_suffix = tname.substr(info.type_prefix.size());
 
-    prtop("template<typename Self> decltype(auto) {}(this Self &&self)\n",
+    prtop("template<typename Self> constexpr decltype(auto) {}(this Self "
+          "&&self)\n",
           a.decl.id);
     prtop("{{\n");
     prtop("  return get<{}>(std::forward<Self>(self));\n", num_non_void);
@@ -519,8 +520,11 @@ Gen::show_type(const UnionBody &b, string t)
   }
   if (num_non_void)
     top_ += '\n';
-  prtop("friend bool operator==(const {0} &, const {0} &) noexcept;\n", t);
-  prtop("friend {}\n", scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
+  prtop(
+      "friend constexpr bool operator==(const {0} &, const {0} &) noexcept;\n",
+      t);
+  prtop("friend constexpr {}\n",
+        scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
   prtop("operator<=>(const {0} &, const {0} &) noexcept;\n", t);
   // Note __xdr_union_arm_number is used by the gdb python scripts to
   // print the active arm.  We tag it gnu::used so it doesn't get
@@ -636,13 +640,13 @@ constexpr auto
   using ops = x23::union_ops<struct {0}>;
   ops::construct(*this, d);
 }}
-inline
+constexpr
 {1}::{0}({0} &&other) noexcept
 {{
   using ops = x23::union_ops<struct {0}>;
   ops::construct(*this, std::move(other));
 }}
-inline
+constexpr
 {1}::{0}(const {0} &other)
 {{
   using ops = x23::union_ops<struct {0}>;
@@ -654,21 +658,21 @@ constexpr
   using ops = x23::union_ops<struct {0}>;
   ops::destroy(*this);
 }}
-inline struct {1} &
+constexpr struct {1} &
 {1}::operator=(struct {1} &&other) noexcept
 {{
   using ops = x23::union_ops<struct {0}>;
   ops::assign(*this, std::move(other));
   return *this;
 }}
-inline struct {1} &
+constexpr struct {1} &
 {1}::operator=(const struct {1} &other)
 {{
   using ops = x23::union_ops<struct {0}>;
   ops::assign(*this, other);
   return *this;
 }}
-inline struct {1} &
+constexpr struct {1} &
 {1}::{3}({2} d) noexcept
 {{
   using ops = x23::union_ops<struct {0}>;
@@ -686,12 +690,12 @@ get(U &&u)
   else
     return ops::get<I>(std::forward<U>(u));
 }}
-inline bool
+constexpr bool
 operator==(const struct {1} &a, const struct {1} &b) noexcept
 {{
   return x23::union_ops<struct {1}>::eq(a, b);
 }}
-inline {5}
+constexpr {5}
 operator<=>(const struct {1} &a, const struct {1} &b) noexcept
 {{
   return x23::union_ops<struct {1}>::cmp(a, b);

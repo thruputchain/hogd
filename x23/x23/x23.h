@@ -446,7 +446,7 @@ public:
     return u.*fieldptr<0>();
   }
 
-  static void set_discriminant(union_type &u, discriminant_type d)
+  static constexpr void set_discriminant(union_type &u, discriminant_type d)
   {
     // Deliberately not optimizing for the case where the active arm
     // doesn't change, because when it occurs by accident that could
@@ -458,7 +458,7 @@ public:
   // Get a particular field by number.  Uses a template argument U to
   // preserive const and lvalue/rvalue reference status of u.
   template<size_t I, references<union_type> U> requires (I < union_size)
-  static decltype(auto) get(U &&u)
+  static constexpr decltype(auto) get(U &&u)
   {
     if (int n = index(u); n < 0)
       throw XdrBadUnionAccess(
@@ -479,7 +479,7 @@ public:
       I == 0, discriminant_type,
       std::remove_reference_t<decltype(get<I>(std::declval<union_type>()))>>;
 
-  static bool eq(const union_type &a, const union_type &b) noexcept
+  static constexpr bool eq(const union_type &a, const union_type &b) noexcept
   {
     discriminant_type d = get_discriminant(a);
     if (d != get_discriminant(b))
@@ -492,7 +492,7 @@ public:
       });
   }
 
-  static auto cmp(const union_type &a, const union_type &b) noexcept
+  static constexpr auto cmp(const union_type &a, const union_type &b) noexcept
   {
     using return_type = decltype([]<size_t... I>(std::index_sequence<I...>) {
       return common_twc_result<union_element_t<I>...>{0 <=> 0};
@@ -525,7 +525,8 @@ private:
   }
 
   template<typename... Args>
-  constexpr static void construct(union_type &u, discriminant_type d, Args &&...args)
+  constexpr static void construct(union_type &u, discriminant_type d,
+                                  Args &&...args)
       // We depend on value initialization (no args) being noexcept to
       // recover from exceptions in copy assignment.
       noexcept(sizeof...(Args) == 0)
@@ -551,7 +552,7 @@ private:
   template<int I, typename... Args>
   requires (I < union_size) &&
            std::constructible_from<union_element_t<I>, Args...>
-  static void do_construct(union_type &u, Args &&...args)
+  static constexpr void do_construct(union_type &u, Args &&...args)
       noexcept(sizeof...(Args) == 0 ||
                noexcept(union_element_t<I>(std::forward<Args>(args)...)))
   {
@@ -560,7 +561,7 @@ private:
   }
 
   template<references<union_type> U>
-  static void construct(union_type &u, U &&other)
+  static constexpr void construct(union_type &u, U &&other)
   {
     discriminant_type d = get_discriminant(other);
     if (int n = index(d); n > 0)
@@ -572,7 +573,7 @@ private:
   }
 
   template<references<union_type> U>
-  static void assign(union_type &u, U &&other)
+  static constexpr void assign(union_type &u, U &&other)
   {
     discriminant_type d = get_discriminant(other);
     int n = index(d);
@@ -606,7 +607,7 @@ private:
 // setting the union requires additional logic for changing the active
 // arm, we need a different function.
 template<is_xdr_union U>
-inline void
+constexpr inline void
 union_set_discriminant(U &u, typename xdr_meta<U>::discriminant_type d)
 {
   union_ops<U>::set_discriminant(u, d);
@@ -699,7 +700,7 @@ xdr_type_name()
 }
 
 template<is_xdr_struct T>
-inline auto
+constexpr inline auto
 xdr_cmp(const T &a, const T &b)
 {
   return [&a, &b]<size_t... I>(std::index_sequence<I...>) {

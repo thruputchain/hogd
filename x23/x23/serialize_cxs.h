@@ -271,7 +271,14 @@ store_cxs_int_extra_bytes(x23::Buf &buf, int64_t value)
   size_t offset = buf.size();
   buf.resize_uninitialized(offset + 1 + N);
   buf[offset] = lookup_header_byte<N>();
-  std::memcpy(buf.data() + offset + 1, &value, N);
+  if consteval {
+    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(value)>>(value);
+    for (size_t i = 0; i < N; ++i)
+      buf[offset + 1 + i] = bytes[i];
+  }
+  else {
+    std::memcpy(buf.data() + offset + 1, &value, N);
+  }
 }
 
 template<std::signed_integral T>
@@ -314,7 +321,14 @@ store_cxs_uint_extra_bytes(x23::Buf &buf, uint64_t value)
   size_t offset = buf.size();
   buf.resize_uninitialized(offset + 1 + N);
   buf[offset] = lookup_header_byte<N>();
-  std::memcpy(buf.data() + offset + 1, &value, N);
+  if consteval {
+    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(value)>>(value);
+    for (size_t i = 0; i < N; ++i)
+      buf[offset + 1 + i] = bytes[i];
+  }
+  else {
+    std::memcpy(buf.data() + offset + 1, &value, N);
+  }
 }
 
 template<std::unsigned_integral T>
@@ -670,8 +684,7 @@ cxs_size(const T &x)
     return size;
   }
   else if constexpr (is_xdr_cat<X, kPtr>)
-    return cxs_size(bool{x.get() != nullptr}) +
-           (x.get() ? cxs_size(*x) : 0UZ);
+    return cxs_size(bool{x.get() != nullptr}) + (x.get() ? cxs_size(*x) : 0UZ);
   else if constexpr (is_xdr_union<X>)
     return cxs_size(get<0>(x)) +
            union_visit_arm([](const auto &a) { return cxs_size(a); }, x, 0UZ);
@@ -685,7 +698,8 @@ cxs_size(const T &x)
 }
 
 // Serialize a concrete value into an array sized to its exact CXS encoding.
-// N must equal cxs_size(value); call as serialize_cxs_array<cxs_size(obj)>(obj).
+// N must equal cxs_size(value); call as
+// serialize_cxs_array<cxs_size(obj)>(obj).
 template<size_t N, is_xdr_type T>
 consteval std::array<std::uint8_t, N>
 serialize_cxs_array(const T &value)
