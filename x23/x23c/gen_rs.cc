@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <format>
 #include <iterator>
@@ -11,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -41,9 +43,31 @@ struct GenRs {
 
   void show_def(const Definition &d)
   {
-    show_comment(d.comment, true);
+    // const traits are still unstable in Rust, so ConstWriteXDR is opt-in per
+    // type via a #[rust(ConstWriteXDR)] comment marker rather than derived on
+    // everything.  Strip the marker here and thread the resulting flag down to
+    // the type-defining overloads.
+    string comment = d.comment;
+    bool const_write_xdr = false;
+    if (optional<string> stripped = line_removed(comment, kConstWriteXDR)) {
+      comment = std::move(*stripped);
+      const_write_xdr = true;
+    }
+    show_comment(comment, true);
     prtop("\n");
-    visit([this](const auto &d) { show_def(d); }, d);
+    visit(
+        [this, const_write_xdr](const auto &def) {
+          using T = std::decay_t<decltype(def)>;
+          if constexpr (std::same_as<T, EnumDecl> ||
+                        std::same_as<T, StructDecl> ||
+                        std::same_as<T, UnionDecl>) {
+            show_def(def, const_write_xdr);
+          }
+          else {
+            show_def(def);
+          }
+        },
+        d);
   }
   void show_def(const ConstDef &c)
   {
@@ -70,19 +94,19 @@ struct GenRs {
   {
     prtop("pub type {} = {};\n", d.id, type_name(d, true, true));
   }
-  void show_def(const EnumDecl &t)
+  void show_def(const EnumDecl &t, bool const_write_xdr)
   {
-    show_typespec(t.body, t.id);
+    show_typespec(t.body, t.id, const_write_xdr);
     prtop("\n");
   }
-  void show_def(const StructDecl &t)
+  void show_def(const StructDecl &t, bool const_write_xdr)
   {
-    show_typespec(t.body, t.id);
+    show_typespec(t.body, t.id, const_write_xdr);
     prtop("\n");
   }
-  void show_def(const UnionDecl &t)
+  void show_def(const UnionDecl &t, bool const_write_xdr)
   {
-    show_typespec(t.body, t.id);
+    show_typespec(t.body, t.id, const_write_xdr);
     prtop("\n");
   }
   void show_def(const OpenNS &ns)
@@ -140,20 +164,25 @@ struct GenRs {
     }
   }
 
-  void do_generations(std::string name_prefix, const TypeSpecifier &type);
+  void do_generations(std::string name_prefix, const TypeSpecifier &type,
+                      bool const_write_xdr);
 
-  void show_typespec(const TypeSpecifier &ts, string t)
+  void show_typespec(const TypeSpecifier &ts, string t, bool const_write_xdr)
   {
-    visit([this, &t](const auto &v) { show_type(v, t); }, ts);
+    visit([this, &t, const_write_xdr](const auto &v) {
+      show_type(v, t, const_write_xdr);
+    },
+          ts);
   }
 
-  void show_type(const string &s, string const & /*unused*/)
+  void show_type(const string &s, string const & /*unused*/,
+                 bool /*const_write_xdr*/)
   {
     prtop("{}", map_type(s));
   }
-  void show_type(const EnumBody &e, string const &tname);
-  void show_type(const StructBody &s, string const &tname);
-  void show_type(const UnionBody &b, string const &tname);
+  void show_type(const EnumBody &e, string const &tname, bool const_write_xdr);
+  void show_type(const StructBody &s, string const &tname, bool const_write_xdr);
+  void show_type(const UnionBody &b, string const &tname, bool const_write_xdr);
 
   void show_comment(std::string comment, bool chomp, string prefix = {});
 
@@ -237,6 +266,17 @@ struct GenRs {
     return std::format("#[cfg_attr(feature = \"{}\", {})]", feature, attr);
   }
 
+  // The xdrs-feature derive list.  ConstXDRSize is always safe to derive, but
+  // ConstWriteXDR relies on const traits (still unstable), so it is only
+  // emitted for types opted in via a #[rust(ConstWriteXDR)] comment marker.
+  string xdrs_derive_attr(bool const_write_xdr)
+  {
+    return feature_attr(
+        "xdrs", const_write_xdr
+                    ? "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"
+                    : "derive(ReadXDR, WriteXDR, ConstXDRSize)");
+  }
+
   string cfg(const std::string &feature, const std::string &value)
   {
     if (rust_features.contains(feature)) {
@@ -260,12 +300,33 @@ struct GenRs {
     return {};
   }
 
+  // Remove the whole comment line carrying `sub` (its leading whitespace, the
+  // // prefix, and the trailing newline), returning nullopt if absent.  Unlike
+  // substring_removed this leaves no empty "//" residue when a type-level
+  // marker sits on its own comment line.  The marker is expected on its own
+  // line; any text sharing the line is removed with it.
+  static optional<string> line_removed(std::string_view str,
+                                       const string_view sub)
+  {
+    string::size_type i = str.find(sub);
+    if (i == string::npos)
+      return {};
+    string::size_type line_start = str.rfind('\n', i);
+    line_start = (line_start == string::npos) ? 0 : line_start + 1;
+    string::size_type nl = str.find('\n', i);
+    string::size_type line_end = (nl == string::npos) ? str.size() : nl + 1;
+    string str2 = string{str};
+    str2.erase(line_start, line_end - line_start);
+    return str2;
+  }
+
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
   static constexpr string_view kSerdeArrays =
       R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
+  static constexpr string_view kConstWriteXDR = R"(#[rust(ConstWriteXDR)])";
   static constexpr string_view kDocHidden = R"(#[doc(hidden)])";
   static constexpr string_view kDefaultDerives =
       R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
@@ -512,10 +573,10 @@ GenRs::show_def(const ProgDef &prog)
 }
 
 void
-GenRs::show_type(const StructBody &s, string const &tname)
+GenRs::show_type(const StructBody &s, string const &tname, bool const_write_xdr)
 {
   for (const auto &d : s) {
-    do_generations(tname + "_" + d.id, d.type);
+    do_generations(tname + "_" + d.id, d.type, const_write_xdr);
   }
 
   {
@@ -545,7 +606,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
     }
 
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
+    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
       prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
@@ -739,11 +800,11 @@ impl {0} {{
 }
 
 void
-GenRs::show_type(const EnumBody &e, string const &tname)
+GenRs::show_type(const EnumBody &e, string const &tname, bool const_write_xdr)
 {
   prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
   prtop("{}\n", feature_attr("serde", "serde(transparent)"));
-  prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
+  prtop("{}\n", xdrs_derive_attr(const_write_xdr));
   prtop("{}\n", feature_attr("spec", "derive(XDR)"));
   prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
@@ -807,11 +868,11 @@ pub struct {}(pub i32);
 }
 
 void
-GenRs::show_type(const UnionBody &b, string const &tname)
+GenRs::show_type(const UnionBody &b, string const &tname, bool const_write_xdr)
 {
   for (const auto &a : b.arms) {
     auto const &d = a.decl;
-    do_generations(tname + "_" + d.id, d.type);
+    do_generations(tname + "_" + d.id, d.type, const_write_xdr);
   }
 
   std::string default_decl;
@@ -885,7 +946,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   {
     prtop("{}\n", kDefaultDerives);
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR, ConstWriteXDR, ConstXDRSize)"));
+    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
     prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
@@ -1108,12 +1169,13 @@ GenRs::escape_rust_id(const string &id)
 }
 
 void
-GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
+GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type,
+                      bool const_write_xdr)
 {
   if (holds_alternative<string>(type)) {
     return;
   }
-  show_typespec(type, std::move(name_prefix));
+  show_typespec(type, std::move(name_prefix), const_write_xdr);
   top_ += "\n\n";
 }
 
@@ -1144,7 +1206,9 @@ GenRs::type_name(const Declaration &d, bool generate,
   else {
     tname = d.id;
     if (generate) {
-      show_typespec(d.type, d.id);
+      // Inline types generated from a typedef alias; ConstWriteXDR is opt-in
+      // on top-level struct/union/enum declarations, not typedef inline types.
+      show_typespec(d.type, d.id, /*const_write_xdr=*/false);
     }
   }
 
