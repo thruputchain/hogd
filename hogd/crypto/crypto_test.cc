@@ -8,11 +8,20 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/crypto/lthash16.h"
 #include "hogd/init.h"
 #include "types.hh"
 
 namespace hogd {
+
+TEST(DomainSeparators, PubkeyAuthCxs)
+{
+  constexpr std::array<uint8_t, 15> kExpected{
+      0, 13, 'P', 'u', 'b', 'k', 'e', 'y', 'A', 'c', 'c', 'o', 'u', 'n', 't',
+  };
+  static_assert(kPubkeyAuthDomainSeparatorCxs == kExpected);
+}
 
 TEST(SHA256, BasicUsage)
 {

@@ -22,6 +22,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
@@ -41,6 +42,11 @@
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
+
+// clang-tidy's dataflow does not treat ASSERT_TRUE(x.has_value()) as a guard,
+// so it flags the subsequent unchecked *x. These tests only dereference
+// optionals after asserting presence; suppress the check file-wide.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 namespace hogd {
 
@@ -632,8 +638,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -758,8 +767,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -3914,3 +3926,5 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
 }
 
 } // namespace hogd
+
+// NOLINTEND(bugprone-unchecked-optional-access)

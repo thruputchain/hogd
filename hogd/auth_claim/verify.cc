@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -210,7 +212,13 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
     warn("Unsupported cryptographic scheme: {}", preimage.pubkey.scheme());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (sha256(preimage) != invoked_address) {
+  std::optional<ContractAddress> derived_address =
+      pubkey_auth_address(preimage);
+  if (!derived_address.has_value()) {
+    trace("Auth malformed: failed to serialize pubkey preimage");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (*derived_address != invoked_address) {
     trace("Auth malformed: pubkey preimage hash does not match the invoked "
           "address");
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};

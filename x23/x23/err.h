@@ -34,7 +34,8 @@ public:
   // clang21 formats this as &self, instead of & self in clang20
   template<typename Self, typename T, typename E>
   requires std::convertible_to<Self, E>
-  [[nodiscard]] operator std::expected<T, E>(this const Self &self) noexcept
+  [[nodiscard]] constexpr
+  operator std::expected<T, E>(this const Self &self) noexcept
   {
     return std::unexpected(self);
   }

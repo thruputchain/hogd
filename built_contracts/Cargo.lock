@@ -43,7 +43,7 @@ dependencies = [
 [[package]]
 name = "bottle-test-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "sdk",
 ]
@@ -303,8 +303,8 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "erc20-native-test"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "erc20-test",
  "groundhog-erc20-if",
@@ -315,8 +315,8 @@ dependencies = [
 
 [[package]]
 name = "erc20-test"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-erc20-if",
  "sdk",
@@ -406,8 +406,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-spec"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-spec",
  "groundhog-xdr",
@@ -418,8 +418,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-util"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-xdr",
  "sha2 0.11.0",
@@ -428,8 +428,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-erc1271-if"
-version = "0.1.4"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.1.5"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "sdk",
  "thiserror",
@@ -437,8 +437,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-erc20-if"
-version = "0.1.4"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.1.5"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-xdr",
  "sdk",
@@ -447,8 +447,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-event"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -456,8 +456,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-macros"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "darling",
  "groundhog-contract-util",
@@ -470,8 +470,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-native-exec"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-event",
  "groundhog-storage-cost",
@@ -486,8 +486,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-rv32-runtime"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 
 [[package]]
 name = "groundhog-serde_arrays"
@@ -500,9 +500,9 @@ dependencies = [
 
 [[package]]
 name = "groundhog-spec"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "793b4ea3b8d13186639aa30b160122174277dc7832c9a9da97b1fbba5d40c5bf"
+checksum = "be068936d5ef1dc18e7c0276dd6f12aa519c4fa0971281ecd63f47f93c484644"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -510,8 +510,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-storage-cost"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -519,8 +519,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-sys"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "fslock",
  "sha2 0.11.0",
@@ -529,15 +529,15 @@ dependencies = [
 
 [[package]]
 name = "groundhog-syscall"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "b6cdc696e5cf833c50275ad241c9d6be15abf91005a349673d72099a3c448694"
+checksum = "1e29e0449afadc18249afa48787502d159fe14836225eb0a7c5694e4cf9ae2a9"
 
 [[package]]
 name = "groundhog-trace"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "71001da2ad106bbd256b12df56a92f50c25b4bfa27ae92cdc4e904264d0b71e9"
+checksum = "36c663eb3f20eee9eb0877bbe1e7619aab566d8fdb029dc962572b32468c4124"
 dependencies = [
  "groundhog-xdr",
  "hogexec-internal",
@@ -558,8 +558,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-wasm-runtime"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-xdr",
  "heapless",
@@ -567,9 +567,9 @@ dependencies = [
 
 [[package]]
 name = "groundhog-xdr"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "f101b70b9d592aa39ee746dec260857cd66fd909e055be3da5a23a586248f258"
+checksum = "dafb029cb56b2d340bd40df5cfb7b66a31cbba58b9f3800cb7cff2bf55255352"
 dependencies = [
  "groundhog-serde_arrays",
  "groundhog-syscall",
@@ -583,9 +583,9 @@ dependencies = [
 
 [[package]]
 name = "groundhog-xdr-macros"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "b36eff8756ce061b543007ef272e949dbfc545c683dc97051c0b6ef982b7a749"
+checksum = "fd7adb7232c469cd921bf05593600c0459b1d35c3c48ca02e809c8d39c60f213"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -648,9 +648,9 @@ checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hogexec-internal"
-version = "0.19.6"
+version = "0.19.8"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "5a1606f573f336ca71792145d8709e16f23c71f0f971e4329f7b4e8e2a1d2c44"
+checksum = "d1f35733adeab5bfcdc5d4dfa5dbf280544fd290c66172e4e015d4cd697b652b"
 dependencies = [
  "xdrs",
 ]
@@ -975,8 +975,8 @@ dependencies = [
 
 [[package]]
 name = "sdk"
-version = "0.17.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#d29908c25981df8aa80b42b1ae3abfbaa56c3047"
+version = "0.17.2"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#ac7e1456878a40b52ecda58ffe3e4a8c93cde224"
 dependencies = [
  "groundhog-contract-spec",
  "groundhog-event",
@@ -1315,9 +1315,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "xdr-common"
-version = "0.7.3"
+version = "0.8.1"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "ed386cc24a5f20a84caa7951af7b6cd378fa42d2c889e0a85164e869663a5492"
+checksum = "70e1031605ad0375d155f80e281b05a93df63269145ddf024d61663dffd1c2be"
 dependencies = [
  "escape-bytes",
  "schemars",
@@ -1325,9 +1325,9 @@ dependencies = [
 
 [[package]]
 name = "xdr-derive"
-version = "0.7.3"
+version = "0.8.1"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "05adc7df3b6d818cf2ff9333944a2a91404dca3f4c63c4cd4d576b4039426169"
+checksum = "119fdb4269d66f98735a26e31eaebbba4e2b686f9d1a368b9c20d09f71611a2b"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1337,9 +1337,9 @@ dependencies = [
 
 [[package]]
 name = "xdr-repr"
-version = "0.7.3"
+version = "0.8.1"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "0ab9353c6500d5cf65c132257b91b9a9045bd89a65037056b11a2e5d5959bd3a"
+checksum = "6ecb1a2aaaed145cc994feeeb86146b9a1d5ec89345c5300f72bd7d48ce7adbb"
 dependencies = [
  "heapless",
  "xdr-common",
@@ -1347,9 +1347,9 @@ dependencies = [
 
 [[package]]
 name = "xdrs"
-version = "0.7.3"
+version = "0.8.1"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "c4c3116ec68cbd70a0e4619855668c6f799f8988f33451741fcdead837c64dde"
+checksum = "1fcab8fdd1c6e26a003f305ef7beeb5516ed2b5c20c7de32b7caac0c7d9b6263"
 dependencies = [
  "heapless",
  "xdr-common",
