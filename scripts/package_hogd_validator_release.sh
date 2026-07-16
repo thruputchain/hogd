@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "usage: $0 <build-dir> <output-dir> [flavor]" >&2
+if [[ $# -lt 2 || $# -gt 4 ]]; then
+  echo "usage: $0 <build-dir> <output-dir> [flavor] [architecture]" >&2
   exit 1
 fi
 
 build_dir=$1
 output_dir=$2
 flavor=${3:-release}
+architecture=${4:-x86_64}
+
+case "$architecture" in
+x86_64 | arm64) ;;
+*)
+  echo "error: unsupported architecture: $architecture" >&2
+  exit 1
+  ;;
+esac
 
 case "$flavor" in
 release)
-  validator_package=hogd-validator-linux-x86_64
-  hog_devnode_package=hog-devnode-linux-x86_64
+  validator_package="hogd-validator-linux-$architecture"
+  hog_devnode_package="hog-devnode-linux-$architecture"
   ;;
 debug)
-  validator_package=hogd-validator-debug-linux-x86_64
-  hog_devnode_package=hog-devnode-debug-linux-x86_64
+  validator_package="hogd-validator-debug-linux-$architecture"
+  hog_devnode_package="hog-devnode-debug-linux-$architecture"
   ;;
 *)
   echo "error: unsupported flavor: $flavor" >&2
