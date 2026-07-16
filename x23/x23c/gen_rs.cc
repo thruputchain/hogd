@@ -169,9 +169,8 @@ struct GenRs {
 
   void show_typespec(const TypeSpecifier &ts, string t, bool const_write_xdr)
   {
-    visit([this, &t, const_write_xdr](const auto &v) {
-      show_type(v, t, const_write_xdr);
-    },
+    visit([this, &t, const_write_xdr](
+              const auto &v) { show_type(v, t, const_write_xdr); },
           ts);
   }
 
@@ -181,7 +180,8 @@ struct GenRs {
     prtop("{}", map_type(s));
   }
   void show_type(const EnumBody &e, string const &tname, bool const_write_xdr);
-  void show_type(const StructBody &s, string const &tname, bool const_write_xdr);
+  void show_type(const StructBody &s, string const &tname,
+                 bool const_write_xdr);
   void show_type(const UnionBody &b, string const &tname, bool const_write_xdr);
 
   void show_comment(std::string comment, bool chomp, string prefix = {});
