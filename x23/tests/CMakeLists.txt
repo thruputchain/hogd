@@ -54,6 +54,9 @@ set_tests_properties(abort_live PROPERTIES TIMEOUT 10)
 add_x23_test(writebuf_fd_poison)
 set_tests_properties(writebuf_fd_poison PROPERTIES TIMEOUT 15)
 
+add_x23_test(writebuf_stale_worker)
+set_tests_properties(writebuf_stale_worker PROPERTIES TIMEOUT 15)
+
 add_x23_test(poll_writer_uaf)
 set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
 
