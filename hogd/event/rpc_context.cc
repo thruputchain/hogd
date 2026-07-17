@@ -25,7 +25,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/debug.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -126,8 +125,15 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
       panic("unreachable");
     }
     context = &it->second;
-    [[maybe_unused]] auto res = context->try_acquire_reference();
-    x23assert(res);
+    // Acquisition fails when the block is already in ARC shutdown -- e.g.
+    // abandoned with executor-held references still outstanding -- which a
+    // close request can legitimately race with or follow. Releasing a
+    // reference we never acquired would drive the shutdown refcount to zero
+    // and destroy the context under the live holders (#3039).
+    if (!context->try_acquire_reference()) {
+      co_await g.reset_and_return(EventError{EventErrorCode::kBadBlockID});
+      panic("unreachable");
+    }
   }
 
   bool success = co_await context->get().await_all_executors_closed();
