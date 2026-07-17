@@ -41,10 +41,15 @@ EventExecRpc::eventexecutor_close_block(BlockID block_id)
     co_return RPCError::kRPCBadBlockID;
   }
 
-  context->executor_close_block();
+  bool ok = context->executor_close_block();
 
   if (context.release_reference()) [[unlikely]] {
     co_await ctx_.gc_context(block_id);
+  }
+
+  if (!ok) {
+    info("eventexecutor_close_block: block_id={} no_open_handle", block_id);
+    co_return RPCError::kRPCBadBlockID;
   }
 
   info("eventexecutor_close_block: block_id={} done", block_id);

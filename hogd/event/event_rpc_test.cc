@@ -558,6 +558,37 @@ TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
   EXPECT_TRUE(close_completed.load());
 }
 
+// An executor close RPC with no matching open must be rejected, not
+// decrement the handle count. Underflowing the (unsigned) count would wedge
+// eventsched_close_block's executor wait forever; a bogus zero-crossing
+// while real handles remain would wake it early, letting the block finish
+// while an executor is still emitting.
+TEST_F(EventRpcTest, ExecutorCloseWithoutOpenIsRejected)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+
+  // No executor handle is open: the close must be rejected cleanly.
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCBadBlockID);
+
+  // The block must remain fully usable afterwards.
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  // A duplicate close after the last handle drained is rejected too.
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCBadBlockID);
+
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(1, 1)().error(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(1)(), RPCError::kRPCNone);
+}
+
 // Regression for #3039: closing a block that was abandoned while a context
 // reference was still outstanding must fail with kBadBlockID. The abandon
 // leaves the context in the map in ARC-shutdown mode (initiate_shutdown()
