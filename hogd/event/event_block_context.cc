@@ -403,7 +403,12 @@ EventBlockContext::executor_close_block()
 {
   uint32_t prev =
       open_executor_handles_.fetch_sub(1, std::memory_order_release);
-  x23assert(prev > 0); // Prevent underflow - detects mismatched open/close
+  // Block ids are never reused, so an unmatched or duplicate close cannot
+  // arise from RPC timing -- it is a bug in the (trusted) executor. CHECK
+  // rather than x23assert: under NDEBUG the unsigned underflow would
+  // silently wedge await_all_executors_closed() -- and with it every
+  // subsequent close of this block -- forever.
+  CHECK(prev > 0);
   if (prev == 1) {
     all_executors_closed_.store(true);
     auto *pool = x23::ThreadPool::get_thread_pool();

@@ -179,6 +179,15 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   }
   auto &context = it->second;
 
+  // An abandon can land between wait_for_executors_closed() releasing its
+  // reference and the lock acquisition above, initiating ARC shutdown while
+  // outstanding references keep the entry in the map. Acquire before any use
+  // of the (then abandoned) context; the reference is handed to the detached
+  // coroutine below, whose final release balances it.
+  if (!context.try_acquire_reference()) {
+    co_return EventError{EventErrorCode::kBadBlockID};
+  }
+
   context.get().set_block_height(block_height);
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
@@ -207,24 +216,27 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   }
   if (ex) {
     co_await file_wait;
+    // The reference acquired above never reaches the detached coroutine on
+    // this path. [it] is still valid: the lock has been held throughout.
+    if (context.release_reference()) {
+      gc_context_internal(it);
+    }
     std::rethrow_exception(ex);
   }
   record_stage(stage_prepare_context_and_async);
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   [](EventRPCContext &event, std::unique_ptr<x23::CoroGuard> g,
-     BlockID block_id, SHA256Hash out_hash,
-     x23::Async<void> file_wait) -> x23::Detached {
+     PerThreadARC<EventBlockContext> *context, BlockID block_id,
+     SHA256Hash out_hash, x23::Async<void> file_wait) -> x23::Detached {
     auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
       pool = &default_threadpool();
     }
     co_await pool->bg();
 
-    auto it = event.event_block_contexts_.find(block_id);
-    CHECK(it != event.event_block_contexts_.end());
-    PerThreadARC<EventBlockContext> *context = &it->second;
-    CHECK(context->try_acquire_reference());
+    // [context]'s reference was acquired by close_block() under [g], which
+    // is still held here, so no abandon has been able to run in between.
     context->get().set_closing();
     g = nullptr;
 
@@ -241,16 +253,18 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
       x23::CoroGuard cg;
       co_await cg(event.lock_);
 
-      it = event.event_block_contexts_.find(block_id);
-      CHECK(it != event.event_block_contexts_.end());
-      bool released = it->second.release_reference();
-      if (released) {
+      // Only the gc path needs the map iterator (gc_context_internal
+      // erases the entry); released is true only when an abandon raced
+      // ahead of this coroutine and initiated shutdown.
+      if (context->release_reference()) {
+        auto it = event.event_block_contexts_.find(block_id);
+        CHECK(it != event.event_block_contexts_.end());
         event.gc_context_internal(it);
       }
     }
     event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
     co_return;
-  }(*this, std::move(g), block_id, out_hash, std::move(file_wait));
+  }(*this, std::move(g), &context, block_id, out_hash, std::move(file_wait));
 
   // We moved [g] into the detached coroutine above, so be sure not to do any
   // work beyond this point which touches a context!

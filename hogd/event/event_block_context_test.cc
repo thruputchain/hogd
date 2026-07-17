@@ -383,8 +383,10 @@ TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
   finish_file(context);
 }
 
-// Note: We have an assertion in executor_close_block() that prevents underflow
-// (calling close without a matching open), but it's not practical to test with
+// Note: executor_close_block() CHECKs against underflow (a close without a
+// matching open), in all build types -- block ids are never reused, so an
+// unmatched close is an executor bug, and a wrapped count would wedge
+// await_all_executors_closed() forever. Not practical to test with
 // EXPECT_DEATH due to destructor assertions conflicting with the death test
 // framework.
 
