@@ -253,10 +253,12 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
       x23::CoroGuard cg;
       co_await cg(event.lock_);
 
-      auto it = event.event_block_contexts_.find(block_id);
-      CHECK(it != event.event_block_contexts_.end());
-      bool released = it->second.release_reference();
-      if (released) {
+      // Only the gc path needs the map iterator (gc_context_internal
+      // erases the entry); released is true only when an abandon raced
+      // ahead of this coroutine and initiated shutdown.
+      if (context->release_reference()) {
+        auto it = event.event_block_contexts_.find(block_id);
+        CHECK(it != event.event_block_contexts_.end());
         event.gc_context_internal(it);
       }
     }
