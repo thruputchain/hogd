@@ -558,6 +558,39 @@ TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
   EXPECT_TRUE(close_completed.load());
 }
 
+// Regression for #3039: closing a block that was abandoned while a context
+// reference was still outstanding must fail with kBadBlockID. The abandon
+// leaves the context in the map in ARC-shutdown mode (initiate_shutdown()
+// cannot destroy it while the reference is live), so close's
+// wait_for_executors_closed() fails to acquire a reference -- it must report
+// that as kBadBlockID, not release a reference it never acquired (which
+// would drop the shutdown refcount to zero and free the context out from
+// under the live holder).
+TEST_F(EventRpcTest, CloseAfterAbandonWithOutstandingReferenceIsRejected)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Models an in-flight executor RPC holding the block's context.
+  auto held_ref = ctx.get_context(1)();
+  ASSERT_TRUE(held_ref);
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(1, 1)().error(),
+            RPCError::kRPCBadBlockID);
+
+  // The held reference is the last owner; release-then-gc, as the executor
+  // RPC handlers do.
+  if (held_ref.release_reference()) {
+    ctx.gc_context(1)();
+  }
+}
+
 // Test that processing multiple blocks recycles EventBlockContext internals.
 // The second block uses the cached trie/buffers from the first.
 TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
