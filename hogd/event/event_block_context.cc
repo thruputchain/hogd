@@ -398,18 +398,17 @@ EventBlockContext::executor_open_block()
   x23assert(all_executors_closed_.load() == false);
 }
 
-bool
+void
 EventBlockContext::executor_close_block()
 {
-  // CAS rather than fetch_sub: an unmatched close (executor bug or duplicate
-  // RPC) must be refused at zero, not allowed to underflow the count.
-  uint32_t prev = open_executor_handles_.load(std::memory_order_acquire);
-  do {
-    if (prev == 0) {
-      return false;
-    }
-  } while (!open_executor_handles_.compare_exchange_weak(
-      prev, prev - 1, std::memory_order_acq_rel, std::memory_order_acquire));
+  uint32_t prev =
+      open_executor_handles_.fetch_sub(1, std::memory_order_release);
+  // Block ids are never reused, so an unmatched or duplicate close cannot
+  // arise from RPC timing -- it is a bug in the (trusted) executor. CHECK
+  // rather than x23assert: under NDEBUG the unsigned underflow would
+  // silently wedge await_all_executors_closed() -- and with it every
+  // subsequent close of this block -- forever.
+  CHECK(prev > 0);
   if (prev == 1) {
     all_executors_closed_.store(true);
     auto *pool = x23::ThreadPool::get_thread_pool();
@@ -418,7 +417,6 @@ EventBlockContext::executor_close_block()
     }
     all_executors_closed_.broadcast(pool);
   }
-  return true;
 }
 
 x23::Async<bool>

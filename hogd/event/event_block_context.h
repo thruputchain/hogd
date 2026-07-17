@@ -147,11 +147,10 @@ public:
   // Executor handle tracking - count of executors with open handles to this
   // block
   void executor_open_block();
-  // Returns false if no executor handle is open (an unmatched or duplicate
-  // close). The count must never cross zero on a bogus close: an unsigned
-  // underflow would wedge await_all_executors_closed() forever, and a false
-  // zero-crossing while real handles remain would wake it early.
-  bool executor_close_block();
+  // Fail-stops (CHECK) on a close with no open handle: block ids are never
+  // reused, so an unmatched close is an executor bug, and letting the count
+  // underflow would wedge await_all_executors_closed() forever.
+  void executor_close_block();
   // Waits for all executors to close.
   // Returns true if all executors closed normally, false if block was abandoned
   x23::Async<bool> await_all_executors_closed();
