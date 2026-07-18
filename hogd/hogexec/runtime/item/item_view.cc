@@ -54,6 +54,20 @@ make_nnint128_add(int128_xdr add)
   return out;
 }
 
+// Replay reached a new observation but the recorded sequence is exhausted
+// (validation/viewing). If the proposer stopped at exactly the cap, replay
+// agrees with an empty read; otherwise the proposer recorded fewer observations
+// than this contract consumes -- a malformed proposal, i.e. a validation
+// failure. (#2894)
+SystemStatus<const QueueEntry *>
+replay_exhausted_at_cap(bool cap_exceeded)
+{
+  if (cap_exceeded) {
+    return nullptr;
+  }
+  return SystemError{SystemErrorCode::ValidationFailure};
+}
+
 } // namespace
 
 std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
@@ -221,7 +235,7 @@ RetrocausalQueueItem::construct_consume_delta()
 // and seeing a concurrent entry, and then doing an insert and now peek returns
 // that self entry.  This is less weird of an ordering, because the observed
 // behavior of peek changed in direct response to an action by the contract.
-SystemStatus<std::optional<QueueEntry>>
+SystemStatus<const QueueEntry *>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
@@ -291,7 +305,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       past_block_consumed_count_++;
     }
 
-    return next_block->entries[partial_consume_quantity];
+    // Pointer into the snapshot block, which outlives the transaction.
+    return &next_block->entries[partial_consume_quantity];
   }
 
   // otherwise, nothing in past block to consume.  Try current block.
@@ -309,7 +324,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
         construct_consume_delta();
       }
     }
-    return {*self_consume_res};
+    // Pointer into this item's own self-insert delta.
+    return self_consume_res;
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
@@ -318,10 +334,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   if (!concurrent_entry.has_value()) {
     return concurrent_entry.error();
   }
+  const QueueEntry *concurrent_ptr = concurrent_entry.value();
 
-  if (concurrent_entry->has_value()) {
-
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  if (concurrent_ptr != nullptr) {
     if (advance_cursor) {
       ++locally_consumed_index_;
       if (!queue_delta_.consume) {
@@ -332,16 +347,16 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
         CHECK(!std::holds_alternative<ProposalModeData>(execution_mode_data));
         return SystemError{SystemErrorCode::ValidationFailure};
       }
-      queue_delta_.consume->current_block_consumed.push_back(
-          *concurrent_entry.value());
+      // Copies into the consume delta (a distinct buffer from the observation
+      // storage the pointer aliases, so this does not invalidate it).
+      queue_delta_.consume->current_block_consumed.push_back(*concurrent_ptr);
     }
-    // NOLINTEND(bugprone-unchecked-optional-access)
 
-    return {concurrent_entry};
+    return concurrent_ptr;
   }
 
   // Step 4: nothing to consume
-  return std::nullopt;
+  return nullptr;
 }
 
 StorageDelta
@@ -405,108 +420,94 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
   return nullptr;
 }
 
-SystemStatus<std::optional<QueueEntry>>
+// Resolve the next concurrent (non-self, non-past-block) RCQ observation.
+// Returns a pointer to the entry to consume, nullptr (nothing to consume: empty
+// read or cap reached), or a ValidationFailure on malformed replay data. This
+// is the single location aware of proposal-vs-validation-vs-viewing for RCQ
+// reads; the get_next_item caller only sees the uniform pointer result. The
+// returned pointer aliases into owned observation storage (see get_next_item).
+SystemStatus<const QueueEntry *>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
   assert(base_item_);
-  if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-    auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
-    // Once the observation cap is hit, record nothing further and stop probing
-    // the queue; load_next_queue_entry turns this into a deterministic
-    // InvalidSyscallInput. This bounds observation growth structurally, without
-    // relying on RCQ peek gas pricing (#2894).
-    if (proposal_data.observation_cap_exceeded()) {
-      return {std::nullopt};
+  auto const &addrkey = base_item_->addrkey();
+
+  if (auto *proposal_data =
+          std::get_if<ProposalModeData>(&execution_mode_data)) {
+    // Once the cap is hit, record nothing further and stop probing the queue
+    // (#2894).
+    if (proposal_data->observation_cap_exceeded()) {
+      return nullptr;
     }
     auto out = base_item_->get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
       return out.error();
     }
-
-    auto &rcq_entry = out.value();
-
-    if (rcq_entry.get().has_value()) {
-      // NOLINTBEGIN(bugprone-unchecked-optional-access)
-      proposal_data.log_queue_entry_observation(base_item_->addrkey(), index,
-                                                {*rcq_entry.get()});
-      // NOLINTEND(bugprone-unchecked-optional-access)
-
-      proposal_data.log_nondeterministic_bit({true});
-
-      // If logging that observation crossed the cap, it was flagged but not
-      // recorded in observed_queue_entry_sequence. Return no entry here so the
-      // caller does not apply a destructive concurrent consume that validation
-      // replay cannot reproduce: validation reads the same nondeterministic
-      // bit and then finds the recorded sequence exhausted at the cap, so it
-      // likewise returns no entry. load_next_queue_entry then surfaces the
-      // read-limit error in both modes, keeping proposal and validation
-      // storage deltas -- and thus the post-block DbHash -- identical (#3043).
-      if (proposal_data.observation_cap_exceeded()) {
-        return {std::nullopt};
-      }
+    // Reference, not a copy: QueueEntry is heap-backed, so this avoids an
+    // allocation the original also avoided.
+    auto const &live_opt = out.value().get();
+    if (!live_opt.has_value()) {
+      proposal_data->log_nondeterministic_bit({false});
+      return nullptr;
     }
-    else {
-      proposal_data.log_nondeterministic_bit({false});
-    }
-
-    // OK to return not tagged as nondeterministic: the nondeterminism has been
-    // logged above
-    return rcq_entry.get();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    QueueEntry const &live = *live_opt;
+    // The entry the caller may consume is exactly what recording hands back: a
+    // pointer to the stored observation, or nullptr iff logging crossed the cap
+    // (nothing recorded). An unrecorded entry is therefore unreturnable, so a
+    // cap-crossing read applies no proposal-only consume that validation replay
+    // would not reproduce (#3043). The bit is logged first because the bit and
+    // observation streams are independent, so their relative append order does
+    // not matter.
+    proposal_data->log_nondeterministic_bit({true});
+    // Unwrap the nondeterministic tag: the nondeterminism was logged above, and
+    // the recorded pointer is nullptr iff logging crossed the cap.
+    auto recorded =
+        proposal_data->log_queue_entry_observation(addrkey, index, live);
+    return recorded.get();
   }
-  if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
-    auto &viewing_data = std::get<ViewingModeData>(execution_mode_data);
-    if (viewing_data.observation_cap_exceeded()) {
-      return {std::nullopt};
+
+  if (auto *viewing_data = std::get_if<ViewingModeData>(&execution_mode_data)) {
+    if (viewing_data->observation_cap_exceeded()) {
+      return nullptr;
     }
-    auto bit = viewing_data.view_query_queue_observation_bit();
-    if (!bit.get()) {
+    // Bind to a local: Nondeterministic::get() takes an lvalue object argument,
+    // so it cannot be called on the returned temporary directly.
+    auto queue_bit = viewing_data->view_query_queue_observation_bit();
+    if (!queue_bit.get()) {
       // no queue entry available
-      return {std::nullopt};
+      return nullptr;
     }
-    // queue entry available
-    auto entry =
-        viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
-    if (!entry.has_value()) {
-      // Recorded observations exhausted with the contract wanting more: the
-      // proposer's own cap (flag set) replays as InvalidSyscallInput, while a
-      // sequence shorter than the cap is a malformed proposal, i.e. a
-      // validation failure. (#2894)
-      if (viewing_data.observation_cap_exceeded()) {
-        return {std::nullopt};
-      }
-      return SystemError{SystemErrorCode::ValidationFailure};
+    // Bind before .get(): Nondeterministic::get() needs an lvalue.
+    auto observed = viewing_data->view_queue_entry_observation(addrkey, index);
+    if (const QueueEntry *entry = observed.get()) {
+      return entry;
     }
-    return entry.value().get();
+    return replay_exhausted_at_cap(viewing_data->observation_cap_exceeded());
   }
+
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   if (validation_data.observation_cap_exceeded()) {
-    return {std::nullopt};
+    return nullptr;
   }
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
+    // Bit stream exhausted: a malformed proposal.
     return SystemError{SystemErrorCode::ValidationFailure};
   }
-  if (bit_res->get()) {
-    auto res =
-        validation_data.consume_queue_entry_observation(base_item_->addrkey(),
-                                                        index);
-    if (!res.has_value()) {
-      // The recorded observation sequence is exhausted but the contract asked
-      // for another observation. If the proposer stopped at exactly the cap
-      // (flag set), replay the same InvalidSyscallInput it returned. Otherwise
-      // the proposer recorded fewer observations than this contract consumes --
-      // a malformed proposal, which is a validation failure. (#2894)
-      if (validation_data.observation_cap_exceeded()) {
-        return {std::nullopt};
-      }
-      return SystemError{SystemErrorCode::ValidationFailure};
-    }
-    return res.value().get();
+  if (!bit_res->get()) {
+    return nullptr;
   }
-  return {std::nullopt};
+  // Bind before .get(): Nondeterministic::get() needs an lvalue.
+  auto observed =
+      validation_data.consume_queue_entry_observation(addrkey, index);
+  if (const QueueEntry *entry = observed.get()) {
+    return entry;
+  }
+  return replay_exhausted_at_cap(validation_data.observation_cap_exceeded());
 }
 
 const QueueEntry *

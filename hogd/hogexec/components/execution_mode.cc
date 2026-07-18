@@ -59,24 +59,27 @@ ValidationModeData::consume_nondeterministic_bit()
   return out;
 }
 
-void
+Nondeterministic<const QueueEntry *>
 ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
                                               uint32_t index, QueueEntry entry)
 {
   auto it = queue_entry_observations_.find(addrkey);
   if (it != queue_entry_observations_.end() && index < it->second.size()) {
+    // Re-observing an already-recorded (addrkey, index): return the recorded
+    // value (which must match) without appending it again.
     assert(it->second[index] == entry);
-    return;
+    return &it->second[index];
   }
   // A new observation appends to observed_queue_entry_sequence, which is
   // XDR-bounded at kMaxConcurrentRcqReadsPerTx. If it is full, flag the tx and
-  // record nothing (no map insert, no append): the RCQ read syscall surfaces
-  // this as a deterministic InvalidSyscallInput rather than overflowing the
-  // vector across the noexcept syscall boundary (#2894).
+  // record nothing (no map insert, no append) -- and return nullptr so the
+  // caller applies no consume: the RCQ read syscall surfaces this as a
+  // deterministic read-limit error rather than overflowing the vector across
+  // the noexcept syscall boundary (#2894).
   if (proposal_data_.observed_queue_entry_sequence.size() >=
       kMaxConcurrentRcqReadsPerTx) {
     observation_cap_exceeded_ = true;
-    return;
+    return nullptr;
   }
   auto &entries = (it != queue_entry_observations_.end())
                       ? it->second
@@ -84,9 +87,10 @@ ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
   assert(entries.size() == index);
   entries.emplace_back(std::move(entry));
   proposal_data_.observed_queue_entry_sequence.emplace_back(entries.back());
+  return &entries.back();
 }
 
-std::optional<Nondeterministic<QueueEntry>>
+Nondeterministic<const QueueEntry *>
 ValidationModeData::consume_queue_entry_observation(
     AddressAndKey const &addrkey, uint32_t index)
 {
@@ -94,7 +98,7 @@ ValidationModeData::consume_queue_entry_observation(
 
   if (index < entries.size()) {
     // re-observing an entry
-    return entries[index];
+    return &entries[index];
   }
   // observing a new entry
   if (next_queue_entry_index_ >=
@@ -107,13 +111,12 @@ ValidationModeData::consume_queue_entry_observation(
         kMaxConcurrentRcqReadsPerTx) {
       observation_cap_exceeded_ = true;
     }
-    return std::nullopt;
+    return nullptr;
   }
-  auto out =
-      proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
+  entries.push_back(
+      proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_]);
   next_queue_entry_index_++;
-  entries.push_back(out);
-  return out;
+  return &entries.back();
 }
 
 x23::Vec<QueueEntry>
