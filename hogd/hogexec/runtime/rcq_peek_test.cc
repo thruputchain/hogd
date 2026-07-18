@@ -645,6 +645,177 @@ TEST_F(SyscallRcqPeekTest,
   EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// #3043: A destructive concurrent RCQ consume that crosses the per-tx
+// observation cap must not persist the cap-crossing consume. Proposal mode
+// previously appended the cap-crossing entry to the consume delta before
+// load_next_queue_entry converted the read into
+// kSyscallErrorCodeRetrocausalQueueReadLimitReached, while validation replay
+// returned the same handleable error before advancing the cursor. The two
+// executions therefore staged different RCQ bytes and produced different
+// post-block DbHash values -- a consensus divergence a malicious contract can
+// trigger on demand. This test drives the exact scenario and asserts proposal
+// and validation commit identical state.
+TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  NativeContractBuilder builder;
+  // method 10: insert two entries into target queue T, plus one entry into each
+  // of kMaxConcurrentRcqReadsPerTx - 1 distinct filler queues. Committing this
+  // tx first makes those entries current-block concurrent entries for the
+  // consume tx below.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      10, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto target = NativeContractTestFramework::make_storage_key("target_q");
+        for (uint8_t payload : {uint8_t{0xA0}, uint8_t{0xA1}}) {
+          auto res = ctx.handler().retrocausal_queue_insert(
+              target, std::as_bytes(std::span(&payload, 1)));
+          if (!res.has_value()) {
+            return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
+          auto payload = static_cast<uint8_t>(i);
+          auto res = ctx.handler().retrocausal_queue_insert(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          if (!res.has_value()) {
+            return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+  // method 11: destructively consume T[0] (concurrent observation #1), peek
+  // every filler to fill the observation sequence exactly to the cap, then
+  // destructively consume T again. That last consume crosses the cap and must
+  // return the read-limit error, which the contract handles as a stop condition
+  // and returns success.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      11, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto target = NativeContractTestFramework::make_storage_key("target_q");
+
+        auto first =
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+        if (!first.has_value()) {
+          return first.error().to_invoke_error();
+        }
+        if (!first.value().has_value() || first.value().value().size() != 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
+          auto peek =
+              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
+                                                      /*peek=*/true);
+          if (!peek.has_value()) {
+            return peek.error().to_invoke_error();
+          }
+          if (!peek.value().has_value() || peek.value().value().size() != 1) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        auto capped =
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+        if (!capped.has_value()) {
+          return capped.error().to_invoke_error();
+        }
+        // Expect the handleable read-limit error, not an entry.
+        if (capped.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (capped.value().error().code() !=
+            SyscallErrorCode::
+                kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto make_tx = [&](uint32_t method) {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = contract_addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {}},
+                       .uniquifier = make_new_uniquifier()};
+  };
+
+  auto insert_tx = make_tx(10);
+  auto consume_tx = make_tx(11);
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+
+  // Proposal: run and commit both txs, then capture the would-be post-block
+  // DbHash. discard_block closes the block (finalizing the trie root), captures
+  // the hash, and abandons it, so validation replays against the same pre-block
+  // state.
+  {
+    auto insert_handler = make_new_system_call_handler(insert_tx, *context);
+    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    insert_proposal_data = insert_handler.get_proposal_data();
+    ASSERT_EQ(insert_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+
+    auto consume_handler = make_new_system_call_handler(consume_tx, *context);
+    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    consume_proposal_data = consume_handler.get_proposal_data();
+    // The cap-crossing consume logs a nondeterministic bit but records no
+    // observation: the sequence stops at the cap while the bit count is one
+    // greater.
+    ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(),
+              kMaxConcurrentRcqReadsPerTx);
+    ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
+              kMaxConcurrentRcqReadsPerTx + 1);
+    ASSERT_EQ(consume_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+  }
+
+  auto proposal_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: replay both txs from the recorded proposal data, commit, and
+  // capture the post-block DbHash.
+  {
+    auto insert_handler =
+        make_new_system_call_handler_validation(insert_tx, *context,
+                                                insert_proposal_data);
+    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+
+    auto consume_handler =
+        make_new_system_call_handler_validation(consume_tx, *context,
+                                                consume_proposal_data);
+    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    ASSERT_EQ(consume_handler.try_commit_transaction(),
+              ExecResult::ExecResultOK);
+  }
+
+  auto validation_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  EXPECT_TRUE(proposal_hash == validation_hash)
+      << "proposal and validation must commit identical RCQ deltas after a "
+         "contract handles the RCQ observation read-limit error (#3043)";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
