@@ -433,6 +433,18 @@ RetrocausalQueueItem::get_next_concurrent_entry(
       // NOLINTEND(bugprone-unchecked-optional-access)
 
       proposal_data.log_nondeterministic_bit({true});
+
+      // If logging that observation crossed the cap, it was flagged but not
+      // recorded in observed_queue_entry_sequence. Return no entry here so the
+      // caller does not apply a destructive concurrent consume that validation
+      // replay cannot reproduce: validation reads the same nondeterministic
+      // bit and then finds the recorded sequence exhausted at the cap, so it
+      // likewise returns no entry. load_next_queue_entry then surfaces the
+      // read-limit error in both modes, keeping proposal and validation
+      // storage deltas -- and thus the post-block DbHash -- identical (#3043).
+      if (proposal_data.observation_cap_exceeded()) {
+        return {std::nullopt};
+      }
     }
     else {
       proposal_data.log_nondeterministic_bit({false});
