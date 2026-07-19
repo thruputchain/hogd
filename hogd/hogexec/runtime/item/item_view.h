@@ -98,7 +98,13 @@ public:
 
   constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
 
-  SystemStatus<std::optional<QueueEntry>>
+  // Returns a pointer to the next entry to consume, or nullptr when there is
+  // nothing to consume (empty read or per-tx cap reached); a ValidationFailure
+  // on malformed replay data. The pointer aliases into owned storage (the
+  // snapshot block, this item's self-insert delta, or the proposal/validation
+  // observation buffer) and is valid until the next RCQ mutation -- callers
+  // copy it into the syscall result before returning to the contract.
+  SystemStatus<const QueueEntry *>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
   SyscallStatus<void> insert_entry(QueueEntry const &entry);
@@ -112,7 +118,7 @@ private:
   SystemStatus<const RetrocausalQueueBlock *>
   get_next_block(uint64_t search_start_index) const;
 
-  SystemStatus<std::optional<QueueEntry>>
+  SystemStatus<const QueueEntry *>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
 

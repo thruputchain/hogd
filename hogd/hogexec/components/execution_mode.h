@@ -64,8 +64,18 @@ public:
   // succeed?) made during try_invoke
   void log_nondeterministic_bit(Nondeterministic<bool> bit);
 
-  void log_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index,
-                                   QueueEntry entry);
+  // Records a concurrent queue-entry observation and RETURNS a
+  // (nondeterministic) pointer to the recorded entry, so a caller can only
+  // obtain an entry-to-consume as the output of recording it -- an unrecorded
+  // entry is structurally unreturnable. Wraps nullptr when the observation
+  // would exceed kMaxConcurrentRcqReadsPerTx: the entry is NOT recorded (the
+  // cap flag is set instead), so the caller applies no consume and
+  // proposal/validation stay in lockstep (#3043, #2894). The pointer aliases
+  // into this ProposalModeData and is valid until the next observation is
+  // recorded; callers use it before returning to the contract.
+  Nondeterministic<const QueueEntry *>
+  log_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index,
+                              QueueEntry entry);
 
   NondeterministicProposalData const &proposal_data() const
   {
@@ -118,11 +128,12 @@ public:
   // failure)
   std::optional<Nondeterministic<bool>> consume_nondeterministic_bit();
 
-  // Consumes and returns the next nondeterministic queue entry from the
-  // proposal.
-  // Returns nullopt if no more queue entries are available (which is a
-  // validation failure)
-  std::optional<Nondeterministic<QueueEntry>>
+  // Consumes the next nondeterministic queue entry from the proposal and
+  // returns a (nondeterministic) pointer to it, or a wrapped nullptr if no more
+  // queue entries are available (which is a validation failure). The pointer
+  // aliases into this ValidationModeData and is valid until the next
+  // observation is consumed; callers use it before returning to the contract.
+  Nondeterministic<const QueueEntry *>
   consume_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index);
 
   x23::Vec<QueueEntry> get_observed_queue_entries(AddressAndKey const &addrkey,
@@ -197,9 +208,10 @@ public:
     return *bit;
   }
 
-  // Returns nullopt if no more queue entries are available (which is a
-  // validation failure)
-  std::optional<Nondeterministic<QueueEntry>>
+  // Returns a (nondeterministic) pointer to the next observed queue entry, or a
+  // wrapped nullptr if no more are available (a validation failure). Same
+  // aliasing/lifetime as ValidationModeData::consume_queue_entry_observation.
+  Nondeterministic<const QueueEntry *>
   view_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index)
   {
     return partial_validation_data_.consume_queue_entry_observation(addrkey,
