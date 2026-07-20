@@ -671,9 +671,10 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
 // occupied slot's weight independently reflects the authority the owner
 // assigned and grants nobody who lacks the key any capability. The
 // strictly-increasing-slot-id rule (see DuplicateSignerRejected /
-// OutOfOrderSignerRejected) already prevents replaying a *single* slot's weight;
-// every weight counted here comes from a distinct registered slot. Reported as
-// issue #3068 and confirmed working-as-intended; this test pins that behavior.
+// OutOfOrderSignerRejected) already prevents replaying a *single* slot's
+// weight; every weight counted here comes from a distinct registered slot.
+// Reported as issue #3068 and confirmed working-as-intended; this test pins
+// that behavior.
 TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
 {
   AuthClaim claim = make_claim((1 << 0) | (1 << 1), /*required_weight=*/2);
@@ -699,8 +700,9 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
   };
 
   // All verification levels accept: both slots are occupied by the owner's key,
-  // both decorated signatures verify against it, and the summed weight (2) meets
-  // the threshold. This is intended -- the owner granted the key that authority.
+  // both decorated signatures verify against it, and the summed weight (2)
+  // meets the threshold. This is intended -- the owner granted the key that
+  // authority.
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(
       lightweight_validate_auth_claims(stx, &duplicate_key_slots).has_value());
@@ -723,7 +725,8 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
   // ...and a party who does not hold the key cannot fabricate the signatures,
   // so duplicate slots never let an unauthorized signer reach the threshold.
   auto [other_pk, other_sk] = make_key_pair();
-  DecoratedSignature forged0 = make_signature(other_sk, tx, /*public_key_id=*/0);
+  DecoratedSignature forged0 =
+      make_signature(other_sk, tx, /*public_key_id=*/0);
   DecoratedSignature forged1 = forged0;
   forged1.public_key_id = 1;
   SignedTransaction forged_stx{.tx = tx, .signatures = {forged0, forged1}};
