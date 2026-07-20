@@ -80,6 +80,11 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
+    // Wait for coroutines that outlive their initiating RPC handler and still
+    // touch our members -- the detached vetted-notify send and the
+    // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
+    // runs on a thread-pool worker) -- before member destructors tear that
+    // state down.
     while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
