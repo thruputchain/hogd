@@ -22,16 +22,28 @@ source ./scripts/ci/prepare_env.sh
 echo 'build gcc debug'
 ./scripts/build.sh -d build/gcc_debug -c gcc -t Debug -x "-DBUILD_BENCHMARKS=OFF"
 
+# SyscallRcqPeekTest.ConsumeCapErrorAgreesProposalAndValidationDbHash is a
+# deterministic RCQ DbHash-agreement unit test that drives the per-transaction
+# observation cap (protocol kMaxConcurrentRcqReadsPerTx = 16384) to its
+# boundary, then finalizes two blocks and replays the whole sequence in
+# validation mode. The test harness talks to its event server over x23 sockets,
+# and this schedule pins those sockets to 1-byte buffers (X23_RCVBUF/SNDBUF=1),
+# which throttles the test's ~16k per-op round-trips into a >600s crawl. It
+# exercises no asyncio behavior this schedule is meant to stress and passes
+# quickly under normal socket buffers, so exclude it here; it stays fully
+# covered by the gcc-debug/llvm-debug/gcc-release CI (cpp-namespace-optimized).
+RCQ_DBHASH_SLOW='ConsumeCapErrorAgreesProposalAndValidationDbHash'
+
 export X23_RCVBUF=1
 
 echo 'run gcc tests RCVBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E rpcstress_writebuf
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}"
 
 unset X23_RCVBUF
 
 export X23_SNDBUF=1
 echo 'run gcc tests SNDBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "${RCQ_DBHASH_SLOW}"
 unset X23_SNDBUF
 
 """
