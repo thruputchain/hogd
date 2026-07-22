@@ -100,6 +100,8 @@ jobs:
           if [ "$TIDY_SCOPE" = "changed" ] &&
             ! git diff --quiet "$TIDY_BASE_SHA" "$TIDY_HEAD_SHA" -- \
               .github/workflows/tidy-namespace-optimized.yml \
+              scripts/env.sh \
+              scripts/filter_tidy_log.sh \
               scripts/tidy_inputs.py \
               scripts/tidy-ubuntu.sh; then
             echo "Tidy infrastructure changed; using full scope"
