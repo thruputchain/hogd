@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -110,6 +112,60 @@ class FullInputsTest(unittest.TestCase):
         self.assertEqual(
             inputs, {"hogd/one.cc", "hogd/two.cc", "hogd/standalone.h"}
         )
+
+
+class ProxyCompileDatabaseTest(unittest.TestCase):
+    def test_standalone_headers_get_test_framework_include_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "hogd/base/example.cc"
+            header = root / "hogd/test_ffi/helpers.h"
+            source.parent.mkdir(parents=True)
+            header.parent.mkdir(parents=True)
+            source.touch()
+            header.touch()
+            compile_db = root / "compile_commands.json"
+            compile_db.write_text(
+                json.dumps(
+                    [
+                        {
+                            "directory": str(root),
+                            "arguments": [
+                                "clang++",
+                                "-I",
+                                str(root / "hogd"),
+                                "-c",
+                                str(source),
+                                "-o",
+                                "example.o",
+                            ],
+                            "file": str(source),
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            proxy_dir = root / "proxies"
+            proxy_compile_db = root / "proxy_compile_commands.json"
+
+            rewritten = tidy_inputs.write_proxy_compile_db(
+                root,
+                compile_db,
+                {"hogd/test_ffi/helpers.h"},
+                proxy_dir,
+                proxy_compile_db,
+            )
+
+            entries = json.loads(proxy_compile_db.read_text(encoding="utf-8"))
+            proxy_entry = entries[-1]
+            self.assertEqual(
+                rewritten,
+                {str(proxy_dir / "hogd__test_ffi__helpers.h.cc")},
+            )
+            for include_dir in tidy_inputs.PROXY_SYSTEM_INCLUDE_DIRS:
+                self.assertIn(
+                    str(root / include_dir), proxy_entry["arguments"]
+                )
 
 
 if __name__ == "__main__":
