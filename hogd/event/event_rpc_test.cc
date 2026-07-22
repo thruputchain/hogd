@@ -558,6 +558,104 @@ TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
   EXPECT_TRUE(close_completed.load());
 }
 
+// Regression for #3039: closing a block that was abandoned while a context
+// reference was still outstanding must fail with kBadBlockID. The abandon
+// leaves the context in the map in ARC-shutdown mode (initiate_shutdown()
+// cannot destroy it while the reference is live), so close's
+// wait_for_executors_closed() fails to acquire a reference -- it must report
+// that as kBadBlockID, not release a reference it never acquired (which
+// would drop the shutdown refcount to zero and free the context out from
+// under the live holder).
+TEST_F(EventRpcTest, CloseAfterAbandonWithOutstandingReferenceIsRejected)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Models an in-flight executor RPC holding the block's context.
+  auto held_ref = ctx.get_context(1)();
+  ASSERT_TRUE(held_ref);
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(1, 1)().error(),
+            RPCError::kRPCBadBlockID);
+
+  // The held reference is the last owner; release-then-gc, as the executor
+  // RPC handlers do.
+  if (held_ref.release_reference()) {
+    ctx.gc_context(1)();
+  }
+}
+
+// Companion to CloseAfterAbandonWithOutstandingReferenceIsRejected (#3039),
+// one stage later: an abandon can land in the gap between close_block's
+// wait_for_executors_closed() succeeding and its re-acquisition of the block
+// map lock, leaving an abandoned, shutdown-pending context (pinned in the
+// map by an outstanding reference) that close_block then finds. close_block
+// must detect this and return kBadBlockID -- not fail-stop on an
+// unacquirable reference or run the finish pipeline on an abandoned block.
+// The gap is a few instructions wide, so this hammers the interleaving with
+// a swept timing offset; every outcome must be a clean error code.
+TEST_F(EventRpcTest, AbandonRacingCloseAfterExecutorsClosedIsClean)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  using namespace std::chrono_literals;
+  for (BlockID block_id = 1; block_id <= 200; ++block_id) {
+    ASSERT_EQ(mempool_rpc.eventsched_open_block(block_id)(),
+              RPCError::kRPCNone);
+    ASSERT_EQ(exec_rpc.eventexecutor_open_block(block_id)(),
+              RPCError::kRPCNone);
+
+    // Keeps the context pinned in the map (shutdown-pending) if the abandon
+    // wins the race, modeling an in-flight executor RPC.
+    auto held_ref = ctx.get_context(block_id)();
+    ASSERT_TRUE(held_ref);
+
+    std::atomic<RPCError> close_err = RPCError::kRPCNone;
+    auto close_task = [&](this auto) -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      auto result = co_await mempool_rpc.eventsched_close_block(block_id, 1);
+      close_err.store(result.error(), std::memory_order_release);
+      co_return;
+    }();
+
+    // Let close_block reach its executor wait, then release the last
+    // executor handle (waking it) and immediately race an abandon against
+    // its map-lock re-acquisition, sweeping the offset across iterations.
+    std::this_thread::sleep_for(2ms); // NOLINT(misc-include-cleaner)
+    ASSERT_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
+              RPCError::kRPCNone);
+    std::this_thread::sleep_for( // NOLINT(misc-include-cleaner)
+        std::chrono::microseconds(block_id % 16));
+    RPCError abandon_err = mempool_rpc.eventsched_abandon_block(block_id)();
+
+    close_task();
+    RPCError observed_close = close_err.load(std::memory_order_acquire);
+
+    // Depending on who wins, either RPC may succeed or lose the block id;
+    // anything else (in particular a crash) is the bug.
+    EXPECT_TRUE(observed_close == RPCError::kRPCNone ||
+                observed_close == RPCError::kRPCBadBlockID)
+        << "close error " << static_cast<int>(observed_close) << " at block "
+        << block_id;
+    EXPECT_TRUE(abandon_err == RPCError::kRPCNone ||
+                abandon_err == RPCError::kRPCBadBlockID)
+        << "abandon error " << static_cast<int>(abandon_err) << " at block "
+        << block_id;
+
+    if (held_ref.release_reference()) {
+      ctx.gc_context(block_id)();
+    }
+  }
+}
+
 // Test that processing multiple blocks recycles EventBlockContext internals.
 // The second block uses the cached trie/buffers from the first.
 TEST_F(EventRpcTest, RecycleContextAcrossBlocks)

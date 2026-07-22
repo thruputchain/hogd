@@ -81,9 +81,6 @@ public:
       uint8_t canonical = (*value_) ? 1 : 0;
       std::memcpy(original_pointer_, &canonical, 1);
     }
-    else if constexpr (requires { value_->data(); }) {
-      std::memcpy(original_pointer_, value_->data(), sizeof(T));
-    }
     else {
       std::memcpy(original_pointer_, &(*value_), sizeof(T));
     }
@@ -109,12 +106,7 @@ T
 read_unaligned(const void *ptr)
 {
   T value{};
-  if constexpr (requires { value.data(); }) {
-    std::memcpy(value.data(), ptr, sizeof(T));
-  }
-  else {
-    std::memcpy(&value, ptr, sizeof(T));
-  }
+  std::memcpy(&value, ptr, sizeof(T));
   return value;
 }
 

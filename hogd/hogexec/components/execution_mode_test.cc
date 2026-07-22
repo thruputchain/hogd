@@ -154,8 +154,8 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   auto check_consume = [&](AddressAndKey const &addrkey, uint32_t index,
                            QueueEntry const &expected) {
     auto res = validation.consume_queue_entry_observation(addrkey, index);
-    ASSERT_TRUE(res);
-    EXPECT_EQ(res->get(), expected);
+    ASSERT_NE(res.get(), nullptr);
+    EXPECT_EQ(*res.get(), expected);
   };
 
   check_consume(addrkey_1, 0, QueueEntry{1});
@@ -236,6 +236,41 @@ TEST(ExecutionModeTest, ProposalObservationCapFlagsAndStopsRecording)
             kMaxConcurrentRcqReadsPerTx);
 }
 
+// #3043 follow-up: log_queue_entry_observation RETURNS a pointer to the
+// recorded entry (nullptr at the cap), so the RCQ read path can only return an
+// entry it actually recorded within the cap -- making a proposal-only
+// cap-crossing consume structurally unrepresentable rather than merely guarded
+// against.
+TEST(ExecutionModeTest, ProposalObservationReturnsRecordedEntryThenNullAtCap)
+{
+  ProposalModeData proposal;
+
+  // A fresh recording returns a pointer to the entry it recorded.
+  for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx; ++i) {
+    auto recorded =
+        proposal.log_queue_entry_observation(make_obs_key(i), 0, QueueEntry{1});
+    ASSERT_NE(recorded.get(), nullptr);
+    EXPECT_EQ(*recorded.get(), QueueEntry{1});
+  }
+
+  // Re-observing an already-recorded (addrkey, index) returns the same entry
+  // without advancing the sequence or tripping the cap.
+  auto reobserved =
+      proposal.log_queue_entry_observation(make_obs_key(0), 0, QueueEntry{1});
+  ASSERT_NE(reobserved.get(), nullptr);
+  EXPECT_EQ(*reobserved.get(), QueueEntry{1});
+  EXPECT_FALSE(proposal.observation_cap_exceeded());
+
+  // The cap-crossing observation records nothing and returns a wrapped nullptr,
+  // so the caller has no entry to consume.
+  auto capped = proposal.log_queue_entry_observation(
+      make_obs_key(kMaxConcurrentRcqReadsPerTx), 0, QueueEntry{1});
+  EXPECT_EQ(capped.get(), nullptr);
+  EXPECT_TRUE(proposal.observation_cap_exceeded());
+  EXPECT_EQ(proposal.proposal_data().observed_queue_entry_sequence.size(),
+            kMaxConcurrentRcqReadsPerTx);
+}
+
 // #2894: validation replay must agree with proposal -- when the recorded
 // sequence is exhausted at exactly the cap, a new observation flags the cap
 // (which surfaces as InvalidSyscallInput), matching what proposal returned.
@@ -246,14 +281,16 @@ TEST(ExecutionModeTest, ValidationObservationCapMatchesProposal)
     proposal.log_queue_entry_observation(make_obs_key(i), 0, QueueEntry{1});
   }
   ValidationModeData validation(proposal.proposal_data());
+  auto consume_ptr = [&](uint32_t key_index) {
+    auto obs =
+        validation.consume_queue_entry_observation(make_obs_key(key_index), 0);
+    return obs.get();
+  };
   for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx; ++i) {
-    ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(i), 0));
+    ASSERT_NE(consume_ptr(i), nullptr);
     ASSERT_FALSE(validation.observation_cap_exceeded());
   }
-  EXPECT_FALSE(validation
-                   .consume_queue_entry_observation(
-                       make_obs_key(kMaxConcurrentRcqReadsPerTx), 0)
-                   .has_value());
+  EXPECT_EQ(consume_ptr(kMaxConcurrentRcqReadsPerTx), nullptr);
   EXPECT_TRUE(validation.observation_cap_exceeded());
 }
 
@@ -265,10 +302,14 @@ TEST(ExecutionModeTest, ValidationShortSequenceIsFailureNotCap)
   proposal.log_queue_entry_observation(make_obs_key(0), 0, QueueEntry{1});
   proposal.log_queue_entry_observation(make_obs_key(1), 0, QueueEntry{2});
   ValidationModeData validation(proposal.proposal_data());
-  ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(0), 0));
-  ASSERT_TRUE(validation.consume_queue_entry_observation(make_obs_key(1), 0));
-  EXPECT_FALSE(validation.consume_queue_entry_observation(make_obs_key(2), 0)
-                   .has_value());
+  auto consume_ptr = [&](uint32_t key_index) {
+    auto obs =
+        validation.consume_queue_entry_observation(make_obs_key(key_index), 0);
+    return obs.get();
+  };
+  ASSERT_NE(consume_ptr(0), nullptr);
+  ASSERT_NE(consume_ptr(1), nullptr);
+  EXPECT_EQ(consume_ptr(2), nullptr);
   EXPECT_FALSE(validation.observation_cap_exceeded());
 }
 

@@ -147,6 +147,9 @@ public:
   // Executor handle tracking - count of executors with open handles to this
   // block
   void executor_open_block();
+  // Fail-stops (CHECK) on a close with no open handle: block ids are never
+  // reused, so an unmatched close is an executor bug, and letting the count
+  // underflow would wedge await_all_executors_closed() forever.
   void executor_close_block();
   // Waits for all executors to close.
   // Returns true if all executors closed normally, false if block was abandoned

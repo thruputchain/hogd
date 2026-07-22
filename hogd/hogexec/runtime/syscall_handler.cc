@@ -1766,9 +1766,10 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
         SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
   }
 
-  auto &value = entry.value();
-  if (value.has_value()) {
-    return value.value();
+  // The pointer aliases into owned storage and is copied here into the syscall
+  // result (the one copy the contract's return value requires).
+  if (const QueueEntry *value = entry.value()) {
+    return *value;
   }
 
   return SyscallError{

@@ -2364,6 +2364,25 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          KeyChangeBatch key_changes)
 {
+  // Count this callback among the coordinator's pending coroutines so that
+  // ~MempoolCoordinatorRpc waits for it to finish before the member
+  // destructors tear down the state it touches -- in particular
+  // [auth_data_height_], which we broadcast on at the end of this function.
+  //
+  // This callback is invoked from the [MempoolAuthRpc] handler, whose RPC
+  // stream lifetime does not reliably cover this coroutine's tail: the tail
+  // (the [auth_data_height_] broadcast) runs on a thread-pool worker after the
+  // handler has already been resumed/failed, so draining [mempool_auth_server_]
+  // during a failed construction is not enough on its own -- the broadcast can
+  // still race the coordinator's destructor. Increment synchronously, before
+  // the first co_await, so the count is raised while the auth server's drain is
+  // still holding the handler; decrement via a scope guard so the count is
+  // released even if this coroutine's frame is destroyed early (cancellation).
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  x23::Defer release_pending([this] {
+    pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+  });
+
   CHECK(ready());
   CHECK_EQ(height, auth_data_height_.load() + 1);
 

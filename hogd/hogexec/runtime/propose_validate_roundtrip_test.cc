@@ -680,7 +680,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
 }
 
 // Tamper: remove the queue entry observation (keep bit=true).
-// consume_queue_entry_observation returns nullopt → validation fails.
+// consume_queue_entry_observation returns nullptr → validation fails.
 TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
 {
   auto ctx = make_rcq_context();

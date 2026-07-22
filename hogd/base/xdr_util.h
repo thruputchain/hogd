@@ -79,6 +79,19 @@ static_assert((uint128_t{UINT64_MAX} << 64 | UINT64_MAX) ==
 static_assert((int128_t{int64_t{-1}} << 64 | int128_t{UINT64_MAX}) == -1,
               "signed limb reconstruction must produce -1");
 
+// #3070: NNInt128 and balance rows are persisted and folded into the
+// consensus DbHash as `int128_to_xdr_bytes(...)`, whose width is
+// `sizeof(int128_xdr)`. `int128_xdr` is two 64-bit limbs with no over-
+// alignment, so on every conforming target it has no tail padding and this
+// width is exactly the 16-byte fixed XDR representation of the two limbs.
+// Pin that invariant at compile time so the persisted/hashed row width can
+// never drift from the wire encoding regardless of host object layout.
+static_assert(sizeof(int128_xdr) == 16,
+              "int128_xdr must be exactly two 64-bit limbs with no tail "
+              "padding; persisted/hashed row width feeds the consensus DbHash");
+static_assert(sizeof(int128_xdr) == sizeof(uint128_xdr),
+              "signed and unsigned 128-bit row widths must match");
+
 inline std::array<std::byte, sizeof(int128_xdr)>
 int128_to_xdr_bytes(int128_t value)
 {

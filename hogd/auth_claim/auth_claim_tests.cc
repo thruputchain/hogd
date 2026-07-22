@@ -659,6 +659,83 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
   }
 }
 
+// An address's `AddressAuthData` -- its signer slots and each slot's
+// `max_weight` -- is self-declared configuration, owned and mutated only by the
+// address itself through contract-authorized syscalls that already require the
+// address to authorize the change (see
+// syscall_ChangePublicKeyRegistration_inner). Registering the same Ed25519
+// public key into two weight-1 slots is therefore just a verbose way of
+// granting that key weight 2, functionally identical to a single weight-2 slot;
+// the address owner is the only party who can set it up. Because the party who
+// holds the key is exactly the party the owner chose to authorize, summing each
+// occupied slot's weight independently reflects the authority the owner
+// assigned and grants nobody who lacks the key any capability. The
+// strictly-increasing-slot-id rule (see DuplicateSignerRejected /
+// OutOfOrderSignerRejected) already prevents replaying a *single* slot's
+// weight; every weight counted here comes from a distinct registered slot.
+// Reported as issue #3068 and confirmed working-as-intended; this test pins
+// that behavior.
+TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
+{
+  AuthClaim claim = make_claim((1 << 0) | (1 << 1), /*required_weight=*/2);
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction(claim);
+
+  // One keypair, one signature, copied into two decorated-signature entries
+  // that differ only in the slot they reference.
+  DecoratedSignature sig0 = make_signature(sk, tx, /*public_key_id=*/0);
+  DecoratedSignature sig1 = sig0;
+  sig1.public_key_id = 1;
+  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
+
+  // Self-declared auth row: the address deliberately placed the same key in two
+  // weight-1 slots. This is equivalent to a single weight-2 slot for that key.
+  AddressAuthData duplicate_key_slots{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk, .max_weight = 1}),
+                      x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk, .max_weight = 1})},
+      .required_weight = 1,
+  };
+
+  // All verification levels accept: both slots are occupied by the owner's key,
+  // both decorated signatures verify against it, and the summed weight (2)
+  // meets the threshold. This is intended -- the owner granted the key that
+  // authority.
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(
+      lightweight_validate_auth_claims(stx, &duplicate_key_slots).has_value());
+  EXPECT_TRUE(verify_auth(stx, &duplicate_key_slots).has_value());
+
+  Ed25519SignatureVerifier signature_verifier;
+  EXPECT_TRUE(
+      verify_auth(stx, &duplicate_key_slots, &signature_verifier).has_value());
+  EXPECT_TRUE(signature_verifier.verify());
+
+  // The behavior grants no capability across a trust boundary. The safety rails
+  // remain: reusing the *same* slot id twice is still rejected as malformed...
+  DecoratedSignature dup_slot = sig0;
+  SignedTransaction same_slot_twice{.tx = tx, .signatures = {sig0, dup_slot}};
+  auto same_slot_result = auth_claim_is_well_formed(same_slot_twice);
+  EXPECT_FALSE(same_slot_result.has_value());
+  EXPECT_EQ(same_slot_result.error().code(),
+            AuthVerifyErrorCode::kAuthMalformed);
+
+  // ...and a party who does not hold the key cannot fabricate the signatures,
+  // so duplicate slots never let an unauthorized signer reach the threshold.
+  auto [other_pk, other_sk] = make_key_pair();
+  DecoratedSignature forged0 =
+      make_signature(other_sk, tx, /*public_key_id=*/0);
+  DecoratedSignature forged1 = forged0;
+  forged1.public_key_id = 1;
+  SignedTransaction forged_stx{.tx = tx, .signatures = {forged0, forged1}};
+  auto forged_result = verify_auth(forged_stx, &duplicate_key_slots);
+  EXPECT_FALSE(forged_result.has_value());
+  EXPECT_EQ(forged_result.error().code(),
+            AuthVerifyErrorCode::kSignatureVerificationFailed);
+}
+
 } // namespace hogd
 
 // NOLINTEND(bugprone-unchecked-optional-access)
