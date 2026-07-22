@@ -9,11 +9,6 @@ BUILD_DIR=$1
 NUM_ACCOUNTS=$2
 RUNTIME=${3:-wasm}
 CLIENT="$BUILD_DIR/hogd/hogexec/bench/payments_bench"
-read -r -a HOGEXEC_SERVERS <<<"${METRICS_HOGEXEC_SERVERS:-hog11 hog8}"
-HOGEXEC_SERVER_ARGS=()
-for server in "${HOGEXEC_SERVERS[@]}"; do
-  HOGEXEC_SERVER_ARGS+=(-s "$server")
-done
 
 # Optional third arg selects the contract runtime: "rv32" deploys the .rv32a
 # artifacts, anything else (default) uses the wasm builds.
@@ -23,4 +18,4 @@ if [ "$RUNTIME" = "rv32" ]; then
 fi
 
 # Run the client process (waits for it to finish)
-"$CLIENT" -c 10001 -e 10000 -a "$NUM_ACCOUNTS" $RV32_FLAG "${HOGEXEC_SERVER_ARGS[@]}"
+"$CLIENT" -c 10001 -e 10000 -a $NUM_ACCOUNTS $RV32_FLAG -s hog11 -s hog8

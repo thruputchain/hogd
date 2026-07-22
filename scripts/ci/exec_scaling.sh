@@ -6,12 +6,7 @@ set -Eeuo pipefail
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)
 CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
-read -r -a BENCH_HOSTS <<<"${EXEC_SCALING_HOSTS:-hog5 hog6 hog7 hog8 hog11}"
-
-if [ "${#BENCH_HOSTS[@]}" -lt 5 ]; then
-  echo "EXEC_SCALING_HOSTS must contain at least 5 hosts"
-  exit 1
-fi
+BENCH_HOSTS=(hog5 hog6 hog7 hog8 hog11)
 
 cleanup() {
   local exit_code=$1
@@ -31,19 +26,17 @@ for host in "${BENCH_HOSTS[@]}"; do
   ci_wait_port "$host" "$CI_CONTROL_PORT"
 done
 
-if [ "${CI_SKIP_CLONE_METRICS_HISTORY:-0}" != "1" ]; then
-  echo 'clone metrics history' # This is idempotent
-  ./scripts/clone_metrics_history.sh
-fi
+echo 'clone metrics history' # This is idempotent
+./scripts/clone_metrics_history.sh
 
 echo 'launch multiexec runner one exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s "${BENCH_HOSTS[2]}" -s "${BENCH_HOSTS[3]}" -s "${BENCH_HOSTS[0]}" -a 100 >multiexec_runner_log
+./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -a 100 >multiexec_runner_log
 
 echo 'launch multiexec runner two exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s "${BENCH_HOSTS[2]}" -s "${BENCH_HOSTS[3]}" -s "${BENCH_HOSTS[0]}" -s "${BENCH_HOSTS[4]}" -a 100 >>multiexec_runner_log
+./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -a 100 >>multiexec_runner_log
 
 echo 'launch multiexec runner three exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s "${BENCH_HOSTS[2]}" -s "${BENCH_HOSTS[3]}" -s "${BENCH_HOSTS[0]}" -s "${BENCH_HOSTS[4]}" -s "${BENCH_HOSTS[1]}" -a 100 >>multiexec_runner_log
+./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
 
 echo 'log multiexec runner logs'
 ./scripts/log_metric.sh multiexec_interface multiexec_runner_log
