@@ -781,6 +781,26 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     CHECK(missing.empty());
   }
 
+  // Genesis (block 0) is loaded replicated on *every* db shard, so each shard's
+  // [BackgroundCommitWorker] dispatches the same block-0 delta set (e.g.
+  // [kDeployContractAddress]). Apply each genesis delta exactly once; otherwise
+  // the [kHogAgeGroupReceived] group is multiplied by the shard count. Genesis
+  // is a one-time, tiny batch, so we apply it serially here rather than
+  // parallelizing. (Non-genesis blocks dispatch per-owner deltas and take the
+  // parallel path below with no dedup.)
+  // TODO: drop this once genesis delta dispatch is made shard-owner-only on the
+  // hogdb side (ISSUES.md #1b); the dedup then becomes unnecessary.
+  if (transfers.block == 0) {
+    x23::CoroGuard cg;
+    co_await cg(global_lock_);
+    for (const Delta &delta : transfers.deltas) {
+      if (genesis_applied_deltas_.insert(delta.address).second) {
+        process_transfers_helper(delta, transfers.block);
+      }
+    }
+    co_return;
+  }
+
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;
