@@ -21,6 +21,11 @@ EE_EXEMPT_RE = re.compile(
     r"|/hogdb/hogdb\.cc$"
 )
 
+PROXY_SYSTEM_INCLUDE_DIRS = (
+    "external/googletest/googletest/include",
+    "external/googletest/googlemock/include",
+)
+
 
 def repo_path(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root).as_posix()
@@ -101,7 +106,9 @@ def dependency_command(entry: dict) -> list[str]:
     return cleaned + ["-MM", "-MG", "-MT", "__tidy_deps__"]
 
 
-def proxy_compile_argv(entry: dict, source: Path, output: Path) -> list[str]:
+def proxy_compile_argv(
+    entry: dict, source: Path, output: Path, root: Path
+) -> list[str]:
     argv = command_argv(entry)
     original_file = Path(entry["file"])
     if not original_file.is_absolute():
@@ -131,6 +138,12 @@ def proxy_compile_argv(entry: dict, source: Path, output: Path) -> list[str]:
         if Path(arg) == original_file or arg == entry["file"]:
             continue
         cleaned.append(arg)
+    # Standalone headers have no target of their own from which CMake can
+    # supply target-specific include paths. Some of them are test helpers, so
+    # give synthetic translation units access to the test framework that is
+    # initialized by the tidy workflow.
+    for include_dir in PROXY_SYSTEM_INCLUDE_DIRS:
+        cleaned.extend(("-isystem", str(root / include_dir)))
     return cleaned + ["-c", str(source), "-o", str(output)]
 
 
@@ -275,7 +288,7 @@ def write_proxy_compile_db(
             {
                 "directory": str(root),
                 "arguments": proxy_compile_argv(
-                    base_entry, proxy, proxy.with_suffix(".o")
+                    base_entry, proxy, proxy.with_suffix(".o"), root
                 ),
                 "file": str(proxy),
             }
