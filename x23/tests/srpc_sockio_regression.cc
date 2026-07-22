@@ -164,14 +164,14 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   RefPtr<SRpcStream<>> client_stream{*new SRpcStream<>(std::move(client_fd))};
   client_stream->go();
 
-  std::atomic<bool> got_bad_input{false};
+  std::atomic<bool> got_xdr_error{false};
   std::thread caller{[&] {
     try {
       (void)client_stream->template send_call<oversized_bounded_vec_proc>();
-    } catch (const XdrBadInput &) {
-      got_bad_input = true;
+    } catch (const XdrException &) {
+      got_xdr_error = true;
     } catch (...) {
-      // Any other outcome (including no exception) leaves got_bad_input false.
+      // Any other outcome (including no exception) leaves got_xdr_error false.
     }
   }};
 
@@ -195,9 +195,9 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   ASSERT_TRUE(write_all(peer_fd.get(), response));
 
   caller.join();
-  EXPECT_TRUE(got_bad_input.load())
+  EXPECT_TRUE(got_xdr_error.load())
       << "oversized bounded-vector reply should surface as a client-side "
-         "XdrBadInput without terminating the process";
+         "XdrException without terminating the process";
 }
 
 } // namespace x23

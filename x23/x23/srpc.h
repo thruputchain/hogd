@@ -333,7 +333,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
                         ProcMeta::proc_name, record.size() - 4,
                         max_message_size_);
 
-    using ErrType = std::variant<XdrBadInput, XdrCallFailed>;
+    using ErrType = std::variant<XdrException, XdrCallFailed>;
     std::expected<typename ProcMeta::return_type, ErrType> ret;
     std::binary_semaphore done{0};
 
@@ -343,7 +343,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
                                ProcMeta::version_meta::version_name,
                                ProcMeta::proc_name);
         logger_.log_client_fail(xid, err);
-        ret = std::unexpected{XdrBadInput(err)};
+        ret = std::unexpected{XdrException(err)};
       }
       else if (!rpc_is_success(*msg)) {
         logger_.template log_client<ProcMeta>(*msg);
@@ -368,17 +368,17 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
         } catch (XdrException &e) {
           // Catch the XdrException base, not just XdrBadInput: a malformed
           // reply body can also throw XdrLengthError (e.g. an oversized
-          // bounded vector count).  Letting a sibling exception escape this
-          // callback would cross the noexcept boundary in SRpcFd::input and
-          // call std::terminate.  Every decode failure is reported to the
-          // blocked caller as XdrBadInput, so callers only ever have to catch
-          // XdrBadInput.
+          // bounded vector count), and letting a sibling escape this callback
+          // would cross the noexcept boundary in SRpcFd::input and call
+          // std::terminate.  Hand the caught exception back to the blocked
+          // caller as-is; callers catch the generic XdrException base.
           if (logging)
             logger_.template log_client<ProcMeta>(
                 *msg, uformat("deserializion error: {}", e.what()));
-          ret = std::unexpected{
-              XdrBadInput("{}::{}: {}", ProcMeta::version_meta::version_name,
-                          ProcMeta::proc_name, e.what_)};
+          e.what_ =
+              std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, e.what_);
+          ret = std::unexpected{std::move(e)};
         }
       done.release();
     });
