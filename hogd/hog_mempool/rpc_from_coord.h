@@ -257,6 +257,17 @@ public:
       DbSchedResult ret = co_await client->dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
+        // Genesis failed on this shard, so the sharded db is only partially
+        // initialized and unusable. An earlier shard may already have committed
+        // its genesis block and dispatched a block-0 hog delta, leaving a
+        // [handle_transfer] blocked on [all_shards_genesis_ready_]. Latch the
+        // failure and open the barrier so that waiter wakes and drops the
+        // transfer instead of hanging forever holding [scheduler_lock_]. The
+        // error is surfaced to the caller, which aborts the run.
+        error("genesis load failed on a db shard ({}); aborting genesis", ret);
+        scheduler_->genesis_load_failed_.store(true, std::memory_order_release);
+        scheduler_->all_shards_genesis_ready_.store(true);
+        scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
         co_return ret;
       }
     }
@@ -281,6 +292,12 @@ public:
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
+
+    // Reached only when genesis loaded OK on every shard. Release the transfer
+    // barrier: it is now safe to process hog transfer deltas, because every
+    // shard can serve the sharded hog-age reads in [read_average_hog_ages].
+    scheduler_->all_shards_genesis_ready_.store(true);
+    scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
 
     // Reached only when genesis loaded OK on every shard.
     co_return DbSchedResult::DbSchedResultOK;
@@ -566,6 +583,17 @@ private:
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
+    // On restart the db tip already reflects a committed genesis on every
+    // shard, so genesis will not be re-loaded (see
+    // [schedcoord_load_genesis_configuration], which early-returns when the tip
+    // is non-empty). Release the transfer barrier here so [handle_transfer]
+    // does not wait forever for a genesis fan-out that never runs. A fresh
+    // start leaves the barrier closed until
+    // [schedcoord_load_genesis_configuration] completes.
+    if (last_committed_block_.value.proposal_header.block_height >= 0) {
+      scheduler_->all_shards_genesis_ready_.store(true);
+      scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
+    }
     co_await db_rpc_->register_scheduler(scheduler_);
     auth_rpc_->register_callback(
         [this](BlockHeight height, KeyChangeBatch key_changes) {

@@ -65,6 +65,29 @@ public:
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
     CHECK_PTR(scheduler_.get());
+
+    // Wait until genesis has been loaded on every db shard before touching hog
+    // ages. [process_transfers] -> [read_average_hog_ages] shards reads by
+    // address, and the genesis fan-out is sequential, so the first shard's
+    // genesis-block deltas (which include accounts owned by shards that have not
+    // yet run genesis, e.g. [kDeployContractAddress]) would otherwise read a
+    // not-yet-populated shard and fail. Once set, this barrier stays open, so
+    // steady-state blocks do not wait.
+    while (!scheduler_->all_shards_genesis_ready_.load()) {
+      co_await scheduler_->all_shards_genesis_ready_.wait(false);
+    }
+
+    // The barrier is also opened when the genesis fan-out *fails* on a shard, so
+    // that we do not hang here forever. In that case the sharded db is only
+    // partially initialized; drop the transfer rather than reading it (which
+    // would trip the missing-hog-age CHECK). The run is being aborted anyway.
+    if (scheduler_->genesis_load_failed_.load(std::memory_order_acquire)) {
+      info("[MempoolDbRpc::handle_transfer] genesis load failed on a shard; "
+           "dropping transfer for block {} (run is aborting).",
+           transfers.block);
+      co_return;
+    }
+
     co_await scheduler_->process_transfers(transfers);
 
     // We write the hog ages to the database down here because we need to update

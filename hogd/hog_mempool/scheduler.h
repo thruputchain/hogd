@@ -173,6 +173,24 @@ public:
   x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
+  // Barrier: true once genesis has been loaded on *every* db shard. Hog transfer
+  // processing ([MempoolDbRpc::handle_transfer]) must wait on this before
+  // reading hog ages, because [read_average_hog_ages] shards reads by address
+  // and the genesis fan-out is sequential: the first shard's genesis-block
+  // deltas arrive (and route to accounts owned by *other* shards, e.g.
+  // [kDeployContractAddress]) before those shards have run their genesis. Set by
+  // [MempoolCoordinatorRpc] after the fan-out completes (or, on restart, once
+  // the db tip shows genesis already committed).
+  x23::CoroFutex<bool> all_shards_genesis_ready_{false};
+
+  // Set true (and published alongside [all_shards_genesis_ready_]) if the
+  // genesis fan-out failed on some shard, leaving the sharded db only partially
+  // initialized. [handle_transfer] then wakes and drops the transfer instead of
+  // reading a half-initialized db (which would trip the missing-hog-age CHECK)
+  // or hanging forever on the barrier holding [scheduler_lock_]. One-way latch:
+  // genesis failure is unrecoverable and the run is being aborted.
+  std::atomic<bool> genesis_load_failed_{false};
+
   x23::CoroLock global_lock_;
 
 private:
@@ -317,6 +335,15 @@ private:
   // gathered from) the shard that owns each account; the scheduler itself
   // stays unaware of sharding.
   std::shared_ptr<sharded_db_sched_client_t> sharded_db_;
+
+  // Addresses whose genesis (block 0) hog transfer delta has already been
+  // applied. Genesis is loaded replicated on *every* db shard, so each shard's
+  // commit dispatches the same block-0 delta set; without this dedup the
+  // received-hog-age group would be multiplied by the shard count. Only touched
+  // on the block-0 path in [process_transfers], which is serialized by
+  // [pending_hog_age_update_lock_]/[global_lock_]. TODO: remove once genesis
+  // delta dispatch is made shard-owner-only on the hogdb side (ISSUES.md #1b).
+  std::unordered_set<ContractAddress, ByteArrayHasher> genesis_applied_deltas_;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };
