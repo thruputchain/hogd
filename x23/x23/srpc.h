@@ -376,9 +376,11 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
           if (logging)
             logger_.template log_client<ProcMeta>(
                 *msg, uformat("deserializion error: {}", e.what()));
-          ret = std::unexpected{XdrBadInput(
-              "{}::{}: {}", ProcMeta::version_meta::version_name,
-              ProcMeta::proc_name, e.what_)};
+          XdrBadInput err(e.what_);
+          err.what_ =
+              std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, err.what_);
+          ret = std::unexpected{std::move(err)};
         }
       done.release();
     });
