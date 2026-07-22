@@ -365,14 +365,20 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
             deserialize(&ret.value(), res);
             logger_.template log_client<ProcMeta>(*msg, ret.value());
           }
-        } catch (XdrBadInput &e) {
+        } catch (XdrException &e) {
+          // Catch the XdrException base, not just XdrBadInput: a malformed
+          // reply body can also throw XdrLengthError (e.g. an oversized
+          // bounded vector count).  Letting a sibling exception escape this
+          // callback would cross the noexcept boundary in SRpcFd::input and
+          // call std::terminate.  Translate any decode failure into a typed
+          // client-side XdrBadInput so the blocked caller is released and the
+          // read thread survives.
           if (logging)
             logger_.template log_client<ProcMeta>(
                 *msg, uformat("deserializion error: {}", e.what()));
-          e.what_ =
-              std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
-                          ProcMeta::proc_name, e.what_);
-          ret = std::unexpected{std::move(e)};
+          ret = std::unexpected{XdrBadInput(
+              "{}::{}: {}", ProcMeta::version_meta::version_name,
+              ProcMeta::proc_name, e.what_)};
         }
       done.release();
     });

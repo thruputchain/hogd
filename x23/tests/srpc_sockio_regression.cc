@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
 #include <string_view>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 #include <utility>
@@ -88,6 +92,112 @@ TEST(SockioRegression, BoundedStrCStr)
   BoundedStr<12> bs = "Hello, world";
   ASSERT_EQ(bs.size(), 12U);
   bs.c_str();
+}
+
+namespace {
+
+// Metadata for a synthetic non-void RPC whose result is a bounded vector
+// (bounded_intvec, max 8 elements).  A malicious peer answers a pending call
+// with a SUCCESS reply that declares more elements than the bound permits.
+struct oversized_bounded_vec_proc {
+  struct version_meta {
+    static constexpr std::uint32_t program = 0x5a23'2283;
+    static constexpr std::uint32_t version = 1;
+    static constexpr const char *version_name = "poc_srpc_v1";
+  };
+
+  static constexpr std::uint32_t proc = 1;
+  static constexpr const char *proc_name = "oversized_bounded_vec";
+  using return_type = bounded_intvec;
+};
+
+// Best-effort blocking helpers for the peer side of a loopback socket.
+bool
+read_exact(int fd, void *buf, size_t len)
+{
+  auto *p = static_cast<std::uint8_t *>(buf);
+  while (len) {
+    ssize_t n = ::read(fd, p, len);
+    if (n <= 0)
+      return false;
+    p += n;
+    len -= static_cast<size_t>(n);
+  }
+  return true;
+}
+
+bool
+write_all(int fd, BufView bytes)
+{
+  while (!bytes.empty()) {
+    ssize_t n = ::write(fd, bytes.data(), bytes.size());
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n <= 0)
+      return false;
+    bytes = bytes.subspan(static_cast<size_t>(n));
+  }
+  return true;
+}
+
+} // namespace
+
+// Regression test for issue #3091: a SUCCESS reply whose bounded-vector result
+// declares more elements than the type permits throws XdrLengthError during
+// decode.  The SRPC client callback must catch the XdrException base (not just
+// XdrBadInput) so the exception does not escape SRpcFd::input(BufView) noexcept
+// and call std::terminate.  Expected behaviour: the blocked caller is released
+// with a translated XdrBadInput and the process survives.
+TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
+{
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  ASSERT_TRUE(client_fd);
+  UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
+  ASSERT_TRUE(peer_fd);
+
+  RefPtr<SRpcStream<>> client_stream{*new SRpcStream<>(std::move(client_fd))};
+  client_stream->go();
+
+  std::atomic<bool> got_bad_input{false};
+  std::thread caller{[&] {
+    try {
+      (void)client_stream->template send_call<oversized_bounded_vec_proc>();
+    } catch (const XdrBadInput &) {
+      got_bad_input = true;
+    } catch (...) {
+      // Any other outcome (including no exception) leaves got_bad_input false.
+    }
+  }};
+
+  // Act as the malicious peer: read the framed request, recover the assigned
+  // xid, and answer with a SUCCESS reply whose bounded_intvec count is 9 (the
+  // maximum is 8) followed by 8 elements.
+  std::uint32_t marker = 0;
+  ASSERT_TRUE(read_exact(peer_fd.get(), &marker, sizeof(marker)));
+  size_t msglen = getbe<std::uint32_t>(&marker) & 0x7fff'ffffU;
+  Buf request;
+  request.resize_uninitialized(msglen);
+  ASSERT_TRUE(read_exact(peer_fd.get(), request.data(), request.size()));
+
+  rpc_msg reply{};
+  reply.xid = getbe<std::uint32_t>(request.data());
+  msg_set_reply_stat(&reply, accept_stat::SUCCESS);
+  Buf response = make_record(reply, std::uint32_t{9}, std::int32_t{0},
+                             std::int32_t{1}, std::int32_t{2}, std::int32_t{3},
+                             std::int32_t{4}, std::int32_t{5}, std::int32_t{6},
+                             std::int32_t{7}, std::int32_t{8});
+  ASSERT_TRUE(write_all(peer_fd.get(), response));
+
+  caller.join();
+  EXPECT_TRUE(got_bad_input.load())
+      << "oversized bounded-vector reply should surface as a client-side "
+         "XdrBadInput without terminating the process";
 }
 
 } // namespace x23
