@@ -598,12 +598,44 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
     release_indexer_snapshot(snapshot);
     return;
   }
-  [](indexer_snapshot_t *snapshot, SignedTransactionHash hash,
+
+  // Bounded admission control (#3124). With indexers registered, each spawned
+  // relay pins one pending RPC XID per indexer until that indexer replies or
+  // its stream fails, and this detached path has no other backpressure. Cap
+  // how many may be in flight so a contract that floods best-effort reports
+  // at a connected-but-unresponsive indexer cannot make that per-report RPC
+  // state grow without bound. Dropping past the cap is acceptable -- the
+  // indexer-side tx-failure cache is explicitly best effort.
+  //
+  // The counter is decremented by the detached relay below through the
+  // shared_ptr it owns, so the accounting stays correct even if the relay
+  // outlives this EventRPCContext (which deliberately never drains this path).
+  if (tx_failure_relays_in_flight_->fetch_add(1, std::memory_order_acq_rel) >=
+      max_in_flight_tx_failure_relays_) {
+    tx_failure_relays_in_flight_->fetch_sub(1, std::memory_order_release);
+    const size_t dropped =
+        tx_failure_relays_dropped_.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Rate-limit to one line per power-of-two drops, so a sustained flood
+    // cannot turn dropping into a logging DoS of its own.
+    if ((dropped & (dropped - 1)) == 0) {
+      warn("dropping best-effort tx-failure report: in-flight relay cap {} "
+           "reached ({} dropped so far)",
+           max_in_flight_tx_failure_relays_, dropped);
+    }
+    release_indexer_snapshot(snapshot);
+    return;
+  }
+
+  [](std::shared_ptr<std::atomic<size_t>> in_flight,
+     indexer_snapshot_t *snapshot, SignedTransactionHash hash,
      TxFailureDiagnostic d) -> x23::Detached {
     x23::Defer release{[snapshot] { release_indexer_snapshot(snapshot); }};
+    x23::Defer decrement{
+        [in_flight] { in_flight->fetch_sub(1, std::memory_order_release); }};
     co_await relay_tx_failure(snapshot->get(), hash, d);
     co_return;
-  }(snapshot, std::move(tx_hash), std::move(diag));
+  }(tx_failure_relays_in_flight_, snapshot, std::move(tx_hash),
+    std::move(diag));
 }
 
 } // namespace hogd
