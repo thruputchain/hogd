@@ -3,12 +3,14 @@
 #include <limits>
 #include <optional>
 
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
@@ -250,6 +252,63 @@ TEST(BalanceLockTest, NewBalanceStorageCost)
 
   // transferred kBalanceStorageCost + 10000 to the address, and only pay once
   EXPECT_EQ(lock.build_result(make_dummy_context()), 10000);
+}
+
+// Regression test for #2957: modifying an existing balance reservation into an
+// opposite-sign extreme delta makes delta_after - delta_before overflow inside
+// NNInt128DeltaBounds::try_reserve_delta. Unlike NNInt128 deltas, balance
+// deltas are not bounded against a base, so a contract can reach this via a
+// narrowed reservation (e.g. -1 then INT128_MAX, or +1 then INT128_MIN). This
+// must surface as a recoverable bounds conflict, not abort the process.
+TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
+{
+  static ItemKey balance_key =
+      make_address_balance_item_key(make_address(2957));
+
+  auto make_ctx = [](std::optional<DbConflictCode> *reason) {
+    static HogDBDAO *dummy_dao = nullptr;
+    LockContext ctx(dummy_dao, 0, balance_key, &kTestCostModel);
+    ctx.conflict_reason = reason;
+    return ctx;
+  };
+
+  // Negative-then-positive: delta_before = -1, delta_after = INT128_MAX.
+  {
+    BalanceLock lock(1);
+
+    Balance first(-1);
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &first, make_ctx(nullptr))
+                    .has_value());
+
+    Balance second(std::numeric_limits<int128_t>::max());
+    ASSERT_TRUE(second.narrow(first).has_value());
+
+    std::optional<DbConflictCode> reason;
+    auto status =
+        lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code(), HogDBCode::kConflict);
+    EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+  }
+
+  // Positive-then-negative: delta_before = +1, delta_after = INT128_MIN.
+  {
+    BalanceLock lock(100);
+
+    Balance first(1);
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &first, make_ctx(nullptr))
+                    .has_value());
+
+    Balance second(std::numeric_limits<int128_t>::min());
+    ASSERT_TRUE(second.narrow(first).has_value());
+
+    std::optional<DbConflictCode> reason;
+    auto status =
+        lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code(), HogDBCode::kConflict);
+    EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+  }
 }
 
 } // namespace hogd
