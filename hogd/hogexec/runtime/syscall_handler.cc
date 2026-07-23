@@ -1424,46 +1424,16 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   assert(!invocation_frame_stack_.empty());
   CHECK(!is_read_only());
 
-  // Reject deploy-address conflicts before resolving (and thus loading,
-  // decoding, and translating) the requested contract, so a deploy that
-  // targets an already-occupied address does no requested-contract resolution
-  // work. The tx-local check is a cheap in-memory lookup. The snapshot check
-  // is NOT free on a cold cache: try_get_deployed_contract() eagerly warms and
-  // translates the existing deployed contract's code, so charge deterministic,
-  // size-based host gas for that work before returning the conflict, mirroring
-  // the resolve charge below. (hogd issue #3122)
-  auto deploy_addr =
-      static_get_deploy_address(get_current_address(), nonce, contract_hash);
-
-  auto deploy_check_status =
-      snapshot_cache_.try_get_deployed_contract(deploy_addr);
-  if (!deploy_check_status) {
-    return deploy_check_status.error();
-  }
-  if (*deploy_check_status != nullptr) {
-    if (out_load_gas != nullptr) {
-      *out_load_gas =
-          DeployContractLoadCost((*deploy_check_status)->hash.contract_size);
-    }
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
-  }
-
-  if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
-          .has_value()) {
-    // A tx-local deployment is bookkeeping only (no snapshot cache entry, so no
-    // contract load/translation happened here); leave out_load_gas untouched.
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
-  }
-
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor.
   // The resolution does real host work (HogDB read + XDR decode + eager RV32
-  // translation) on a cache miss, so charge deterministic, size-based direct
-  // host gas for it via *out_load_gas below. (hogd issue #3122)
+  // translation) on a block-cache miss. Charge deterministic, size-based
+  // direct host gas for it (via *out_load_gas) so the work is metered even
+  // when the deployed contract is never subsequently invoked. The charge is a
+  // function of the serialized contract size, not of cache hit/miss, so it is
+  // identical across nodes. (hogd issue #3122)
   auto contract_res = resolve_contract(contract_hash);
   if (!contract_res.has_value()) {
     return contract_res.error();
@@ -1487,6 +1457,26 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   if (contract.contract_type() == ContractType::kNative &&
       is_banned_redeploy_native_contract(contract.native_contract_id())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  auto deploy_addr =
+      static_get_deploy_address(get_current_address(), nonce, contract_hash);
+
+  auto deploy_check_status =
+      snapshot_cache_.try_get_deployed_contract(deploy_addr);
+  if (!deploy_check_status) {
+    return deploy_check_status.error();
+  }
+  if (*deploy_check_status != nullptr) {
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
+  }
+
+  if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
+          .has_value()) {
+    // contract has already been deployed in this transaction
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
   // deploy new contract

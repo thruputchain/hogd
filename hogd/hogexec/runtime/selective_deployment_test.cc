@@ -337,12 +337,11 @@ TEST_P(SelectiveDeploymentTest, DeploySyscallChargesSizeBasedHostGas)
   EXPECT_EQ(res.gas_consumed_, DeployContractLoadCost(kContractBytes));
 }
 
-// Regression test for issue #3122: a DeployContract syscall whose target
-// address is already occupied is rejected with ContractAlreadyDeployed, but
-// the occupancy check (try_get_deployed_contract) still warms and translates
-// the existing deployed contract's code on a cold cache. That host work must
-// be metered too, so the rejected syscall charges size-based gas for the
-// existing contract rather than reporting zero.
+// Regression test for issue #3122: resolution of the requested contract (and
+// its size-based host-gas charge) happens before the deploy-address conflict
+// check, so a deploy that is ultimately rejected with ContractAlreadyDeployed
+// still charges for the resolution work it performed rather than reporting
+// zero. Here the requested hash resolves to a kExistingBytes-sized contract.
 TEST_P(SelectiveDeploymentTest, DeploySyscallChargesHostGasOnAddressConflict)
 {
   constexpr size_t kExistingBytes = 128;
