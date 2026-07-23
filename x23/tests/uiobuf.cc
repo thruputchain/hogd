@@ -286,3 +286,58 @@ TEST(uiobuf, Swap)
     EXPECT_TRUE(buf_eq(flatview, v.to_vec()));
   }
 }
+
+// Regression test for issue #3113.  Copied ranges are only coalesced into
+// the previous iovec when they share the same Storage allocation.  Two
+// distinct Storage allocations must never be merged into one iovec, even
+// if the allocator happens to place them contiguously, because the merged
+// iovec would then span two arrays and later pointer arithmetic from its
+// base would leave the first array.
+TEST(uiobuf, CoalesceStaysWithinStorage)
+{
+  x23::Buf byte;
+  byte.resize(1, 0xcd);
+
+  x23::Buf flat;
+  x23::BufVec v;
+
+  // The first Storage reserves 2 * kCopyThreshold bytes; fill it exactly
+  // with single-byte copies, all of which live in one allocation and so
+  // coalesce into a single iovec.
+  constexpr std::size_t kFirst = 2 * x23::BufVec::kCopyThreshold;
+  for (std::size_t i = 0; i < kFirst; ++i) {
+    v.append(x23::BufView(byte));
+    flat += byte;
+  }
+  {
+    auto iov = v.to_vec();
+    ASSERT_EQ(iov.size(), std::size_t{1});
+    EXPECT_EQ(iov.front().iov_len, kFirst);
+  }
+
+  // One more copy spills into a freshly allocated second Storage.  It must
+  // start a new iovec rather than extending the first one, regardless of
+  // where the allocator placed the second allocation (the bug was to merge
+  // when the two allocations happened to be adjacent in memory).
+  v.append(x23::BufView(byte));
+  flat += byte;
+
+  auto iov = v.to_vec();
+  ASSERT_EQ(iov.size(), std::size_t{2});
+  EXPECT_EQ(iov.front().iov_len, kFirst);
+  EXPECT_EQ(iov.back().iov_len, std::size_t{1});
+
+  // Data must round-trip, and every iovec must lie entirely within one
+  // Storage allocation.
+  ASSERT_TRUE(buf_eq(flat, iov));
+  for (const auto &v0 : iov) {
+    const auto *base = static_cast<const std::uint8_t *>(v0.iov_base);
+    const bool contained =
+        std::ranges::any_of(v.storage_, [&](const x23::BufVec::Storage &s) {
+          const auto *lo = s.bytes_.data();
+          const auto *hi = lo + s.bytes_.capacity();
+          return base >= lo && base + v0.iov_len <= hi;
+        });
+    EXPECT_TRUE(contained);
+  }
+}

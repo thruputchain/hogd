@@ -165,6 +165,12 @@ struct BufVec {
   VecQ<Storage> storage_;
   VecQ<iovec> data_;
   size_t nconsumed_{}; // number of iovecs consumed
+  // Base of the Storage::bytes_ allocation backing the last iovec in
+  // data_.  Used to decide whether a freshly copied range may be
+  // coalesced with the previous iovec: pointer adjacency alone is not
+  // enough, since the allocator may place distinct allocations
+  // contiguously.  Coalescing is only sound within a single allocation.
+  const uint8_t *last_iov_storage_{};
 
   BufVec() noexcept = default;
   BufVec(BufVec &&other) noexcept { swap(other); }
@@ -182,6 +188,7 @@ struct BufVec {
     data_.clear();
     storage_.clear();
     nconsumed_ = 0;
+    last_iov_storage_ = nullptr;
   }
 
   bool empty() const noexcept { return data_.empty(); }
@@ -192,6 +199,7 @@ struct BufVec {
     swap(storage_, other.storage_);
     swap(data_, other.data_);
     swap(nconsumed_, other.nconsumed_);
+    swap(last_iov_storage_, other.last_iov_storage_);
   }
 
   size_t nbytes() const noexcept
@@ -216,8 +224,14 @@ struct BufVec {
                                     2 * storage_.back().bytes_.capacity())));
     Storage &back = storage_.back();
     auto *p = back.copy(b.data() + offset, nbytes);
-    if (!data_.empty() && p == static_cast<uint8_t *>(data_.back().iov_base) +
-                                   data_.back().iov_len)
+    // Only coalesce with the previous iovec when this copy landed in the
+    // same Storage allocation.  Pointer adjacency across distinct
+    // allocations can hold by chance, but extending the iovec would make
+    // it span two arrays, and later pointer arithmetic from its base
+    // would leave the first array (undefined behavior).
+    if (!data_.empty() && back.bytes_.data() == last_iov_storage_ &&
+        p == static_cast<uint8_t *>(data_.back().iov_base) +
+                 data_.back().iov_len)
       data_.back().iov_len += nbytes;
     else {
       back.iovnum_ = iovnum();
@@ -226,6 +240,7 @@ struct BufVec {
           .iov_len = nbytes,
       });
     }
+    last_iov_storage_ = back.bytes_.data();
   }
 
   void append(Buf &&b, size_t offset = 0)
@@ -242,6 +257,9 @@ struct BufVec {
         .iov_base = newback->bytes_.data() + offset,
         .iov_len = newback->bytes_.size() - offset,
     });
+    // The new iovec is backed by this owned Buf's allocation; record it so
+    // a later small copy into the same Storage may legitimately coalesce.
+    last_iov_storage_ = newback->bytes_.data();
 
     // Keep the Storage with the most room at the back of the list.
     // It's okay to have iovnum_ out of order.
