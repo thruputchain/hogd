@@ -164,6 +164,66 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
   EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
 }
 
+// Regression for #3124: the fire-and-forget tx-failure relay path
+// (eventexecutor_report_tx_failure -> spawn_tx_failure_relay) has no natural
+// backpressure -- each relay registers one pending RPC XID per indexer that
+// clears only when the indexer replies or its stream fails. A contract can
+// drive an unbounded number of these reports, so a configured indexer that
+// stays connected but withholds replies (a realistic slow/hung dependency)
+// would otherwise let that per-report RPC state accumulate without bound.
+// spawn_tx_failure_relay must cap the number of concurrently in-flight relays
+// and drop the excess (the indexer-side tx-failure cache is best effort).
+TEST_F(EventRpcTest, TxFailureRelayIsBoundedWhenIndexerNeverReplies)
+{
+  EventRPCContext ctx(temp_dir());
+  constexpr size_t kCap = 3;
+  ctx.set_max_in_flight_tx_failure_relays_for_test(kCap);
+
+  // A live indexer peer that never answers: the far end (fds[1]) stays open
+  // but is never served, so every relay's send suspends awaiting a reply
+  // that never arrives -- exactly the "slow live peer" failure mode. (Unlike
+  // make_socketpair_indexer_client, which wires a fake that replies at once.)
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  const int peer_fd = fds[1]; // unresponsive peer end, closed at teardown
+  auto stuck_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  ctx.add_indexer(stuck_stream->client<IndexerEvent1>());
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x23);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 2522;
+  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
+
+  // Fire many more reports than the cap. spawn_tx_failure_relay increments
+  // the in-flight count synchronously before spawning, and an admitted relay
+  // only decrements once its send completes -- which never happens while the
+  // peer withholds replies -- so once the loop returns the counts are
+  // deterministic: kCap admitted (still suspended), the rest dropped.
+  constexpr size_t kReports = 32;
+  for (size_t i = 0; i < kReports; ++i) {
+    tx_hash[0] = static_cast<uint8_t>(i);
+    ctx.spawn_tx_failure_relay(tx_hash, diag);
+  }
+
+  EXPECT_EQ(ctx.tx_failure_relays_in_flight_for_test(), kCap);
+  EXPECT_EQ(ctx.tx_failure_relays_dropped_for_test(), kReports - kCap);
+
+  // Teardown: close the peer end so the reader hits EOF and fails the stream,
+  // completing the suspended relays (which clears their pending XIDs and
+  // releases the indexer snapshot) before ctx is destroyed. The destructor
+  // deliberately does not drain this path, so without this the detached
+  // relays -- and the snapshot they pin -- would leak under ASAN/LSAN.
+  CHECK_EQ(close(peer_fd), 0);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (ctx.tx_failure_relays_in_flight_for_test() != 0) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "in-flight tx-failure relays did not drain after peer close";
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+}
+
 TEST_F(EventRpcTest, DeadIndexerDoesNotFailCommit)
 {
   EventRPCContext ctx(temp_dir());
