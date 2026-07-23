@@ -610,11 +610,10 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   // The counter is decremented by the detached relay below through the
   // shared_ptr it owns, so the accounting stays correct even if the relay
   // outlives this EventRPCContext (which deliberately never drains this path).
-  if (tx_failure_relays_in_flight_->fetch_add(1, std::memory_order_acq_rel) >=
+  if (tx_failure_relays_in_flight_->fetch_add(1) >=
       max_in_flight_tx_failure_relays_) {
-    tx_failure_relays_in_flight_->fetch_sub(1, std::memory_order_release);
-    const size_t dropped =
-        tx_failure_relays_dropped_.fetch_add(1, std::memory_order_relaxed) + 1;
+    tx_failure_relays_in_flight_->fetch_sub(1);
+    const size_t dropped = tx_failure_relays_dropped_.fetch_add(1) + 1;
     // Rate-limit to one line per power-of-two drops, so a sustained flood
     // cannot turn dropping into a logging DoS of its own.
     if ((dropped & (dropped - 1)) == 0) {
@@ -630,8 +629,7 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
      indexer_snapshot_t *snapshot, SignedTransactionHash hash,
      TxFailureDiagnostic d) -> x23::Detached {
     x23::Defer release{[snapshot] { release_indexer_snapshot(snapshot); }};
-    x23::Defer decrement{
-        [in_flight] { in_flight->fetch_sub(1, std::memory_order_release); }};
+    x23::Defer decrement{[in_flight] { in_flight->fetch_sub(1); }};
     co_await relay_tx_failure(snapshot->get(), hash, d);
     co_return;
   }(tx_failure_relays_in_flight_, snapshot, std::move(tx_hash),
