@@ -493,16 +493,11 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
 {
   // Open the block on every shard. Surface the first non-OK result; the caller
   // abandons on failure (which also fans out across shards).
-  DbSchedResult result = DbSchedResult::DbSchedResultOK;
-  for (auto &client : db_sched_clients_) {
-    DbSchedResult r =
-        co_await client->dbsched_create_snapshot(prev_block_id, block_id, mode);
-    if (result == DbSchedResult::DbSchedResultOK &&
-        r != DbSchedResult::DbSchedResultOK) {
-      result = r;
-    }
-  }
-  co_return result;
+  co_return co_await sharded_db_sched_client_->broadcast_status(
+      [&](auto &client) {
+        return client->dbsched_create_snapshot(prev_block_id, block_id, mode);
+      },
+      DbSchedResult::DbSchedResultOK);
 }
 
 x23::Async<RPCError>
@@ -515,15 +510,9 @@ x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
   // Abandon the block on every shard.
-  DbSchedResult result = DbSchedResult::DbSchedResultOK;
-  for (auto &client : db_sched_clients_) {
-    DbSchedResult r = co_await client->dbsched_abandon_snapshot(block_id);
-    if (result == DbSchedResult::DbSchedResultOK &&
-        r != DbSchedResult::DbSchedResultOK) {
-      result = r;
-    }
-  }
-  co_return result;
+  co_return co_await sharded_db_sched_client_->broadcast_status(
+      [&](auto &client) { return client->dbsched_abandon_snapshot(block_id); },
+      DbSchedResult::DbSchedResultOK);
 }
 
 x23::Async<RPCError>
@@ -546,6 +535,11 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   // divergence between nodes. On failure the caller abandons; a non-OK
   // DbBlockResult carries no db_hash, but no caller reads db_hash on the
   // non-OK path.
+  //
+  // Kept as an explicit loop (not routed through the ShardedClient facade)
+  // because close returns a value-carrying DbBlockResult whose db_hash is
+  // shard 0's alone -- the facade's broadcast_status only reduces to a status
+  // and would drop the hash. This mirrors commit_snapshot below.
   DbBlockResult result =
       co_await db_sched_clients_[0]->dbsched_close_snapshot(block_id);
   for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
