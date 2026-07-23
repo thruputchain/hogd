@@ -36,6 +36,7 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
@@ -1417,7 +1418,8 @@ is_banned_redeploy_native_contract(
 
 SystemStatus<SyscallStatus<ContractAddress>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
-                                   SHA256Hash const &contract_hash)
+                                   SHA256Hash const &contract_hash,
+                                   uint64_t *out_load_gas)
 {
   assert(!invocation_frame_stack_.empty());
   CHECK(!is_read_only());
@@ -1425,16 +1427,30 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
-  // be immediately invoked with e.g. a constructor
+  // be immediately invoked with e.g. a constructor.
+  // The resolution does real host work (HogDB read + XDR decode + eager RV32
+  // translation) on a block-cache miss. Charge deterministic, size-based
+  // direct host gas for it (via *out_load_gas) so the work is metered even
+  // when the deployed contract is never subsequently invoked. The charge is a
+  // function of the serialized contract size, not of cache hit/miss, so it is
+  // identical across nodes. (hogd issue #3122)
   auto contract_res = resolve_contract(contract_hash);
   if (!contract_res.has_value()) {
     return contract_res.error();
   }
   if (contract_res.value() == nullptr) {
+    if (out_load_gas != nullptr) {
+      *out_load_gas = kDeployContractLoadBaseCost;
+    }
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
+
+  auto contract_size = static_cast<uint32_t>(contract_blob_size(contract));
+  if (out_load_gas != nullptr) {
+    *out_load_gas = DeployContractLoadCost(contract_size);
+  }
 
   // Native (precompiled) contracts cannot be deployed - they are set up at
   // genesis and should not be redeployed by user transactions
@@ -1462,8 +1478,6 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
-
-  auto contract_size = static_cast<uint32_t>(contract_blob_size(contract));
 
   // deploy new contract
   invocation_frame_stack_.deploy_contract(

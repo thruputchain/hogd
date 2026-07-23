@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
@@ -51,13 +52,19 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_contract_hash,
                              ContractAddress &output_deployed_address) noexcept
 {
-  auto status =
-      syscall_handler.deploy_contract(input_nonce, input_contract_hash);
+  // Direct host gas for the contract-resolution work (HogDB read + XDR decode +
+  // eager RV32 translation) performed by deploy_contract(). Set on any path
+  // that reaches resolution and reported to the outer syscall trampoline so the
+  // work is metered even when the deployed contract is never invoked. (#3122)
+  uint64_t load_gas = 0;
+  auto status = syscall_handler.deploy_contract(input_nonce,
+                                                input_contract_hash, &load_gas);
   if (!status) {
+    // SystemError ends execution of the whole block; gas reporting is moot.
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+    return {status.value().error().code(), WrappedGasAmount{load_gas}};
   }
   output_deployed_address = *status.value();
 
@@ -73,7 +80,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
     }
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{load_gas}};
 }
 
 } // namespace hogd
