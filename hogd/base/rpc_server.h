@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -49,14 +50,23 @@ public:
       listen_fd_.wait(lfd);
     }
 
-    for (;;) {
-      auto ptr = cs_.take();
-      Conn *c = ptr->connlist;
-      if (!c)
-        break;
-      x23::RefPtr s(*c->rpcstream_);
-      ptr.reset();
-      s->fail();
+    // Fail every live connection.  We cannot assume fail() synchronously
+    // deletes the Conn (which unlinks it from connlist via ~Conn): a Conn
+    // whose async handler is still suspended keeps its dispatcher — and
+    // hence the Conn that dispatcher's impl_ owns — alive until the
+    // handler completes, so it lingers in connlist after fail().  Snapshot
+    // the streams under the lock, fail them without the lock, then let
+    // destroy_wait() block until every Conn has been destroyed and dropped
+    // its RefPtr back to this server.
+    {
+      std::vector<x23::RefPtr<x23::detail::RpcStreamImpl>> streams;
+      {
+        auto ptr = cs_.take();
+        for (Conn *c = ptr->connlist; c; c = c->next_)
+          streams.emplace_back(*c->rpcstream_);
+      }
+      for (auto &s : streams)
+        s->fail();
     }
     destroy_wait();
   }

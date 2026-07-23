@@ -135,8 +135,19 @@ struct ProgVers {
 };
 
 template<typename T>
-struct SrvMap : public std::map<ProgVers, std::unique_ptr<T>> {
-  using super = std::map<ProgVers, std::unique_ptr<T>>;
+struct SrvMap : public std::map<ProgVers, std::shared_ptr<T>> {
+  using super = std::map<ProgVers, std::shared_ptr<T>>;
+
+  // Return a shared owner of the exact-match dispatcher for msg, or null
+  // if there is none.  Used to let a suspended async handler keep its
+  // dispatcher alive independently of this map (see rpc.cc reader()).
+  std::shared_ptr<T> find_shared(const rpc_msg &msg) const
+  {
+    ProgVers pv{.prog = msg.body.cbody().prog, .vers = msg.body.cbody().vers};
+    auto it = super::find(pv);
+    return it != super::end() ? it->second : nullptr;
+  }
+
   T *lookup(const rpc_msg &msg, rpc_msg *err) const
   {
     using enum accept_stat;

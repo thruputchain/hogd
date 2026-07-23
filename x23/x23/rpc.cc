@@ -45,16 +45,16 @@ RpcStreamImpl::fail()
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
-  // Do NOT clear srvmap_ here.  A server handler that returned a
-  // non-ready awaitable is running in a detached continuation (see
-  // reader()) that holds only a RefPtr to this stream, while the copied
-  // ProcHandler in that continuation holds a bare reference to the
-  // RpcDispatcher owned by srvmap_.  Destroying the dispatcher now would
-  // leave that suspended handler dereferencing freed memory when it
-  // resumes.  The dispatchers are torn down with srvmap_ when this stream
-  // is destroyed, which cannot happen before every such continuation has
-  // dropped its RefPtr.  request_stop() plus poison() already ensure no
-  // further calls will be dispatched.
+  // Drop this stream's ownership of its service dispatchers.  This both
+  // stops any post-failure call from being dispatched (lookup() will
+  // miss) and breaks the ownership cycle that RpcServer sets up (a
+  // dispatcher's impl_ owns a Conn that holds a RefPtr back to this
+  // stream).  A dispatcher that is still needed by a suspended async
+  // handler is not destroyed here: srvmap_ now holds shared_ptrs and the
+  // detached handler continuation in reader() co-owns the dispatcher it
+  // is running, so clearing the map only releases this stream's
+  // reference; the object survives until the continuation completes.
+  srvmap_.clear();
   cp_->poison(fd_);
 }
 
@@ -167,15 +167,27 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
+        // Co-own the dispatcher for the whole duration of the call.  The
+        // handler and, for an async handler that suspends, the copied
+        // ProcHandler in its continuation hold a bare reference to this
+        // dispatcher (RpcDispatcher &).  A concurrent fail() may clear
+        // srvmap_ (which both stops post-failure dispatch and breaks the
+        // RpcServer ownership cycle) while the handler is running or
+        // suspended; holding a shared_ptr here — acquired before serve()
+        // so it also guards a fail() racing the dispatch itself — keeps
+        // the dispatcher (and the impl_/logger it owns) alive until the
+        // handler completes.
+        std::shared_ptr<RpcService> svc = srvmap_.find_shared(msg);
+        auto awaitable = svc->serve(msg, {b.subspan(hdrbytes), b});
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())
           cp_->dwrite(fd_, awaiter.await_resume());
         else
-          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+          [](RefPtr<RpcStreamImpl> self, std::shared_ptr<RpcService> svc,
+             auto awaitable) -> Detached {
             self->cp_->dwrite(self->fd_, co_await awaitable);
-          }(*this, std::move(awaitable));
+          }(*this, std::move(svc), std::move(awaitable));
       }
       else
         send_msg(res);
