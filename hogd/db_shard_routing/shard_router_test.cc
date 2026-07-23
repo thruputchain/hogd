@@ -1,5 +1,6 @@
 #include "hogd/db_shard_routing/shard_router.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <set>
 
@@ -11,7 +12,8 @@ namespace hogd {
 namespace {
 
 // Builds a distinct address from a seed by writing the seed into the bytes.
-ContractAddress make_address(uint64_t seed)
+ContractAddress
+make_address(uint64_t seed)
 {
   ContractAddress addr{};
   for (size_t i = 0; i < sizeof(seed); ++i) {
@@ -24,7 +26,7 @@ ContractAddress make_address(uint64_t seed)
 TEST(ShardRouterTest, SingleShardAlwaysZero)
 {
   for (uint64_t seed = 0; seed < 256; ++seed) {
-    EXPECT_EQ(shard_of_address(make_address(seed), /*shard_count=*/1), 0u);
+    EXPECT_EQ(shard_of_address(make_address(seed), /*shard_count=*/1), 0U);
   }
 }
 
@@ -69,7 +71,7 @@ TEST(ShardRouterTest, SpreadsAcrossShards)
   for (uint64_t seed = 0; seed < 1000; ++seed) {
     hit.insert(shard_of_address(make_address(seed), /*shard_count=*/8));
   }
-  EXPECT_GT(hit.size(), 1u);
+  EXPECT_GT(hit.size(), 1U);
 }
 
 } // namespace
