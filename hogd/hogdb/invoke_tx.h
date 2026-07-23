@@ -102,6 +102,11 @@ public:
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }
 
+  // Number of keys currently tracked in changes_. Exposed only so tests can
+  // assert that a failed first-time admission leaves no retained entry
+  // behind (#3111).
+  std::size_t change_entry_count_for_testing() const { return changes_.size(); }
+
   //
   // All of the read_* methods below read the current value of an item in just
   // this transaction relative to the snapshot state. They will return

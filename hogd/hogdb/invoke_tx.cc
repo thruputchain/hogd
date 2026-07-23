@@ -384,10 +384,15 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   last_conflict_reason_.reset();
 
   assert(!key.is_address_balance());
-  std::vector<ItemVersion> &v = changes_[key];
+  auto it = changes_.find(key);
 
   // this is the first change for this key; try to acquire a lock on the item.
-  if (v.empty()) {
+  // Acquire the lock *before* touching changes_: a failed first-time
+  // admission must not leave a retained empty entry behind, since
+  // rollback_to_savepoint() skips empty vectors and would never prune it
+  // (#3111). A prior failed admission may have been prevented from inserting,
+  // so an existing entry can also be empty -- treat that as a first change.
+  if (it == changes_.end() || it->second.empty()) {
     HogDBStatus<int128_t> ret =
         block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
@@ -397,6 +402,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     assert(*ret >= 0 || change.is_permanent_exclusive());
     int128_t marginal_storage = *ret;
 
+    std::vector<ItemVersion> &v = changes_[key];
     v.emplace_back(std::move(change), tx_depth_);
     // now lock the storage
     if (marginal_storage != 0) {
@@ -408,6 +414,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   }
 
   // otherwise it is an existing change, so the item is already locked.
+  std::vector<ItemVersion> &v = it->second;
   ItemVersion &item = v.back();
   if (auto r = change.narrow(item.change); !r)
     return r.error();

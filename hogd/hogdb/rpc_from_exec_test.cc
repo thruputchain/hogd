@@ -238,6 +238,43 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 
+// Regression test for #3111: a failed first-time admission must not leave a
+// retained (empty) entry in InvokeTX::changes_. request_change() used to
+// materialize changes_[key] before attempting the block-level lock and, on
+// lock failure, returned without erasing it; rollback_to_savepoint() skips
+// empty vectors and so could never prune it. Repeating catchable failed
+// pushes against distinct keys therefore grew the failing transaction's map
+// with uncharged empty nodes until teardown.
+TEST_F(RpcFromExecDiagnosticsTest, FailedFirstAdmissionRetainsNoChangeEntry)
+{
+  constexpr TransactionID kLockHolderTx = 41;
+  constexpr TransactionID kFailingTx = 42;
+  constexpr std::size_t kAttempts = 6;
+
+  // A sibling transaction wins each key first, so the failing transaction's
+  // first-touch lock on that key is a genuine conflict.
+  for (std::size_t i = 0; i < kAttempts; ++i) {
+    seed_conflict(BlockID{1}, kLockHolderTx,
+                  make_data_key(addr_, static_cast<std::uint8_t>(i)));
+  }
+
+  for (std::size_t i = 0; i < kAttempts; ++i) {
+    StorageDeltaBatch batch;
+    batch.push_back(
+        make_bytes_delta(make_data_key(addr_, static_cast<std::uint8_t>(i)),
+                         0xBB));
+    auto r = rpc_->try_push_new_subtransaction(BlockID{1}, kFailingTx, batch);
+    ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
+
+    InvokeTX *failing_tx = ctx_->get_invoke_tx(BlockID{1}, kFailingTx);
+    ASSERT_NE(failing_tx, nullptr);
+    // Savepoint fully rolled back and, with the fix, no empty entry retained:
+    // the failed first-touch admission never inserts into changes_.
+    EXPECT_EQ(failing_tx->get_savepoint_head(), 0U);
+    EXPECT_EQ(failing_tx->change_entry_count_for_testing(), 0U);
+  }
+}
+
 } // namespace
 
 } // namespace hogd
