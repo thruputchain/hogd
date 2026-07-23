@@ -21,6 +21,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/ramdb/db.h"
