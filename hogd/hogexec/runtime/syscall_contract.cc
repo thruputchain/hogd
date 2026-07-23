@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <cstdint>
 #include <exception>
 #include <utility>
 

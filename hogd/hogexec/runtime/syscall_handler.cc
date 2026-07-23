@@ -1425,10 +1425,13 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   CHECK(!is_read_only());
 
   // Reject deploy-address conflicts before resolving (and thus loading,
-  // decoding, and translating) the requested contract. The conflict checks are
-  // cheap - a snapshot lookup and an in-memory tx-local lookup - so a deploy
-  // that targets an already-occupied address does no requested-contract
-  // resolution work at all. (hogd issue #3122)
+  // decoding, and translating) the requested contract, so a deploy that
+  // targets an already-occupied address does no requested-contract resolution
+  // work. The tx-local check is a cheap in-memory lookup. The snapshot check
+  // is NOT free on a cold cache: try_get_deployed_contract() eagerly warms and
+  // translates the existing deployed contract's code, so charge deterministic,
+  // size-based host gas for that work before returning the conflict, mirroring
+  // the resolve charge below. (hogd issue #3122)
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
@@ -1438,13 +1441,18 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return deploy_check_status.error();
   }
   if (*deploy_check_status != nullptr) {
+    if (out_load_gas != nullptr) {
+      *out_load_gas =
+          DeployContractLoadCost((*deploy_check_status)->hash.contract_size);
+    }
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
   if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
           .has_value()) {
-    // contract has already been deployed in this transaction
+    // A tx-local deployment is bookkeeping only (no snapshot cache entry, so no
+    // contract load/translation happened here); leave out_load_gas untouched.
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }

@@ -337,6 +337,84 @@ TEST_P(SelectiveDeploymentTest, DeploySyscallChargesSizeBasedHostGas)
   EXPECT_EQ(res.gas_consumed_, DeployContractLoadCost(kContractBytes));
 }
 
+// Regression test for issue #3122: a DeployContract syscall whose target
+// address is already occupied is rejected with ContractAlreadyDeployed, but
+// the occupancy check (try_get_deployed_contract) still warms and translates
+// the existing deployed contract's code on a cold cache. That host work must
+// be metered too, so the rejected syscall charges size-based gas for the
+// existing contract rather than reporting zero.
+TEST_P(SelectiveDeploymentTest, DeploySyscallChargesHostGasOnAddressConflict)
+{
+  constexpr size_t kExistingBytes = 128;
+  auto existing = std::make_shared<Contract>(ContractType::kWasmi);
+  existing->wasmi_contract().data.resize_uninitialized(kExistingBytes);
+  for (size_t i = 0; i < kExistingBytes; ++i) {
+    existing->wasmi_contract().data[i] = static_cast<uint8_t>((i * 13) + 5);
+  }
+  auto existing_hash = sha256(*existing);
+  write_contract(existing);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 0xc0;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0,
+      [existing_hash](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        ContractAddress deployed_addr;
+        auto syscall_res =
+            ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce, existing_hash,
+                                                    deployed_addr);
+        // The address is already occupied, so the deploy must be rejected.
+        if (!syscall_res.has_value() ||
+            syscall_res.value() !=
+                SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopWasmiContext wasmi_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kWasmi, {&wasmi_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  // Pre-occupy the address the syscall would deploy to with the existing
+  // contract, so the deploy hits the ContractAlreadyDeployed conflict path.
+  auto deploy_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   existing_hash);
+  write_deployment(deploy_addr, existing);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
+      context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // The rejected deploy still charges for warming the existing contract.
+  EXPECT_EQ(res.gas_consumed_, DeployContractLoadCost(kExistingBytes));
+}
+
 // Regression test for issue #2021: a transaction that attaches a wasm contract
 // with unknown host imports must be rejected at initial validation (before
 // root_invoke executes), so the malformed contract never reaches deployment.
