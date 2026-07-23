@@ -173,14 +173,14 @@ public:
   x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
-  // Barrier: true once genesis has been loaded on *every* db shard. Hog transfer
-  // processing ([MempoolDbRpc::handle_transfer]) must wait on this before
-  // reading hog ages, because [read_average_hog_ages] shards reads by address
-  // and the genesis fan-out is sequential: the first shard's genesis-block
-  // deltas arrive (and route to accounts owned by *other* shards, e.g.
-  // [kDeployContractAddress]) before those shards have run their genesis. Set by
-  // [MempoolCoordinatorRpc] after the fan-out completes (or, on restart, once
-  // the db tip shows genesis already committed).
+  // Barrier: true once genesis has been loaded on *every* db shard. Hog
+  // transfer processing ([MempoolDbRpc::handle_transfer]) must wait on this
+  // before reading hog ages, because [read_average_hog_ages] shards reads by
+  // address and the genesis fan-out is sequential: the first shard's
+  // genesis-block deltas arrive (and route to accounts owned by *other* shards,
+  // e.g. [kDeployContractAddress]) before those shards have run their genesis.
+  // Set by [MempoolCoordinatorRpc] after the fan-out completes (or, on restart,
+  // once the db tip shows genesis already committed).
   x23::CoroFutex<bool> all_shards_genesis_ready_{false};
 
   // Set true (and published alongside [all_shards_genesis_ready_]) if the
