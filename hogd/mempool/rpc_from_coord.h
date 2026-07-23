@@ -420,6 +420,8 @@ private:
       CHECK(!db_sched_clients_.empty());
       // Shard 0 still backs the scheduler's account reads and get_tip for now.
       db_sched_client_ = db_sched_clients_[0];
+      sharded_db_sched_client_ =
+          std::make_shared<sharded_db_sched_client_t>(db_sched_clients_);
     }
     for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
       auto clients = co_await MempoolExecutorRpc::get_clients();
@@ -461,7 +463,7 @@ private:
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.value.proposal_header
             .block_height,
-        std::make_shared<sharded_db_sched_client_t>(db_sched_clients_));
+        sharded_db_sched_client_);
     co_await Health::instance().set_current_block_height(
         last_committed_block_.value.proposal_header.block_height);
     MempoolMetrics::instance().current_block_height.record(
@@ -730,6 +732,14 @@ private:
   // and get_tip for now (TODO: route those per shard).
   std::vector<std::shared_ptr<db_sched_client_t>> db_sched_clients_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
+  // Sharding-aware view over db_sched_clients_. The homogeneous block-lifecycle
+  // fan-outs (create/abandon snapshot) go through its broadcast helpers so the
+  // per-shard loop lives in one place; shared with the Scheduler. The
+  // value-carrying fan-outs (close/commit snapshot) and genesis load stay
+  // explicit loops on purpose -- their result-shaping, ordering, and
+  // partial-failure semantics should read as deliberate, not hidden behind a
+  // single-client illusion.
+  std::shared_ptr<sharded_db_sched_client_t> sharded_db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
