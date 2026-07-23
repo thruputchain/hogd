@@ -69,6 +69,26 @@ public:
     co_return out;
   }
 
+  // Fan the SAME call out to EVERY shard (no per-shard batching) and reduce the
+  // per-shard statuses to one: the first status not equal to `ok`, or `ok` if
+  // every shard succeeds. Every shard is visited even after one fails -- these
+  // are the homogeneous block-lifecycle fan-outs (open/abandon a block) that
+  // must reach all shards so a later abandon can clean them all up uniformly.
+  // Contrast scatter_write, which is keyed and stops at the first failure.
+  //   call(client) -> x23::Async<Status>
+  template <typename Status, typename Call>
+  x23::Async<Status> broadcast_status(Call call, Status ok)
+  {
+    Status result = ok;
+    for (size_t s = 0; s < clients_.size(); ++s) {
+      Status r = co_await call(clients_[s]);
+      if (result == ok && !(r == ok)) {
+        result = r;
+      }
+    }
+    co_return result;
+  }
+
   // Scatter a keyed batch across shards and reduce the per-shard statuses to
   // one. Returns the first status not equal to `ok` (stopping there), or `ok`
   // if every touched shard succeeds. Shards with no items are skipped.
