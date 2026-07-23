@@ -46,17 +46,30 @@ public:
   //                               in sub_batch order
   // Shards with no items in this batch are skipped (independent reads need no
   // cross-shard alignment). Returns a ResultBatch of length items.size().
+  //
+  // The touched shards are issued concurrently: an Async begins executing on
+  // creation (initial_suspend is suspend_never), so launching every shard's
+  // call before awaiting any keeps all the round-trips in flight at once --
+  // wall-clock is one round-trip, not N. `split` outlives every await, so a
+  // sub-batch passed by reference into `call` stays valid throughout.
   template <typename ResultBatch, typename Batch, typename Route, typename Call>
   x23::Async<ResultBatch> scatter_gather(Batch const &items, Route route,
                                          Call call)
   {
     auto split = split_by_shard(items, clients_.size(), route);
-    std::vector<ResultBatch> per_shard(clients_.size());
+    using CallResult = decltype(call(clients_[0], split.batches[0]));
+    std::vector<std::pair<size_t, CallResult>> in_flight;
+    in_flight.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
       if (split.batches[s].empty()) {
         continue;
       }
-      per_shard[s] = co_await call(clients_[s], split.batches[s]);
+      in_flight.emplace_back(s, call(clients_[s], split.batches[s]));
+    }
+
+    std::vector<ResultBatch> per_shard(clients_.size());
+    for (auto &[s, async] : in_flight) {
+      per_shard[s] = co_await async;
     }
 
     std::vector<typename ResultBatch::value_type> ordered =
@@ -74,7 +87,7 @@ public:
   // every shard succeeds. Every shard is visited even after one fails -- these
   // are the homogeneous block-lifecycle fan-outs (open/abandon a block) that
   // must reach all shards so a later abandon can clean them all up uniformly.
-  // Contrast scatter_write, which is keyed and stops at the first failure.
+  // Contrast scatter_write, which is keyed (per-shard sub-batches).
   //   call(client) -> x23::Async<Status>
   template <typename Status, typename Call>
   x23::Async<Status> broadcast_status(Call call, Status ok)
@@ -90,25 +103,39 @@ public:
   }
 
   // Scatter a keyed batch across shards and reduce the per-shard statuses to
-  // one. Returns the first status not equal to `ok` (stopping there), or `ok`
-  // if every touched shard succeeds. Shards with no items are skipped.
+  // one. Returns the first (lowest-shard) status not equal to `ok`, or `ok` if
+  // every touched shard succeeds. Shards with no items are skipped.
   //   route(item, shard_count) -> owning shard index
   //   call(client, sub_batch)  -> x23::Async<Status>
+  //
+  // The touched shards are issued concurrently (see scatter_gather): every
+  // shard's call is launched before any is awaited, so N shards cost one
+  // round-trip, not N. All touched shards are visited even after one fails --
+  // the writes are already in flight, and on a non-ok result the caller aborts,
+  // which fans out to every shard anyway.
   template <typename Status, typename Batch, typename Route, typename Call>
   x23::Async<Status> scatter_write(Batch const &items, Route route, Call call,
                                    Status ok)
   {
     auto split = split_by_shard(items, clients_.size(), route);
+    using CallResult = decltype(call(clients_[0], split.batches[0]));
+    std::vector<CallResult> in_flight;
+    in_flight.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
       if (split.batches[s].empty()) {
         continue;
       }
-      Status r = co_await call(clients_[s], split.batches[s]);
-      if (!(r == ok)) {
-        co_return r;
+      in_flight.push_back(call(clients_[s], split.batches[s]));
+    }
+
+    Status result = ok;
+    for (auto &async : in_flight) {
+      Status r = co_await async;
+      if (result == ok && !(r == ok)) {
+        result = r;
       }
     }
-    co_return ok;
+    co_return result;
   }
 
 private:
