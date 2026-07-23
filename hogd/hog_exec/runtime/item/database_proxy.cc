@@ -303,15 +303,19 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
 SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  // Fan out abort to every shard the transaction has open.
+  // Fan out abort to every shard the transaction has open. Visit ALL shards
+  // even after one fails and return the first error: try_push_new_subtransaction
+  // may have opened a transaction on shards past a failing one, and stopping
+  // early would leak that open state indefinitely (mirrors broadcast_status).
+  SystemStatus<void> first_error{};
   for (size_t shard = 0; shard < clients_.size(); ++shard) {
     auto res = clients_[shard].abort_transaction(block_id, tx_id);
     auto status = to_system_error_code<VoidMarker{}>(res, [] {});
-    if (!status.has_value()) {
-      return status;
+    if (!status.has_value() && first_error.has_value()) {
+      first_error = status;
     }
   }
-  return SystemStatus<void>{};
+  return first_error;
 }
 
 // A transaction's r/w footprint must never encode to a StorageDeltaBatch push
@@ -543,15 +547,19 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   // Every shard has an aligned savepoint stack (see try_push_new_subtransaction),
-  // so pop `count` from each.
+  // so pop `count` from each. Visit ALL shards even after one fails and return
+  // the first error: stopping early would leave shards past the failing one a
+  // pop deeper, desynchronising the savepoint stacks the next
+  // try_push_new_subtransaction relies on (mirrors broadcast_status).
+  SystemStatus<void> first_error{};
   for (size_t shard = 0; shard < clients_.size(); ++shard) {
     auto res = clients_[shard].pop_subtransactions(block_id, tx_id, count);
     auto status = to_system_error_code<VoidMarker{}>(res, [] {});
-    if (!status.has_value()) {
-      return status;
+    if (!status.has_value() && first_error.has_value()) {
+      first_error = status;
     }
   }
-  return SystemStatus<void>{};
+  return first_error;
 }
 
 SystemStatus<DbTip>
