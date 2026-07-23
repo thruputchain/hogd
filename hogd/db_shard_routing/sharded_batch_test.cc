@@ -14,7 +14,7 @@ auto by_mod = [](int v, size_t n) { return static_cast<size_t>(v) % n; };
 // Helper: given a split, produce per-shard results by applying `f` to each
 // item in each shard's sub-batch -- mimicking what a real per-shard RPC call
 // returns, in the order the shard received the items.
-template <typename F>
+template<typename F>
 std::vector<std::vector<int>>
 make_per_shard_results(ShardSplit<std::vector<int>> const &split, F f)
 {
@@ -32,7 +32,7 @@ TEST(ShardedBatchTest, RoutesEachItemToItsShard)
   std::vector<int> items{0, 1, 2, 3, 4, 5, 6, 7, 8};
   auto split = split_by_shard(items, /*shard_count=*/3, by_mod);
 
-  EXPECT_EQ(split.total, 9u);
+  EXPECT_EQ(split.total, 9U);
   EXPECT_EQ(split.batches[0], (std::vector<int>{0, 3, 6}));
   EXPECT_EQ(split.batches[1], (std::vector<int>{1, 4, 7}));
   EXPECT_EQ(split.batches[2], (std::vector<int>{2, 5, 8}));
@@ -84,7 +84,7 @@ TEST(ShardedBatchTest, EmptyInput)
   std::vector<int> items{};
   auto split = split_by_shard(items, /*shard_count=*/3, by_mod);
 
-  EXPECT_EQ(split.total, 0u);
+  EXPECT_EQ(split.total, 0U);
   for (size_t s = 0; s < 3; ++s) {
     EXPECT_TRUE(split.shard_empty(s));
   }

@@ -543,7 +543,8 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   DbBlockResult result =
       co_await db_sched_clients_[0]->dbsched_close_snapshot(block_id);
   for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
-    DbBlockResult r = co_await db_sched_clients_[i]->dbsched_close_snapshot(block_id);
+    DbBlockResult r =
+        co_await db_sched_clients_[i]->dbsched_close_snapshot(block_id);
     if (result.result() == DbSchedResult::DbSchedResultOK &&
         r.result() != DbSchedResult::DbSchedResultOK) {
       result = r;

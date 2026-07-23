@@ -19,13 +19,13 @@ namespace hogd {
 // logic lives in one place.
 //
 // `Client` is whatever handle the caller holds per shard (a value client, or a
-// std::shared_ptr<...> to one); the caller's `call`/`fn` lambdas dereference it,
-// so both `client.method(...)` and `client->method(...)` styles work.
+// std::shared_ptr<...> to one); the caller's `call`/`fn` lambdas dereference
+// it, so both `client.method(...)` and `client->method(...)` styles work.
 //
 // NOTE: async-only. The executor's DatabaseProxy is synchronous and uses the
-// pure split_by_shard / gather_positional core directly rather than this holder.
-template <typename Client>
-class ShardedClient {
+// pure split_by_shard / gather_positional core directly rather than this
+// holder.
+template<typename Client> class ShardedClient {
 public:
   explicit ShardedClient(std::vector<Client> clients)
     : clients_(std::move(clients))
@@ -52,7 +52,7 @@ public:
   // call before awaiting any keeps all the round-trips in flight at once --
   // wall-clock is one round-trip, not N. `split` outlives every await, so a
   // sub-batch passed by reference into `call` stays valid throughout.
-  template <typename ResultBatch, typename Batch, typename Route, typename Call>
+  template<typename ResultBatch, typename Batch, typename Route, typename Call>
   x23::Async<ResultBatch> scatter_gather(Batch const &items, Route route,
                                          Call call)
   {
@@ -89,7 +89,7 @@ public:
   // must reach all shards so a later abandon can clean them all up uniformly.
   // Contrast scatter_write, which is keyed (per-shard sub-batches).
   //   call(client) -> x23::Async<Status>
-  template <typename Status, typename Call>
+  template<typename Status, typename Call>
   x23::Async<Status> broadcast_status(Call call, Status ok)
   {
     Status result = ok;
@@ -113,7 +113,7 @@ public:
   // round-trip, not N. All touched shards are visited even after one fails --
   // the writes are already in flight, and on a non-ok result the caller aborts,
   // which fans out to every shard anyway.
-  template <typename Status, typename Batch, typename Route, typename Call>
+  template<typename Status, typename Batch, typename Route, typename Call>
   x23::Async<Status> scatter_write(Batch const &items, Route route, Call call,
                                    Status ok)
   {

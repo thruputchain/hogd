@@ -25,8 +25,8 @@ inline constexpr size_t kPrimaryShard = 0;
 // visible; keeping this the only definition makes that swap a single edit.
 //
 // Precondition: `shard_count >= 1`. Returns a value in [0, shard_count).
-inline size_t shard_of_address(ContractAddress const &address,
-                               size_t shard_count)
+inline size_t
+shard_of_address(ContractAddress const &address, size_t shard_count)
 {
   assert(shard_count >= 1);
   uint64_t h = 14695981039346656037ULL; // FNV-1a offset basis
@@ -38,7 +38,8 @@ inline size_t shard_of_address(ContractAddress const &address,
 }
 
 // Convenience overload: routes an AddressAndKey by its account address.
-inline size_t shard_of_key(AddressAndKey const &key, size_t shard_count)
+inline size_t
+shard_of_key(AddressAndKey const &key, size_t shard_count)
 {
   return shard_of_address(key.address, shard_count);
 }

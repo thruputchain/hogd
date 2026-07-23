@@ -16,7 +16,6 @@
 
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/db_shard_routing/shard_router.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
@@ -25,6 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_shard_routing/shard_router.h"
 #include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -125,15 +125,16 @@ Scheduler::write_all_average_hog_ages_to_db()
       ages += per_thread_ages;
     });
   }
-  CHECK_EQ(
-      co_await sharded_db_->scatter_write(
-          ages,
-          [](HogAge const &a, size_t n) { return shard_of_address(a.address, n); },
-          [](auto &c, HogAgeBatch const &sub) {
-            return c->dbsched_write_hog_ages(sub);
-          },
-          DbSchedResult::DbSchedResultOK),
-      DbSchedResult::DbSchedResultOK);
+  CHECK_EQ(co_await sharded_db_->scatter_write(
+               ages,
+               [](HogAge const &a, size_t n) {
+                 return shard_of_address(a.address, n);
+               },
+               [](auto &c, HogAgeBatch const &sub) {
+                 return c->dbsched_write_hog_ages(sub);
+               },
+               DbSchedResult::DbSchedResultOK),
+           DbSchedResult::DbSchedResultOK);
   co_return;
 }
 
@@ -788,8 +789,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // is a one-time, tiny batch, so we apply it serially here rather than
   // parallelizing. (Non-genesis blocks dispatch per-owner deltas and take the
   // parallel path below with no dedup.)
-  // TODO: drop this once genesis delta dispatch is made shard-owner-only on the
-  // hogdb side (ISSUES.md #1b); the dedup then becomes unnecessary.
+  // TODO(vpawar): drop this once genesis delta dispatch is made
+  // shard-owner-only on the hogdb side; the dedup then becomes unnecessary.
   if (transfers.block == 0) {
     x23::CoroGuard cg;
     co_await cg(global_lock_);

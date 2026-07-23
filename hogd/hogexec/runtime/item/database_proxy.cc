@@ -5,6 +5,7 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -26,6 +27,7 @@
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -176,7 +178,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
     // A single client for local mock testing. Using one client avoids fd ulimit
     // issues in sdk tests.
     clients_.push_back(make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
-        x23::HostPort{"localhost", x23::uformat("{}", mock_db.read_port_number_)},
+        x23::HostPort{"localhost",
+                      x23::uformat("{}", mock_db.read_port_number_)},
         false, *x23::single_bucket_map));
     return;
   }
@@ -192,7 +195,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         throw std::runtime_error("Failed to parse database shard address");
       }
       clients_.push_back(
-          make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport, false));
+          make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
+                                                               false));
     }
     return;
   }
@@ -275,8 +279,9 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
     // (mirrors abort_transaction).
     SystemStatus<void> first_error{};
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
-      auto res = clients_[shard].commit_transaction(
-          block_id, tx_id, shard == 0 ? new_contracts : kEmptyBatch);
+      auto res = clients_[shard].commit_transaction(block_id, tx_id,
+                                                    shard == 0 ? new_contracts
+                                                               : kEmptyBatch);
       auto status = to_system_error_code<VoidMarker{}>(res, [] {});
       if (!status.has_value() && first_error.has_value()) {
         first_error = status;
@@ -315,8 +320,8 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   // failing one, and stopping early would leak that open state indefinitely
   // (mirrors broadcast_status).
   SystemStatus<void> first_error{};
-  for (size_t shard = 0; shard < clients_.size(); ++shard) {
-    auto res = clients_[shard].abort_transaction(block_id, tx_id);
+  for (auto &client : clients_) {
+    auto res = client.abort_transaction(block_id, tx_id);
     auto status = to_system_error_code<VoidMarker{}>(res, [] {});
     if (!status.has_value() && first_error.has_value()) {
       first_error = status;
@@ -506,12 +511,14 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     // (possibly empty) subtransaction so all shards' savepoint stacks stay
     // aligned for pop_subtransactions. This is the prepare phase of the
     // cross-shard 2PC.
-    auto split = split_by_shard(
-        delta_batch, clients_.size(),
-        [](auto const &delta, size_t n) { return shard_of_key(delta.addrkey, n); });
+    auto split = split_by_shard(delta_batch, clients_.size(),
+                                [](auto const &delta, size_t n) {
+                                  return shard_of_key(delta.addrkey, n);
+                                });
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
-      auto res = clients_[shard].try_push_new_subtransaction(
-          block_id, tx_id, split.batches[shard]);
+      auto res =
+          clients_[shard].try_push_new_subtransaction(block_id, tx_id,
+                                                      split.batches[shard]);
       // Stop on the first error or conflict; the caller aborts, which fans the
       // abort out to every shard.
       switch (res.error()) {
@@ -560,8 +567,8 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
   // stacks the next try_push_new_subtransaction relies on (mirrors
   // broadcast_status).
   SystemStatus<void> first_error{};
-  for (size_t shard = 0; shard < clients_.size(); ++shard) {
-    auto res = clients_[shard].pop_subtransactions(block_id, tx_id, count);
+  for (auto &client : clients_) {
+    auto res = client.pop_subtransactions(block_id, tx_id, count);
     auto status = to_system_error_code<VoidMarker{}>(res, [] {});
     if (!status.has_value() && first_error.has_value()) {
       first_error = status;

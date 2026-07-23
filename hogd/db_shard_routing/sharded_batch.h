@@ -22,8 +22,7 @@ namespace hogd {
 // The result of splitting a `Batch` (any container with value_type, push_back,
 // and range iteration -- std::vector or x23::XdrVec) across `shard_count`
 // shards.
-template <typename Batch>
-struct ShardSplit {
+template<typename Batch> struct ShardSplit {
   using value_type = typename Batch::value_type;
 
   // batches[s] holds the items routed to shard s, in input order among that
@@ -42,9 +41,9 @@ struct ShardSplit {
 // Split `items` across `shard_count` shards. `route(item, shard_count)` returns
 // the owning shard index in [0, shard_count) -- typically a call into the
 // shared shard_router (shard_of_address / shard_of_key).
-template <typename Batch, typename Route>
-ShardSplit<Batch> split_by_shard(Batch const &items, size_t shard_count,
-                                 Route route)
+template<typename Batch, typename Route>
+ShardSplit<Batch>
+split_by_shard(Batch const &items, size_t shard_count, Route route)
 {
   assert(shard_count >= 1);
   ShardSplit<Batch> split;
@@ -71,7 +70,7 @@ ShardSplit<Batch> split_by_shard(Batch const &items, size_t shard_count,
 //
 // Precondition: per_shard has one entry per shard, and each per_shard[s] has
 // the same length as split.batches[s]. Returns a vector of length split.total.
-template <typename ResultBatch, typename Batch>
+template<typename ResultBatch, typename Batch>
 std::vector<typename ResultBatch::value_type>
 gather_positional(ShardSplit<Batch> const &split,
                   std::vector<ResultBatch> const &per_shard)
