@@ -45,7 +45,16 @@ RpcStreamImpl::fail()
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
-  srvmap_.clear();
+  // Do NOT clear srvmap_ here.  A server handler that returned a
+  // non-ready awaitable is running in a detached continuation (see
+  // reader()) that holds only a RefPtr to this stream, while the copied
+  // ProcHandler in that continuation holds a bare reference to the
+  // RpcDispatcher owned by srvmap_.  Destroying the dispatcher now would
+  // leave that suspended handler dereferencing freed memory when it
+  // resumes.  The dispatchers are torn down with srvmap_ when this stream
+  // is destroyed, which cannot happen before every such continuation has
+  // dropped its RefPtr.  request_stop() plus poison() already ensure no
+  // further calls will be dispatched.
   cp_->poison(fd_);
 }
 
