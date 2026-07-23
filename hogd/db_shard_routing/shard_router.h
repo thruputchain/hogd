@@ -29,7 +29,7 @@ inline size_t shard_of_address(ContractAddress const &address,
                                size_t shard_count)
 {
   assert(shard_count >= 1);
-  uint64_t h = 1469598103934665603ULL; // FNV-1a offset basis
+  uint64_t h = 14695981039346656037ULL; // FNV-1a offset basis
   for (uint8_t byte : address) {
     h ^= byte;
     h *= 1099511628211ULL; // FNV-1a prime

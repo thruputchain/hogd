@@ -540,6 +540,9 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   // because close returns a value-carrying DbBlockResult whose db_hash is
   // shard 0's alone -- the facade's broadcast_status only reduces to a status
   // and would drop the hash. This mirrors commit_snapshot below.
+  // TODO(geoff): forward the root hash of the event block back to the block
+  // header
+  // TODO(geoff): consider whether this should be called from commit instead
   DbBlockResult result =
       co_await db_sched_clients_[0]->dbsched_close_snapshot(block_id);
   for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
@@ -550,9 +553,6 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
     }
   }
   co_return result;
-  // TODO(geoff): forward the root hash of the event block back to the block
-  // header
-  // TODO(geoff): consider whether this should be called from commit instead
 }
 
 x23::Async<RPCError>
