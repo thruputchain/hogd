@@ -625,6 +625,9 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
     return;
   }
 
+  // Hand the counter to the relay as a shared_ptr it owns, so it can
+  // decrement on completion even after this EventRPCContext is destroyed.
+  auto in_flight = tx_failure_relays_in_flight_;
   [](std::shared_ptr<std::atomic<size_t>> in_flight,
      indexer_snapshot_t *snapshot, SignedTransactionHash hash,
      TxFailureDiagnostic d) -> x23::Detached {
@@ -632,8 +635,7 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
     x23::Defer decrement{[in_flight] { in_flight->fetch_sub(1); }};
     co_await relay_tx_failure(snapshot->get(), hash, d);
     co_return;
-  }(tx_failure_relays_in_flight_, snapshot, std::move(tx_hash),
-    std::move(diag));
+  }(in_flight, snapshot, std::move(tx_hash), std::move(diag));
 }
 
 } // namespace hogd
