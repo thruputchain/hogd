@@ -268,15 +268,21 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
     static const BorrowedContractBatch::contract_map_t kEmptyContracts;
     static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
                                                    kEmptyContracts);
+    // Visit ALL shards even after one fails and return the first error:
+    // stopping early would leave shards 0..N-1 committed while shards N+1..K
+    // are only prepared. The caller's abort is a no-op on the already-committed
+    // shards, so the abandoned prepared shards would diverge permanently
+    // (mirrors abort_transaction).
+    SystemStatus<void> first_error{};
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
       auto res = clients_[shard].commit_transaction(
           block_id, tx_id, shard == 0 ? new_contracts : kEmptyBatch);
       auto status = to_system_error_code<VoidMarker{}>(res, [] {});
-      if (!status.has_value()) {
-        return status;
+      if (!status.has_value() && first_error.has_value()) {
+        first_error = status;
       }
     }
-    return SystemStatus<void>{};
+    return first_error;
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
     // exception terminates hog_exec. Contain every failure here and return a
@@ -304,9 +310,10 @@ SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   // Fan out abort to every shard the transaction has open. Visit ALL shards
-  // even after one fails and return the first error: try_push_new_subtransaction
-  // may have opened a transaction on shards past a failing one, and stopping
-  // early would leak that open state indefinitely (mirrors broadcast_status).
+  // even after one fails and return the first error:
+  // try_push_new_subtransaction may have opened a transaction on shards past a
+  // failing one, and stopping early would leak that open state indefinitely
+  // (mirrors broadcast_status).
   SystemStatus<void> first_error{};
   for (size_t shard = 0; shard < clients_.size(); ++shard) {
     auto res = clients_[shard].abort_transaction(block_id, tx_id);
@@ -546,11 +553,12 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  // Every shard has an aligned savepoint stack (see try_push_new_subtransaction),
-  // so pop `count` from each. Visit ALL shards even after one fails and return
-  // the first error: stopping early would leave shards past the failing one a
-  // pop deeper, desynchronising the savepoint stacks the next
-  // try_push_new_subtransaction relies on (mirrors broadcast_status).
+  // Every shard has an aligned savepoint stack (see
+  // try_push_new_subtransaction), so pop `count` from each. Visit ALL shards
+  // even after one fails and return the first error: stopping early would leave
+  // shards past the failing one a pop deeper, desynchronising the savepoint
+  // stacks the next try_push_new_subtransaction relies on (mirrors
+  // broadcast_status).
   SystemStatus<void> first_error{};
   for (size_t shard = 0; shard < clients_.size(); ++shard) {
     auto res = clients_[shard].pop_subtransactions(block_id, tx_id, count);
