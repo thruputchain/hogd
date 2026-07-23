@@ -309,8 +309,13 @@ public:
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
+  // On any path that reaches contract resolution, *out_load_gas (when non-null)
+  // is set to the deterministic direct host gas for that resolution work (see
+  // DeployContractLoadCost); it is left untouched on paths that reject before
+  // resolving. (hogd issue #3122)
   SystemStatus<SyscallStatus<ContractAddress>>
-  deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
+  deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash,
+                  uint64_t *out_load_gas = nullptr);
 
   bool is_read_only() const
   {

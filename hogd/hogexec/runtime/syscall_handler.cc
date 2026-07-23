@@ -36,6 +36,7 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
@@ -1417,32 +1418,17 @@ is_banned_redeploy_native_contract(
 
 SystemStatus<SyscallStatus<ContractAddress>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
-                                   SHA256Hash const &contract_hash)
+                                   SHA256Hash const &contract_hash,
+                                   uint64_t *out_load_gas)
 {
   assert(!invocation_frame_stack_.empty());
   CHECK(!is_read_only());
 
-  // check that contract_hash actually exists
-  // This causes a load of the contract to the cache,
-  // but this is in most cases no-cost, as a deployed contract will _probably_
-  // be immediately invoked with e.g. a constructor
-  auto contract_res = resolve_contract(contract_hash);
-  if (!contract_res.has_value()) {
-    return contract_res.error();
-  }
-  if (contract_res.value() == nullptr) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  assert(contract_res.value() != nullptr);
-  auto const &contract = *contract_res.value();
-
-  // Native (precompiled) contracts cannot be deployed - they are set up at
-  // genesis and should not be redeployed by user transactions
-  if (contract.contract_type() == ContractType::kNative &&
-      is_banned_redeploy_native_contract(contract.native_contract_id())) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-
+  // Reject deploy-address conflicts before resolving (and thus loading,
+  // decoding, and translating) the requested contract. The conflict checks are
+  // cheap - a snapshot lookup and an in-memory tx-local lookup - so a deploy
+  // that targets an already-occupied address does no requested-contract
+  // resolution work at all. (hogd issue #3122)
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
@@ -1463,7 +1449,37 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
+  // check that contract_hash actually exists
+  // This causes a load of the contract to the cache,
+  // but this is in most cases no-cost, as a deployed contract will _probably_
+  // be immediately invoked with e.g. a constructor.
+  // The resolution does real host work (HogDB read + XDR decode + eager RV32
+  // translation) on a cache miss, so charge deterministic, size-based direct
+  // host gas for it via *out_load_gas below. (hogd issue #3122)
+  auto contract_res = resolve_contract(contract_hash);
+  if (!contract_res.has_value()) {
+    return contract_res.error();
+  }
+  if (contract_res.value() == nullptr) {
+    if (out_load_gas != nullptr) {
+      *out_load_gas = kDeployContractLoadBaseCost;
+    }
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  assert(contract_res.value() != nullptr);
+  auto const &contract = *contract_res.value();
+
   auto contract_size = static_cast<uint32_t>(contract_blob_size(contract));
+  if (out_load_gas != nullptr) {
+    *out_load_gas = DeployContractLoadCost(contract_size);
+  }
+
+  // Native (precompiled) contracts cannot be deployed - they are set up at
+  // genesis and should not be redeployed by user transactions
+  if (contract.contract_type() == ContractType::kNative &&
+      is_banned_redeploy_native_contract(contract.native_contract_id())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   // deploy new contract
   invocation_frame_stack_.deploy_contract(

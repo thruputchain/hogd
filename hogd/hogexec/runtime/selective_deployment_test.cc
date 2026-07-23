@@ -14,6 +14,7 @@
 #include "hogd/hogexec/common/limits.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/item/deployed_contract.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -258,6 +259,82 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
   // Verify that the deployment failed
   auto deployment_lookup = lookup_deployment_from_db(deploy_addr);
   EXPECT_FALSE(deployment_lookup.has_value());
+}
+
+// Regression test for issue #3122: the DeployContract syscall charges
+// deterministic, size-based direct host gas for resolving the persisted
+// contract (HogDB read + XDR decode + eager RV32 translation), so that host
+// work is metered even though the deployed contract is never invoked here.
+// Before the fix the syscall reported zero direct host gas for this work.
+TEST_P(SelectiveDeploymentTest, DeploySyscallChargesSizeBasedHostGas)
+{
+  constexpr size_t kContractBytes = 256;
+  auto contract = std::make_shared<Contract>(ContractType::kWasmi);
+  contract->wasmi_contract().data.resize_uninitialized(kContractBytes);
+  for (size_t i = 0; i < kContractBytes; ++i) {
+    contract->wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  }
+  auto contract_hash = sha256(*contract);
+  write_contract(contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 0xd1;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(0,
+                [contract_hash](NativeSyscallContext &ctx) noexcept
+                    -> InvokeStatus<void> {
+                  ContractAddress deployed_addr;
+                  auto syscall_res =
+                      ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
+                                                              contract_hash,
+                                                              deployed_addr);
+                  if (!syscall_res.has_value() ||
+                      syscall_res.value() !=
+                          SyscallErrorCode::kSyscallErrorCodeNone) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopWasmiContext wasmi_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kWasmi, {&wasmi_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   contract_hash);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation = Invocation{.invoked_address = deployer_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
+      context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // A native deployer body itself consumes no gas, so the only gas charged is
+  // the DeployContract syscall's size-based resolution cost.
+  EXPECT_GT(res.gas_consumed_, 0U);
+  EXPECT_EQ(res.gas_consumed_, DeployContractLoadCost(kContractBytes));
 }
 
 // Regression test for issue #2021: a transaction that attaches a wasm contract

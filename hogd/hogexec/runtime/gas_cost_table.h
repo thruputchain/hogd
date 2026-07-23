@@ -27,6 +27,29 @@ constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
 };
 // NOLINTEND(readability-identifier-naming)
 
+// Direct host-side gas for the DeployContract syscall's contract resolution:
+// a HogDB read, XDR decode, eager RV32 translation, and block-cache admission
+// (see StorageSnapshotCache::get_contract_entry). Charged deterministically
+// from the resolved contract's serialized size so the amount is independent of
+// per-node / per-block cache state (a cache hit and a miss cost the same). This
+// meters host work that is otherwise unaccounted when a contract is deployed
+// but never invoked. Unlike the SHA256 costs above, this charge is applied by
+// the host at runtime and is NOT compiled into RV32 artifacts, so it is
+// deliberately kept out of kSyscallGasCostSchedule / kGasScheduleDigest.
+// (hogd issue #3122)
+constexpr static uint64_t kDeployContractLoadBaseCost = 1000;
+constexpr static uint64_t kDeployContractLoadByteCost = 100;
+
+// NOLINTBEGIN(readability-identifier-naming)
+constexpr static auto DeployContractLoadCost = [](uint64_t bytes_len) -> uint64_t {
+  constexpr uint64_t kMaxSafeLen =
+      (UINT64_MAX - kDeployContractLoadBaseCost) / kDeployContractLoadByteCost;
+  if (bytes_len > kMaxSafeLen)
+    return UINT64_MAX;
+  return (bytes_len * kDeployContractLoadByteCost) + kDeployContractLoadBaseCost;
+};
+// NOLINTEND(readability-identifier-naming)
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
