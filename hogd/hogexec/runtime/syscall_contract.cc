@@ -56,8 +56,8 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   // that reaches resolution and reported to the outer syscall trampoline so the
   // work is metered even when the deployed contract is never invoked. (#3122)
   uint64_t load_gas = 0;
-  auto status = syscall_handler.deploy_contract(input_nonce, input_contract_hash,
-                                                &load_gas);
+  auto status = syscall_handler.deploy_contract(input_nonce,
+                                                input_contract_hash, &load_gas);
   if (!status) {
     // SystemError ends execution of the whole block; gas reporting is moot.
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};

@@ -41,12 +41,14 @@ constexpr static uint64_t kDeployContractLoadBaseCost = 1000;
 constexpr static uint64_t kDeployContractLoadByteCost = 100;
 
 // NOLINTBEGIN(readability-identifier-naming)
-constexpr static auto DeployContractLoadCost = [](uint64_t bytes_len) -> uint64_t {
+constexpr static auto DeployContractLoadCost =
+    [](uint64_t bytes_len) -> uint64_t {
   constexpr uint64_t kMaxSafeLen =
       (UINT64_MAX - kDeployContractLoadBaseCost) / kDeployContractLoadByteCost;
   if (bytes_len > kMaxSafeLen)
     return UINT64_MAX;
-  return (bytes_len * kDeployContractLoadByteCost) + kDeployContractLoadBaseCost;
+  return (bytes_len * kDeployContractLoadByteCost) +
+         kDeployContractLoadBaseCost;
 };
 // NOLINTEND(readability-identifier-naming)
 

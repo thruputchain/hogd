@@ -285,8 +285,8 @@ TEST_P(SelectiveDeploymentTest, DeploySyscallChargesSizeBasedHostGas)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(0,
-                [contract_hash](NativeSyscallContext &ctx) noexcept
-                    -> InvokeStatus<void> {
+                [contract_hash](
+                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   ContractAddress deployed_addr;
                   auto syscall_res =
                       ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
@@ -321,11 +321,11 @@ TEST_P(SelectiveDeploymentTest, DeploySyscallChargesSizeBasedHostGas)
   setup_grant_storage_token(deployed_addr, 1'000'000'000);
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = Invocation{.invoked_address = deployer_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
+      Transaction{.invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       context);
   auto res = handler.root_invoke();
