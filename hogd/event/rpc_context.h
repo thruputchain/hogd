@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -106,8 +107,28 @@ public:
   // and runs on the process-global coropoll, and it must never touch this
   // EventRPCContext -- it may outlive it. Anything added to the relay body
   // must keep that property.
+  //
+  // The number of concurrently in-flight relays is bounded
+  // (kMaxInFlightTxFailureRelays); reports beyond the cap are dropped. See
+  // tx_failure_relays_in_flight_ for why.
   void spawn_tx_failure_relay(SignedTransactionHash tx_hash,
                               TxFailureDiagnostic diag);
+
+  // Test-only knobs/observers for the #3124 in-flight relay cap. The setter
+  // must be called before any relay is spawned. in_flight/dropped let a test
+  // assert the cap holds without reaching into private state.
+  void set_max_in_flight_tx_failure_relays_for_test(size_t cap)
+  {
+    max_in_flight_tx_failure_relays_ = cap;
+  }
+  size_t tx_failure_relays_in_flight_for_test() const
+  {
+    return tx_failure_relays_in_flight_->load(std::memory_order_acquire);
+  }
+  size_t tx_failure_relays_dropped_for_test() const
+  {
+    return tx_failure_relays_dropped_.load(std::memory_order_acquire);
+  }
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>
@@ -172,6 +193,34 @@ private:
   // nullptr always means "not cached", never "empty").
   indexer_snapshot_t *indexers_snapshot_ =
       new indexer_snapshot_t(std::vector<indexer_event_client_t>{});
+
+  // #3124: cap on the number of concurrently in-flight fire-and-forget
+  // tx-failure relays. Each relay pins one pending RPC XID per registered
+  // indexer until that indexer replies or its stream fails, and the detached
+  // path has no other backpressure (it deliberately bypasses
+  // pending_detached_coroutines_). Without a cap, a contract that floods
+  // proposal-conflict reports while a configured indexer stays connected but
+  // stops replying makes that per-report RPC state (XID-map entries plus
+  // suspended relay frames) accumulate without bound. Dropping beyond the cap
+  // is acceptable: the indexer-side tx-failure cache is explicitly best
+  // effort.
+  static constexpr size_t kMaxInFlightTxFailureRelays = 2048;
+
+  // Count of relays currently in flight, checked against
+  // max_in_flight_tx_failure_relays_ on each spawn. Held behind a shared_ptr
+  // because a spawned relay may outlive this EventRPCContext (the destructor
+  // deliberately does not drain tx-failure relays), so its completion handler
+  // must be able to decrement without touching the context.
+  std::shared_ptr<std::atomic<size_t>> tx_failure_relays_in_flight_ =
+      std::make_shared<std::atomic<size_t>>(0);
+  // The active cap. A plain field (not in the shared block): only
+  // spawn_tx_failure_relay reads it, and it is fixed at construction outside
+  // of the test-only setter, which runs before any relay.
+  size_t max_in_flight_tx_failure_relays_ = kMaxInFlightTxFailureRelays;
+  // Total reports dropped for hitting the cap. Written only by
+  // spawn_tx_failure_relay (which may run concurrently), never by the relay
+  // body, so it stays on the context.
+  std::atomic<size_t> tx_failure_relays_dropped_ = 0;
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a
