@@ -78,8 +78,8 @@ struct FailureCapturingIndexerRpc {
 };
 static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
 
-// IndexerEvent1 fake that only counts received failure reports, via an atomic
-// so the test thread can poll it without racing the RPC reader thread.
+// IndexerEvent1 fake that only counts received messages, via atomics so the
+// test thread can poll them without racing the RPC reader thread.
 struct CountingIndexerRpc {
   using rpc_service = IndexerEvent1;
 
@@ -88,6 +88,7 @@ struct CountingIndexerRpc {
                                const TxEventLogBatch & /*tx_events*/,
                                const ProposedTransactionBatch & /*tx_bodies*/)
   {
+    events.fetch_add(1, std::memory_order_relaxed);
     co_return;
   }
 
@@ -99,6 +100,7 @@ struct CountingIndexerRpc {
     co_return;
   }
 
+  std::atomic<size_t> events = 0;
   std::atomic<size_t> reports = 0;
 };
 static_assert(is_IndexerEvent1<CountingIndexerRpc *, x23::Async>);

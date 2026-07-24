@@ -569,7 +569,7 @@ EventRPCContext::add_indexer(indexer_event_client_t &&indexer)
 {
   std::unique_lock g(indexers_mtx_);
   uint64_t id = next_indexer_id_++;
-  indexers_.emplace_back(id, IndexerRelayTarget{std::move(indexer)});
+  indexers_.emplace_back(id, IndexerRelayTarget{.client = std::move(indexer)});
   publish_indexer_snapshot(g);
   return id;
 }
