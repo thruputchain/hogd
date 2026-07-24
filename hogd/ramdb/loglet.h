@@ -509,7 +509,7 @@ public:
 
   Loglet *get() const noexcept { return ll_; }
 
-  std::add_lvalue_reference_t<Loglet> operator*() const noexcept
+  typename std::add_lvalue_reference_t<Loglet> operator*() const noexcept
   {
     return *ll_;
   }
