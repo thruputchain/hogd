@@ -11,6 +11,7 @@
 #include <functional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 #include <version>
 
@@ -91,6 +92,19 @@ static_assert(sizeof(int128_xdr) == 16,
               "padding; persisted/hashed row width feeds the consensus DbHash");
 static_assert(sizeof(int128_xdr) == sizeof(uint128_xdr),
               "signed and unsigned 128-bit row widths must match");
+
+// #3131: the fixed-width helpers below store their `std::byte` row storage
+// and read it back through `uint8_t` (via `x23::putbe`/`getbe`, which
+// dereference `uint8_t` elements). Object-representation access through
+// `uint8_t` is only alias-permitted when `uint8_t` is a character type. Every
+// target we build on typedefs `std::uint8_t` to `unsigned char`, but pin that
+// precondition at compile time so the consensus-state persistence/DbHash path
+// can never silently rely on an implementation where `std::uint8_t` is an
+// extended (non-character) integer type.
+static_assert(std::is_same_v<std::uint8_t, unsigned char>,
+              "NNInt128 XDR byte helpers access std::byte storage through "
+              "uint8_t; uint8_t must be unsigned char for that access to be "
+              "alias-safe in the consensus DbHash path");
 
 inline std::array<std::byte, sizeof(int128_xdr)>
 int128_to_xdr_bytes(int128_t value)
