@@ -1,6 +1,5 @@
 # TODO
 
-
 ## Indexer: recover transaction bodies on replay
 
 The indexer stores the full `ProposedTransaction` body alongside each
