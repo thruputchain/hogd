@@ -471,6 +471,58 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
 }
 
+// Regression test for #3127. A transaction builds up a batch of live changes
+// (savepoint depth 1), then repeatedly pushes an empty savepoint and pops it
+// again. Each pop reaches InvokeTX::rollback_to_savepoint; previously it
+// rescanned every prior live change on every pop even though the popped
+// savepoint touched nothing. rollback_to_savepoint now consults a per-depth
+// touched-key index, so an empty pop no longer visits unrelated live changes.
+// This test guards the correctness half of that change: the accumulated live
+// changes must survive the empty push/pop cycles untouched and commit intact.
+TEST_P(DirectBytestringTest, EmptySavepointPopsPreservePriorLiveChanges)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  constexpr int kLiveChanges = 12;
+  constexpr int kPopCycles = 7;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx = make_new_per_tx_db_proxy();
+  for (int i = 0; i < kLiveChanges; ++i) {
+    tx.add_delta(make_addrkey(contract_addr, "live" + std::to_string(i)),
+                 make_bytestring_delta("value" + std::to_string(i)),
+                 std::to_underlying(StorageDeltaFlags::None));
+  }
+  auto initial_push = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(initial_push.has_value());
+  ASSERT_TRUE(initial_push.value());
+
+  // Each cycle pushes an empty savepoint (no deltas queued) and pops it. The
+  // pop rolls back to the savepoint holding the live changes, which must be
+  // left exactly as they were.
+  for (int i = 0; i < kPopCycles; ++i) {
+    auto empty_push = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(empty_push.has_value());
+    ASSERT_TRUE(empty_push.value());
+
+    auto pop = tx.pop_subtransactions(1);
+    ASSERT_TRUE(pop.has_value());
+  }
+
+  ASSERT_TRUE(tx.commit_transaction().has_value());
+  advance_block();
+
+  // Every live change must have survived the empty pops and committed.
+  for (int i = 0; i < kLiveChanges; ++i) {
+    auto item = lookup_storage_item_from_db(
+        make_contract_data_addrkey(contract_addr, "live" + std::to_string(i)));
+    ASSERT_TRUE(item.has_value()) << "live change " << i << " missing";
+    EXPECT_EQ(item.value().bytestring(),
+              make_bytestring("value" + std::to_string(i)))
+        << "live change " << i << " corrupted by empty savepoint pop";
+  }
+}
+
 TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
 {
   auto contract_addr = make_contract_address(0);

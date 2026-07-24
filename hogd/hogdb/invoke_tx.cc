@@ -133,6 +133,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     }
 
     change.emplace_back(std::move(new_item), tx_depth_);
+    note_touched_key(key);
     return {};
   }
 
@@ -173,6 +174,7 @@ InvokeTX::update_balance_lock(Address const &addr)
   }
   assert(last.tx_depth < tx_depth_);
   change.emplace_back(std::move(new_item), tx_depth_);
+  note_touched_key(key);
   return {};
 }
 
@@ -185,6 +187,7 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
         StorageBalanceVersion{.manual_transfer_amount = 0,
                               .total_locked_storage_amount = 0,
                               .tx_depth = tx_depth_});
+    note_touched_balance(addr);
   }
   else if (bal_stats.back().tx_depth < tx_depth_) {
     // setup the back with a copy of the current state
@@ -193,6 +196,7 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
         .manual_transfer_amount = back.manual_transfer_amount,
         .total_locked_storage_amount = back.total_locked_storage_amount,
         .tx_depth = tx_depth_});
+    note_touched_balance(addr);
   }
   assert(!bal_stats.empty());
   assert(bal_stats.back().tx_depth == tx_depth_);
@@ -256,6 +260,8 @@ InvokeTX::commit()
 
   changes_.clear();
   balance_deltas_.clear();
+  touched_keys_by_depth_.clear();
+  touched_balances_by_depth_.clear();
 
   if (failed) {
     block_.get().poison();
@@ -276,52 +282,103 @@ InvokeTX::abort()
   }
   changes_.clear();
   balance_deltas_.clear();
+  touched_keys_by_depth_.clear();
+  touched_balances_by_depth_.clear();
+}
+
+void
+InvokeTX::note_touched_key(const ItemKey &key)
+{
+  if (touched_keys_by_depth_.size() <= tx_depth_)
+    touched_keys_by_depth_.resize(tx_depth_ + 1);
+  touched_keys_by_depth_[tx_depth_].push_back(key);
+}
+
+void
+InvokeTX::note_touched_balance(const Address &addr)
+{
+  if (touched_balances_by_depth_.size() <= tx_depth_)
+    touched_balances_by_depth_.resize(tx_depth_ + 1);
+  touched_balances_by_depth_[tx_depth_].push_back(addr);
 }
 
 void
 InvokeTX::rollback_to_savepoint(int depth)
 {
+  const unsigned int old_depth = tx_depth_;
   tx_depth_ = depth;
-  for (auto &[key, vec] : changes_) {
-    // skip if no changes made after savepoint.
-    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
-      continue;
 
-    // revert and erase the history of changes made after savepoint.
-    ItemChange tmp{std::move(vec.back().change)};
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &ItemVersion::tx_depth),
-              vec.end());
-    if (!vec.empty()) {
-      HogDBStatus<int128_t> ret =
-          block_.get().modify_lock(key, tmp, vec.back().change);
-      if (!ret) [[unlikely]] {
-        // modify_lock only fails here when a committed sibling block pruned
-        // DAO state this restored change depends on (e.g. an RCQ consume's
-        // past block), which also invalidated this block -- so the error is
-        // always kStaleBlock. The block is doomed; stop rolling back and let
-        // the caller observe kStaleBlock on its next locked operation. We leave
-        // both changes_/balance_deltas_ partially rolled back AND the failing
-        // item's lock still holding tmp (the post-savepoint change) while
-        // vec.back() is now the pre-savepoint change -- so ~InvokeTX()->abort()
-        // later unlocks with the "wrong" change. All of this is harmless on a
-        // block that can never commit: get_meta() is cached (the unlock takes
-        // no live DAO read), every sibling tx sharing this lock is also
-        // invalidated, and assert_is_valid() short-circuits once invalidated.
-        // A non-stale failure would be a real invariant violation.
-        assert(ret.error() == HogDBError{HogDBCode::kStaleBlock});
-        return;
-      }
-      assert(vec.back().locked_storage_cost >= *ret);
+  // Only keys that received a version at a depth greater than the target can
+  // carry post-savepoint state to revert. Walk the per-depth touched index for
+  // the popped range instead of rescanning the whole changes_ map, so a
+  // savepoint pop costs work proportional to the keys actually touched in that
+  // range rather than to every unrelated prior live change (#3127). A key
+  // reachable from more than one depth is reverted the first time it is
+  // reached (the vec.back() check below skips it on later visits), matching
+  // the old single-pass full-map scan.
+  for (unsigned int d = old_depth; d > tx_depth_; --d) {
+    if (d >= touched_keys_by_depth_.size())
       continue;
+    for (const ItemKey &key : touched_keys_by_depth_[d]) {
+      auto it = changes_.find(key);
+      if (it == changes_.end())
+        continue;
+      std::vector<ItemVersion> &vec = it->second;
+
+      // skip if no changes made after savepoint (already reverted, or the
+      // index entry is stale for this depth).
+      if (vec.empty() || vec.back().tx_depth <= tx_depth_)
+        continue;
+
+      // revert and erase the history of changes made after savepoint.
+      ItemChange tmp{std::move(vec.back().change)};
+      vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
+                                         &ItemVersion::tx_depth),
+                vec.end());
+      if (!vec.empty()) {
+        HogDBStatus<int128_t> ret =
+            block_.get().modify_lock(key, tmp, vec.back().change);
+        if (!ret) [[unlikely]] {
+          // modify_lock only fails here when a committed sibling block pruned
+          // DAO state this restored change depends on (e.g. an RCQ consume's
+          // past block), which also invalidated this block -- so the error is
+          // always kStaleBlock. The block is doomed; stop rolling back and let
+          // the caller observe kStaleBlock on its next locked operation. We
+          // leave both changes_/balance_deltas_ partially rolled back AND the
+          // failing item's lock still holding tmp (the post-savepoint change)
+          // while vec.back() is now the pre-savepoint change -- so
+          // ~InvokeTX()->abort() later unlocks with the "wrong" change. All of
+          // this is harmless on a block that can never commit: get_meta() is
+          // cached (the unlock takes no live DAO read), every sibling tx
+          // sharing this lock is also invalidated, and assert_is_valid()
+          // short-circuits once invalidated. A non-stale failure would be a
+          // real invariant violation.
+          assert(ret.error() == HogDBError{HogDBCode::kStaleBlock});
+          return;
+        }
+        assert(vec.back().locked_storage_cost >= *ret);
+        continue;
+      }
+      block_.get().unlock(key, tmp);
     }
-    block_.get().unlock(key, tmp);
+    touched_keys_by_depth_[d].clear();
   }
 
-  for (auto &[addr, vec] : balance_deltas_) {
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &StorageBalanceVersion::tx_depth),
-              vec.end());
+  for (unsigned int d = old_depth; d > tx_depth_; --d) {
+    if (d >= touched_balances_by_depth_.size())
+      continue;
+    for (const Address &addr : touched_balances_by_depth_[d]) {
+      auto it = balance_deltas_.find(addr);
+      if (it == balance_deltas_.end())
+        continue;
+      // Idempotent: an address reachable from multiple depths has its
+      // post-savepoint versions erased on the first visit, a no-op thereafter.
+      it->second.erase(
+          std::ranges::upper_bound(it->second, tx_depth_, {},
+                                   &StorageBalanceVersion::tx_depth),
+          it->second.end());
+    }
+    touched_balances_by_depth_[d].clear();
   }
   assert_is_valid();
 }
@@ -348,6 +405,9 @@ InvokeTX::release_savepoint(int depth)
       continue;
     }
     vec.push_back(std::move(tmp));
+    // The retained change now lives at the lowered depth; record it there so
+    // the touched index still leads a later rollback to this key (#3127).
+    note_touched_key(key);
   }
 
   panic("not implemented releasing balance versions");
@@ -361,6 +421,7 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
     bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta,
                                            .total_locked_storage_amount = 0,
                                            .tx_depth = tx_depth_});
+    note_touched_balance(addr);
   }
   else if (bal.back().tx_depth < tx_depth_) {
     bal.emplace_back(
@@ -368,6 +429,7 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
                               .total_locked_storage_amount =
                                   bal.back().total_locked_storage_amount,
                               .tx_depth = tx_depth_});
+    note_touched_balance(addr);
   }
   else {
     assert(bal.back().tx_depth == tx_depth_);
@@ -404,6 +466,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     int128_t marginal_storage = *ret;
 
     v.emplace_back(std::move(change), tx_depth_);
+    note_touched_key(key);
     // now lock the storage
     if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);
@@ -434,6 +497,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   else {
     assert(item.tx_depth < tx_depth_);
     v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
+    note_touched_key(key);
   }
 
   // It's ok if marginal storage is negative;

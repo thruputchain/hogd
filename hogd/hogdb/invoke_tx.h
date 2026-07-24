@@ -247,6 +247,32 @@ private:
   std::unordered_map<Address, std::vector<StorageBalanceVersion>>
       balance_deltas_;
 
+  // Per-savepoint-depth index of the keys/addresses that received a new
+  // version at that depth. rollback_to_savepoint consults these instead of
+  // rescanning the whole changes_/balance_deltas_ maps, so popping a savepoint
+  // costs work proportional to the entries actually touched in the popped
+  // depth range -- not to every unrelated live change accumulated earlier in
+  // the transaction. Without this index a contract could build up N live
+  // changes and then repeatedly pop empty savepoints, forcing O(N) unmetered
+  // scan work per pop (#3127).
+  //
+  // Invariant: for any key with a surviving version whose tx_depth == D, the
+  // key appears in touched_keys_by_depth_[d] for some d >= D. New versions are
+  // recorded at their creation depth; a rollback that would remove a version
+  // at depth D also runs over (and clears) every depth > its target, so the
+  // index never drops an entry a later rollback still needs. Entries may be
+  // stale (a key listed at a higher depth than its current version, e.g. after
+  // release_savepoint lowers it) or duplicated across depths; rollback
+  // re-checks vec.back().tx_depth per key, so stale/duplicate entries are
+  // harmless.
+  std::vector<std::vector<ItemKey>> touched_keys_by_depth_;
+  std::vector<std::vector<Address>> touched_balances_by_depth_;
+
+  // note_touched_key / note_touched_balance record that the given entry
+  // received a new version at the current savepoint depth.
+  void note_touched_key(const ItemKey &key);
+  void note_touched_balance(const Address &addr);
+
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
   const ItemChange *read_change(const ItemKey &key) const;
