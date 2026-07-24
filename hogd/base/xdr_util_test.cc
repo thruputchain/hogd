@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -13,6 +14,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "parallel.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
