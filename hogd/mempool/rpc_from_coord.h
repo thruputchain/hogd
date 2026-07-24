@@ -525,11 +525,6 @@ private:
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
-  x23::Async<SchedulerCommitOutcome>
-  schedulercoord_commit_block_impl(BlockID block_id,
-                                   const ConsensusValue &expected_value);
-  x23::Async<SchedulerValidationResult>
-  schedulercoord_validate_impl(DbTip db_tip, Proposal proposal);
 
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,

@@ -1517,9 +1517,15 @@ MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
 }
 
 x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate_impl(DbTip db_tip,
-                                                    Proposal proposal)
+MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
+                                                     Proposal proposal)
 {
+  DbTip db_tip = last_committed_block_;
+  if (db_tip.id != parent_id) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
+  }
+
   CHECK(ready());
 
   ElapsedTimer timer;
@@ -1970,26 +1976,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_impl(DbTip db_tip,
   co_return result;
 }
 
-x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
-                                                     Proposal proposal)
-{
-  DbTip db_tip = last_committed_block_;
-  if (db_tip.id != parent_id) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
-  }
-  co_return co_await schedulercoord_validate_impl(db_tip, std::move(proposal));
-}
-
 // TODO(jhumphri): We could livelock in this method if we continue to receive
 // blocks to validate. We do not pause validations once
 // [schedulercoord_commit_block()] starts. If this becomes an issue (such as due
 // to a malicious node that keeps sending blocks to validate), we will need to
 // stop validations once a commit starts.
 x23::Async<SchedulerCommitOutcome>
-MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
-    BlockID block_id, const ConsensusValue &expected_value)
+MempoolCoordinatorRpc::schedulercoord_commit_block(
+    BlockID block_id, ConsensusValue expected_value)
 {
   CHECK(ready());
   MempoolMetrics::instance().commit_attempt_count.increment();
@@ -2346,13 +2340,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   }
 
   co_return commit_outcome;
-}
-
-x23::Async<SchedulerCommitOutcome>
-MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id,
-                                                   ConsensusValue value)
-{
-  co_return co_await schedulercoord_commit_block_impl(block_id, value);
 }
 
 // TODO(jhumphri): After a commit, I think I need to check that
