@@ -39,7 +39,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "parallel.hh"
