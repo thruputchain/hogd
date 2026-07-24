@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
-STALE_PROCESSES="loadgen_server hogexec auth_exec event_exec indexer_exec hogdb chuckd chuckd.dev scpd scpd.dev mempool_exec"
+STALE_PROCESSES="loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev"
 CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
 
 kill_stale_processes() {
