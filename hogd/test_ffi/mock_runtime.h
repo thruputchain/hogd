@@ -92,7 +92,7 @@ public:
     return false;
   }
 
-private:
+protected:
   explicit MockGasRuntime(
       GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
     : Runtime(nullptr), initial_gas_(initial_gas), gas_remaining_(initial_gas)
@@ -104,6 +104,7 @@ private:
     gas_remaining_ = initial_gas;
   }
 
+private:
   GasAmount initial_gas_;
   GasAmount gas_remaining_;
 };
