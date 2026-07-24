@@ -26,35 +26,39 @@
 
 namespace hogd {
 
-// A registered indexer client paired with a count of best-effort tx-failure
-// relays currently in flight to it. The count is PER INDEXER (#3124): each
-// in-flight relay pins one pending RPC XID on that indexer's stream until it
-// replies or its stream fails, and the detached relay path has no other
-// backpressure. Bounding per indexer -- rather than globally across all
-// relays -- keeps one connected-but-unresponsive indexer from exhausting a
-// shared budget and starving healthy indexers of diagnostics. Relaxed
-// throughout: it is a pure admission bound and guards no other state.
+// Immutable, refcounted snapshot of the registered indexer clients, plus a
+// per-indexer count of best-effort tx-failure relays currently in flight.
 //
-// The count lives in the refcounted snapshot; a relay holds a snapshot
-// reference for its whole lifetime, so the count is always alive while any
-// relay references it -- even if that relay outlives the EventRPCContext (the
-// destructor deliberately does not drain that path). It is heap-held (via
-// unique_ptr) only because std::atomic is not movable and the snapshot vector
-// must relocate; relays reference it directly, never copying it.
-struct IndexerRelayTarget {
-  explicit IndexerRelayTarget(indexer_event_client_t client)
-    : client(std::move(client))
-  {}
-
-  indexer_event_client_t client;
-  std::unique_ptr<std::atomic<size_t>> in_flight =
-      std::make_unique<std::atomic<size_t>>(0);
+// [clients] and [tx_failure_in_flight] are INDEX-ALIGNED (same pattern as
+// send_events_to_indexers' full_event_log/full_tx_bodies): entry i of each
+// belongs to the same indexer. Both are built together in one pass at publish
+// and never resized afterward, so the alignment holds for the snapshot's life.
+// Keeping [clients] a plain contiguous vector lets commit_block hand it
+// straight to send_events_to_indexers with no copy -- the counters, needed
+// only by the tx-failure relay path, ride alongside without disturbing it.
+//
+// The count is PER INDEXER (#3124): each in-flight relay pins one pending RPC
+// XID on that indexer's stream until it replies or its stream fails, and the
+// detached relay path has no other backpressure. Bounding per indexer --
+// rather than globally across all relays -- keeps one connected-but-
+// unresponsive indexer from exhausting a shared budget and starving healthy
+// indexers of diagnostics. Relaxed throughout: it is a pure admission bound
+// and guards no other state.
+//
+// The counts live in the refcounted snapshot; a relay holds a snapshot
+// reference for its whole lifetime, so a count is always alive while any relay
+// references it -- even if that relay outlives the EventRPCContext (the
+// destructor deliberately does not drain that path). Each is heap-held (via
+// unique_ptr) only because std::atomic is not movable and the vector must
+// relocate; relays reference it directly, never copying it.
+struct IndexerSnapshot {
+  std::vector<indexer_event_client_t> clients;
+  std::vector<std::unique_ptr<std::atomic<size_t>>> tx_failure_in_flight;
 };
 
-// Immutable, refcounted snapshot of the registered indexer clients.
 // PerThreadARC keeps the acquire/release refcounts thread-local, so the
 // per-failed-tx relay path never writes to contended shared state.
-using indexer_snapshot_t = PerThreadARC<std::vector<IndexerRelayTarget>>;
+using indexer_snapshot_t = PerThreadARC<IndexerSnapshot>;
 
 class EventRPCContext {
 public:
@@ -140,7 +144,7 @@ public:
                               TxFailureDiagnostic diag);
 
   // Cap on the number of best-effort tx-failure relays in flight to a single
-  // indexer at once (#3124). See IndexerRelayTarget for why the bound is per
+  // indexer at once (#3124). See IndexerSnapshot for why the bound is per
   // indexer rather than global.
   static constexpr size_t kMaxInFlightTxFailureRelaysPerIndexer = 256;
 
@@ -206,7 +210,7 @@ private:
   // per-thread fast path works identically in the empty case (a cached
   // nullptr always means "not cached", never "empty").
   indexer_snapshot_t *indexers_snapshot_ =
-      new indexer_snapshot_t(std::vector<IndexerRelayTarget>{});
+      new indexer_snapshot_t(IndexerSnapshot{});
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a

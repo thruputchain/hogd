@@ -73,13 +73,16 @@ relay_one_tx_failure(indexer_event_client_t &client,
 // starve healthy indexers of diagnostics (#3124). The count is bumped here
 // and dropped by relay_one_tx_failure when that indexer's send settles.
 x23::Async<void>
-relay_tx_failure(std::vector<IndexerRelayTarget> &indexers,
-                 SignedTransactionHash tx_hash, TxFailureDiagnostic diag)
+relay_tx_failure(IndexerSnapshot &snapshot, SignedTransactionHash tx_hash,
+                 TxFailureDiagnostic diag)
 {
+  // clients[i] and tx_failure_in_flight[i] describe the same indexer (built
+  // index-aligned at publish); walk them together.
+  CHECK(snapshot.clients.size() == snapshot.tx_failure_in_flight.size());
   std::vector<x23::Async<void>> handles;
-  handles.reserve(indexers.size());
-  for (IndexerRelayTarget &target : indexers) {
-    std::atomic<size_t> &in_flight = *target.in_flight;
+  handles.reserve(snapshot.clients.size());
+  for (size_t i = 0; i < snapshot.clients.size(); ++i) {
+    std::atomic<size_t> &in_flight = *snapshot.tx_failure_in_flight[i];
     if (in_flight.fetch_add(1, std::memory_order_relaxed) >=
         EventRPCContext::kMaxInFlightTxFailureRelaysPerIndexer) {
       in_flight.fetch_sub(1, std::memory_order_relaxed);
@@ -87,7 +90,7 @@ relay_tx_failure(std::vector<IndexerRelayTarget> &indexers,
       continue;
     }
     handles.push_back(
-        relay_one_tx_failure(target.client, in_flight, tx_hash, diag));
+        relay_one_tx_failure(snapshot.clients[i], in_flight, tx_hash, diag));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -329,17 +332,13 @@ EventRPCContext::commit_block(BlockID block_id)
   {
     indexer_snapshot_t *snapshot = try_acquire_indexer_snapshot();
     x23::Defer release{[snapshot] { release_indexer_snapshot(snapshot); }};
-    if (!snapshot->get().empty()) {
-      // send_events_to_indexers wants a plain client list; the snapshot pairs
-      // each client with its tx-failure in-flight counter, unused on this path.
-      std::vector<indexer_event_client_t> clients;
-      clients.reserve(snapshot->get().size());
-      for (const IndexerRelayTarget &target : snapshot->get()) {
-        clients.push_back(target.client);
-      }
+    if (!snapshot->get().clients.empty()) {
+      // The snapshot stores clients as a plain contiguous vector precisely so
+      // this path hands them straight to send_events_to_indexers with no copy;
+      // the parallel tx-failure counters are unused here.
       try {
-        co_await context_ptr->get().send_events_to_indexers(block_height,
-                                                            clients);
+        co_await context_ptr->get().send_events_to_indexers(
+            block_height, snapshot->get().clients);
       } catch (...) {
         send_ex = std::current_exception();
       }
@@ -545,12 +544,15 @@ EventRPCContext::publish_indexer_snapshot(
   // republish is rare (an indexer registering/deregistering), not
   // contract-driven, and the previous snapshot's counters keep bounding any
   // relays still in flight against it, so the per-indexer bound holds.
-  std::vector<IndexerRelayTarget> targets;
-  targets.reserve(indexers_.size());
+  IndexerSnapshot snapshot;
+  snapshot.clients.reserve(indexers_.size());
+  snapshot.tx_failure_in_flight.reserve(indexers_.size());
   for (auto &[id, client] : indexers_) {
-    targets.emplace_back(client);
+    snapshot.clients.push_back(client);
+    snapshot.tx_failure_in_flight.push_back(
+        std::make_unique<std::atomic<size_t>>(0));
   }
-  indexers_snapshot_ = new indexer_snapshot_t(std::move(targets));
+  indexers_snapshot_ = new indexer_snapshot_t(std::move(snapshot));
 
   // Invalidate every thread's cached pointer before retiring [old] (same
   // sweep as gc_context_internal). A reader that acquired a reference under
@@ -600,7 +602,7 @@ EventRPCContext::report_tx_failure_to_indexers(SignedTransactionHash tx_hash,
   // Defer (not a trailing call): a non-Xdr throw from the fan-out must still
   // release the reference, or a retired snapshot would never be destroyed.
   x23::Defer release{[snapshot] { release_indexer_snapshot(snapshot); }};
-  if (snapshot->get().empty()) {
+  if (snapshot->get().clients.empty()) {
     co_return;
   }
   co_await relay_tx_failure(snapshot->get(), tx_hash, diag);
@@ -626,7 +628,7 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   // is dropped for any indexer already at its in-flight cap, bounding retained
   // RPC state per indexer without letting one stuck indexer starve the others.
   indexer_snapshot_t *snapshot = try_acquire_indexer_snapshot();
-  if (snapshot->get().empty()) {
+  if (snapshot->get().clients.empty()) {
     // No indexers: release without spawning a coroutine frame at all.
     release_indexer_snapshot(snapshot);
     return;
