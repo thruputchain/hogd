@@ -907,8 +907,8 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   ConsensusValue value{};
   value.prev_hash = sha256(tip.db_tip().value);
   value.proposal_header = proposal.proposed_block().proposal.header;
-  value.proposal_txs_hash =
-      sha256(proposal.proposed_block().proposal.transactions);
+  value.proposal_txs_hash = proposal_txs_compatibility_hash(
+      proposal.proposed_block().proposal.transactions);
   CHECK_EQ(client.schedulercoord_commit_block(
                proposal.proposed_block().block_id, value)(),
            SchedulerCommitOutcome::SchedulerCommitOK);
