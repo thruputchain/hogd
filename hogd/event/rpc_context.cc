@@ -613,7 +613,7 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   if (tx_failure_relays_in_flight_->fetch_add(1, std::memory_order_relaxed) >=
       kMaxInFlightTxFailureRelays) {
     tx_failure_relays_in_flight_->fetch_sub(1, std::memory_order_relaxed);
-    warn_every_n_sec(5.0f, "tx-failure relay dropped: in-flight cap reached");
+    warn_every_n_sec(5.0F, "tx-failure relay dropped: in-flight cap reached");
     release_indexer_snapshot(snapshot);
     return;
   }
