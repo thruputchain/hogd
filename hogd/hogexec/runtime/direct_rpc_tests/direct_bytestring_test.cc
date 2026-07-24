@@ -475,10 +475,11 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
 // (savepoint depth 1), then repeatedly pushes an empty savepoint and pops it
 // again. Each pop reaches InvokeTX::rollback_to_savepoint; previously it
 // rescanned every prior live change on every pop even though the popped
-// savepoint touched nothing. rollback_to_savepoint now consults a per-depth
-// touched-key index, so an empty pop no longer visits unrelated live changes.
-// This test guards the correctness half of that change: the accumulated live
-// changes must survive the empty push/pop cycles untouched and commit intact.
+// savepoint touched nothing. rollback_to_savepoint now skips the whole-map
+// scan when nothing was touched above the rollback target, so an empty pop no
+// longer visits unrelated live changes. This test guards the correctness half
+// of that change: the accumulated live changes must survive the empty push/pop
+// cycles untouched and commit intact.
 TEST_P(DirectBytestringTest, EmptySavepointPopsPreservePriorLiveChanges)
 {
   auto contract_addr = make_contract_address(0);

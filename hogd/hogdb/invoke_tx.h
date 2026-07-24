@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <optional>
@@ -247,31 +248,28 @@ private:
   std::unordered_map<Address, std::vector<StorageBalanceVersion>>
       balance_deltas_;
 
-  // Per-savepoint-depth index of the keys/addresses that received a new
-  // version at that depth. rollback_to_savepoint consults these instead of
-  // rescanning the whole changes_/balance_deltas_ maps, so popping a savepoint
-  // costs work proportional to the entries actually touched in the popped
-  // depth range -- not to every unrelated live change accumulated earlier in
-  // the transaction. Without this index a contract could build up N live
-  // changes and then repeatedly pop empty savepoints, forcing O(N) unmetered
-  // scan work per pop (#3127).
+  // The deepest savepoint depth at which any live version currently exists in
+  // changes_ or balance_deltas_ (0 if none). rollback_to_savepoint uses this
+  // to skip the whole-map scan entirely when nothing was touched above the
+  // rollback target: popping savepoints that changed nothing is then O(1)
+  // instead of O(changes_.size()). Without this a contract could build up N
+  // live changes and then repeatedly push/pop empty TryInvoke savepoints,
+  // forcing an unmetered O(N) scan on every pop -> O(N*M) amplification
+  // (#3127).
   //
-  // Invariant: for any key with a surviving version whose tx_depth == D, the
-  // key appears in touched_keys_by_depth_[d] for some d >= D. New versions are
-  // recorded at their creation depth; a rollback that would remove a version
-  // at depth D also runs over (and clears) every depth > its target, so the
-  // index never drops an entry a later rollback still needs. Entries may be
-  // stale (a key listed at a higher depth than its current version, e.g. after
-  // release_savepoint lowers it) or duplicated across depths; rollback
-  // re-checks vec.back().tx_depth per key, so stale/duplicate entries are
-  // harmless.
-  std::vector<std::vector<ItemKey>> touched_keys_by_depth_;
-  std::vector<std::vector<Address>> touched_balances_by_depth_;
+  // It is a conservative upper bound: bumped to tx_depth_ whenever a version is
+  // created at the current depth (never larger, since higher depths are always
+  // rolled back before being re-entered), and reset to the rollback target
+  // after a scan. Overestimating only costs an occasional unnecessary scan; it
+  // can never be too low, so the early-out never skips work that is due.
+  unsigned int deepest_touched_depth_{0};
 
-  // note_touched_key / note_touched_balance record that the given entry
-  // received a new version at the current savepoint depth.
-  void note_touched_key(const ItemKey &key);
-  void note_touched_balance(const Address &addr);
+  // note_touched_depth records that a version was created at the current
+  // savepoint depth. Cheap (one integer max) and called on every write.
+  void note_touched_depth()
+  {
+    deepest_touched_depth_ = std::max(deepest_touched_depth_, tx_depth_);
+  }
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
