@@ -16,6 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"
@@ -101,7 +102,8 @@ public:
         ConsensusValue value{};
         value.prev_hash = sha256(ret.value);
         value.proposal_header = proposed.proposal.header;
-        value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+        value.proposal_txs_hash =
+            proposal_txs_compatibility_hash(proposed.proposal.transactions);
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
                      proposed.block_id, value)(),
                  SchedulerCommitOutcome::SchedulerCommitOK);
@@ -187,7 +189,8 @@ public:
       ConsensusValue value{};
       value.prev_hash = sha256(db_tip.value);
       value.proposal_header = proposed.proposal.header;
-      value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+      value.proposal_txs_hash =
+          proposal_txs_compatibility_hash(proposed.proposal.transactions);
       x23::Async<SchedulerCommitOutcome> commit_handle =
           sched_coord_client_.schedulercoord_commit_block(proposed.block_id,
                                                           value);

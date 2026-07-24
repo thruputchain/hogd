@@ -11,6 +11,7 @@
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/build_config.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -39,8 +40,7 @@ contract_search_directories()
   std::lock_guard guard(contract_artifact_directories_mutex);
   std::vector<std::filesystem::path> directories =
       contract_artifact_directories;
-  directories.push_back(std::filesystem::path(CMAKE_ROOT_BINARY_DIR) /
-                        "built_contracts");
+  directories.push_back(std::filesystem::path(kBuildRoot) / "built_contracts");
   directories.push_back(
       std::filesystem::path(x23::getprogpath()).parent_path() / "contracts");
   directories.emplace_back(kSystemContractsDir);

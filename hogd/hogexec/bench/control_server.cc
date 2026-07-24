@@ -27,6 +27,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
+#include "hogd/build_config.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
@@ -124,7 +125,7 @@ public:
     std::string full_program_name =
         program_name.starts_with("/")
             ? program_name
-            : std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
+            : std::string(kBuildRoot) + "/" + program_name;
     info("starting process: {} {}", full_program_name, join_args(program_args));
 
     std::optional<x23::CpuSet> cpu_set;

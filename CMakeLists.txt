@@ -304,12 +304,16 @@ configure_file(
   ${HOGD_BUILT_HEADERS_DIR}/config.h
   @ONLY
 )
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_config.h.in
+  ${HOGD_BUILT_HEADERS_DIR}/build_config.h
+  @ONLY
+)
 
 add_subdirectory(built_contracts)
 
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
-add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
 
 # Set after externals so try_compile/try_run checks are unaffected.
 # CMAKE_CROSSCOMPILING_EMULATOR initializes CROSSCOMPILING_EMULATOR on new

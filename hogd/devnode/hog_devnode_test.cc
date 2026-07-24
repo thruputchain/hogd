@@ -62,6 +62,7 @@
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
+#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
@@ -541,7 +542,8 @@ submit_and_commit(sched_coord_client_t &scheduler,
   ConsensusValue value{};
   value.prev_hash = sha256(tip.db_tip().value);
   value.proposal_header = proposed.proposal.header;
-  value.proposal_txs_hash = sha256(proposed.proposal.transactions);
+  value.proposal_txs_hash =
+      proposal_txs_compatibility_hash(proposed.proposal.transactions);
   if (scheduler.schedulercoord_commit_block(proposed.block_id, value)() !=
       SchedulerCommitOutcome::SchedulerCommitOK) {
     ADD_FAILURE() << "schedulercoord_commit_block did not return OK";

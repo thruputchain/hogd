@@ -131,14 +131,20 @@ if test -z "$HAS_COLOR_DIAGNOSTICS_FLAG"; then
   CMAKE_FLAGS+=(-DCMAKE_COLOR_DIAGNOSTICS=ON)
 fi
 
+mkdir -p "$BUILD_DIR"
+
 if test -z "$DISABLE_CCACHE" && command -v ccache >/dev/null 2>&1; then
+  # Make cache keys portable across checkouts on different build hosts. Keep
+  # explicit settings intact for callers that need different ccache behavior.
+  BUILD_DIR_ABS="$(cd "$BUILD_DIR" && pwd -P)"
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$BUILD_DIR_ABS:$ROOT_DIR}"
+  export CCACHE_COMPILERCHECK="${CCACHE_COMPILERCHECK:-content}"
   ccache --max-size="${HOGD_CCACHE_MAXSIZE:-50G}"
   CMAKE_FLAGS+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 fi
 
 # Do the build
-mkdir -p "$BUILD_DIR"
 CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   -B "$BUILD_DIR" \
