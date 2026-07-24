@@ -26,10 +26,27 @@
 
 namespace hogd {
 
+// A registered indexer client paired with a count of best-effort tx-failure
+// relays currently in flight to it. The count is PER INDEXER (#3124): each
+// in-flight relay pins one pending RPC XID on that indexer's stream until it
+// replies or its stream fails, and the detached relay path has no other
+// backpressure. Bounding per indexer -- rather than globally across all
+// relays -- keeps one connected-but-unresponsive indexer from exhausting a
+// shared budget and starving healthy indexers of diagnostics. The count is a
+// shared_ptr so it persists across snapshot republications and can be
+// decremented by a relay that outlives this EventRPCContext (the destructor
+// deliberately does not drain that path). Relaxed throughout: it is a pure
+// admission bound and guards no other state.
+struct IndexerRelayTarget {
+  indexer_event_client_t client;
+  std::shared_ptr<std::atomic<size_t>> in_flight =
+      std::make_shared<std::atomic<size_t>>(0);
+};
+
 // Immutable, refcounted snapshot of the registered indexer clients.
 // PerThreadARC keeps the acquire/release refcounts thread-local, so the
 // per-failed-tx relay path never writes to contended shared state.
-using indexer_snapshot_t = PerThreadARC<std::vector<indexer_event_client_t>>;
+using indexer_snapshot_t = PerThreadARC<std::vector<IndexerRelayTarget>>;
 
 class EventRPCContext {
 public:
@@ -108,20 +125,16 @@ public:
   // EventRPCContext -- it may outlive it. Anything added to the relay body
   // must keep that property.
   //
-  // At most kMaxInFlightTxFailureRelays relays run concurrently; reports
-  // arriving past that are dropped (the indexer-side cache is best effort).
+  // Admission is bounded PER INDEXER (kMaxInFlightTxFailureRelaysPerIndexer):
+  // a report is dropped for an indexer already at its cap, but still relayed
+  // to the others (the indexer-side cache is best effort).
   void spawn_tx_failure_relay(SignedTransactionHash tx_hash,
                               TxFailureDiagnostic diag);
 
-  // Cap on the number of best-effort tx-failure relays in flight at once
-  // (#3124). Each in-flight relay pins one pending RPC XID per registered
-  // indexer until that indexer replies or its stream fails, and the detached
-  // fire-and-forget path has no other backpressure. Without a cap, a contract
-  // that floods proposal-conflict reports while a configured indexer stays
-  // connected but stops replying makes that per-report RPC state accumulate
-  // without bound. Reports arriving while this many relays are already in
-  // flight are dropped -- the indexer-side tx-failure cache is best effort.
-  static constexpr size_t kMaxInFlightTxFailureRelays = 1024;
+  // Cap on the number of best-effort tx-failure relays in flight to a single
+  // indexer at once (#3124). See IndexerRelayTarget for why the bound is per
+  // indexer rather than global.
+  static constexpr size_t kMaxInFlightTxFailureRelaysPerIndexer = 256;
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>
@@ -178,23 +191,14 @@ private:
   // and never suspend, and in particular no network send happens under it.
   std::mutex indexers_mtx_;
   uint64_t next_indexer_id_ = 0;
-  std::vector<std::pair<uint64_t, indexer_event_client_t>> indexers_;
+  std::vector<std::pair<uint64_t, IndexerRelayTarget>> indexers_;
   // Currently published snapshot; owned here until publish_indexer_snapshot()
   // retires it (then owned by whichever reader releases the last reference).
   // Never null: an empty-vector snapshot stands in for "no indexers", so the
   // per-thread fast path works identically in the empty case (a cached
   // nullptr always means "not cached", never "empty").
   indexer_snapshot_t *indexers_snapshot_ =
-      new indexer_snapshot_t(std::vector<indexer_event_client_t>{});
-
-  // Number of best-effort tx-failure relays currently in flight, capped at
-  // kMaxInFlightTxFailureRelays. Held behind a shared_ptr because a spawned
-  // relay may outlive this EventRPCContext (the destructor deliberately does
-  // not drain that path), so its completion handler must decrement without
-  // touching the context. Relaxed throughout: it is a pure admission bound and
-  // guards no other state.
-  std::shared_ptr<std::atomic<size_t>> tx_failure_relays_in_flight_ =
-      std::make_shared<std::atomic<size_t>>(0);
+      new indexer_snapshot_t(std::vector<IndexerRelayTarget>{});
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a
