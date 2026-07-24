@@ -58,7 +58,8 @@ public:
     co_return ret;
   }
 
-  x23::Async<BlockLookupResult> get_block_by_height(BlockHeight /*height*/)
+  static x23::Async<BlockLookupResult>
+  get_block_by_height(BlockHeight /*height*/)
   {
     // The current indexer ingest API receives only a block height, event logs,
     // and transaction bodies.  It does not receive the ConsensusValue needed
@@ -107,7 +108,7 @@ public:
     // returning no refs until that index is added.
     TransactionRefPage page;
     page.latest_block = db_.latest_block();
-    page.oldest_block = db_.oldest_block();
+    page.oldest_block = IndexDB::oldest_block();
     co_return page;
   }
 
