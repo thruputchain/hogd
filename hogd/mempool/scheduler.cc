@@ -24,7 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_shard_routing/shard_router.h"
+#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -130,7 +130,7 @@ Scheduler::write_all_average_hog_ages_to_db()
                [](HogAge const &a, size_t n) {
                  return shard_of_address(a.address, n);
                },
-               [](auto &c, HogAgeBatch const &sub) {
+               [](auto &c, auto &&sub) {
                  return c->dbsched_write_hog_ages(sub);
                },
                DbSchedResult::DbSchedResultOK),
@@ -280,9 +280,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
   HogAgeResults results = co_await sharded_db_->scatter_gather<HogAgeResults>(
       accounts,
       [](ContractAddress const &a, size_t n) { return shard_of_address(a, n); },
-      [](auto &c, ContractAddressBatch const &sub) {
-        return c->dbsched_get_hog_ages(sub);
-      });
+      [](auto &c, auto &&sub) { return c->dbsched_get_hog_ages(sub); });
   CHECK_EQ(results.size(), accounts.size());
   for (size_t i = 0; i < results.size(); i++) {
     const HogAgeResult &res = results[i];
