@@ -1182,11 +1182,6 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
-  const DbTip db_tip = last_committed_block_;
-  if (db_tip.id != parent_id) {
-    co_return SchedulerProposalResult(
-        SchedulerProposalOutcome::SchedulerProposalError);
-  }
 
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
@@ -1198,13 +1193,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
-  // The parent ID is checked by the RPC entry point; compare the cached tip as
-  // well so proposal construction cannot race a commit.
-  if (db_tip.value.proposal_header.block_height !=
-          last_committed_block_.value.proposal_header.block_height ||
-      db_tip.id != last_committed_block_.id ||
-      db_tip.value.proposal_header.txs_hash !=
-          last_committed_block_.value.proposal_header.txs_hash) {
+  if (last_committed_block_.id != parent_id) {
     info("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
@@ -1225,12 +1214,13 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   auto transfer_data_node = nomination_dag.async<void>(
       "wait transfer data", [&]() -> x23::Async<void> {
         co_await wait_for_transfer_data(
-            db_tip.value.proposal_header.block_height);
+            last_committed_block_.value.proposal_header.block_height);
         co_return;
       });
   auto auth_data_node =
       nomination_dag.async<void>("wait auth data", [&]() -> x23::Async<void> {
-        co_await wait_for_auth_data(db_tip.value.proposal_header.block_height);
+        co_await wait_for_auth_data(
+            last_committed_block_.value.proposal_header.block_height);
         co_return;
       });
 
@@ -1287,7 +1277,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                               prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
-      nomination_dag, db_tip, context, nominated_block_cache_,
+      nomination_dag, last_committed_block_, context, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
@@ -1343,7 +1333,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       nominated_block_cache_.proposal_result.proposed_block().proposal;
   ConsensusValue value{.protocol = 0,
                        .ext = {},
-                       .prev_hash = sha256(db_tip.value),
+                       .prev_hash = sha256(last_committed_block_.value),
                        .proposal_header = proposal.header,
                        .proposal_txs_hash = sha256(proposal.transactions),
                        .upgrades = {}};
@@ -1520,12 +1510,6 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                                      Proposal proposal)
 {
-  DbTip db_tip = last_committed_block_;
-  if (db_tip.id != parent_id) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
-  }
-
   CHECK(ready());
 
   ElapsedTimer timer;
@@ -1578,6 +1562,10 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   CHECK_EQ(proposal.header.block_height,
            last_committed_block_.value.proposal_header.block_height + 1);
 
+  if (last_committed_block_.id != parent_id) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
+  }
   if (proposal.header.network_hash != network_hash_) {
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
@@ -1719,7 +1707,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       validation_dag.after(transfer_data_node, auth_data_node),
       [&]() -> x23::Async<void> {
         DbSchedResult snapshot_result = co_await create_snapshot(
-            /*prev_block_id=*/db_tip.id, validation_block_id,
+            /*prev_block_id=*/last_committed_block_.id, validation_block_id,
             BlockExecutionMode::kBlockExecutionModeValidation);
         if (snapshot_result == DbSchedResult::DbSchedResultOK) {
           snapshot_cleanup.arm();
@@ -1927,7 +1915,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       [&]() -> x23::Async<void> {
         ConsensusValue value{.protocol = 0,
                              .ext = {},
-                             .prev_hash = sha256(db_tip.value),
+                             .prev_hash = sha256(last_committed_block_.value),
                              .proposal_header = proposal.header,
                              .proposal_txs_hash = sha256(proposal.transactions),
                              .upgrades = {}};

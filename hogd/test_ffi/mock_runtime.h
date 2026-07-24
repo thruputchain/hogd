@@ -92,7 +92,7 @@ public:
     return false;
   }
 
-protected:
+private:
   explicit MockGasRuntime(
       GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
     : Runtime(nullptr), initial_gas_(initial_gas), gas_remaining_(initial_gas)
@@ -104,7 +104,6 @@ protected:
     gas_remaining_ = initial_gas;
   }
 
-private:
   GasAmount initial_gas_;
   GasAmount gas_remaining_;
 };
@@ -115,11 +114,10 @@ public:
 
   ~MockRuntime() override = default;
 
-protected:
+private:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
-private:
   MockContract backing_contract_;
 };
 
