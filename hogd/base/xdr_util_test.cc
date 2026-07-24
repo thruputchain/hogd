@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -13,6 +14,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "parallel.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -42,6 +44,38 @@ TEST(Int128XdrBytesTest, RoundTripsPositiveAndNegativeValues)
 
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kPositive)), kPositive);
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kNegative)), kNegative);
+}
+
+// #3131: int128_to_xdr_bytes / int128_from_xdr_bytes reach their std::byte row
+// storage through uint8_t (via x23::putbe/getbe). That object-representation
+// access is only alias-permitted when uint8_t is a character type; the helpers
+// now pin that precondition at compile time. Mirror the guard here and exercise
+// a decode from an independently-populated std::byte buffer read back through a
+// span -- the shape of the persisted contract-data read path.
+TEST(Int128XdrBytesTest, DecodesFromStandaloneByteBufferAliasSafely)
+{
+  static_assert(std::is_same_v<std::uint8_t, unsigned char>,
+                "NNInt128 XDR byte helpers depend on uint8_t being "
+                "unsigned char for alias-safe object-representation access");
+
+  constexpr int128_t kValue =
+      (int128_t{0x0102030405060708LL} << 64) | 0x1112131415161718ULL;
+
+  // Big-endian 16-byte encoding of kValue, staged into a fresh std::byte
+  // buffer without going through the helper's own array.
+  std::array<std::byte, sizeof(int128_xdr)> buffer{};
+  for (size_t i = 0; i < buffer.size(); i++) {
+    buffer[i] = std::byte{static_cast<unsigned char>(
+        static_cast<uint128_t>(kValue) >> (8 * (buffer.size() - i - 1)))};
+  }
+
+  EXPECT_EQ(int128_from_xdr_bytes(
+                std::span<const std::byte, sizeof(int128_xdr)>(buffer)),
+            kValue);
+
+  // And the helper's own encode must land in that same canonical layout.
+  auto encoded = int128_to_xdr_bytes(kValue);
+  EXPECT_TRUE(std::equal(encoded.begin(), encoded.end(), buffer.begin()));
 }
 
 namespace {
