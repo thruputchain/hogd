@@ -5,8 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/db_shard_routing/shard_router.h"
-#include "hogd/db_shard_routing/sharded_batch.h"
+#include "hogd/db_shard_routing/sharding.h"
 #include "x23/x23/async.h"
 
 namespace hogd {
@@ -57,14 +56,21 @@ public:
                                          Call call)
   {
     auto split = split_by_shard(items, clients_.size(), route);
-    using CallResult = decltype(call(clients_[0], split.batches[0]));
+    // Zero-copy per-shard views over `items`; `split` and `items` outlive every
+    // await below, so the views (and the source they borrow) stay valid.
+    std::vector<ShardGatherView<Batch>> views;
+    views.reserve(clients_.size());
+    for (size_t s = 0; s < clients_.size(); ++s) {
+      views.push_back(split.shard_view(items, s));
+    }
+    using CallResult = decltype(call(clients_[0], views[0]));
     std::vector<std::pair<size_t, CallResult>> in_flight;
     in_flight.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
-      if (split.batches[s].empty()) {
+      if (views[s].empty()) {
         continue;
       }
-      in_flight.emplace_back(s, call(clients_[s], split.batches[s]));
+      in_flight.emplace_back(s, call(clients_[s], views[s]));
     }
 
     std::vector<ResultBatch> per_shard(clients_.size());
@@ -118,14 +124,21 @@ public:
                                    Status ok)
   {
     auto split = split_by_shard(items, clients_.size(), route);
-    using CallResult = decltype(call(clients_[0], split.batches[0]));
+    // Zero-copy per-shard views over `items`; `split` and `items` outlive every
+    // await below, so the views (and the source they borrow) stay valid.
+    std::vector<ShardGatherView<Batch>> views;
+    views.reserve(clients_.size());
+    for (size_t s = 0; s < clients_.size(); ++s) {
+      views.push_back(split.shard_view(items, s));
+    }
+    using CallResult = decltype(call(clients_[0], views[0]));
     std::vector<CallResult> in_flight;
     in_flight.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
-      if (split.batches[s].empty()) {
+      if (views[s].empty()) {
         continue;
       }
-      in_flight.push_back(call(clients_[s], split.batches[s]));
+      in_flight.push_back(call(clients_[s], views[s]));
     }
 
     Status result = ok;

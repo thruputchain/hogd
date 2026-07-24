@@ -20,8 +20,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
-#include "hogd/db_shard_routing/shard_router.h"
-#include "hogd/db_shard_routing/sharded_batch.h"
+#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
@@ -516,9 +515,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                   return shard_of_key(delta.addrkey, n);
                                 });
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
-      auto res =
-          clients_[shard].try_push_new_subtransaction(block_id, tx_id,
-                                                      split.batches[shard]);
+      auto res = clients_[shard].try_push_new_subtransaction(
+          block_id, tx_id, split.shard_view(delta_batch, shard));
       // Stop on the first error or conflict; the caller aborts, which fans the
       // abort out to every shard.
       switch (res.error()) {
