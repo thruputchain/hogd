@@ -35,6 +35,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/sharded_db_sched.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/metrics.h"
@@ -216,22 +217,15 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.network_hash = network_hash_;
-    // Load genesis on every shard so each gets the cost model and the genesis
-    // block (block 0), giving all shards matching block history for later
-    // create_snapshot(prev=...) calls.
-    for (size_t s = 0; s < sharded_db_sched_client_->shard_count(); ++s) {
-      DbSchedResult ret =
-          co_await sharded_db_sched_client_->shard(s)
-              ->dbsched_load_genesis_configuration(genesis_configuration,
-                                                   genesis_value);
+    // Load genesis on every shard (fan-out lives in ShardedDbSched); the
+    // cross-shard readiness barrier is ours to coordinate.
+    {
+      DbSchedResult ret = co_await sharded_db_sched_client_->load_genesis(
+          genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
-        // Genesis failed on this shard, so the sharded db is only partially
-        // initialized and unusable. An earlier shard may already have committed
-        // its genesis block and dispatched a block-0 hog delta, leaving a
-        // [handle_transfer] blocked on [all_shards_genesis_ready_]. Latch the
-        // failure and open the barrier so that waiter wakes and drops the
-        // transfer instead of hanging forever holding [scheduler_lock_]. The
-        // error is surfaced to the caller, which aborts the run.
+        // Genesis failed on a shard: latch the failure and open the barrier so
+        // a waiting [handle_transfer] drops its transfer instead of hanging.
+        // The caller aborts the run.
         error("genesis load failed on a db shard ({}); aborting genesis", ret);
         scheduler_->genesis_load_failed_.store(true, std::memory_order_release);
         scheduler_->all_shards_genesis_ready_.store(true);
@@ -240,8 +234,7 @@ public:
       }
     }
 
-    DbTipResult db_res =
-        co_await sharded_db_sched_client_->primary()->dbsched_get_tip();
+    DbTipResult db_res = co_await sharded_db_sched_client_->get_tip();
     CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
     last_committed_block_ = db_res.db_tip();
     CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
@@ -259,13 +252,11 @@ public:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
 
-    // Reached only when genesis loaded OK on every shard. Release the transfer
-    // barrier: it is now safe to process hog transfer deltas, because every
-    // shard can serve the sharded hog-age reads in [read_average_hog_ages].
+    // Every shard loaded genesis OK: open the barrier so hog transfer deltas
+    // can be processed (every shard can now serve the sharded hog-age reads).
     scheduler_->all_shards_genesis_ready_.store(true);
     scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
 
-    // Reached only when genesis loaded OK on every shard.
     co_return DbSchedResult::DbSchedResultOK;
   }
 
@@ -430,8 +421,7 @@ private:
     coord_client_ =
         std::make_unique<coord_sched_client_t>(co_await get_client());
     {
-      // One client per registered db shard, wrapped in the sharding-aware
-      // facade that owns them and is the sole db-sched client from here on.
+      // One client per db shard, wrapped in the ShardedDbSched facade.
       auto clients = co_await MempoolDbRpc::get_clients();
       std::vector<std::shared_ptr<db_sched_client_t>> shard_clients;
       shard_clients.reserve(clients.size());
@@ -440,8 +430,8 @@ private:
             std::make_shared<db_sched_client_t>(std::move(c)));
       }
       CHECK(!shard_clients.empty());
-      sharded_db_sched_client_ = std::make_shared<sharded_db_sched_client_t>(
-          std::move(shard_clients));
+      sharded_db_sched_client_ =
+          std::make_shared<ShardedDbSched>(std::move(shard_clients));
     }
     for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
       auto clients = co_await MempoolExecutorRpc::get_clients();
@@ -453,8 +443,7 @@ private:
         co_await MempoolEventRpc::get_client());
 
     {
-      DbTipResult db_res =
-          co_await sharded_db_sched_client_->primary()->dbsched_get_tip();
+      DbTipResult db_res = co_await sharded_db_sched_client_->get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
         last_committed_block_ = db_res.db_tip();
         CHECK_GE(last_committed_block_.value.proposal_header.block_height, 0);
@@ -495,13 +484,10 @@ private:
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
-    // On restart the db tip already reflects a committed genesis on every
-    // shard, so genesis will not be re-loaded (see
-    // [schedcoord_load_genesis_configuration], which early-returns when the tip
-    // is non-empty). Release the transfer barrier here so [handle_transfer]
-    // does not wait forever for a genesis fan-out that never runs. A fresh
-    // start leaves the barrier closed until
-    // [schedcoord_load_genesis_configuration] completes.
+    // On restart genesis is already committed and won't re-load, so open the
+    // barrier here (else [handle_transfer] would wait forever for a fan-out
+    // that never runs). A fresh start leaves it closed until genesis load
+    // completes.
     if (last_committed_block_.value.proposal_header.block_height >= 0) {
       scheduler_->all_shards_genesis_ready_.store(true);
       scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
@@ -752,15 +738,9 @@ private:
   const ssize_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
-  // The sole db-sched client: a sharding-aware facade owning one client per
-  // shard. Keyless/global requests (db tip) use primary(); the homogeneous
-  // block-lifecycle fan-outs (create/abandon snapshot) go through its broadcast
-  // helpers, and the scheduler's account reads/writes through its scatter
-  // helpers. The value-carrying fan-outs (close/commit snapshot) and genesis
-  // load stay explicit loops over shard(i) on purpose -- their result-shaping,
-  // ordering, and partial-failure semantics should read as deliberate, not
-  // hidden behind a single-client illusion. Shared with the Scheduler.
-  std::shared_ptr<sharded_db_sched_client_t> sharded_db_sched_client_;
+  // Sole handle to the sharded db (see ShardedDbSched); shared with the
+  // Scheduler for its hog-age reads/writes.
+  std::shared_ptr<ShardedDbSched> sharded_db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
