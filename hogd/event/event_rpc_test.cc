@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
-#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
