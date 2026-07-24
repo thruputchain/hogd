@@ -78,6 +78,77 @@ struct FailureCapturingIndexerRpc {
 };
 static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
 
+// IndexerEvent1 fake that only counts received messages, via atomics so the
+// test thread can poll them without racing the RPC reader thread.
+struct CountingIndexerRpc {
+  using rpc_service = IndexerEvent1;
+
+  x23::Async<void>
+  indexer_event_process_events(BlockHeight /*block_height*/,
+                               const TxEventLogBatch & /*tx_events*/,
+                               const ProposedTransactionBatch & /*tx_bodies*/)
+  {
+    events.fetch_add(1, std::memory_order_relaxed);
+    co_return;
+  }
+
+  x23::Async<void>
+  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
+                                  const TxFailureDiagnostic & /*diag*/)
+  {
+    reports.fetch_add(1, std::memory_order_relaxed);
+    co_return;
+  }
+
+  std::atomic<size_t> events = 0;
+  std::atomic<size_t> reports = 0;
+};
+static_assert(is_IndexerEvent1<CountingIndexerRpc *, x23::Async>);
+
+// Reads exactly [n] bytes from [fd]; false on EOF/error.
+bool
+read_exact(int fd, void *buf, size_t n)
+{
+  auto *p = static_cast<uint8_t *>(buf);
+  size_t got = 0;
+  while (got < n) {
+    ssize_t r = ::read(fd, p + got, n - got);
+    if (r <= 0) {
+      return false;
+    }
+    got += static_cast<size_t>(r);
+  }
+  return true;
+}
+
+// Drains and counts complete RPC records off [fd] without ever replying, so
+// every relayed report stays pending at the client. Returns (closing [fd])
+// once the socket is shut down or closed.
+void
+count_rpc_records(int fd, std::atomic<size_t> &records_read)
+{
+  for (;;) {
+    uint8_t hdr[4];
+    if (!read_exact(fd, hdr, sizeof(hdr))) {
+      break;
+    }
+    const uint32_t raw = (static_cast<uint32_t>(hdr[0]) << 24) |
+                         (static_cast<uint32_t>(hdr[1]) << 16) |
+                         (static_cast<uint32_t>(hdr[2]) << 8) |
+                         static_cast<uint32_t>(hdr[3]);
+    const bool last = (raw & 0x80000000U) != 0;
+    const uint32_t len = raw & 0x7fffffffU;
+    uint8_t body[4096];
+    if (len > sizeof(body) || (len != 0 && !read_exact(fd, body, len))) {
+      break;
+    }
+    if (last) {
+      records_read.fetch_add(1, std::memory_order_release);
+    }
+  }
+  ::close(fd);
+}
+
 } // namespace
 
 // Regression for #2923: an indexer peer that sends an IndexerCard whose
@@ -162,6 +233,81 @@ TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
   ASSERT_EQ(live_indexer.reports.size(), 1);
   EXPECT_EQ(live_indexer.reports[0].first, tx_hash);
   EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
+}
+
+// Regression for #3124 (and its review): the fire-and-forget tx-failure relay
+// path (eventexecutor_report_tx_failure -> spawn_tx_failure_relay) has no
+// natural backpressure -- each relay registers one pending RPC XID per indexer
+// that clears only when the indexer replies or its stream fails. A contract
+// can drive an unbounded number of these reports, so a configured indexer that
+// stays connected but withholds replies would otherwise let that per-report
+// RPC state accumulate without bound. relay_tx_failure caps in-flight relays
+// PER INDEXER: the unresponsive indexer is bounded at its own cap, while a
+// healthy indexer keeps receiving every report (no cross-indexer starvation).
+TEST_F(EventRpcTest, TxFailureRelayCapIsPerIndexer)
+{
+  EventRPCContext ctx(temp_dir());
+  constexpr size_t kCap =
+      EventRPCContext::kMaxInFlightTxFailureRelaysPerIndexer;
+
+  // Stuck indexer: drains records but never replies, so its relays stay
+  // pending and never free their per-indexer slots. The peer counts the
+  // records that actually reach its wire.
+  int fds[2];
+  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  std::atomic<size_t> stuck_records = 0;
+  std::jthread peer(
+      [fd = fds[1], &stuck_records] { count_rpc_records(fd, stuck_records); });
+  auto stuck_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
+  ctx.add_indexer(stuck_stream->client<IndexerEvent1>());
+
+  // Healthy indexer: replies immediately.
+  CountingIndexerRpc healthy;
+  ctx.add_indexer(make_socketpair_indexer_client(&healthy));
+
+  SignedTransactionHash tx_hash;
+  std::ranges::fill(tx_hash, 0x23);
+  TxFailureDiagnostic diag;
+  diag.attempt_height = 2522;
+  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
+
+  // Fire one report at a time, waiting for the healthy indexer to receive each
+  // before firing the next. Pacing keeps the healthy indexer's own in-flight
+  // count near zero (so it never hits the cap), while the stuck indexer's
+  // count only climbs -- isolating the two. Fire well past the cap.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  constexpr size_t kReports = kCap + 16;
+  for (size_t i = 0; i < kReports; ++i) {
+    tx_hash[0] = static_cast<uint8_t>(i);
+    ctx.spawn_tx_failure_relay(tx_hash, diag);
+    const size_t want = i + 1;
+    while (healthy.reports.load(std::memory_order_relaxed) < want) {
+      ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+          << "healthy indexer received "
+          << healthy.reports.load(std::memory_order_relaxed) << " of " << want;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  // The healthy indexer received every report -- never starved by the stuck
+  // one -- and the stuck indexer is bounded at its own per-indexer cap.
+  EXPECT_EQ(healthy.reports.load(std::memory_order_relaxed), kReports);
+  while (stuck_records.load(std::memory_order_acquire) < kCap) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "stuck indexer received "
+        << stuck_records.load(std::memory_order_acquire) << " of " << kCap;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(stuck_records.load(std::memory_order_acquire), kCap);
+
+  // Teardown: failing the stuck stream completes its pending relays (releasing
+  // the indexer snapshot), and the shutdown wakes the peer thread so its
+  // jthread join cannot deadlock on a socket the client side would only close
+  // once ctx is destroyed.
+  stuck_stream->fail();
+  ::shutdown(fds[1], SHUT_RDWR);
 }
 
 TEST_F(EventRpcTest, DeadIndexerDoesNotFailCommit)
