@@ -32,15 +32,23 @@ namespace hogd {
 // replies or its stream fails, and the detached relay path has no other
 // backpressure. Bounding per indexer -- rather than globally across all
 // relays -- keeps one connected-but-unresponsive indexer from exhausting a
-// shared budget and starving healthy indexers of diagnostics. The count is a
-// shared_ptr so it persists across snapshot republications and can be
-// decremented by a relay that outlives this EventRPCContext (the destructor
-// deliberately does not drain that path). Relaxed throughout: it is a pure
-// admission bound and guards no other state.
+// shared budget and starving healthy indexers of diagnostics. Relaxed
+// throughout: it is a pure admission bound and guards no other state.
+//
+// The count lives in the refcounted snapshot; a relay holds a snapshot
+// reference for its whole lifetime, so the count is always alive while any
+// relay references it -- even if that relay outlives the EventRPCContext (the
+// destructor deliberately does not drain that path). It is heap-held (via
+// unique_ptr) only because std::atomic is not movable and the snapshot vector
+// must relocate; relays reference it directly, never copying it.
 struct IndexerRelayTarget {
+  explicit IndexerRelayTarget(indexer_event_client_t client)
+    : client(std::move(client))
+  {}
+
   indexer_event_client_t client;
-  std::shared_ptr<std::atomic<size_t>> in_flight =
-      std::make_shared<std::atomic<size_t>>(0);
+  std::unique_ptr<std::atomic<size_t>> in_flight =
+      std::make_unique<std::atomic<size_t>>(0);
 };
 
 // Immutable, refcounted snapshot of the registered indexer clients.
@@ -191,7 +199,7 @@ private:
   // and never suspend, and in particular no network send happens under it.
   std::mutex indexers_mtx_;
   uint64_t next_indexer_id_ = 0;
-  std::vector<std::pair<uint64_t, IndexerRelayTarget>> indexers_;
+  std::vector<std::pair<uint64_t, indexer_event_client_t>> indexers_;
   // Currently published snapshot; owned here until publish_indexer_snapshot()
   // retires it (then owned by whichever reader releases the last reference).
   // Never null: an empty-vector snapshot stands in for "no indexers", so the

@@ -49,12 +49,14 @@ release_indexer_snapshot(indexer_snapshot_t *snapshot)
 // others; bad_alloc and other non-RPC throws are genuine bugs and still
 // terminate (cf. EventServerProxy::emit_event's #2857 containment).
 x23::Async<void>
-relay_one_tx_failure(indexer_event_client_t client,
-                     std::shared_ptr<std::atomic<size_t>> in_flight,
+relay_one_tx_failure(indexer_event_client_t &client,
+                     std::atomic<size_t> &in_flight,
                      SignedTransactionHash tx_hash, TxFailureDiagnostic diag)
 {
   using enum std::memory_order;
-  x23::Defer dec{[in_flight] { in_flight->fetch_sub(1, relaxed); }};
+  // [client] and [in_flight] reference the snapshot, which the spawning relay
+  // keeps alive (via its snapshot reference) for longer than this coroutine.
+  x23::Defer dec{[&in_flight] { in_flight.fetch_sub(1, relaxed); }};
   try {
     co_await client.indexer_event_report_tx_failure(tx_hash, diag);
   } catch (x23::XdrException const &e) {
@@ -77,14 +79,15 @@ relay_tx_failure(std::vector<IndexerRelayTarget> &indexers,
   std::vector<x23::Async<void>> handles;
   handles.reserve(indexers.size());
   for (IndexerRelayTarget &target : indexers) {
-    if (target.in_flight->fetch_add(1, std::memory_order_relaxed) >=
+    std::atomic<size_t> &in_flight = *target.in_flight;
+    if (in_flight.fetch_add(1, std::memory_order_relaxed) >=
         EventRPCContext::kMaxInFlightTxFailureRelaysPerIndexer) {
-      target.in_flight->fetch_sub(1, std::memory_order_relaxed);
+      in_flight.fetch_sub(1, std::memory_order_relaxed);
       warn_every_n_sec(5.0F, "tx-failure relay dropped: indexer at cap");
       continue;
     }
     handles.push_back(
-        relay_one_tx_failure(target.client, target.in_flight, tx_hash, diag));
+        relay_one_tx_failure(target.client, in_flight, tx_hash, diag));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -537,14 +540,15 @@ EventRPCContext::publish_indexer_snapshot(
   indexer_snapshot_t *old = indexers_snapshot_;
   // An empty indexer list publishes an empty-vector snapshot rather than
   // nullptr, so readers' per-thread caches stay valid (and hot) in the
-  // no-indexer case; a cached nullptr always means "not cached". Copying each
-  // IndexerRelayTarget shares (does not reset) its in-flight counter, so a
-  // republish -- e.g. adding/removing a different indexer -- preserves each
-  // surviving indexer's admission state.
+  // no-indexer case; a cached nullptr always means "not cached". Each publish
+  // gives every indexer a fresh in-flight counter (starting at zero). A
+  // republish is rare (an indexer registering/deregistering), not
+  // contract-driven, and the previous snapshot's counters keep bounding any
+  // relays still in flight against it, so the per-indexer bound holds.
   std::vector<IndexerRelayTarget> targets;
   targets.reserve(indexers_.size());
-  for (auto &[id, target] : indexers_) {
-    targets.push_back(target);
+  for (auto &[id, client] : indexers_) {
+    targets.emplace_back(client);
   }
   indexers_snapshot_ = new indexer_snapshot_t(std::move(targets));
 
@@ -569,7 +573,7 @@ EventRPCContext::add_indexer(indexer_event_client_t &&indexer)
 {
   std::unique_lock g(indexers_mtx_);
   uint64_t id = next_indexer_id_++;
-  indexers_.emplace_back(id, IndexerRelayTarget{.client = std::move(indexer)});
+  indexers_.emplace_back(id, std::move(indexer));
   publish_indexer_snapshot(g);
   return id;
 }
