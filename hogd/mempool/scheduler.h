@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/mempool/sharded_db_sched.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "transaction.hh"
@@ -27,7 +28,7 @@ namespace hogd {
 class Scheduler {
 public:
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<sharded_db_sched_client_t> sharded_db)
+            std::shared_ptr<ShardedDbSched> sharded_db)
     : current_block_(current_block), sharded_db_(std::move(sharded_db))
   {}
 
@@ -173,22 +174,14 @@ public:
   x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
-  // Barrier: true once genesis has been loaded on *every* db shard. Hog
-  // transfer processing ([MempoolDbRpc::handle_transfer]) must wait on this
-  // before reading hog ages, because [read_average_hog_ages] shards reads by
-  // address and the genesis fan-out is sequential: the first shard's
-  // genesis-block deltas arrive (and route to accounts owned by *other* shards,
-  // e.g. [kDeployContractAddress]) before those shards have run their genesis.
-  // Set by [MempoolCoordinatorRpc] after the fan-out completes (or, on restart,
-  // once the db tip shows genesis already committed).
+  // Barrier raised once genesis has loaded on every db shard; [handle_transfer]
+  // waits on it before reading hog ages, since the first shard's block-0 deltas
+  // route to accounts on shards that have not run genesis yet.
   x23::CoroFutex<bool> all_shards_genesis_ready_{false};
 
-  // Set true (and published alongside [all_shards_genesis_ready_]) if the
-  // genesis fan-out failed on some shard, leaving the sharded db only partially
-  // initialized. [handle_transfer] then wakes and drops the transfer instead of
-  // reading a half-initialized db (which would trip the missing-hog-age CHECK)
-  // or hanging forever on the barrier holding [scheduler_lock_]. One-way latch:
-  // genesis failure is unrecoverable and the run is being aborted.
+  // One-way latch set (with [all_shards_genesis_ready_]) if the genesis fan-out
+  // fails on a shard: [handle_transfer] then drops the transfer instead of
+  // reading a half-initialized db or hanging on the barrier. Aborts the run.
   std::atomic<bool> genesis_load_failed_{false};
 
   x23::CoroLock global_lock_;
@@ -331,19 +324,13 @@ private:
   std::atomic<ssize_t> size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  // The scheduler's sharding-aware view of the database, used to read/write
-  // the hog ages for accounts. Per-account hog-age RPCs are routed to (and
-  // gathered from) the shard that owns each account; the scheduler itself
-  // stays unaware of sharding.
-  std::shared_ptr<sharded_db_sched_client_t> sharded_db_;
+  // Reads/writes hog ages, routed to the shard that owns each account. See
+  // ShardedDbSched.
+  std::shared_ptr<ShardedDbSched> sharded_db_;
 
-  // Addresses whose genesis (block 0) hog transfer delta has already been
-  // applied. Genesis is loaded replicated on *every* db shard, so each shard's
-  // commit dispatches the same block-0 delta set; without this dedup the
-  // received-hog-age group would be multiplied by the shard count. Only touched
-  // on the block-0 path in [process_transfers], which is serialized by
-  // [pending_hog_age_update_lock_]/[global_lock_]. TODO: remove once genesis
-  // delta dispatch is made shard-owner-only on the hogdb side (ISSUES.md #1b).
+  // Block-0 addresses already applied, so the genesis deltas replicated from
+  // each shard are counted once (see [process_transfers]). TODO: remove once
+  // genesis dispatch is shard-owner-only.
   std::unordered_set<ContractAddress, ByteArrayHasher> genesis_applied_deltas_;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
