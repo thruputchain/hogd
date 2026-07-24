@@ -460,7 +460,11 @@ struct RpcStream : public detail::RpcStreamImpl {
     BufView rv;
     try {
       rbuf = co_await a;
-      rv = rbuf.subspan(deserialize_from(&msg, rbuf));
+      // Decode the reply header against the live record length.  rbuf is
+      // the peer's record buffer moved in from the reader, so it can carry
+      // stale retained capacity; a plain Buf would bound the fast path to
+      // capacity() rather than size().
+      rv = rbuf.subspan(deserialize_from(&msg, BufView(rbuf)));
     } catch (const XdrBadInput &e) {
       throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());
     } catch (const std::exception &e) {

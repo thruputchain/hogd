@@ -132,7 +132,13 @@ RpcStreamImpl::reader(SLOC_ARG0)
     rpc_msg msg;
     size_t hdrbytes;
     try {
-      hdrbytes = deserialize_from(&msg, b);
+      // Decode the untrusted header against the live record length, not
+      // the reused buffer's retained capacity.  Passing the Buf directly
+      // would select BufViewEnd(const Buf&), whose over-read bound is
+      // data()+capacity(); a short CALL record could then have the fast
+      // path read credential/verifier bytes from stale capacity outside
+      // the current record.  A BufView bounds the decode to data()+size().
+      hdrbytes = deserialize_from(&msg, BufView(b));
     } catch (XdrException &e) {
       debug("RpcStreamImpl deserialization: {}", e.what());
       fail();
@@ -158,7 +164,10 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
+        // Bound the argument decode to the live record as well; passing
+        // the container here would again extend the over-read bound to the
+        // reused buffer's capacity.
+        auto awaitable = s->serve(msg, BufView(b.subspan(hdrbytes)));
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())

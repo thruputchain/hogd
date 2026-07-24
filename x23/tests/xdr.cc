@@ -8,6 +8,7 @@
 #include <utility>
 #include <x23/async.h>
 #include <x23/format.h>
+#include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
@@ -88,6 +89,47 @@ TEST(Deserialize, Fuzz)
     } catch (const x23::XdrException &) {
     }
   }
+}
+
+// Regression test for #3133: an untrusted RPC record must be decoded against
+// its live length, not a reused buffer's retained capacity.  A short CALL
+// header sitting in a buffer whose spare capacity still holds the tail of a
+// previous, larger record must be rejected at the credential-length check,
+// without the fast path reading the credential body / verifier from bytes
+// outside the live record.  This pins the invariant RpcStreamImpl::reader now
+// relies on (it decodes through BufView(b), not the Buf's capacity).
+TEST(Deserialize, RpcHeaderBoundedByLiveSize)
+{
+  using namespace x23;
+
+  // A complete, valid CALL carrying a 400-byte credential body.
+  rpc_msg full;
+  full.xid = 0x12345678;
+  full.body.mtype(msg_type::CALL);
+  auto &cb = full.body.cbody();
+  cb.rpcvers = 2;
+  cb.prog = 1;
+  cb.vers = 1;
+  cb.proc = 0;
+  cb.cred.flavor = auth_flavor::AUTH_NONE;
+  cb.cred.body.resize(400);
+  cb.verf.flavor = auth_flavor::AUTH_NONE;
+
+  Buf record = serialize(full);
+
+  // The live record is only the 32-byte scalar prefix, ending with the
+  // cred.body length field (== 400).  Shrinking the size keeps the credential
+  // body and verifier bytes in the buffer's retained capacity, exactly like a
+  // record buffer reused across records.
+  constexpr size_t kLive = 32;
+  ASSERT_GT(record.size(), kLive);
+  ASSERT_GE(record.capacity(), record.size()); // trailing bytes still present
+  record.resize(kLive);
+
+  // Decoding against the live length must reject the truncated record before
+  // touching any out-of-record byte.
+  rpc_msg out{};
+  EXPECT_THROW(deserialize_from(&out, BufView(record)), XdrBadInput);
 }
 
 TEST(CompareStructs, BasicAssertions)
