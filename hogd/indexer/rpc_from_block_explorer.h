@@ -58,6 +58,16 @@ public:
     co_return ret;
   }
 
+  x23::Async<BlockLookupResult> get_block_by_height(BlockHeight /*height*/)
+  {
+    // The current indexer ingest API receives only a block height, event logs,
+    // and transaction bodies.  It does not receive the ConsensusValue needed
+    // to answer this query.  Keep the newly-added protocol RPC conformant
+    // without manufacturing a value; this can return BlockFound once block
+    // metadata is forwarded to and persisted by the indexer.
+    co_return BlockLookupResult(BlockLookupOutcome::BlockNotFound);
+  }
+
   x23::Async<EventPage> get_events(EventQuery query)
   {
     auto status = db_.get_events(query);
@@ -87,6 +97,18 @@ public:
       co_return TransactionRefPage{};
     }
     co_return std::move(*status);
+  }
+
+  x23::Async<TransactionRefPage>
+  get_transactions_by_block(BlockTransactionQuery /*query*/)
+  {
+    // The transaction index is keyed by transaction hash and has no
+    // block-height index yet.  Report the current serving bounds while
+    // returning no refs until that index is added.
+    TransactionRefPage page;
+    page.latest_block = db_.latest_block();
+    page.oldest_block = db_.oldest_block();
+    co_return page;
   }
 
 private:
