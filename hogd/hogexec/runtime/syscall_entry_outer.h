@@ -622,7 +622,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     if (syscall_result.has_value() &&
         !is_allowed_error_code<SyscallMeta>(*syscall_result)) {
       panic("Syscall {} returned undocumented error code {}",
-            SyscallMeta::kSyscallNo, x23 : show(*syscall_result));
+            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
     }
   }
 
