@@ -610,17 +610,10 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   // The counter is decremented by the detached relay below through the
   // shared_ptr it owns, so the accounting stays correct even if the relay
   // outlives this EventRPCContext (which deliberately never drains this path).
-  if (tx_failure_relays_in_flight_->fetch_add(1) >=
-      max_in_flight_tx_failure_relays_) {
-    tx_failure_relays_in_flight_->fetch_sub(1);
-    const size_t dropped = tx_failure_relays_dropped_.fetch_add(1) + 1;
-    // Rate-limit to one line per power-of-two drops, so a sustained flood
-    // cannot turn dropping into a logging DoS of its own.
-    if ((dropped & (dropped - 1)) == 0) {
-      warn("dropping best-effort tx-failure report: in-flight relay cap {} "
-           "reached ({} dropped so far)",
-           max_in_flight_tx_failure_relays_, dropped);
-    }
+  if (tx_failure_relays_in_flight_->fetch_add(1, std::memory_order_relaxed) >=
+      kMaxInFlightTxFailureRelays) {
+    tx_failure_relays_in_flight_->fetch_sub(1, std::memory_order_relaxed);
+    warn_every_n_sec(5.0f, "tx-failure relay dropped: in-flight cap reached");
     release_indexer_snapshot(snapshot);
     return;
   }
@@ -631,8 +624,12 @@ EventRPCContext::spawn_tx_failure_relay(SignedTransactionHash tx_hash,
   [](std::shared_ptr<std::atomic<size_t>> in_flight,
      indexer_snapshot_t *snapshot, SignedTransactionHash hash,
      TxFailureDiagnostic d) -> x23::Detached {
-    x23::Defer release{[snapshot] { release_indexer_snapshot(snapshot); }};
-    x23::Defer decrement{[in_flight] { in_flight->fetch_sub(1); }};
+    // Runs on any exit (including a non-Xdr throw escaping the fan-out):
+    // release the snapshot ref and free the in-flight slot.
+    x23::Defer cleanup{[in_flight, snapshot] {
+      release_indexer_snapshot(snapshot);
+      in_flight->fetch_sub(1, std::memory_order_relaxed);
+    }};
     co_await relay_tx_failure(snapshot->get(), hash, d);
     co_return;
   }(in_flight, snapshot, std::move(tx_hash), std::move(diag));
