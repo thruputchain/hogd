@@ -56,15 +56,13 @@ public:
                                                     BlockExecutionMode mode);
 
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id,
-                                                    BlockHash block_hash,
-                                                    SHA256Hash events_hash);
+                                                    ConsensusValue value);
   x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
 
   x23::Async<DbSchedResult>
   dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
-                                     uint64_t network_id, SHA256Hash txset_hash,
-                                     SHA256Hash events_hash);
+                                     ConsensusValue value);
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
@@ -91,10 +89,9 @@ private:
   // commit.
   // There must be an active reference to the blocktx.  This active reference
   // should be the last reference that is open for the btx..
-  HogDBStatus<void> commit_block(BlockID id, BlockHash block_hash,
-                                 SHA256Hash events_hash,
+  HogDBStatus<void> commit_block(BlockID id, ConsensusValue value,
                                  PerThreadARC<BlockTX> *btx,
-                                 const DbHash &db_hash);
+                                 const StorageLongHash &db_hash);
 };
 static_assert(is_DbSched1<HogDBSchedRpc *, x23::Async>);
 

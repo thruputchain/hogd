@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 : "${BUILD_DIR:?BUILD_DIR must be set}"
 : "${WORK_DIR:?WORK_DIR must be set}"
+: "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -310,9 +311,7 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-for host in "${ALL_HOSTS[@]}"; do
-  "$WAIT_PORT" "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
@@ -396,7 +395,7 @@ node1_mempool_host="${MEMPOOL_HOSTS[1]}"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
-  --network-id 1
+  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -409,7 +408,7 @@ node0_mempool_cmd=(
 node1_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node1_mempool_host")"
-  --network-id 1
+  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"

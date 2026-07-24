@@ -25,9 +25,13 @@ namespace hogd {
 
 namespace {
 
-const SHA256Hash topic0 = sha256(std::string_view{"topic0"});
-const SHA256Hash topic1 = sha256(std::string_view{"topic1"});
-const SHA256Hash topic2 = sha256(std::string_view{"topic2"});
+using namespace std::string_view_literals;
+
+// NOLINTBEGIN(bugprone-throwing-static-initialization)
+const SHA256Hash topic0 = sha256("topic0"sv);
+const SHA256Hash topic1 = sha256("topic1"sv);
+const SHA256Hash topic2 = sha256("topic2"sv);
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 auto make_event_data = [](uint32_t val) {
   x23::Buf data;

@@ -10,6 +10,7 @@
 #include <utility>
 
 // xdr types
+#include "consensus.hh"
 #include "db_gateway.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -134,7 +135,7 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
                                                   nullptr);
   StorageCostModel cost_model = StorageCostModel::default_cost_model();
   {
-    DbHash base_hash = dao.compute_full_db_hash();
+    StorageLongHash base_hash = dao.compute_full_db_hash();
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model, background_commit_worker, BlockHeight{1},
         BlockExecutionMode::kBlockExecutionModeProposal);
@@ -230,9 +231,10 @@ TEST(HogDBGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
   DbTip before = ctx.get_tip();
   EXPECT_FALSE(ctx.is_committed_read_stale(before));
 
+  ConsensusValue value{};
+  value.proposal_header.block_height = 7;
   ASSERT_TRUE(
-      ctx.update_dbtip(BlockTXID{7}, BlockHash{}, SHA256Hash{}, DbHash{})
-          .has_value());
+      ctx.update_dbtip(BlockTXID{7}, value, StorageLongHash{}).has_value());
 
   // The pre-advance snapshot is now stale; the current tip is not.
   EXPECT_TRUE(ctx.is_committed_read_stale(before));

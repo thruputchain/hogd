@@ -20,8 +20,9 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &delete_status = *status;
+  if (!delete_status) {
+    return {delete_status.error().code(), WrappedGasAmount{0}};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};

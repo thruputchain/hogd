@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "built_contracts/syscall_misc_tests.h"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
@@ -61,13 +62,11 @@ public:
     event_client_ = make_srpc_multiclient<EventSched1>(
         x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
 
-    uint64_t network_id = 0x0;
-    SHA256Hash txset_hash{};
-    SHA256Hash events_hash{};
+    ConsensusValue genesis_value{};
+    genesis_value.proposal_header.block_height = 0;
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
-                                                      network_id, txset_hash,
-                                                      events_hash);
+                                                      genesis_value);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
         << "Failed to load genesis configuration";
   }

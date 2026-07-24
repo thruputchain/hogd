@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "exec_result.hh"
@@ -69,10 +70,9 @@ public:
     auto close = get_coord_client().dbsched_close_snapshot(block);
     EXPECT_EQ(close.result(), DbSchedResult::DbSchedResultOK);
 
-    auto commit = get_coord_client().dbsched_commit_snapshot(
-        block,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+    ConsensusValue value{};
+    value.proposal_header.block_height = block;
+    auto commit = get_coord_client().dbsched_commit_snapshot(block, value);
     EXPECT_EQ(commit.result(), DbSchedResult::DbSchedResultOK);
   }
 
@@ -327,10 +327,9 @@ TEST_F(DirectStalenessTest, CommitInvalidatedBlockReturnsError)
   auto close_b = get_coord_client().dbsched_close_snapshot(block_b);
   EXPECT_EQ(close_b.result(), DbSchedResult::DbSchedResultOK);
 
-  auto commit_b = get_coord_client().dbsched_commit_snapshot(
-      block_b,
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+  ConsensusValue value_b{};
+  value_b.proposal_header.block_height = block_b;
+  auto commit_b = get_coord_client().dbsched_commit_snapshot(block_b, value_b);
   EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
 }
 
@@ -359,7 +358,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
   auto warm = cache1.try_get_snapshot_item(addrkey);
   ASSERT_TRUE(warm.has_value());
@@ -385,17 +384,19 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
   // A fresh viewing snapshot sees new-value.
   auto snap2 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
   auto fresh = cache2.try_get_snapshot_item(addrkey);
   ASSERT_TRUE(fresh.has_value());
   ASSERT_NE(fresh.value(), nullptr);
   EXPECT_EQ(fresh.value()->bytestring(), make_bytestring("new-value"));
 
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .has_value());
 }
 
 TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
@@ -407,7 +408,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
   // Warm negative contract lookup.
   auto warm = cache1.try_get_contract_by_hash(missing_hash);
@@ -438,7 +439,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   // Fresh viewing snapshot sees the deployment.
   auto snap2 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
   auto fresh_deploy = cache2.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(fresh_deploy.has_value());
@@ -457,10 +458,12 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
   EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
 
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .has_value());
 }
 
 TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
@@ -469,32 +472,34 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
   auto warm_tip = cache1.try_get_db_tip();
   ASSERT_TRUE(warm_tip.has_value());
-  BlockHeight old_height = warm_tip.value()->height;
+  BlockHeight old_height = warm_tip.value()->value.proposal_header.block_height;
 
   advance_block();
 
   // Stale cache still returns old height.
   auto stale_tip = cache1.try_get_db_tip();
   ASSERT_TRUE(stale_tip.has_value());
-  EXPECT_EQ(stale_tip.value()->height, old_height);
+  EXPECT_EQ(stale_tip.value()->value.proposal_header.block_height, old_height);
 
   // Fresh viewing snapshot sees incremented height.
   auto snap2 = get_db_proxy().open_viewing_snapshot();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
   auto fresh_tip = cache2.try_get_db_tip();
   ASSERT_TRUE(fresh_tip.has_value());
-  EXPECT_GT(fresh_tip.value()->height, old_height);
+  EXPECT_GT(fresh_tip.value()->value.proposal_header.block_height, old_height);
 
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap2->block_id).has_value());
-  EXPECT_TRUE(
-      get_db_proxy().close_viewing_snapshot(snap1->block_id).has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .has_value());
+  EXPECT_TRUE(get_db_proxy()
+                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .has_value());
 }
 
 // Regression test for issue #2399.

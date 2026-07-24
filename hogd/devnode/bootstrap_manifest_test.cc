@@ -24,6 +24,7 @@
 #include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
@@ -57,8 +58,9 @@ struct ManifestBuilder {
 
   std::string kind = "groundhog-bootstrap";
 
-  bool include_network_id = true;
-  std::string network_id = "groundhog-bench-local";
+  bool include_network_hash = true;
+  std::string network_hash =
+      "00000000000000000000000000000000000000000000000000000000000000aa";
 
   std::string profile = "local-dev";
 
@@ -98,8 +100,8 @@ struct ManifestBuilder {
         w.field("schemaVersion", schema_version);
       }
       w.field("kind", kind);
-      if (include_network_id) {
-        w.field("networkId", network_id);
+      if (include_network_hash) {
+        w.field("networkHash", network_hash);
       }
       w.field("profile", profile);
       if (include_protocol) {
@@ -199,7 +201,8 @@ expect_ok(std::filesystem::path const &path)
 TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
 {
   ManifestBuilder builder;
-  builder.network_id = "groundhog-bench-local";
+  builder.network_hash =
+      "00000000000000000000000000000000000000000000000000000000000000aa";
   builder.bootstrap_count = 2;
   builder.bootstrap_seed = "manifest-seed";
   builder.initial_storage_tokens = "1000000000";
@@ -211,7 +214,8 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
       load_bootstrap_manifest(path);
   ASSERT_TRUE(result.has_value()) << result.error();
   const BootstrapManifestConfig &config = *result;
-  EXPECT_EQ(config.network_id, "groundhog-bench-local");
+  EXPECT_EQ(format_network_hash(config.network_hash),
+            "00000000000000000000000000000000000000000000000000000000000000aa");
   EXPECT_EQ(config.bootstrap_config.count, 2U);
   EXPECT_EQ(config.bootstrap_config.seed, "manifest-seed");
   EXPECT_EQ(config.bootstrap_config.storage_tokens, 1'000'000'000ULL);
@@ -293,24 +297,25 @@ TEST(BootstrapManifest, AcceptsAbsentProtocol)
   expect_ok(path);
 }
 
-TEST(BootstrapManifest, RejectsEmptyNetworkId)
+TEST(BootstrapManifest, RejectsEmptyNetworkHash)
 {
   ManifestBuilder builder;
-  builder.network_id = "";
+  builder.network_hash = "";
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "networkId must not be empty");
+  expect_error_with(path,
+                    "networkHash must be exactly 64 hexadecimal characters");
 }
 
-TEST(BootstrapManifest, RejectsMissingNetworkId)
+TEST(BootstrapManifest, RejectsMissingNetworkHash)
 {
   ManifestBuilder builder;
-  builder.include_network_id = false;
+  builder.include_network_hash = false;
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "missing root.networkId");
+  expect_error_with(path, "missing root.networkHash");
 }
 
 TEST(BootstrapManifest, RejectsMissingDevWallet)

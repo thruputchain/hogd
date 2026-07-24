@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <new>
 #include <span>
 #include <utility>
 
@@ -86,8 +85,8 @@ syscall_ChangePublicKeyRegistration_inner(
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
       }
     }();
-  } catch (std::bad_alloc &e) {
-    error("unrecoverable: failed to allocate public key config: {}", e.what());
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to build public key config: {}", e.what());
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
@@ -95,13 +94,15 @@ syscall_ChangePublicKeyRegistration_inner(
     return {new_key.error().code(), WrappedGasAmount{0}};
   }
 
-  auto status = syscall_handler.change_public_key_registration(input_key_index,
-                                                               new_key.value());
+  auto status =
+      syscall_handler.change_public_key_registration(input_key_index,
+                                                     std::move(*new_key));
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &registration_status = *status;
+  if (!registration_status) {
+    return {registration_status.error().code(), WrappedGasAmount{0}};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -116,8 +117,9 @@ syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &weight_status = *status;
+  if (!weight_status) {
+    return {weight_status.error().code(), WrappedGasAmount{0}};
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
@@ -127,7 +129,12 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
                            generated::AuthClaim &output_auth_claim) noexcept
 {
   auto const &claim = syscall_handler.get_auth_claim();
-  output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
+  try {
+    output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to convert auth claim to FFI: {}", e.what());
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {

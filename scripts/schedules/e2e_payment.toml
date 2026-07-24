@@ -80,11 +80,18 @@ export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
 echo 'run mempool benchmarks'
-(./scripts/ci/mempool_bench.sh) || true
+set +e
+./scripts/ci/mempool_bench.sh
 mempool_bench_exit=$?
+set -e
 
-echo 'commit metrics'
-(./scripts/commit_metrics.sh) || true
+if [ "$mempool_bench_exit" -eq 0 ]; then
+    echo 'commit metrics'
+    ./scripts/commit_metrics.sh
+else
+    echo "mempool bench failed with status $mempool_bench_exit; skipping metrics commit"
+    exit "$mempool_bench_exit"
+fi
 
 """
 after = """

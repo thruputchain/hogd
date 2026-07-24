@@ -16,6 +16,7 @@
 #include "built_contracts/contract_loader.h"
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
@@ -69,7 +70,7 @@ print_usage(FILE *stream, char *argv[])
 Generate hosted devnet bootstrap genesis and metadata without starting services.
 
 Options:
-  --network-id <id>              Network id for metadata [default: devnet]
+  --network-hash <hex>           32-byte network hash [default: all zeroes]
   --dev-wallet-profile <name>    Built-in dev wallet profile
                                  [default: hog-devnode-default]
   --dev-accounts <count>         Deterministic dev accounts to bootstrap
@@ -132,12 +133,15 @@ parse_generate_args(int argc, char *argv[])
       print_usage(stdout, argv);
       std::exit(EXIT_SUCCESS);
     }
-    if (arg == "--network-id" && i + 1 < argc) {
-      options.config.network_id = argv[++i];
-      if (options.config.network_id.empty()) {
-        hogd::arg_error("Invalid network id: id must not be empty", argv,
-                        usage);
+    if (arg == "--network-hash" && i + 1 < argc) {
+      std::optional<hogd::NetworkHash> network_hash =
+          hogd::parse_network_hash(argv[++i]);
+      if (!network_hash) {
+        hogd::arg_error(
+            "Invalid network hash: expected exactly 64 hexadecimal characters",
+            argv, usage);
       }
+      options.config.network_hash = *network_hash;
       continue;
     }
     if (arg == "--dev-wallet-profile" && i + 1 < argc) {

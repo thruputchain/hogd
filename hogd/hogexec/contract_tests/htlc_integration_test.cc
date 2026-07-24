@@ -363,7 +363,10 @@ protected:
     advance_block();
   }
 
-  BlockHeight get_block_height() const { return get_db_tip().height; }
+  BlockHeight get_block_height() const
+  {
+    return get_db_tip().value.proposal_header.block_height;
+  }
 };
 
 TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)

@@ -27,6 +27,7 @@
 #include "db_sched.hh"
 #include "event.hh"
 #include "genesis.hh"
+#include "header.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
@@ -457,13 +458,14 @@ read_event_log_file(std::filesystem::path const &path)
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     BootstrapAccountConfig const &bootstrap_config,
-    std::optional<std::filesystem::path> const &data_dir)
-  : bind_host_(std::move(bind_host)), data_dir_(data_dir),
-    bootstrap_config_(bootstrap_config), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), event_ctx_(event_dir_.directory()),
-    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
-    event_indexer_server_(event_ctx_)
+    std::optional<std::filesystem::path> const &data_dir,
+    NetworkHash network_hash)
+  : bind_host_(std::move(bind_host)), network_hash_(network_hash),
+    data_dir_(data_dir), bootstrap_config_(bootstrap_config),
+    runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
+    event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
+    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
     // Genesis bootstrap payloads can be larger than the transport default.
@@ -707,33 +709,33 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
   }
 
   const DbTip tip = ctx_->get_tip();
+  const BlockHeight tip_height = tip.value.proposal_header.block_height;
   const BlockHeight indexed_height = indexer_db_->latest_block();
-  if (indexed_height >= tip.height) {
+  if (indexed_height >= tip_height) {
     return;
   }
-  if (tip.height <= 0 || indexed_height + 1 != tip.height) {
+  if (tip_height <= 0 || indexed_height + 1 != tip_height) {
     throw std::runtime_error(std::format(
         "recovered hog-devnode indexer is behind chain tip: indexed height {}, "
         "chain tip {}; only one-block tip replay is supported",
-        indexed_height, tip.height));
+        indexed_height, tip_height));
   }
 
-  std::filesystem::path event_path =
-      EventBlockContext::final_events_filename(event_dir_.directory(),
-                                               tip.events_hash);
+  std::filesystem::path event_path = EventBlockContext::final_events_filename(
+      event_dir_.directory(), tip.value.proposal_header.events_hash);
   TxEventLogBatch events = read_event_log_file(event_path);
   // The on-disk event log file holds only event logs (transaction bodies are
   // forwarded out of band and are not part of the event trie), so this
   // recovery replay supplies no bodies.
   IndexerStatus<void> status =
-      indexer_db_->consume_events(tip.height, events, {});
+      indexer_db_->consume_events(tip_height, events, {});
   if (!status.has_value()) {
     throw std::runtime_error(
         std::format("failed to replay recovered event log into indexer: {}",
                     status.error()));
   }
   info("replayed recovered event log '{}' into indexer at height {}",
-       event_path.string(), tip.height);
+       event_path.string(), tip_height);
 }
 
 void
@@ -836,7 +838,7 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
-  if (ctx_->get_tip().height == 0) {
+  if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
         "hog-devnode data dir has bootstrap genesis but no initialization "
         "block; reinitialize the data dir");
@@ -899,12 +901,16 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   SchedulerGetTipResult tip = client.schedcoord_get_tip()();
   CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-  SchedulerNominationResult nomination =
-      client.schedulercoord_nominate(tip.db_tip())();
-  CHECK_EQ(nomination.outcome(),
-           SchedulerNominationOutcome::SchedulerNominationOK);
+  SchedulerProposalResult proposal =
+      client.schedulercoord_propose_block(tip.db_tip().id, ProposalContext{})();
+  CHECK_EQ(proposal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  ConsensusValue value{};
+  value.prev_hash = sha256(tip.db_tip().value);
+  value.proposal_header = proposal.proposed_block().proposal.header;
+  value.proposal_txs_hash =
+      sha256(proposal.proposed_block().proposal.transactions);
   CHECK_EQ(client.schedulercoord_commit_block(
-               nomination.nominated_block().block_id)(),
+               proposal.proposed_block().block_id, value)(),
            SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
@@ -963,7 +969,7 @@ HogDevnodeNode::init_db_backend(
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
     info("recovered hog-devnode database at committed height {}",
-         ctx_->get_tip().height);
+         ctx_->get_tip().value.proposal_header.block_height);
   }
   else {
     ctx_->initialize_cost_model(StorageCostModel::default_cost_model());
@@ -986,7 +992,8 @@ HogDevnodeNode::register_db_with_mempool()
   std::string auth_address =
       format_advertised_address(bind_host_, db_auth_server_->port());
   const BlockHeight block_height =
-      std::max<BlockHeight>(ctx_->get_tip().height, BlockHeight{0});
+      std::max<BlockHeight>(ctx_->get_tip().value.proposal_header.block_height,
+                            BlockHeight{0});
   client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                               .block_height = block_height,
                               .address_for_exec = exec_address.c_str(),

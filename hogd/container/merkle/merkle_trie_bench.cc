@@ -126,13 +126,13 @@ init_branch_hash_bench_node(Node &branch,
                             std::array<Node, Node::kMaxNumBranches> &children)
 {
   branch.init_branch(nullptr);
-  branch.value_hash() = SHA256Hash();
-  branch.value_hash()->at(0) = 0x5A;
+  auto &branch_value_hash = branch.value_hash().emplace();
+  branch_value_hash.at(0) = 0x5A;
   for (size_t i = 0; i < children.size(); i++) {
     children[i].init_leaf(&branch);
     children[i].path() = HexArray("0123456789abcdef");
-    children[i].value_hash() = SHA256Hash();
-    children[i].value_hash()->at(0) = static_cast<unsigned char>(i);
+    auto &child_value_hash = children[i].value_hash().emplace();
+    child_value_hash.at(0) = static_cast<unsigned char>(i);
     children[i].hash = children[i].compute_node_hash();
     branch.branch_children()[i] = &children[i];
   }

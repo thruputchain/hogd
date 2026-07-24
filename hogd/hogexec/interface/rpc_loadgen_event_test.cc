@@ -5,6 +5,7 @@
 #include <set>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
@@ -129,11 +130,9 @@ protected:
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
-    auto db_commit_res =
-        // NOLINTBEGIN(bugprone-argument-comment)
-        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{},
-                                           /*events_hash=*/{});
-    // NOLINTEND(bugprone-argument-comment)
+    ConsensusValue value{};
+    value.proposal_header.block_height = block_id;
+    auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id, value);
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
   }
 };
@@ -155,12 +154,10 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, network_id, txset_hash,
-      events_hash);
+      result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor with a shard pointing to our mock database server
@@ -251,12 +248,10 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, network_id, txset_hash,
-      events_hash);
+      result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor

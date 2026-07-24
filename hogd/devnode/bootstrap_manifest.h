@@ -8,15 +8,16 @@
 #include <string_view>
 
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "types.hh"
 
 namespace hogd {
 
-// Network id stamped into the runtime manifest's `networkId` field when
-// no bootstrap manifest overrides it.
-inline constexpr std::string_view kDefaultRuntimeNetworkId = "groundhog-local";
+// Network hash stamped into the runtime manifest when no bootstrap manifest
+// overrides it.
+inline constexpr NetworkHash kDefaultRuntimeNetworkHash{};
 
 struct BootstrapManifestConfig {
-  std::string network_id;
+  NetworkHash network_hash;
   BootstrapAccountConfig bootstrap_config;
 };
 

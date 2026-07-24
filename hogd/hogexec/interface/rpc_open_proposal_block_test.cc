@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
@@ -50,13 +51,11 @@ public:
     db_client_ = make_srpc_multiclient<DbSched1>(
         x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
 
-    uint64_t network_id = 0x0;
-    SHA256Hash txset_hash{};
-    SHA256Hash events_hash{};
+    ConsensusValue genesis_value{};
+    genesis_value.proposal_header.block_height = 0;
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
-                                                      network_id, txset_hash,
-                                                      events_hash);
+                                                      genesis_value);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
         << "Failed to load genesis configuration";
   }

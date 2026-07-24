@@ -1,5 +1,7 @@
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 
+#include "hogd/base/network_hash.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -228,7 +230,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hog-hosted-bootstrap");
-    w.field("networkId", config.network_id);
+    w.field("networkHash", format_network_hash(config.network_hash));
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(artifact.genesis_hash));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
@@ -408,9 +410,6 @@ write_file_if_absent_or_same(std::filesystem::path const &path,
 HostedBootstrapArtifact
 build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
 {
-  if (config.network_id.empty()) {
-    throw std::runtime_error("hosted bootstrap network id must not be empty");
-  }
   if (config.bootstrap_config.seed.empty()) {
     throw std::runtime_error(
         "hosted bootstrap dev account seed must not be empty");

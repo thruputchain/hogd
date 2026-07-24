@@ -68,7 +68,7 @@ make_account_address(uint8_t i)
 
 class MempoolTestInfra {
 public:
-  static constexpr uint64_t kNetworkId = 0x0;
+  static constexpr NetworkHash kNetworkHash{};
   static constexpr std::string kAddress = "127.0.0.1";
   static constexpr std::array<ContractAddress, 4> kAccountAddresses =
       std::array{make_account_address(3), make_account_address(4),

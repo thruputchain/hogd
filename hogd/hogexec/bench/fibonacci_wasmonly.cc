@@ -150,7 +150,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 
     for (int i = 0; i < num_exec_threads; i++) {
       int offset = i * ntx_per_thread;
-      int cur_count = std::min(ntx_per_thread, num_txs - (offset));
+      int cur_count = std::min(ntx_per_thread, num_txs - offset);
 
       futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
                                              cur_count, base_height]() -> void {

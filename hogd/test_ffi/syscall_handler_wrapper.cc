@@ -12,6 +12,7 @@
 #include "hogd/test_ffi/ffi_data_buffer.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -157,7 +158,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     bool buffers_handed_off = false;
     x23::Defer free_buffers_on_error([&]() {
       if (!buffers_handed_off) {
-        hogd::free_ffi_data_buffer(serialized_output.value());
+        hogd::free_ffi_data_buffer(*serialized_output);
         hogd::free_ffi_data_buffer(serialized_trace);
         hogd::free_ffi_data_buffer(serialized_events);
       }

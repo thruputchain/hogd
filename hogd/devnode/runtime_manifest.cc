@@ -1,5 +1,7 @@
 #include "hogd/devnode/runtime_manifest.h"
 
+#include "hogd/base/network_hash.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -119,7 +121,7 @@ write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 
 std::string
 build_runtime_manifest_json(HogDevnodeNode const &node,
-                            std::string_view network_id)
+                            NetworkHash const &network_hash)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
@@ -135,7 +137,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hog-devnode-runtime");
-    w.field("networkId", network_id);
+    w.field("networkHash", format_network_hash(network_hash));
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(genesis_hash));
     w.object_field("producer", [&](json::Writer &w) {
@@ -286,11 +288,11 @@ format_hex_hash(SHA256Hash const &hash)
 
 RuntimeManifestPointer
 write_hog_devnode_runtime_manifest(HogDevnodeNode const &node,
-                                   std::string_view network_id)
+                                   NetworkHash const &network_hash)
 {
   std::filesystem::path manifest_path =
       std::filesystem::path(node.runtime_dir()) / kManifestFileName;
-  std::string manifest = build_runtime_manifest_json(node, network_id);
+  std::string manifest = build_runtime_manifest_json(node, network_hash);
   write_manifest_atomically(manifest_path, manifest);
 
   SHA256Hash manifest_hash = hash_bytes(manifest);

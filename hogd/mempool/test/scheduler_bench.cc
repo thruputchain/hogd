@@ -3,9 +3,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <vector>
 
+#include "db_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -13,6 +16,8 @@
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
+#include "sched_db.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -45,7 +50,7 @@ make_benchmark_accounts(size_t num_accounts)
     ContractAddress address{};
     static_assert(sizeof(i) <= sizeof(address),
                   "benchmark account index does not fit in ContractAddress");
-    memcpy(address.data(), &i, sizeof(i));
+    std::memcpy(address.data(), &i, sizeof(i));
     accounts.push_back(address);
   }
   return accounts;
@@ -91,6 +96,7 @@ bm_scheduler_process_transfers(benchmark::State &state)
     scheduler->process_transfers(transfer)();
   }
 }
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 BENCHMARK(bm_scheduler_process_transfers)
     ->Arg(1)
     ->Arg(4)
@@ -103,7 +109,7 @@ void
 bm_scheduler_add_txs(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const size_t num_txs = static_cast<size_t>(state.range(0));
+  const auto num_txs = static_cast<size_t>(state.range(0));
 
   for (auto _ : state) {
     MempoolTestInfra server;
@@ -120,7 +126,8 @@ bm_scheduler_add_txs(benchmark::State &state)
   state.SetItemsProcessed(static_cast<int64_t>(state.iterations()) *
                           static_cast<int64_t>(num_txs));
 }
-BENCHMARK(bm_scheduler_add_txs) // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_add_txs)
     ->Arg(1)
     ->Arg(8)
     ->Arg(32)

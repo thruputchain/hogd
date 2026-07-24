@@ -5,6 +5,7 @@
 #include <span>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
@@ -55,13 +56,13 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
   ASSERT_TRUE(dir.has_value());
   DbTip initial_tip{};
-  DbHash db_hash;
+  StorageLongHash db_hash;
   {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    EXPECT_EQ(dao.compute_full_db_hash(), DbHash{});
+    EXPECT_EQ(dao.compute_full_db_hash(), StorageLongHash{});
 
     // add some items to the database
     // some items that are not in the db hash
@@ -118,13 +119,13 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     auto *btx = ctx.get_block_tx(1, false);
     assert(btx != nullptr);
     // close() stages changes and computes hash; must be called before commit().
-    auto hash_result = btx->get().close(ctx.get_tip().db_hash);
+    auto hash_result = btx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(hash_result.has_value());
     db_hash = *hash_result;
     ASSERT_TRUE((btx->get()).commit().has_value());
-    ASSERT_TRUE(
-        ctx.update_dbtip(1, /*block_hash=*/{}, /*events_hash=*/{}, db_hash)
-            .has_value());
+    ConsensusValue value{};
+    value.proposal_header.block_height = 1;
+    ASSERT_TRUE(ctx.update_dbtip(1, value, db_hash).has_value());
 
     ASSERT_TRUE(btx->initiate_shutdown());
     ctx.remove_shutdown_block_tx(1);
@@ -144,7 +145,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
   ASSERT_TRUE(db);
   auto dao = HogDBDAO(RAMDB(std::move(*db)));
   EXPECT_EQ(db_hash, dao.compute_full_db_hash());
-  ASSERT_EQ(db_hash, initial_tip.db_hash);
+  ASSERT_EQ(db_hash, initial_tip.storage_long_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());
@@ -245,7 +246,7 @@ insert_into_recovered_rcq(uint64_t live_entries)
   EXPECT_TRUE(invoke_tx.sync_balance_locks().has_value());
   EXPECT_TRUE(invoke_tx.commit());
 
-  EXPECT_TRUE(block_tx.get().close(DbHash{}).has_value());
+  EXPECT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
   EXPECT_TRUE(block_tx.get().commit().has_value());
 
   auto updated = dao.read_retrocausal_queue_metadata(rcq_key);

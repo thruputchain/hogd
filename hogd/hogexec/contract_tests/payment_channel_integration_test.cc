@@ -569,7 +569,10 @@ protected:
     advance_block();
   }
 
-  BlockHeight get_block_height() const { return get_db_tip().height; }
+  BlockHeight get_block_height() const
+  {
+    return get_db_tip().value.proposal_header.block_height;
+  }
 };
 
 // Test opening a channel, joining, and basic close flow

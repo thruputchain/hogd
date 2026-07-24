@@ -34,7 +34,8 @@ public:
                  std::string const &event_host, std::uint16_t event_exec_port,
                  std::size_t nthreads = 2);
 
-  static ViewGatewayIntroOutcome viewgateway_intro(Protocol const &protocol);
+  static ViewGatewayIntroOutcome
+  viewgateway_intro(ProtocolCommit const &protocol);
 
   x23::Async<ViewGatewayResult> viewgateway_view(TransactionViewQuery query);
 

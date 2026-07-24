@@ -56,10 +56,11 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
+  auto &deploy_status = *status;
+  if (!deploy_status) {
+    return {deploy_status.error().code(), WrappedGasAmount{0}};
   }
-  output_deployed_address = *status.value();
+  output_deployed_address = *deploy_status;
 
   if (auto *trace_data =
           syscall_handler

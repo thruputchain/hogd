@@ -290,11 +290,9 @@ CommonBenchState::advance_block()
 
   close_event_block(block_number_);
 
-  auto r2 =
-      // NOLINTBEGIN(bugprone-argument-comment)
-      coord_client_->dbsched_commit_snapshot(block_number_, /*block_hash=*/{},
-                                             /*events_hash=*/{});
-  // NOLINTEND(bugprone-argument-comment)
+  ConsensusValue value{};
+  value.proposal_header.block_height = block_number_;
+  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
@@ -337,11 +335,11 @@ CommonBenchState::run_genesis_configuration(
 
   assert(block_number_ == 0);
   {
-    uint64_t network_id = 0x0;
-    SHA256Hash txset_hash{};
-    SHA256Hash events_hash{};
-    auto r = coord_client_->dbsched_load_genesis_configuration(
-        genesis_configuration, network_id, txset_hash, events_hash);
+    ConsensusValue genesis_value{};
+    genesis_value.proposal_header.block_height = 0;
+    auto r =
+        coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
+                                                          genesis_value);
     if (r != DbSchedResult::DbSchedResultOK) {
       panic("Failed to write genesis configuration");
     }

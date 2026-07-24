@@ -19,7 +19,7 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"
-#include "nomination.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -75,44 +75,41 @@ public:
     const x23::XdrVec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
-    DbTip ret{};
+    SchedulerGetTipResult tip_result =
+        sched_coord_client.schedcoord_get_tip()();
+    CHECK_EQ(tip_result.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip ret = tip_result.db_tip();
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
                                                       t_to_parallel_batch(
                                                           init_tx)())();
 
-      // Now nominate and commit the initialization transactions with
-      // [schedulercoord_nominate()].
+      // Now propose and commit the initialization transactions.
       size_t num_nominated_txs = 0;
-      SchedulerNominatedBlock nomination{};
       while (num_nominated_txs < init_tx.size()) {
-        DbTip db_tip{.height = nomination.nomination.block_height,
-                     .block_hash = nomination.nomination.block_hash,
-                     .db_hash = {},
-                     .id = nomination.block_id};
-        auto res_nominate =
-            sched_coord_client.schedulercoord_nominate(db_tip)();
-        CHECK_EQ(res_nominate.outcome(),
-                 SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = res_nominate.nominated_block();
-        CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
+        auto res_propose = sched_coord_client.schedulercoord_propose_block(
+            ret.id, ProposalContext{})();
+        CHECK_EQ(res_propose.outcome(),
+                 SchedulerProposalOutcome::SchedulerProposalOK);
+        const SchedulerProposedBlock &proposed = res_propose.proposed_block();
         {
-          SignedTransactionHashBatch tx_hashes;
-          CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
-                                    tx_hashes)());
-          num_nominated_txs += tx_hashes.size();
+          SignedTransactionBatch proposed_txs;
+          CHECK(parallel_batch_to_t(proposed.txs, proposed_txs)());
+          num_nominated_txs += proposed_txs.size();
         }
 
+        ConsensusValue value{};
+        value.prev_hash = sha256(ret.value);
+        value.proposal_header = proposed.proposal.header;
+        value.proposal_txs_hash = sha256(proposed.proposal.transactions);
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
-                     res_nominate.nominated_block().block_id)(),
+                     proposed.block_id, value)(),
                  SchedulerCommitOutcome::SchedulerCommitOK);
+        ret = {.id = proposed.block_id,
+               .storage_long_hash = {},
+               .value = value};
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
-
-      ret = {.height = nomination.nomination.block_height,
-             .block_hash = nomination.nomination.block_hash,
-             .db_hash = {},
-             .id = nomination.block_id};
     }
 
     info("Initialized loadgen experiment with context_id {}", context_id_);
@@ -175,19 +172,25 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
-      x23::Async<SchedulerNominationResult> nominate_handle =
-          sched_coord_client_.schedulercoord_nominate(db_tip);
+      x23::Async<SchedulerProposalResult> propose_handle =
+          sched_coord_client_.schedulercoord_propose_block(db_tip.id,
+                                                           ProposalContext{});
 
       txs = co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
       x23::Async<void> submit_vetted_handle =
           sched_coord_client_.schedulercoord_submit_vetted(kValidatorId, txs);
 
-      SchedulerNominationResult res_nominate = co_await nominate_handle;
-      CHECK_EQ(res_nominate.outcome(),
-               SchedulerNominationOutcome::SchedulerNominationOK);
+      SchedulerProposalResult res_propose = co_await propose_handle;
+      CHECK_EQ(res_propose.outcome(),
+               SchedulerProposalOutcome::SchedulerProposalOK);
+      const SchedulerProposedBlock &proposed = res_propose.proposed_block();
+      ConsensusValue value{};
+      value.prev_hash = sha256(db_tip.value);
+      value.proposal_header = proposed.proposal.header;
+      value.proposal_txs_hash = sha256(proposed.proposal.transactions);
       x23::Async<SchedulerCommitOutcome> commit_handle =
-          sched_coord_client_.schedulercoord_commit_block(
-              res_nominate.nominated_block().block_id);
+          sched_coord_client_.schedulercoord_commit_block(proposed.block_id,
+                                                          value);
 
       co_await submit_vetted_handle;
 
@@ -196,19 +199,16 @@ public:
                SchedulerCommitOutcome::SchedulerCommitOK);
       info("commit handle took {} seconds", timer.elapsed());
 
-      const Nomination &nomination = res_nominate.nominated_block().nomination;
       size_t num_txs = 0;
       {
-        SignedTransactionHashBatch tx_hashes;
-        CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
-                                           tx_hashes));
-        num_txs = tx_hashes.size();
+        SignedTransactionBatch proposed_txs;
+        CHECK(co_await parallel_batch_to_t(proposed.txs, proposed_txs));
+        num_txs = proposed_txs.size();
       }
 
-      db_tip = {.height = nomination.block_height,
-                .block_hash = nomination.block_hash,
-                .db_hash = {},
-                .id = res_nominate.nominated_block().block_id};
+      db_tip = {.id = proposed.block_id,
+                .storage_long_hash = {},
+                .value = std::move(value)};
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.
