@@ -536,18 +536,21 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   // DbBlockResult carries no db_hash, but no caller reads db_hash on the
   // non-OK path.
   //
-  // Kept as an explicit loop (not routed through the ShardedClient facade)
-  // because close returns a value-carrying DbBlockResult whose db_hash is
-  // shard 0's alone -- the facade's broadcast_status only reduces to a status
-  // and would drop the hash. This mirrors commit_snapshot below.
+  // Kept as an explicit loop over the facade's shards (rather than its
+  // broadcast_status helper) because close returns a value-carrying
+  // DbBlockResult whose db_hash is shard 0's alone -- broadcast_status only
+  // reduces to a status and would drop the hash. This mirrors commit_snapshot
+  // below.
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
   DbBlockResult result =
-      co_await db_sched_clients_[0]->dbsched_close_snapshot(block_id);
-  for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
+      co_await sharded_db_sched_client_->primary()->dbsched_close_snapshot(
+          block_id);
+  for (size_t i = 1; i < sharded_db_sched_client_->shard_count(); ++i) {
     DbBlockResult r =
-        co_await db_sched_clients_[i]->dbsched_close_snapshot(block_id);
+        co_await sharded_db_sched_client_->shard(i)->dbsched_close_snapshot(
+            block_id);
     if (result.result() == DbSchedResult::DbSchedResultOK &&
         r.result() != DbSchedResult::DbSchedResultOK) {
       result = r;
@@ -584,10 +587,12 @@ MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
   // partial failure needs a durable commit record (deferred; see the sharding
   // 2PC TODOs).
   DbBlockResult result =
-      co_await db_sched_clients_[0]->dbsched_commit_snapshot(block_id, value);
-  for (size_t i = 1; i < db_sched_clients_.size(); ++i) {
+      co_await sharded_db_sched_client_->primary()->dbsched_commit_snapshot(
+          block_id, value);
+  for (size_t i = 1; i < sharded_db_sched_client_->shard_count(); ++i) {
     DbBlockResult r =
-        co_await db_sched_clients_[i]->dbsched_commit_snapshot(block_id, value);
+        co_await sharded_db_sched_client_->shard(i)->dbsched_commit_snapshot(
+            block_id, value);
     if (result.result() == DbSchedResult::DbSchedResultOK &&
         r.result() != DbSchedResult::DbSchedResultOK) {
       result = r;

@@ -38,6 +38,17 @@ public:
   // content-addressed lookups.
   Client &primary() { return clients_[kPrimaryShard]; }
 
+  // Direct access to shard s's client, for the deliberately-explicit per-shard
+  // fan-outs that don't reduce cleanly through the broadcast/scatter helpers --
+  // e.g. genesis load (sequential, with mid-loop failure handling) and the
+  // value-carrying close/commit snapshot loops (whose result is shard 0's
+  // alone). Precondition: s < shard_count().
+  Client &shard(size_t s)
+  {
+    assert(s < clients_.size());
+    return clients_[s];
+  }
+
   // Scatter a keyed batch across shards and gather the per-item results back
   // into the ORIGINAL input order.
   //   route(item, shard_count) -> owning shard index in [0, shard_count)
