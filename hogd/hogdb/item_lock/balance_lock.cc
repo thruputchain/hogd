@@ -50,6 +50,21 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
     }
   }
 
+  // A balance's committed value is snapshot + delta and must stay within
+  // [0, INT128_MAX]. Enforce that domain here, at the lock entrypoint, using
+  // the snapshot the lock already holds (no extra base read). Unlike NNInt128
+  // deltas, balance deltas are otherwise unbounded -- Balance::narrow performs
+  // no base check -- so a narrowed opposite-sign reservation could leave
+  // delta_after outside this range and make delta_after - delta_before overflow
+  // inside NNInt128DeltaBounds::try_reserve_delta, tripping its assert.
+  // Bounding delta_after to [-snapshot, INT128_MAX - snapshot] keeps that
+  // subtraction in the same non-overflowing domain NNInt128 relies on.
+  int128_t snapshot = snapshot_value.value_or(0);
+  auto [committed, committed_overflow] = overflowing_add(snapshot, delta_after);
+  if (committed_overflow || committed < 0) {
+    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+  }
+
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
     return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);

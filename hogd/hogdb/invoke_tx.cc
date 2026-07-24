@@ -385,13 +385,19 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   last_conflict_reason_.reset();
 
   assert(!key.is_address_balance());
-  std::vector<ItemVersion> &v = changes_[key];
+  auto it = changes_.try_emplace(key).first;
+  std::vector<ItemVersion> &v = it->second;
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
     HogDBStatus<int128_t> ret =
         block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
+      // A failed first-time admission must not leave a retained empty entry
+      // behind: rollback_to_savepoint() skips empty vectors and would never
+      // prune it (#3111). Erase through the iterator we already hold -- no
+      // extra hash lookup -- so the hot path stays a single map operation.
+      changes_.erase(it);
       return ret.error();
     }
 
