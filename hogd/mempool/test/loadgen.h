@@ -16,7 +16,6 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"

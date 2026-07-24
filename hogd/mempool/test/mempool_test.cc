@@ -26,7 +26,7 @@
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "hogd/mempool/proposal_hash.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -48,25 +48,6 @@ constexpr size_t kNumTxs = 100;
 
 using deploy_and_transfer_client_t =
     ContractTraitClient<deploy_and_transfer::DeployAndTransfer>;
-
-TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
-{
-  ProposalTxs txs{};
-  txs.hash.segment_tokens = {1, 2};
-  txs.hash.segment_bytes = {4, 8};
-  txs.hash.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3};
-  txs.nondeterministic_data.segment_tokens = {1};
-  txs.nondeterministic_data.segment_bytes = {4};
-  txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
-
-  const ProposalTxsHash expected{
-      0x3a, 0x3c, 0xe7, 0x82, 0x83, 0x94, 0x38, 0x26,
-      0xac, 0x43, 0x29, 0x1f, 0xab, 0x79, 0xbd, 0x17,
-      0xc4, 0xad, 0x1d, 0x1e, 0xf9, 0xe2, 0x2d, 0x8c,
-      0x72, 0x31, 0xa9, 0x7c, 0xb6, 0x68, 0xdc, 0xd9};
-  EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
-  EXPECT_NE(proposal_txs_compatibility_hash(txs), sha256(txs));
-}
 
 SHA256Hash
 make_test_nonce(uint64_t value)
@@ -104,9 +85,8 @@ consensus_value(const DbTip &parent, const Proposal &proposal)
                         .ext = {},
                         .prev_hash = sha256(parent.value),
                         .proposal_header = proposal.header,
-                        .proposal_txs_hash =
-                            proposal_txs_compatibility_hash(
-                                proposal.transactions),
+                        .proposal_txs_hash = proposal_txs_compatibility_hash(
+                            proposal.transactions),
                         .upgrades = {}};
 }
 
@@ -127,6 +107,25 @@ commit_block(MempoolTestInfra &server, BlockID block_id, const DbTip &parent,
 }
 
 } // namespace
+
+TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
+{
+  ProposalTxs txs{};
+  txs.hash.segment_tokens = {1, 2};
+  txs.hash.segment_bytes = {4, 8};
+  txs.hash.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3};
+  txs.nondeterministic_data.segment_tokens = {1};
+  txs.nondeterministic_data.segment_bytes = {4};
+  txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
+
+  const ProposalTxsHash expected = {
+      0x3a, 0x3c, 0xe7, 0x82, 0x83, 0x94, 0x38, 0x26, 0xac, 0x43, 0x29,
+      0x1f, 0xab, 0x79, 0xbd, 0x17, 0xc4, 0xad, 0x1d, 0x1e, 0xf9, 0xe2,
+      0x2d, 0x8c, 0x72, 0x31, 0xa9, 0x7c, 0xb6, 0x68, 0xdc, 0xd9,
+  };
+  EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
+  EXPECT_NE(sha256(txs), expected);
+}
 
 // TODO(jhumphri): Update this test once we implement authentication and
 // vetting.

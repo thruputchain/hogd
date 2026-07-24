@@ -62,7 +62,6 @@
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
-#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"

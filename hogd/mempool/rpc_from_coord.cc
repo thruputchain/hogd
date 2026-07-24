@@ -39,7 +39,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/proposal_hash.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "parallel.hh"
@@ -1336,9 +1335,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .ext = {},
                        .prev_hash = sha256(last_committed_block_.value),
                        .proposal_header = proposal.header,
-                       .proposal_txs_hash =
-                           proposal_txs_compatibility_hash(
-                               proposal.transactions),
+                       .proposal_txs_hash = proposal_txs_compatibility_hash(
+                           proposal.transactions),
                        .upgrades = {}};
   nominated_block_cache_.db_tip = DbTip{
       .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
