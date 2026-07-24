@@ -103,8 +103,8 @@ public:
   void add(R (*lambda)(Args...))
   {
     using fn_t = decltype(lambda);
-    using args_t = detail::NativeContractArgs<fn_t>::args_t;
-    using return_t = detail::NativeContractArgs<fn_t>::return_t;
+    using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
+    using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
     using meta_t = ContractTraitMeta<ContractTrait>;
 
@@ -143,8 +143,8 @@ public:
   void add(Runtime::MethodID id, R (*lambda)(Args...))
   {
     using fn_t = decltype(lambda);
-    using args_t = detail::NativeContractArgs<fn_t>::args_t;
-    using return_t = detail::NativeContractArgs<fn_t>::return_t;
+    using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
+    using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
     // TODO(geoff): figure out gas costs for native contracts like this
     constexpr static GasAmount kErrorGas = 0;

@@ -308,12 +308,8 @@ public:
   advance_block(BlockExecutionMode mode =
                     BlockExecutionMode::kBlockExecutionModeProposal);
 
-  //
-  // Aborts if the advance fails. Tests that expect the advance itself to fail
-  // -- e.g. after the db has shut down, or on a rejected block -- must call
-  // try_advance_block and assert on the returned error instead.
-  // As advance_block, but returns the failing DbSchedResult rather than
-  // aborting.
+  // Returns the failing DbSchedResult if the advance fails, e.g., after the db
+  // has shut down or on a rejected block.
   std::expected<StorageShortHash, DbSchedResult>
   try_advance_block(BlockExecutionMode mode =
                         BlockExecutionMode::kBlockExecutionModeProposal);

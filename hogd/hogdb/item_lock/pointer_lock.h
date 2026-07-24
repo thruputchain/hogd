@@ -11,7 +11,7 @@ namespace hogd {
 
 template<item_lock_unsized T> class PointerLock : public std::unique_ptr<T> {
 public:
-  using change_type = T::change_type;
+  using change_type = typename T::change_type;
 
   template<typename... Args>
   PointerLock(Args &&...args)

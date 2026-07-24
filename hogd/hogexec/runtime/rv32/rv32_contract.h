@@ -41,10 +41,10 @@ public:
   ~Rv32Runtime() override = default;
 
 private:
+  Rv32Contract const *contract_;
+
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
-
-  Rv32Contract const *contract_;
 };
 
 // RuntimeContext for RV32 contracts. Snapshot deployments arrive with their

@@ -123,7 +123,7 @@ try {
             panic("bad exclusive state");
           }
           else {
-            using change_type = lock_t::change_type;
+            using change_type = typename lock_t::change_type;
             auto const *inner = change.get_inner<change_type>();
             CHECK_PTR(inner);
             return lock.try_atomic_change_lock(nullptr, inner, ctx);
@@ -224,7 +224,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           panic("finalized bad state");
         }
         else {
-          using change_type = lock_t::change_type;
+          using change_type = typename lock_t::change_type;
 
           change_type const *before_inner = nullptr;
           if (before != nullptr) {
@@ -298,7 +298,7 @@ ItemLock::handle_try_atomic_from_pending(
             panic("bad pending state");
           }
           else {
-            using change_type = lock_t::change_type;
+            using change_type = typename lock_t::change_type;
             auto const *after_inner = after->get_inner<change_type>();
             CHECK_PTR(after_inner);
             return lock.try_atomic_change_lock(nullptr, after_inner, ctx);
@@ -354,7 +354,7 @@ ItemLock::handle_try_atomic_from_pending(
           return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
         }
         else {
-          using change_type = lock_t::change_type;
+          using change_type = typename lock_t::change_type;
 
           change_type const *before_inner = nullptr;
           if (before != nullptr) {

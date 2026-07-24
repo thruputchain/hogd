@@ -280,7 +280,8 @@ public:
           std::tuple<Args...>,
           typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
   {
-    using args_t = detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
+    using args_t =
+        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return make_encoding(args_t{args...});
   }
 
@@ -300,7 +301,7 @@ public:
                             bool manually_reverted)
   {
     using return_type =
-        detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
+        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
     return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
@@ -341,10 +342,11 @@ public:
   }
 
   template<StringLiteral Name>
-  using args_t = detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
+  using args_t =
+      typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
   template<StringLiteral Name>
   using return_t =
-      detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
+      typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
 
 private:
   template<typename... Args>
