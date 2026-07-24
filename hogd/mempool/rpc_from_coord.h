@@ -216,9 +216,11 @@ public:
     // Load genesis on every shard so each gets the cost model and the genesis
     // block (block 0), giving all shards matching block history for later
     // create_snapshot(prev=...) calls.
-    for (auto &client : db_sched_clients_) {
-      DbSchedResult ret = co_await client->dbsched_load_genesis_configuration(
-          genesis_configuration, genesis_value);
+    for (size_t s = 0; s < sharded_db_sched_client_->shard_count(); ++s) {
+      DbSchedResult ret =
+          co_await sharded_db_sched_client_->shard(s)
+              ->dbsched_load_genesis_configuration(genesis_configuration,
+                                                   genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
         // Genesis failed on this shard, so the sharded db is only partially
         // initialized and unusable. An earlier shard may already have committed
@@ -235,7 +237,8 @@ public:
       }
     }
 
-    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+    DbTipResult db_res =
+        co_await sharded_db_sched_client_->primary()->dbsched_get_tip();
     CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
     last_committed_block_ = db_res.db_tip();
     CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
@@ -406,22 +409,19 @@ private:
   {
     coord_client_ =
         std::make_unique<coord_sched_client_t>(co_await get_client());
-    // TODO(jhumphri): I think I just need to create a client for one of the
-    // shards? Will the account information that the scheduler needs be
-    // distributed across shards?
     {
-      // One client per registered db shard, for block-lifecycle fan-out.
+      // One client per registered db shard, wrapped in the sharding-aware
+      // facade that owns them and is the sole db-sched client from here on.
       auto clients = co_await MempoolDbRpc::get_clients();
-      db_sched_clients_.reserve(clients.size());
+      std::vector<std::shared_ptr<db_sched_client_t>> shard_clients;
+      shard_clients.reserve(clients.size());
       for (auto &c : clients) {
-        db_sched_clients_.push_back(
+        shard_clients.push_back(
             std::make_shared<db_sched_client_t>(std::move(c)));
       }
-      CHECK(!db_sched_clients_.empty());
-      // Shard 0 still backs the scheduler's account reads and get_tip for now.
-      db_sched_client_ = db_sched_clients_[0];
-      sharded_db_sched_client_ =
-          std::make_shared<sharded_db_sched_client_t>(db_sched_clients_);
+      CHECK(!shard_clients.empty());
+      sharded_db_sched_client_ = std::make_shared<sharded_db_sched_client_t>(
+          std::move(shard_clients));
     }
     for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
       auto clients = co_await MempoolExecutorRpc::get_clients();
@@ -433,7 +433,8 @@ private:
         co_await MempoolEventRpc::get_client());
 
     {
-      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      DbTipResult db_res =
+          co_await sharded_db_sched_client_->primary()->dbsched_get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
         last_committed_block_ = db_res.db_tip();
         CHECK_GE(last_committed_block_.value.proposal_header.block_height, 0);
@@ -726,19 +727,14 @@ private:
   const ssize_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
-  // One db-sched client per shard. Block-lifecycle RPCs (create/close/commit/
-  // abandon snapshot) and genesis fan out over all of these. db_sched_client_
-  // aliases db_sched_clients_[0] and still backs the scheduler's account reads
-  // and get_tip for now (TODO: route those per shard).
-  std::vector<std::shared_ptr<db_sched_client_t>> db_sched_clients_;
-  std::shared_ptr<db_sched_client_t> db_sched_client_;
-  // Sharding-aware view over db_sched_clients_. The homogeneous block-lifecycle
-  // fan-outs (create/abandon snapshot) go through its broadcast helpers so the
-  // per-shard loop lives in one place; shared with the Scheduler. The
-  // value-carrying fan-outs (close/commit snapshot) and genesis load stay
-  // explicit loops on purpose -- their result-shaping, ordering, and
-  // partial-failure semantics should read as deliberate, not hidden behind a
-  // single-client illusion.
+  // The sole db-sched client: a sharding-aware facade owning one client per
+  // shard. Keyless/global requests (db tip) use primary(); the homogeneous
+  // block-lifecycle fan-outs (create/abandon snapshot) go through its broadcast
+  // helpers, and the scheduler's account reads/writes through its scatter
+  // helpers. The value-carrying fan-outs (close/commit snapshot) and genesis
+  // load stay explicit loops over shard(i) on purpose -- their result-shaping,
+  // ordering, and partial-failure semantics should read as deliberate, not
+  // hidden behind a single-client illusion. Shared with the Scheduler.
   std::shared_ptr<sharded_db_sched_client_t> sharded_db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
