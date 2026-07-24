@@ -413,7 +413,7 @@ show_byte_array(const std::array<uint8_t, N> &array)
 } // namespace hogd
 
 template<> struct std::hash<hogd::AddressAndKey> {
-  std::size_t operator()(const hogd::AddressAndKey &addrkey) const
+  std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
     auto key_disc = addrkey.key.key_type();
 

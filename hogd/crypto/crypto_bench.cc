@@ -88,9 +88,7 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
   });
 }
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
-BENCHMARK(bm_ed25519_sign_and_verify)
-    ->RangeMultiplier(2)
-    ->Range(kMin, kMax); // NOLINT
+BENCHMARK(bm_ed25519_sign_and_verify)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_lthash16_add(benchmark::State &state)

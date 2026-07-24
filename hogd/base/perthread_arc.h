@@ -77,7 +77,7 @@ public:
   }
 
   // Returns true if the value should be destroyed.
-  bool release_reference()
+  bool release_reference() noexcept
   {
     // The fast path: Decrease the current threadlocal count by 1.
     // If the threadlocal count is still positive, then shutdown has not yet
