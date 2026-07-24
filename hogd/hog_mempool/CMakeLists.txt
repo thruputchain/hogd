@@ -4,6 +4,7 @@ add_library(
   hog_mempool
   rpc_from_coord.cc
   scheduler.cc
+  sharded_db_sched.cc
 )
 target_link_libraries(
   hog_mempool

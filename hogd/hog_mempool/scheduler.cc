@@ -127,15 +127,7 @@ Scheduler::write_all_average_hog_ages_to_db()
       ages += per_thread_ages;
     });
   }
-  CHECK_EQ(co_await sharded_db_->scatter_write(
-               ages,
-               [](HogAge const &a, size_t n) {
-                 return shard_of_address(a.address, n);
-               },
-               [](auto &c, auto &&sub) {
-                 return c->dbsched_write_hog_ages(sub);
-               },
-               DbSchedResult::DbSchedResultOK),
+  CHECK_EQ(co_await sharded_db_->write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
   co_return;
 }
@@ -279,10 +271,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
   ReadAverageHogAgesResult ret;
   ret.found.reserve(accounts.size());
 
-  HogAgeResults results = co_await sharded_db_->scatter_gather<HogAgeResults>(
-      accounts,
-      [](ContractAddress const &a, size_t n) { return shard_of_address(a, n); },
-      [](auto &c, auto &&sub) { return c->dbsched_get_hog_ages(sub); });
+  HogAgeResults results = co_await sharded_db_->read_hog_ages(accounts);
   CHECK_EQ(results.size(), accounts.size());
   for (size_t i = 0; i < results.size(); i++) {
     const HogAgeResult &res = results[i];
@@ -804,15 +793,12 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     account_state.hog_age.address = account;
   }
 
-  // Genesis (block 0) is loaded replicated on *every* db shard, so each shard's
-  // [BackgroundCommitWorker] dispatches the same block-0 delta set (e.g.
-  // [kDeployContractAddress]). Apply each genesis delta exactly once; otherwise
-  // the [kHogAgeGroupReceived] group is multiplied by the shard count. Genesis
-  // is a one-time, tiny batch, so we apply it serially here rather than
-  // parallelizing. (Non-genesis blocks dispatch per-owner deltas and take the
-  // parallel path below with no dedup.)
-  // TODO(vpawar): drop this once genesis delta dispatch is made
-  // shard-owner-only on the hogdb side; the dedup then becomes unnecessary.
+  // Genesis is replicated on every shard, so each dispatches the same block-0
+  // deltas; apply each exactly once (else [kHogAgeGroupReceived] is multiplied
+  // by the shard count). It is a tiny one-time batch, so apply it serially --
+  // non-genesis blocks take the parallel, dedup-free path below.
+  // TODO(vpawar): drop once genesis dispatch is shard-owner-only on the hogdb
+  // side.
   if (transfers.block == 0) {
     x23::CoroGuard cg;
     co_await cg(global_lock_);
