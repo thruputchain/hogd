@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 : "${BUILD_DIR:?BUILD_DIR must be set}"
 : "${WORK_DIR:?WORK_DIR must be set}"
+: "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -310,9 +311,7 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-for host in "${ALL_HOSTS[@]}"; do
-  "$WAIT_PORT" "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
