@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <unordered_map>
@@ -13,10 +14,12 @@
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
+#include "integration.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -82,6 +85,30 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
+}
+
+// A tx from a known account but larger than kMaxBytesSignedTransaction is
+// dropped at ingress rather than stored and later forwarded to the executor
+// (#3144). The executor keeps its own guard (#2857) as defense in depth.
+TEST(Scheduler, AddVettedTxOversizedIsDropped)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  const std::vector<uint8_t> big(kMaxBytesSignedTransaction + 1, 0);
+  txs[0].tx.invocation.calldata = Calldata(big.begin(), big.end());
+  ASSERT_GT(x23::xdr_size(txs[0]),
+            static_cast<size_t>(kMaxBytesSignedTransaction));
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  scheduler->add_txs({txs[0]})();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 }
 
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
