@@ -79,8 +79,9 @@ AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
   // KeyChangeBatch larger than the default 16 MiB cap; without this the
   // outbound send throws locally and the subscriber is erased, stalling auth
   // delivery for later heights (issue #3146).
-  auto client = co_await make_rpc_client<AuthDB1>(
-      address, false, LoadgenRpc::kRpcMaxMessageSize);
+  auto client =
+      co_await make_rpc_client<AuthDB1>(address, false,
+                                        LoadgenRpc::kRpcMaxMessageSize);
   if (!client) {
     error("AuthChangeSubscriptionManager: Failed to create RPC client for "
           "{}: {}",
