@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
@@ -20,7 +21,6 @@
 #include "hogd/indexer/shared.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -52,7 +52,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
 
   // Create the RPC server that the event server talks to.
   RpcServer<IndexerEventRpc> event(db, failure_cache);
-  event->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  event->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
@@ -78,7 +78,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
 
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
-  block_explorer->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  block_explorer->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
       make_bind_host_port(bind_ip, block_explorer_port));
   CHECK(actual_block_explorer_port == block_explorer_port ||

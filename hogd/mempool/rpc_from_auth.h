@@ -6,8 +6,8 @@
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
@@ -62,7 +62,7 @@ public:
 
     auto ret = co_await create_client<AuthMempool1>(
         server_address_to_sockaddr(card.address_for_mempool), /*retry=*/false,
-        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
     if (!ret)
       panic("rpc_from_auth get_client connect failed: {}",
             ret.error().error_code().message());

@@ -14,11 +14,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
@@ -87,7 +87,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   }
 
   RpcServer<MempoolAuthRpc> auth;
-  auth->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  auth->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_auth_port =
       auth.start_server(make_bind_host_port(bind_ip, auth_port));
   CHECK(actual_auth_port == auth_port || auth_port == 0);
@@ -100,7 +100,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   RpcServer<MempoolCoordinatorRpc> coord(
       db->impl(), auth->impl(), std::move(network_hash),
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
-  coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  coord->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
       coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
@@ -115,7 +115,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // (SchedGateway1) on a separate port.  Chuckd remains on the
   // coordinator port; the public RPC gateway binds to this one.
   MempoolGatewayServer gateway(coord->impl());
-  gateway->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  gateway->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_gateway_port =
       gateway.start_server(make_bind_host_port(bind_ip, gateway_port));
   CHECK(actual_gateway_port == gateway_port || gateway_port == 0);

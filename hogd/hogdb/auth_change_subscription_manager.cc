@@ -13,6 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -73,7 +74,13 @@ x23::Async<std::optional<AuthChangeSubscriptionManager::auth_db_client_t>>
 AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
                                              const AuthCard &card)
 {
-  auto client = co_await make_rpc_client<AuthDB1>(address, false);
+  // Match the auth service's inbound cap (auth.cc sets its AuthDBRpc server's
+  // max_message_size_ to a large value). A committed block can produce a
+  // KeyChangeBatch larger than the default 16 MiB cap; without this the
+  // outbound send throws locally and the subscriber is erased, stalling auth
+  // delivery for later heights (issue #3146).
+  auto client =
+      co_await make_rpc_client<AuthDB1>(address, false, kBulkRpcMaxMessageSize);
   if (!client) {
     error("AuthChangeSubscriptionManager: Failed to create RPC client for "
           "{}: {}",

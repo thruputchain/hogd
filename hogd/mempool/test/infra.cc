@@ -8,6 +8,7 @@
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -15,7 +16,6 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/shared.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
@@ -37,7 +37,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   Metrics::instance().clear();
   init_hogexec_metrics();
 
-  mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  mempool_auth_server_->max_message_size_ = kBulkRpcMaxMessageSize;
 
   // Start the mempool RPC servers. All of the subsystems register with the
   // mempool, so the mempool RPC servers need to start first.
@@ -59,7 +59,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   db_executor_server_->start_server(/*port=*/0);
   // [db_scheduler_server_] handles RPCs from the mempool.
   db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-  (*db_scheduler_server_)->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  (*db_scheduler_server_)->max_message_size_ = kBulkRpcMaxMessageSize;
   db_scheduler_server_->start_server(/*port=*/0);
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(/*port=*/0);
@@ -69,8 +69,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
   auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
 
-  auth_db_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  auth_mempool_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  auth_db_server_->max_message_size_ = kBulkRpcMaxMessageSize;
+  auth_mempool_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   auth_db_server_.start_server(/*port=*/0);
   auth_mempool_server_.start_server(/*port=*/0);
   auth_db_server_->impl()->set_auth_server(*auth_server_);
@@ -86,7 +86,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // the mempool. The real coordinator implementation is in the chuckd repo
   // and is written in go. So to ease test implementation, we use a fake
   // coordinator.
-  coordinator_sched_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  coordinator_sched_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   coordinator_sched_server_.start_server(/*port=*/0);
 
   // Now have all of the subsystems register themselves with the mempool.

@@ -7,10 +7,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/mempool/test/loadgen.h"
@@ -38,7 +38,7 @@ coordinator_init(const std::string &mempool_address,
 {
   // Start the coordinator server.
   RpcServer<CoordinatorSchedRpc> sched;
-  sched->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  sched->max_message_size_ = kBulkRpcMaxMessageSize;
   CHECK_EQ(sched.start_server(kSchedulerServerPort), kSchedulerServerPort);
 
   // Register with the mempool.
@@ -51,7 +51,7 @@ coordinator_init(const std::string &mempool_address,
   sched_coord_client_t client =
       create_client<SchedulerCoord1>(
           host_port, /*retry=*/true,
-          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)()
+          /*max_message_size=*/kBulkRpcMaxMessageSize)()
           .value();
   std::string address_for_sched = create_address(kSchedulerServerPort);
   CoordCard card{.protocol = version::kHogdProtocol(),
