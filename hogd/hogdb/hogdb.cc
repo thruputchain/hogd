@@ -24,6 +24,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/hog_age_reconciliation.h"
@@ -37,7 +38,6 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -159,7 +159,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the mempool server.
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
-  mempool_server.max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  mempool_server.max_message_size_ = kBulkRpcMaxMessageSize;
   const uint16_t actual_mempool_port =
       mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);

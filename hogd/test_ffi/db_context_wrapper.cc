@@ -16,10 +16,10 @@
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
@@ -57,7 +57,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   x23::HostPort auth_port{"localhost", hogdb_wrapper_.auth_port()};
   auth_server_ =
       std::make_unique<AuthServer>(make_dbauth_client(auth_port), 16);
-  auth_db_server_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  auth_db_server_->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_db_server_.start_server(/*port=*/0);
   {

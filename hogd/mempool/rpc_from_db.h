@@ -5,9 +5,9 @@
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
@@ -123,7 +123,7 @@ public:
       auto client = co_await create_client<DbSched1>(
           server_address_to_sockaddr(card.address_for_sched),
           /*retry=*/false,
-          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+          /*max_message_size=*/kBulkRpcMaxMessageSize);
       if (!client)
         panic("rpc_from_db get_clients connect failed: {}",
               client.error().error_code().message());

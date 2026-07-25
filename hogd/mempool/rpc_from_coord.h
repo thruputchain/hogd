@@ -23,12 +23,12 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_db.h"
@@ -108,7 +108,7 @@ public:
     auto ret = co_await create_client<CoordScheduler1>(
         server_address_to_sockaddr(card.address_for_sched),
         /*retry=*/false,
-        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
     if (!ret)
       panic("rpc_from_coord get_client connect failed: {}",
             ret.error().error_code().message());

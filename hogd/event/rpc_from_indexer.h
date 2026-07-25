@@ -2,10 +2,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "x23/async.h"
@@ -37,7 +37,7 @@ public:
     }
     auto client = co_await make_rpc_client<IndexerEvent1>(
         server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
-        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
     if (!client) {
       // The dial back to the indexer's advertised address failed. Report it so
       // the indexer fails startup instead of treating registration as

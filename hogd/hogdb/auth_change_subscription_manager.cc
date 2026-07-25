@@ -13,6 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"

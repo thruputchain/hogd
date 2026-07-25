@@ -14,11 +14,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "sched_db.hh"
@@ -51,14 +51,14 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   sched_auth_client_t mempool_client = std::move(*mempool_client_res);
 
   RpcServer<AuthDBRpc> auth_db_rpc;
-  auth_db_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  auth_db_rpc->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auto [actual_db_port, db_lfd] =
       auth_db_rpc.bind_server(make_bind_host_port(bind_ip, db_port));
   CHECK(actual_db_port == db_port || db_port == 0);
   info("PORT auth.db={}", actual_db_port);
 
   RpcServer<AuthMempoolRpc> auth_mempool_rpc;
-  auth_mempool_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  auth_mempool_rpc->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auto [actual_mempool_port, mempool_lfd] =
       auth_mempool_rpc.bind_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
