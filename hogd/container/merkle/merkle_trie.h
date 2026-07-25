@@ -214,14 +214,13 @@ private:
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
   Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                size_t idx,
-                                const std::span<const std::byte> &obj);
+                                size_t idx, const SHA256Hash &obj_hash);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                           const std::span<const std::byte> &obj);
+                           const SHA256Hash &obj_hash);
 
   // Returns true if we will need to remove [branch] after removing a KV pair
   // that is "under" it.
