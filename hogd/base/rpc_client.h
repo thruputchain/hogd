@@ -22,6 +22,13 @@
 
 namespace hogd {
 
+// Message-size cap for internal service-to-service RPC that forwards bulk
+// database state (e.g. HogDB -> auth / mempool key-change batches). A single
+// committed block can exceed the 16 MiB x23 default, so these links negotiate a
+// much larger cap. Defined here so DB-facing endpoints share one value instead
+// of borrowing an unrelated constant.
+inline constexpr size_t kBulkRpcMaxMessageSize = 0x7fffffffff;
+
 template<typename RpcService>
 using rpc_client_t = typename RpcService::template client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>;
