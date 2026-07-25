@@ -816,6 +816,87 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
          "contract handles the RCQ observation read-limit error (#3043)";
 }
 
+// #3141: repeated peeks of an empty RCQ key each record a nondeterministic bit
+// but no observation, so without a read cap they grow the unbounded
+// nondeterministic_bits vector without limit -- an allocation failure on that
+// growth escapes the noexcept syscall path. Peeking past the cap must return
+// the deterministic read-limit error (not NoRetrocausalQueueEntry), leaving the
+// bit count bounded and the observation sequence empty.
+TEST_F(SyscallRcqPeekTest, EmptyPeekReadCapReturnsSyscallErrorAndBoundsBits)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  constexpr uint32_t kPeekCount = kMaxConcurrentRcqReadsPerTx + 8;
+
+  NativeContractBuilder builder;
+  // method 13: peek the same empty key `count` times. The first
+  // kMaxConcurrentRcqReadsPerTx peeks report an empty queue; the rest return
+  // the read-limit error rather than continuing to grow proposal metadata.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      13, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              SyscallRcqPeekTest::kStorageKey, len);
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (status.value() !=
+                    SyscallErrorCode::
+                        kSyscallErrorCodeNoRetrocausalQueueEntry ||
+                len != 0) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          else if (status.value() !=
+                   SyscallErrorCode::
+                       kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kPeekCount);
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(13),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto const &proposal_data = handler.get_proposal_data();
+  // Bits stop one past the cap: the cap-crossing read logs its bit but records
+  // no observation, then every further read short-circuits without a bit.
+  EXPECT_EQ(proposal_data.nondeterministic_bit_count,
+            kMaxConcurrentRcqReadsPerTx + 1);
+  EXPECT_TRUE(proposal_data.observed_queue_entry_sequence.empty());
+
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

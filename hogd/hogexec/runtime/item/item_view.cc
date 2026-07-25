@@ -447,6 +447,17 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // Reference, not a copy: QueueEntry is heap-backed, so this avoids an
     // allocation the original also avoided.
     auto const &live_opt = out.value().get();
+    // Every concurrent read records one nondeterministic bit, so bound the
+    // number of reads per tx -- empty reads and re-peeks record no observation
+    // and would otherwise bypass log_queue_entry_observation's cap, growing the
+    // unbounded nondeterministic_bits vector until an allocation failure
+    // escapes the noexcept syscall path (#3141). The cap-crossing read still
+    // logs its bit but records no observation and surfaces the read-limit
+    // error, matching the observation cap (#2894, #3043).
+    if (proposal_data->concurrent_read_cap_reached()) {
+      proposal_data->log_nondeterministic_bit({live_opt.has_value()});
+      return nullptr;
+    }
     if (!live_opt.has_value()) {
       proposal_data->log_nondeterministic_bit({false});
       return nullptr;
@@ -491,6 +502,15 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   if (validation_data.observation_cap_exceeded()) {
+    return nullptr;
+  }
+  if (validation_data.concurrent_read_cap_reached()) {
+    // Mirror proposal: the cap-crossing read consumed one nondeterministic bit
+    // and surfaced the read-limit error without an observation (#3141). A
+    // missing bit here is a malformed (e.g. doctored) proposal.
+    if (!validation_data.consume_nondeterministic_bit().has_value()) {
+      return SystemError{SystemErrorCode::ValidationFailure};
+    }
     return nullptr;
   }
   auto bit_res = validation_data.consume_nondeterministic_bit();

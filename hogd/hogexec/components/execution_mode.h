@@ -97,11 +97,31 @@ public:
   // overflowing the bounded observed_queue_entry_sequence (#2894).
   bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
 
+  // Accounts for one concurrent RCQ read (empty, non-empty, or a re-peek at an
+  // already-observed index -- each records exactly one nondeterministic bit).
+  // Returns true once kMaxConcurrentRcqReadsPerTx reads have already been
+  // counted, setting the cap flag so the read surfaces the deterministic
+  // read-limit error. Unlike log_queue_entry_observation's cap, this counts
+  // reads that record no observation, so empty peeks can't grow the unbounded
+  // nondeterministic_bits vector past the cap and drive an allocation failure
+  // across the noexcept syscall boundary (#3141).
+  bool concurrent_read_cap_reached()
+  {
+    if (concurrent_rcq_read_count_ >= kMaxConcurrentRcqReadsPerTx) {
+      observation_cap_exceeded_ = true;
+      return true;
+    }
+    concurrent_rcq_read_count_++;
+    return false;
+  }
+
 private:
   // Proposal data containing nondeterministic choices made during execution
   NondeterministicProposalData proposal_data_{};
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
   bool observation_cap_exceeded_ = false;
+  // Count of concurrent RCQ reads recorded this tx (#3141).
+  uint32_t concurrent_rcq_read_count_ = 0;
 };
 
 // Data structure for validation mode execution that validates nondeterministic
@@ -160,6 +180,19 @@ public:
   // validation failure.
   bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
 
+  // Mirrors ProposalModeData::concurrent_read_cap_reached so validation replay
+  // stops consuming bits at the same read count the proposer stopped logging
+  // them (#3141).
+  bool concurrent_read_cap_reached()
+  {
+    if (concurrent_rcq_read_count_ >= kMaxConcurrentRcqReadsPerTx) {
+      observation_cap_exceeded_ = true;
+      return true;
+    }
+    concurrent_rcq_read_count_++;
+    return false;
+  }
+
 private:
   // Proposal data containing expected nondeterministic choices
   const NondeterministicProposalData proposal_data_;
@@ -170,6 +203,8 @@ private:
   uint32_t next_queue_entry_index_ = 0;
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
   bool observation_cap_exceeded_ = false;
+  // Count of concurrent RCQ reads consumed this tx (#3141).
+  uint32_t concurrent_rcq_read_count_ = 0;
 };
 
 class ViewingModeData {
