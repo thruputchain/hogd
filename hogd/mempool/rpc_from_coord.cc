@@ -292,6 +292,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       "prune auth failures", submit_dag.after(verify_node),
       [&]() -> x23::Async<void> {
         const AuthErrorCodeBatch &auth_ret = verify_node.get();
+        // Auth is a trusted component and must return exactly one result per
+        // submitted transaction; otherwise we cannot attribute auth results to
+        // transactions and must not admit the batch.
+        CHECK_EQ(auth_ret.size(), txs->size());
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
