@@ -30,7 +30,7 @@ public:
 
   explicit HogDBGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
 
-  static DbGatewayIntroOutcome dbgateway_intro(Protocol const &protocol);
+  static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 
   DbGatewayResult dbgateway_get_items(AddressAndKeyBatch const &batch);
 

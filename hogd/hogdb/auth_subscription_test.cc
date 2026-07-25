@@ -19,6 +19,7 @@
 #include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -123,7 +124,9 @@ protected:
     ASSERT_TRUE(db_.write_address_auth_data(addr, old_auth_data));
     grant_storage_token(addr, 1'000'000);
 
-    DbTip tip{.height = kAcceptedHeight, .id = 0};
+    ConsensusValue tip_value{};
+    tip_value.proposal_header.block_height = kAcceptedHeight;
+    DbTip tip{.id = 0, .storage_long_hash = {}, .value = tip_value};
     ASSERT_TRUE(db_.write_dbtip(tip));
 
     ctx_opt_.emplace(std::move(db_), nullptr);
@@ -155,7 +158,8 @@ protected:
     PerThreadARC<BlockTX> *block_tx = ctx.get_block_tx(kBlockId, false);
     ASSERT_NE(block_tx, nullptr);
     ASSERT_EQ(block_tx->get().get_height(), kNextHeight);
-    HogDBStatus<DbHash> db_hash = block_tx->get().close(ctx.get_tip().db_hash);
+    HogDBStatus<StorageLongHash> db_hash =
+        block_tx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(db_hash.has_value());
     ASSERT_TRUE(block_tx->get().commit().has_value());
 
@@ -240,7 +244,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -323,7 +327,7 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -409,7 +413,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
   // Close and commit BlockTX (should succeed even though auth server is down)
   // The subscription manager should handle the error gracefully
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result)
       << "BlockTX commit should succeed even if auth server is down";
@@ -480,7 +484,7 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   ASSERT_TRUE(invoke_tx.commit());
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -622,7 +626,7 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
 TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
 {
   AuthCard empty_protocol_card =
-      AuthCard{.protocol = Protocol{},
+      AuthCard{.protocol = ProtocolCommit{},
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -637,7 +641,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   nul_suffixed.push_back('\0');
   nul_suffixed += "suffix";
   AuthCard nul_protocol_card =
-      AuthCard{.protocol = Protocol(nul_suffixed.data(), nul_suffixed.size()),
+      AuthCard{.protocol =
+                   ProtocolCommit(nul_suffixed.data(), nul_suffixed.size()),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -673,7 +678,10 @@ TEST_F(AuthSubscriptionTest, IntroHeightCoversAlreadyPublishedHeight)
   constexpr BlockHeight kPublishedHeight = kCommittedHeight + 1;
 
   // The committed tip is H-1: this is what the racing intro reads.
-  ASSERT_TRUE(db_.write_dbtip(DbTip{.height = kCommittedHeight, .id = 0}));
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = kCommittedHeight;
+  ASSERT_TRUE(db_.write_dbtip(
+      DbTip{.id = 0, .storage_long_hash = {}, .value = tip_value}));
   RPCContext ctx(std::move(db_), nullptr);
   ASSERT_EQ(ctx.get_height_threadsafe(), kCommittedHeight);
 

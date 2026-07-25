@@ -9,6 +9,7 @@ add_library(contract_loader
 
 target_link_libraries(contract_loader
   base
+  built_headers_interface
   x23
   protocol
   unified_lib
@@ -25,10 +26,6 @@ target_include_directories(contract_loader PRIVATE
 )
 
 add_dependencies(contract_loader generate_wasm_meter_ffi_h)
-
-target_compile_definitions(contract_loader PRIVATE
-  CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
-)
 
 add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)

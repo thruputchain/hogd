@@ -196,7 +196,7 @@ private:
   // Wrap atomic<int64_t> to force initialization to 0.
   // PerThread<T> requires movable types.
   struct Refcount {
-    Refcount() : count_((kUninitializedValue)) {}
+    Refcount() : count_(kUninitializedValue) {}
     // Why is this ok?
     // The threadlocal vector inside PerThread<T> is only ever modified if the
     // PerThread lock is held. That's the lock returned by

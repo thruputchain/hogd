@@ -4,17 +4,18 @@
 #include <cstdlib>
 #include <format>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
@@ -22,10 +23,10 @@
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -72,11 +73,11 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
 
   GenesisConfiguration genesis_configuration{.initial_config = {},
                                              .storage_cost_model = cost_model};
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
-  auto res = db_sched_client_.dbsched_load_genesis_configuration(
-      genesis_configuration, network_id, txset_hash, events_hash);
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  auto res =
+      db_sched_client_.dbsched_load_genesis_configuration(genesis_configuration,
+                                                          genesis_value);
   if (res != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "DBContext: dbsched_load_genesis_configuration failed");
@@ -95,9 +96,9 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_close_snapshot failed");
     }
 
-    res = db_sched_client_.dbsched_commit_snapshot(current_block_id_,
-                                                   /*block_hash=*/{},
-                                                   /*events_hash=*/{});
+    ConsensusValue value{};
+    value.proposal_header.block_height = current_block_id_;
+    res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
           "advance_new_block: dbsched_commit_block failed");

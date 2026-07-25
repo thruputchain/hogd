@@ -16,6 +16,7 @@
 // xdr types
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -114,7 +115,7 @@ protected:
   template<typename F>
   void commit_block_expect_db_hash_matches_full(BlockHeight height, F &&fn)
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
@@ -129,17 +130,17 @@ protected:
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash = db_.compute_full_db_hash();
+    StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash);
   }
 
   template<typename F>
-  DbHash commit_block_and_return_db_hash(BlockHeight height, F &&fn)
+  StorageLongHash commit_block_and_return_db_hash(BlockHeight height, F &&fn)
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
@@ -169,7 +170,7 @@ protected:
     if (!hash_result.has_value()) {
       return {};
     }
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     bool committed = static_cast<bool>(block_tx.get().commit());
     EXPECT_TRUE(committed);
     if (!committed) {
@@ -380,10 +381,13 @@ TEST_F(HogDBTest, DataAccessObject)
   //
 
   // test db tip
-  DbTip tip{.height = 10,
-            .block_hash = sha256(std::as_bytes(std::span("foo"))),
-            .db_hash = db_hash_from_buf(std::as_bytes(std::span("foo"))),
-            .id = 30};
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = 10;
+  tip_value.proposal_header.txs_hash = sha256(std::as_bytes(std::span("foo")));
+  DbTip tip{.id = 30,
+            .storage_long_hash =
+                db_hash_from_buf(std::as_bytes(std::span("foo"))),
+            .value = std::move(tip_value)};
   EXPECT_TRUE(db_.write_dbtip(tip));
   HogDBStatus<DbTip> rtip = db_.read_dbtip();
   EXPECT_TRUE(rtip);
@@ -641,7 +645,7 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
 
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   auto res = db_.read_address_balance(addr3);
@@ -816,7 +820,7 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
 
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   // Read back the sender's balance
@@ -865,7 +869,7 @@ TEST_F(HogDBTest, NewBalanceHogAgeIsAllZeroes)
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   ASSERT_TRUE(invoke_tx.commit());
 
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   auto age = db_.read_address_average_hog_age(recipient_addr);
@@ -1044,7 +1048,7 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   }
 
   // Commit the block transaction
-  ASSERT_TRUE(block_tx.get().close(DbHash{}));
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   // Verify sender's balance
@@ -1147,7 +1151,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
   ItemKey key = make_item_key(contract_addr, 10);
   auto db_key = make_contract_data_key(key);
   auto balance_key = make_address_key(contract_addr, Prefix::kBalance);
-  DbHash base_hash = db_.compute_full_db_hash();
+  StorageLongHash base_hash = db_.compute_full_db_hash();
   constexpr int128_t kInitialBalance = 10'000'000;
 
   PerThreadARC<BlockTX> block_tx(
@@ -1164,7 +1168,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
 
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
-  DbHash incremental_hash = *hash_result;
+  StorageLongHash incremental_hash = *hash_result;
   ASSERT_TRUE(block_tx.get().commit());
 
   auto final_balance = db_.read_address_balance(contract_addr);
@@ -1178,7 +1182,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
                   int128_to_xdr_bytes(*final_balance));
   auto canonical_bytes = int128_to_xdr_bytes(321);
   lthash_add_item(canonical, db_key, kNNInt128, canonical_bytes);
-  DbHash canonical_hash = db_hash_from_lthash16(canonical);
+  StorageLongHash canonical_hash = db_hash_from_lthash16(canonical);
 
   LtHash16 raw = lthash16_from_db_hash(base_hash);
   lthash_remove_item(raw, std::as_bytes(std::span(balance_key)), kNNInt128,
@@ -1187,7 +1191,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
                   raw_int128_le_bytes(*final_balance));
   auto raw_bytes = raw_int128_le_bytes(321);
   lthash_add_item(raw, db_key, kNNInt128, raw_bytes);
-  DbHash raw_hash = db_hash_from_lthash16(raw);
+  StorageLongHash raw_hash = db_hash_from_lthash16(raw);
 
   EXPECT_EQ(incremental_hash, canonical_hash);
   EXPECT_NE(incremental_hash, raw_hash);
@@ -1199,7 +1203,7 @@ TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
   Address contract_addr = make_address(kAddress + 63);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 11);
-  DbHash base_hash = db_.compute_full_db_hash();
+  StorageLongHash base_hash = db_.compute_full_db_hash();
 
   db_.enable_debug_invariants(cost_model_);
 
@@ -1457,13 +1461,13 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
 
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
   // Capture the db hash after normal operations
   // The db hash has been updated by the BlockTX commits above
-  DbHash original_db_hash = db_.compute_full_db_hash();
+  StorageLongHash original_db_hash = db_.compute_full_db_hash();
 
   // Read block 1's data
   uint64_t target_block_number = 1;
@@ -1504,7 +1508,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
   // Recompute the db hash from ramdb to detect the inconsistency
   // If blocks are properly integrity-protected in the db hash, reloading from
   // the tampered ramdb will produce a different db hash
-  DbHash new_db_hash = db_.compute_full_db_hash();
+  StorageLongHash new_db_hash = db_.compute_full_db_hash();
 
   // Blocks are included directly in the db hash, so tampering with block
   // contents in ramdb causes the reloaded db hash to differ from the
@@ -1550,14 +1554,14 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_consume = db_.compute_full_db_hash();
+  StorageLongHash db_hash_before_consume = db_.compute_full_db_hash();
 
   // Consume the first block completely
-  DbHash db_hash_after_consume;
+  StorageLongHash db_hash_after_consume;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
@@ -1586,7 +1590,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash = db_.compute_full_db_hash();
+  StorageLongHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_consume, full_db_hash);
 
   // Verify db hash changed after consuming block 1
@@ -1637,14 +1641,14 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_delete = db_.compute_full_db_hash();
+  StorageLongHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Delete the entire RCQ by consuming all entries
-  DbHash db_hash_after_delete;
+  StorageLongHash db_hash_after_delete;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
@@ -1675,7 +1679,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash = db_.compute_full_db_hash();
+  StorageLongHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
   // Verify db hash changed after deleting all blocks
@@ -1731,15 +1735,15 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_delete = db_.compute_full_db_hash();
+  StorageLongHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
-  DbHash db_hash_after_delete;
+  StorageLongHash db_hash_after_delete;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
@@ -1762,7 +1766,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash = db_.compute_full_db_hash();
+  StorageLongHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
   // Verify db hash changed after deleting all blocks
@@ -1825,15 +1829,15 @@ TEST_F(HogDBTest,
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_type_change = db_.compute_full_db_hash();
+  StorageLongHash db_hash_before_type_change = db_.compute_full_db_hash();
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
-  DbHash db_hash_after_type_change;
+  StorageLongHash db_hash_after_type_change;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
@@ -1857,7 +1861,7 @@ TEST_F(HogDBTest,
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash = db_.compute_full_db_hash();
+  StorageLongHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_type_change, full_db_hash);
 
   // Verify db hash changed after deleting all blocks
@@ -1919,15 +1923,15 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_type_change = db_.compute_full_db_hash();
+  StorageLongHash db_hash_before_type_change = db_.compute_full_db_hash();
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
-  DbHash db_hash_after_type_change;
+  StorageLongHash db_hash_after_type_change;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
@@ -1950,7 +1954,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash = db_.compute_full_db_hash();
+  StorageLongHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_type_change, full_db_hash);
 
   // Verify db hash changed after deleting all blocks
@@ -2023,7 +2027,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -2047,7 +2051,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
         std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -2062,8 +2066,8 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
       << "Metadata item should be removed after full consumption";
 
   // The fully consumed db should hash-match the empty db
-  DbHash consumed_hash = db_.compute_full_db_hash();
-  DbHash empty_hash = db2.compute_full_db_hash();
+  StorageLongHash consumed_hash = db_.compute_full_db_hash();
+  StorageLongHash empty_hash = db2.compute_full_db_hash();
   EXPECT_EQ(consumed_hash, empty_hash)
       << "Fully consumed RCQ should leave no residual state in the db hash";
 }
@@ -2128,7 +2132,7 @@ TEST_F(HogDBTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
 
     invoke_tx.abort();
 
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -2463,7 +2467,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -2481,13 +2485,13 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
 
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
-    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
   // db2 has no auth operations — hashes should match
-  DbHash created_then_deleted_hash = db_.compute_full_db_hash();
-  DbHash empty_hash = db2.compute_full_db_hash();
+  StorageLongHash created_then_deleted_hash = db_.compute_full_db_hash();
+  StorageLongHash empty_hash = db2.compute_full_db_hash();
   EXPECT_EQ(created_then_deleted_hash, empty_hash)
       << "Auth data create-then-delete should leave no residual state";
 }
@@ -2587,7 +2591,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
 
   // Block 1: two InvokeTXs both modify the same NNInt128
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
@@ -2616,10 +2620,10 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash = db_.compute_full_db_hash();
+    StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
         << "Two InvokeTXs modifying same NNInt128 should produce matching hash";
   }
@@ -2730,7 +2734,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
   setup_contract_address(addr);
 
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
@@ -2766,10 +2770,10 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash = db_.compute_full_db_hash();
+    StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
         << "Two InvokeTXs adding to same RCQ should produce matching hash";
   }
@@ -2827,7 +2831,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
@@ -2858,10 +2862,10 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash = db_.compute_full_db_hash();
+    StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
         << "Two InvokeTXs adding nonces to same replay cache should match";
   }
@@ -2888,7 +2892,7 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
   // Block 2: two InvokeTXs - one inserts, other consumes (including current
   // block)
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     BlockHeight height = 2;
     PerThreadARC<BlockTX> block_tx(
@@ -2928,10 +2932,10 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    DbHash incremental_hash = *hash_result;
+    StorageLongHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash = db_.compute_full_db_hash();
+    StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
         << "RCQ insert then consume current block in different InvokeTXs";
   }
@@ -2945,7 +2949,7 @@ TEST_F(HogDBTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
@@ -2998,7 +3002,7 @@ TEST_F(HogDBTest, AbortedFreshHeightStaysAbsentInNextBlock)
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
@@ -3057,7 +3061,7 @@ TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
   {
-    DbHash base_hash = db_.compute_full_db_hash();
+    StorageLongHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
@@ -3105,7 +3109,7 @@ TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
 // attempted the aborted reservation at all.
 TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
 {
-  auto run_scenario = [&](bool include_aborted_attempt) -> DbHash {
+  auto run_scenario = [&](bool include_aborted_attempt) -> StorageLongHash {
     ErrnoStatus<Directory> dir = Directory::open_temporary();
     EXPECT_TRUE(static_cast<bool>(dir));
     constexpr size_t kHeapSize = 10_MiB;
@@ -3118,7 +3122,7 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
     Address addr = make_address(kAddress + 56);
     EXPECT_TRUE(dao.write_address_balance(addr, 10'000'000));
 
-    DbHash base_hash = dao.compute_full_db_hash();
+    StorageLongHash base_hash = dao.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model_, background_commit_worker_, 1,
@@ -3161,8 +3165,8 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
     return dao.compute_full_db_hash();
   };
 
-  DbHash hash_with_aborted = run_scenario(true);
-  DbHash hash_without_aborted = run_scenario(false);
+  StorageLongHash hash_with_aborted = run_scenario(true);
+  StorageLongHash hash_without_aborted = run_scenario(false);
   EXPECT_EQ(hash_with_aborted, hash_without_aborted);
 }
 
@@ -3474,7 +3478,7 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
                                 std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
     ASSERT_TRUE(itx_b.commit());
-    ASSERT_TRUE(block_tx_b.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx_b.get().close(StorageLongHash{}));
     ASSERT_TRUE(block_tx_b.get().commit());
   }
 
@@ -3816,16 +3820,17 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlock)
     return delta;
   };
 
-  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
-    auto trigger_seed = make_insert_delta(0x11);
-    ASSERT_TRUE(itx.request_retrocausal_queue(trigger_key,
-                                              std::move(trigger_seed),
-                                              kNoFlags));
-    auto control_seed = make_insert_delta(0x22);
-    ASSERT_TRUE(itx.request_retrocausal_queue(control_key,
-                                              std::move(control_seed),
-                                              kNoFlags));
-  });
+  StorageLongHash parent_hash =
+      commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+        auto trigger_seed = make_insert_delta(0x11);
+        ASSERT_TRUE(itx.request_retrocausal_queue(trigger_key,
+                                                  std::move(trigger_seed),
+                                                  kNoFlags));
+        auto control_seed = make_insert_delta(0x22);
+        ASSERT_TRUE(itx.request_retrocausal_queue(control_key,
+                                                  std::move(control_seed),
+                                                  kNoFlags));
+      });
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(control_key));
 
@@ -3911,10 +3916,12 @@ TEST_F(HogDBTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
     return delta;
   };
 
-  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
-    auto seed = make_insert_delta(0x11);
-    ASSERT_TRUE(itx.request_retrocausal_queue(key, std::move(seed), kNoFlags));
-  });
+  StorageLongHash parent_hash =
+      commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+        auto seed = make_insert_delta(0x11);
+        ASSERT_TRUE(
+            itx.request_retrocausal_queue(key, std::move(seed), kNoFlags));
+      });
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
 
   // Exclusive RCQ delete + recreate with consume on a non-stale block.
@@ -3976,12 +3983,13 @@ TEST_F(HogDBTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   };
 
   // Block 1: seed the queue with one entry, producing block 1 in the DAO.
-  DbHash parent_hash = commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
-    RetrocausalQueueDelta seed;
-    seed.insert.added_entries.push_back(QueueEntry{uint8_t{0x11}});
-    ASSERT_TRUE(
-        itx.request_retrocausal_queue(queue_key, std::move(seed), kNoFlags));
-  });
+  StorageLongHash parent_hash =
+      commit_block_and_return_db_hash(1, [&](InvokeTX &itx) {
+        RetrocausalQueueDelta seed;
+        seed.insert.added_entries.push_back(QueueEntry{uint8_t{0x11}});
+        ASSERT_TRUE(itx.request_retrocausal_queue(queue_key, std::move(seed),
+                                                  kNoFlags));
+      });
   ASSERT_TRUE(db_.read_retrocausal_queue_block(queue_key, 1));
 
   // Block 2 (the to-be-stale block): a consume that reads past block 1, then a
@@ -4102,7 +4110,7 @@ TEST_F(HogDBTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   ASSERT_EQ(rcq_cost_model.get_retrocausal_queue_cost(2) - one_entry_cost,
             int128_t{8});
 
-  DbHash parent_hash = db_.compute_full_db_hash();
+  StorageLongHash parent_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> stale_block_tx(
       db_, rcq_cost_model, background_commit_worker_, 1,
       BlockExecutionMode::kBlockExecutionModeProposal);

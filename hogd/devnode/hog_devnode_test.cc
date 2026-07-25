@@ -39,11 +39,13 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
 #include "built_contracts/itc_erc20.h"
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "header.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
@@ -146,7 +148,7 @@ struct Readiness {
   Endpoint indexer;
   Endpoint db_gateway;
   Endpoint view_gateway;
-  std::string network_id;
+  std::string network_hash;
   std::filesystem::path manifest_path;
   std::string manifest_hash;
   json::Value manifest;
@@ -432,10 +434,10 @@ parse_readiness(std::string line)
     throw std::runtime_error(
         std::format("unexpected manifest kind '{}'", kind));
   }
-  std::string_view network_id =
-      require_string_field(*manifest, "networkId", manifest_bytes);
-  if (network_id.empty()) {
-    throw std::runtime_error("manifest networkId is empty");
+  std::string_view network_hash =
+      require_string_field(*manifest, "networkHash", manifest_bytes);
+  if (network_hash.empty()) {
+    throw std::runtime_error("manifest networkHash is empty");
   }
 
   const json::Value *endpoints = manifest->find("endpoints");
@@ -460,7 +462,7 @@ parse_readiness(std::string line)
           parse_endpoint(require_string_field(*endpoints, "viewGateway",
                                               manifest_bytes),
                          "viewGateway", manifest_bytes),
-      .network_id = std::string(network_id),
+      .network_hash = std::string(network_hash),
       .manifest_path = std::move(manifest_path),
       .manifest_hash = std::move(manifest_hash),
       .manifest = std::move(*manifest),
@@ -521,18 +523,27 @@ submit_and_commit(sched_coord_client_t &scheduler,
     ADD_FAILURE() << "schedcoord_get_tip did not return OK";
     return {};
   }
-  SchedulerNominationResult nomination =
-      scheduler.schedulercoord_nominate(tip.db_tip())();
-  if (nomination.outcome() !=
-      SchedulerNominationOutcome::SchedulerNominationOK) {
-    ADD_FAILURE() << "schedulercoord_nominate did not return OK";
+  SchedulerProposalResult proposal =
+      scheduler.schedulercoord_propose_block(tip.db_tip().id,
+                                             ProposalContext{})();
+  if (proposal.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
+    ADD_FAILURE() << "schedulercoord_propose_block did not return OK";
     return {};
   }
+  const SchedulerProposedBlock &proposed = proposal.proposed_block();
+  SignedTransactionBatch proposed_txs;
+  EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
   SignedTransactionHashBatch tx_hashes;
-  EXPECT_TRUE(parallel_batch_to_t(
-      nomination.nominated_block().nomination.transactions_hash, tx_hashes)());
-  if (scheduler.schedulercoord_commit_block(
-          nomination.nominated_block().block_id)() !=
+  tx_hashes.reserve(proposed_txs.size());
+  for (const SignedTransaction &tx : proposed_txs) {
+    tx_hashes.push_back(sha256(tx.tx));
+  }
+  ConsensusValue value{};
+  value.prev_hash = sha256(tip.db_tip().value);
+  value.proposal_header = proposed.proposal.header;
+  value.proposal_txs_hash =
+      proposal_txs_compatibility_hash(proposed.proposal.transactions);
+  if (scheduler.schedulercoord_commit_block(proposed.block_id, value)() !=
       SchedulerCommitOutcome::SchedulerCommitOK) {
     ADD_FAILURE() << "schedulercoord_commit_block did not return OK";
     return {};
@@ -794,7 +805,8 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "groundhog-bootstrap");
-    w.field("networkId", "groundhog-bench-local");
+    w.field("networkHash",
+            "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
       w.field("protocol", version::kHogdProtocol());
@@ -937,7 +949,8 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
-  EXPECT_EQ(readiness.network_id, "groundhog-local");
+  EXPECT_EQ(readiness.network_hash,
+            "0000000000000000000000000000000000000000000000000000000000000000");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
   EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
@@ -1356,7 +1369,7 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
       R"({"schemaVersion":1,"kind":"hog-devnode-runtime",)"
-      R"("networkId":"groundhog-local","protocol":"hogp/test",)"
+      R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
       R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
@@ -1484,7 +1497,8 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   });
   Readiness readiness = process.wait_for_readiness();
 
-  EXPECT_EQ(readiness.network_id, "groundhog-bench-local");
+  EXPECT_EQ(readiness.network_hash,
+            "00000000000000000000000000000000000000000000000000000000000000aa");
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
@@ -1696,7 +1710,7 @@ TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
 
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 0);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
     EXPECT_EQ(tip.db_tip().id, 0UL);
   }
 
@@ -2028,7 +2042,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
@@ -2074,7 +2088,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
 
     int status = process.terminate();
     std::string stderr_output = process.read_remaining_stderr();

@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/build_config.h"
 #include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/rv32/artifact.h"
 #include "hogd/hogexec/runtime/rv32/encoding.h"
@@ -934,8 +935,8 @@ bm_wasmi_wat_fibonacci_recursive_20(benchmark::State &state)
 void
 bm_wasmi_built_contract_fibonacci_recursive_20(benchmark::State &state)
 {
-  run_wasmi_benchmark(state, load_wasm_from_dir(CMAKE_ROOT_BINARY_DIR
-                                                "/built_contracts",
+  run_wasmi_benchmark(state, load_wasm_from_dir(std::string(kBuildRoot) +
+                                                    "/built_contracts",
                                                 "fibonacci_raw.wasm"));
 }
 

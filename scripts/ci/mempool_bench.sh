@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+: "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
-STALE_PROCESSES="loadgen_server hogexec auth_exec event_exec indexer_exec hogdb chuckd chuckd.dev scpd scpd.dev mempool_exec"
+STALE_PROCESSES="loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev"
 CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
 
 kill_stale_processes() {
@@ -61,9 +62,7 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 echo 'make sure bench servers are running'
-for host in "${BENCH_HOSTS[@]}"; do
-  ci_wait_port "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_port_hosts "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
 
 echo 'clear work dirs'
 ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
@@ -137,11 +136,41 @@ $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
-bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec --bind-ip '"$(hog_ip hog10)"' --metrics-port $MEMPOOL_HTTP_PORT --network-id 1 --num-db-shards 1 --num-exec-shards 2 --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+set +e
+timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec \
+  --bind-ip "$(hog_ip hog10)" \
+  --metrics-port "$MEMPOOL_HTTP_PORT" \
+  --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
+  --num-db-shards 1 \
+  --num-exec-shards 2 \
+  --db-port "$MEMPOOL_DB_PORT" \
+  --event-port "$MEMPOOL_EVENT_PORT" \
+  --executor-port "$MEMPOOL_EXECUTOR_PORT" \
+  --auth-port "$MEMPOOL_AUTH_PORT" \
+  --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
+mempool_status=$?
+set -e
+
+coordinator_status=0
+if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
+  set +e
+  $CONTROL_CLI hog4 "$CI_CONTROL_PORT" wait
+  coordinator_status=$?
+  set -e
+fi
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+
+if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
+  echo "mempool exited with status $mempool_status" >&2
+  exit "$mempool_status"
+fi
+if [[ $coordinator_status -ne 0 ]]; then
+  echo "coordinator exited with status $coordinator_status" >&2
+  exit "$coordinator_status"
+fi
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

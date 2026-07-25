@@ -20,6 +20,8 @@
 
 #include <getopt.h> // NOLINT(misc-include-cleaner)
 
+#include "consensus.hh"
+#include "header.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -323,7 +325,11 @@ Benchmark::run()
   PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1,
                               BlockExecutionMode::kBlockExecutionModeProposal);
 
-  DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = 0;
+  DbTip tip{.id = std::numeric_limits<BlockTXID>::max(),
+            .storage_long_hash = {},
+            .value = std::move(tip_value)};
   if (auto ret = db_.write_dbtip(tip); !ret)
     fail(ret.error());
 
@@ -333,7 +339,8 @@ Benchmark::run()
 
     InvokeTX tx(block);
     if (p.uniquifier) {
-      CHECK(p.uniquifier->block_expiry_height >= tip.height);
+      CHECK_GE(p.uniquifier->block_expiry_height,
+               tip.value.proposal_header.block_height);
       auto ret =
           tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
                                         std::to_underlying(
@@ -364,7 +371,7 @@ Benchmark::run()
 
   // Close the block: stage changes and optionally compute the hash.
   if (compute_db_hash_) {
-    auto hash_result = block.get().close(DbHash{});
+    auto hash_result = block.get().close(StorageLongHash{});
     CHECK(hash_result.has_value());
     asm volatile("" : : "m"(*hash_result) : "memory");
   }
@@ -433,7 +440,7 @@ private:
   void close_block(BlockTX &btx) const
   {
     if (compute_db_hash_) {
-      CHECK(btx.close(DbHash{}).has_value());
+      CHECK(btx.close(StorageLongHash{}).has_value());
     }
     else {
       CHECK(btx.close_skip_hash_for_testing().has_value());
@@ -481,7 +488,11 @@ RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
   populate_account_balances(bench->db_, num_queues, balance_per_addr);
 
   // Write initial dbtip.
-  DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = 0;
+  DbTip tip{.id = std::numeric_limits<BlockTXID>::max(),
+            .storage_long_hash = {},
+            .value = std::move(tip_value)};
   if (HogDBStatus<void> ret = bench->db_.write_dbtip(tip); !ret)
     fail(ret.error());
 

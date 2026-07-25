@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/build_config.h"
 #include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 
 namespace hogd ::test {
@@ -20,7 +21,7 @@ namespace hogd ::test {
 static std::optional<ContractBlob>
 try_load_raw_file(std::string_view filename)
 {
-  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
+  std::string file = std::string(kBuildRoot) + std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
   if (f == nullptr)
     return std::nullopt;
@@ -70,7 +71,7 @@ load_raw_file(std::string_view filename)
 {
   auto contents = try_load_raw_file(filename);
   if (!contents) {
-    panic("failed to load wasm file: {}{}", CMAKE_ROOT_BINARY_DIR, filename);
+    panic("failed to load wasm file: {}{}", kBuildRoot, filename);
   }
   return std::move(contents).value();
 }

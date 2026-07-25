@@ -55,7 +55,7 @@ constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
 } // namespace
 
-DbHash
+StorageLongHash
 HogDBDAO::compute_full_db_hash()
 {
   PerThread<LtHash16> per_thread_hash;

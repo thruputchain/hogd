@@ -41,7 +41,7 @@ public:
   MempoolGatewayRpc &operator=(MempoolGatewayRpc &&) = delete;
 
   static x23::Async<SchedGatewayIntroOutcome>
-  schedgateway_intro(Protocol protocol)
+  schedgateway_intro(ProtocolCommit protocol)
   {
     if (std::string_view(protocol) !=
         std::string_view(version::kHogdProtocol())) {

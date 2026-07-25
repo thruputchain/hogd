@@ -6,7 +6,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include <x23/debug.h>
 #include <x23/fileio.h>
@@ -32,10 +31,15 @@ namespace hogd {
 
 namespace {
 
+struct InitEntry {
+  InitFunc init;
+  std::string_view name;
+};
+
 // add your init functions here
-const std::pair<InitFunc, std::string_view> init_tbl[] = {
-    {base_init, "base"},
-    {crypto_init, "crypto"},
+constexpr InitEntry kInitTbl[] = {
+    {.init = base_init, .name = "base"},
+    {.init = crypto_init, .name = "crypto"},
 };
 
 constexpr std::string_view kJsonLogFormat = "json";
@@ -137,7 +141,7 @@ hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
   }
 
   // initialize each subsystem
-  for (auto [func, name] : init_tbl) {
+  for (auto [func, name] : kInitTbl) {
     debug("Initializing '{}'.", name);
     GStatus<void> ret = func();
     if (!ret) {

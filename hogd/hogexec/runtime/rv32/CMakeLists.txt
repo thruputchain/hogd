@@ -317,6 +317,7 @@ if(BUILD_BENCHMARKS)
     rv32_vm_bench
     rv32_syscall_bridge
     benchmark::benchmark
+    built_headers_interface
     unified_lib
   )
 
@@ -336,7 +337,6 @@ if(BUILD_BENCHMARKS)
   target_compile_definitions(
     rv32_vm_bench
     PRIVATE
-    CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
     RV32_VM_BENCH_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
   )
 

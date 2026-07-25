@@ -10,10 +10,11 @@
 #include "hogd/base/types.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
-inline constexpr std::string_view kDefaultHostedDevnetNetworkId = "devnet";
+inline constexpr NetworkHash kDefaultHostedDevnetNetworkHash{};
 
 struct HostedFaucetConfig {
   Ed25519PublicKey public_key;
@@ -27,7 +28,7 @@ struct HostedFaucetMetadata {
 };
 
 struct HostedBootstrapGeneratorConfig {
-  std::string network_id = std::string(kDefaultHostedDevnetNetworkId);
+  NetworkHash network_hash = kDefaultHostedDevnetNetworkHash;
   BootstrapAccountConfig bootstrap_config{
       .count = 10,
       .seed = "groundhog-dev-accounts",

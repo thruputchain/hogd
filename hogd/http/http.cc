@@ -52,8 +52,7 @@ reason_phrase(int status)
 bool
 has_complete_headers(std::string_view request)
 {
-  return request.find("\r\n\r\n") != std::string_view::npos ||
-         request.find("\n\n") != std::string_view::npos;
+  return request.contains("\r\n\r\n") || request.contains("\n\n");
 }
 
 std::string_view

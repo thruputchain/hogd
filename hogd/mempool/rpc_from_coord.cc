@@ -20,13 +20,13 @@
 #include <vector>
 
 #include "auth_rpc.hh"
-#include "block.hh"
+#include "consensus.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
+#include "header.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -41,12 +41,13 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
-#include "nomination.hh"
 #include "parallel.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "validator.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
@@ -291,6 +292,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       "prune auth failures", submit_dag.after(verify_node),
       [&]() -> x23::Async<void> {
         const AuthErrorCodeBatch &auth_ret = verify_node.get();
+        // Auth is a trusted component and must return exactly one result per
+        // submitted transaction; otherwise we cannot attribute auth results to
+        // transactions and must not admit the batch.
+        CHECK_EQ(auth_ret.size(), txs->size());
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
@@ -529,12 +534,9 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash,
-                                       SHA256Hash events_hash)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
-                                                               block_hash,
-                                                               events_hash);
+  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
 }
 
 x23::Async<void>
@@ -896,8 +898,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           x23::span<bool> ret_span(cache.statuses.begin() + start,
                                    cache.statuses.begin() + end);
           // [schedule()] appends transactions to the end of [txs]. We reserve
-          // [txs] up front in [schedulercoord_nominate()], so spans into it do
-          // not become invalid when later schedule nodes append more txs.
+          // [txs] up front in [schedulercoord_propose_block()], so spans into
+          // it do not become invalid when later schedule nodes append more txs.
           x23::span<SignedTransaction> txs_span(cache.txs.begin() + start,
                                                 cache.txs.begin() + end);
           co_await propose_batch_in_chunks(
@@ -1013,10 +1015,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     auto hash_serialize_node = dag.async<void>(
         "serialize nomination tx hashes", std::move(hash_serialize_deps),
         [&, state, i]() -> x23::Async<void> {
-          Nomination &nomination =
-              cache.nomination_result.nominated_block().nomination;
+          Proposal &proposal = cache.proposal_result.proposed_block().proposal;
           if (i == 0) {
-            nomination.transactions_hash = {};
+            proposal.transactions.hash = {};
           }
           if (!state->summarized_chunks[i].active) {
             co_return;
@@ -1027,7 +1028,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               cache.result_tx_hashes.begin() + start,
               cache.result_tx_hashes.begin() + end);
           co_await append_to_parallel_batch(tx_hashes_span,
-                                            nomination.transactions_hash);
+                                            proposal.transactions.hash);
           co_return;
         });
     nodes.serialize_chunks.push_back(hash_serialize_node);
@@ -1041,10 +1042,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         "serialize nomination nondeterministic data",
         std::move(nomination_serialize_deps),
         [&, state, i]() -> x23::Async<void> {
-          Nomination &nomination =
-              cache.nomination_result.nominated_block().nomination;
+          Proposal &proposal = cache.proposal_result.proposed_block().proposal;
           if (i == 0) {
-            nomination.transactions_nondeterministic_data = {};
+            proposal.transactions.nondeterministic_data = {};
           }
           if (!state->summarized_chunks[i].active) {
             co_return;
@@ -1055,7 +1055,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               cache.result_tx_nominations.begin() + start,
               cache.result_tx_nominations.begin() + end);
           co_await append_to_parallel_batch(
-              nominations_span, nomination.transactions_nondeterministic_data);
+              nominations_span, proposal.transactions.nondeterministic_data);
           co_return;
         });
     nodes.serialize_chunks.push_back(nomination_serialize_node);
@@ -1068,7 +1068,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         "serialize nominated txs", std::move(txs_serialize_deps),
         [&, state, i]() -> x23::Async<void> {
           if (i == 0) {
-            cache.nomination_result.nominated_block().txs = {};
+            cache.proposal_result.proposed_block().txs = {};
           }
           if (!state->summarized_chunks[i].active) {
             co_return;
@@ -1078,7 +1078,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           x23::span<const SignedTransaction> txs_span(cache.txs.begin() + start,
                                                       cache.txs.begin() + end);
           co_await append_to_parallel_batch(
-              txs_span, cache.nomination_result.nominated_block().txs);
+              txs_span, cache.proposal_result.proposed_block().txs);
           co_return;
         });
     nodes.serialize_chunks.push_back(txs_serialize_node);
@@ -1095,8 +1095,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
 
 MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
-    x23::Dag &dag, const DbTip &db_tip, PendingBlock &cache,
-    const x23::DagDeps &proposal_deps,
+    x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
+    PendingBlock &cache, const x23::DagDeps &proposal_deps,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps)
 {
@@ -1109,12 +1109,12 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                  co_return co_await close_snapshot(
                                      cache.block_id);
                                });
-  nodes.close_event =
-      dag.async<EventBlockResult>("close event block", proposal_deps,
-                                  [&]() -> x23::Async<EventBlockResult> {
-                                    co_return co_await eventsched_close_block(
-                                        cache.block_id, db_tip.height + 1);
-                                  });
+  nodes.close_event = dag.async<EventBlockResult>(
+      "close event block", proposal_deps,
+      [&]() -> x23::Async<EventBlockResult> {
+        co_return co_await eventsched_close_block(
+            cache.block_id, db_tip.value.proposal_header.block_height + 1);
+      });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
         const size_t num_threads = available_parallelism();
@@ -1130,25 +1130,25 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         {
           DbBlockResult result = close_snapshot.get();
           CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-          cache.db_tip.db_hash = result.db_hash();
+          cache.db_tip.value.proposal_header.storage_hash =
+              result.block().storage_hash;
+          cache.db_tip.storage_long_hash = result.block().storage_long_hash;
         }
         {
           EventBlockResult result = close_event.get();
           CHECK_EQ(result.error(), RPCError::kRPCNone);
-          cache.db_tip.events_hash = result.root_hash();
+          cache.db_tip.value.proposal_header.events_hash = result.root_hash();
         }
-        Nomination &nomination =
-            cache.nomination_result.nominated_block().nomination;
-        nomination.block_height = db_tip.height + 1;
-
-        BlockHeader header{.network_id = network_id_,
-                           .block_height = nomination.block_height,
-                           .txset_hash = txset_hash.get(),
-                           .db_hash = cache.db_tip.db_hash,
-                           .events_hash = cache.db_tip.events_hash,
-                           .prev_block_hash = db_tip.block_hash};
-        nomination.block_hash = sha256(header);
-        nomination.prev_block_hash = db_tip.block_hash;
+        Proposal &proposal = cache.proposal_result.proposed_block().proposal;
+        proposal.header = ProposalHeader{
+            .ext = {},
+            .network_hash = network_hash_,
+            .proposer = context.proposer,
+            .block_timepoint = context.block_timepoint,
+            .block_height = db_tip.value.proposal_header.block_height + 1,
+            .txs_hash = txset_hash.get(),
+            .storage_hash = cache.db_tip.value.proposal_header.storage_hash,
+            .events_hash = cache.db_tip.value.proposal_header.events_hash};
         co_return;
       });
   return nodes;
@@ -1167,8 +1167,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 {
   x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id, cache.db_tip.block_hash,
-                      cache.db_tip.events_hash);
+      commit_snapshot(cache.block_id, cache.db_tip.value);
   x23::Async<RPCError> event_commit_handle =
       eventsched_commit_block(cache.block_id);
   {
@@ -1178,10 +1177,15 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   CHECK_EQ(co_await event_commit_handle, RPCError::kRPCNone);
 }
 
-x23::Async<SchedulerNominationResult>
-MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
+x23::Async<SchedulerProposalResult>
+MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
+                                                    ProposalContext context)
 {
   CHECK(ready());
+  if (context.protocol != 0) {
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
 
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
@@ -1193,34 +1197,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
-  // TODO(jhumphri): chuckd does not know the current [db_hash] or
-  // [events_hash], so we only check the other fields in [db_tip]. Beyond this,
-  // I feel like it is incorrect to have [schedulercoord_nominate()] have the
-  // [DbTip] type as a parameter--I feel like it should only take the latest
-  // *block* hash as a parameter, and maybe we could also have the latest block
-  // height as a parameter if we wanted to have checks that everything is
-  // consistent.
-  //
-  // Similarly, for [schedulercoord_validate()], I think we should only take
-  // [nomination] as a parameter, which includes the latest block hash and
-  // height as fields. We should remove [db_tip].
-  //
-  // I am going to discuss this with Petar and address accordingly.
-  // if (db_tip != last_committed_block_) {
-  if (db_tip.height != last_committed_block_.height ||
-      db_tip.id != last_committed_block_.id ||
-      db_tip.block_hash != last_committed_block_.block_hash) {
+  if (last_committed_block_.id != parent_id) {
     info("schedulercoord_nominate ret");
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
     info("schedulercoord_nominate ret");
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
   }
 
   x23::Dag nomination_dag("schedulercoord_nominate", default_threadpool());
@@ -1229,12 +1217,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   // scheduling priorities for this block, but neither depends on the other.
   auto transfer_data_node = nomination_dag.async<void>(
       "wait transfer data", [&]() -> x23::Async<void> {
-        co_await wait_for_transfer_data(db_tip.height);
+        co_await wait_for_transfer_data(
+            last_committed_block_.value.proposal_header.block_height);
         co_return;
       });
   auto auth_data_node =
       nomination_dag.async<void>("wait auth data", [&]() -> x23::Async<void> {
-        co_await wait_for_auth_data(db_tip.height);
+        co_await wait_for_auth_data(
+            last_committed_block_.value.proposal_header.block_height);
         co_return;
       });
 
@@ -1261,11 +1251,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
         nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
         nominated_block_cache_.result_tx_nominations.reserve(kMaxBlockSize);
         // We set the outcome here because doing so resets
-        // [nominated_block_cache_.nomination_result.nominated_block()]. We
-        // fill in [nominated_block()] throughout this function, so we want our
+        // [nominated_block_cache_.proposal_result.proposed_block()]. We
+        // fill in [proposed_block()] throughout this function, so we want our
         // writes to it preserved.
-        nominated_block_cache_.nomination_result.outcome(
-            SchedulerNominationOutcome::SchedulerNominationOK);
+        nominated_block_cache_.proposal_result.outcome(
+            SchedulerProposalOutcome::SchedulerProposalOK);
         co_return;
       });
 
@@ -1291,7 +1281,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
                                               prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
-      nomination_dag, db_tip, nominated_block_cache_,
+      nomination_dag, last_committed_block_, context, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
@@ -1327,14 +1317,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
     }
     info("schedulercoord_nominate ret");
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
   }
 
-  // We set [nominated_block_cache_.nomination_result.outcome()] to
-  // [SchedulerNominationOutcome::SchedulerNominationOK] above. See the comments
+  // We set [nominated_block_cache_.proposal_result.outcome()] to
+  // [SchedulerProposalOutcome::SchedulerProposalOK] above. See the comments
   // there.
-  nominated_block_cache_.nomination_result.nominated_block().block_id =
+  nominated_block_cache_.proposal_result.proposed_block().block_id =
       nominated_block_cache_.block_id;
   nomination_telemetry.succeeded = true;
   nomination_telemetry.scheduled_tx_count =
@@ -1343,17 +1333,21 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       nominated_block_cache_.result_tx_hashes.size();
   nomination_telemetry.failed_tx_count =
       nominated_block_cache_.failed_tx_hashes.size();
+  const Proposal &proposal =
+      nominated_block_cache_.proposal_result.proposed_block().proposal;
+  ConsensusValue value{.protocol = 0,
+                       .ext = {},
+                       .prev_hash = sha256(last_committed_block_.value),
+                       .proposal_header = proposal.header,
+                       .proposal_txs_hash = proposal_txs_compatibility_hash(
+                           proposal.transactions),
+                       .upgrades = {}};
   nominated_block_cache_.db_tip = DbTip{
-      .height = nominated_block_cache_.nomination_result.nominated_block()
-                    .nomination.block_height,
-      .block_hash = nominated_block_cache_.nomination_result.nominated_block()
-                        .nomination.block_hash,
-      .events_hash = nominated_block_cache_.db_tip.events_hash,
-      .db_hash = nominated_block_cache_.db_tip.db_hash,
-      .id =
-          nominated_block_cache_.nomination_result.nominated_block().block_id};
+      .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
+      .storage_long_hash = nominated_block_cache_.db_tip.storage_long_hash,
+      .value = std::move(value)};
   info("schedulercoord_nominate ret");
-  co_return nominated_block_cache_.nomination_result;
+  co_return nominated_block_cache_.proposal_result;
 }
 
 x23::Async<bool>
@@ -1518,8 +1512,8 @@ MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
 }
 
 x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
-                                               Nomination nomination)
+MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
+                                                     Proposal proposal)
 {
   CHECK(ready());
 
@@ -1538,7 +1532,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_await wait_for_validation_gate_open();
     }
 
-    if (nomination.block_height < last_committed_block_.height + 1) {
+    if (proposal.header.block_height <
+        last_committed_block_.value.proposal_header.block_height + 1) {
       // This block is too old to validate.
       co_await decrement_num_validations_in_progress();
       validation_outcome =
@@ -1547,13 +1542,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
     }
-    else if (nomination.block_height > last_committed_block_.height + 1) {
+    else if (proposal.header.block_height >
+             last_committed_block_.value.proposal_header.block_height + 1) {
       // This block is ahead of the current block in the mempool. Thus, we need
       // to wait for the mempool to catch up before verifying this block.
       co_await decrement_num_validations_in_progress();
       // If we want to validate a block at height [x], we need to wait for the
       // block at height [x - 1] to commit.
-      co_await wait_for_block_commit(nomination.block_height - 1);
+      co_await wait_for_block_commit(proposal.header.block_height - 1);
       // Rather than break out of the loop here, we instead continue to the next
       // iteration of the loop. This prevents a race where a different block at
       // height [x] is committed before we are able to wake up, increment the
@@ -1568,9 +1564,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       break;
     }
   }
-  CHECK_EQ(nomination.block_height, last_committed_block_.height + 1);
+  CHECK_EQ(proposal.header.block_height,
+           last_committed_block_.value.proposal_header.block_height + 1);
 
-  if (last_committed_block_.block_hash != nomination.prev_block_hash) {
+  if (last_committed_block_.id != parent_id) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
+  }
+  if (proposal.header.network_hash != network_hash_) {
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
@@ -1658,10 +1659,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
         x23::Async<bool> tx_nondeterministic_data_handle =
-            parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+            parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                 tx_nominations);
         x23::Async<bool> tx_hash_handle =
-            parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
+            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes);
 
         const bool decoded_tx_nominations =
             co_await tx_nondeterministic_data_handle;
@@ -1694,7 +1695,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                  validation_dag.after(decode_node),
                                  [&]() -> x23::Async<void> {
                                    co_await wait_for_transfer_data(
-                                       nomination.block_height - 1);
+                                       proposal.header.block_height - 1);
                                    co_return;
                                  });
   auto auth_data_node =
@@ -1702,7 +1703,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                  validation_dag.after(decode_node),
                                  [&]() -> x23::Async<void> {
                                    co_await wait_for_auth_data(
-                                       nomination.block_height - 1);
+                                       proposal.header.block_height - 1);
                                    co_return;
                                  });
 
@@ -1711,7 +1712,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       validation_dag.after(transfer_data_node, auth_data_node),
       [&]() -> x23::Async<void> {
         DbSchedResult snapshot_result = co_await create_snapshot(
-            /*prev_block_id=*/db_tip.id, validation_block_id,
+            /*prev_block_id=*/last_committed_block_.id, validation_block_id,
             BlockExecutionMode::kBlockExecutionModeValidation);
         if (snapshot_result == DbSchedResult::DbSchedResultOK) {
           snapshot_cleanup.arm();
@@ -1875,7 +1876,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         {
           EventBlockResult event_result = close_event_node.get();
           CHECK_EQ(event_result.error(), RPCError::kRPCNone);
-          cache.db_tip.events_hash = event_result.root_hash();
+          cache.db_tip.value.proposal_header.events_hash =
+              event_result.root_hash();
         }
         {
           DbBlockResult db_result = close_snapshot_node.get();
@@ -1888,17 +1890,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                 "check closed validation block");
             co_return;
           }
-          cache.db_tip.db_hash = db_result.db_hash();
+          cache.db_tip.value.proposal_header.storage_hash =
+              db_result.block().storage_hash;
+          cache.db_tip.storage_long_hash = db_result.block().storage_long_hash;
         }
 
-        BlockHeader header{.network_id = network_id_,
-                           .block_height = nomination.block_height,
-                           .txset_hash = txset_hash_node.get(),
-                           .db_hash = cache.db_tip.db_hash,
-                           .events_hash = cache.db_tip.events_hash,
-                           .prev_block_hash = nomination.prev_block_hash};
-        SHA256Hash block_hash = sha256(header);
-        if (block_hash != nomination.block_hash) {
+        if (txset_hash_node.get() != proposal.header.txs_hash ||
+            cache.db_tip.value.proposal_header.storage_hash !=
+                proposal.header.storage_hash ||
+            cache.db_tip.value.proposal_header.events_hash !=
+                proposal.header.events_hash) {
           // The event block and DB snapshot were closed above, but a hash
           // mismatch means this block is never added to
           // [validated_block_cache_], so [schedulercoord_commit_block] will
@@ -1917,13 +1918,20 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   validation_dag.async<void>(
       "build validation result", validation_dag.after(check_closed_node),
       [&]() -> x23::Async<void> {
-        cache.db_tip = DbTip{.height = nomination.block_height,
-                             .block_hash = nomination.block_hash,
-                             .events_hash = cache.db_tip.events_hash,
-                             .db_hash = cache.db_tip.db_hash,
-                             .id = validation_block_id};
+        ConsensusValue value{.protocol = 0,
+                             .ext = {},
+                             .prev_hash = sha256(last_committed_block_.value),
+                             .proposal_header = proposal.header,
+                             .proposal_txs_hash =
+                                 proposal_txs_compatibility_hash(
+                                     proposal.transactions),
+                             .upgrades = {}};
+        cache.db_tip =
+            DbTip{.id = validation_block_id,
+                  .storage_long_hash = cache.db_tip.storage_long_hash,
+                  .value = std::move(value)};
         co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
-        result.block().db_tip = cache.db_tip;
+        result.block().block_id = cache.db_tip.id;
         result.block().signed_transactions = {};
         co_await t_to_parallel_batch(cache.txs,
                                      result.block().signed_transactions);
@@ -1969,7 +1977,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 // to a malicious node that keeps sending blocks to validate), we will need to
 // stop validations once a commit starts.
 x23::Async<SchedulerCommitOutcome>
-MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
+MempoolCoordinatorRpc::schedulercoord_commit_block(
+    BlockID block_id, ConsensusValue expected_value)
 {
   CHECK(ready());
   MempoolMetrics::instance().commit_attempt_count.increment();
@@ -2005,7 +2014,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   };
 
   co_await close_validation_gate();
-  x23::Defer reopen_validation_gate([this] { open_validation_gate(); });
+  x23::Defer reopen_validation_gate([this]() noexcept {
+    try {
+      open_validation_gate();
+    } catch (...) {
+      std::terminate();
+    }
+  });
 
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};
@@ -2016,6 +2031,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   CommitPlan commit_plan;
   SchedulerCommitOutcome commit_outcome =
       SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+  bool invalid_consensus_value = false;
   size_t reenqueue_size = 0;
   size_t remove_from_scheduler_size = 0;
 
@@ -2089,7 +2105,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
           // We are committing the block that we nominated.
           commit_plan.committed_cache = &nominated_block_cache_;
           commit_plan.committed_nominated = true;
-          last_committed_block_ = nominated_block_cache_.db_tip;
         }
         else {
           // We are committing a block that we validated.
@@ -2102,7 +2117,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
             commit_plan.abandon_block_ids.push_back(
                 nominated_block_cache_.block_id);
           }
-          last_committed_block_ = it->second.db_tip;
         }
 
         for (const auto &[_, cache] : validated_block_cache_) {
@@ -2111,6 +2125,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
           }
         }
         CHECK_PTR(commit_plan.committed_cache);
+        if (commit_plan.committed_cache->db_tip.value != expected_value) {
+          info("schedulercoord_commit_block ret");
+          invalid_consensus_value = true;
+          commit_outcome =
+              SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
+          co_return;
+        }
+        last_committed_block_ = commit_plan.committed_cache->db_tip;
         co_return;
       });
 
@@ -2118,6 +2140,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       commit_dag.async<void>("commit block",
                              commit_dag.after(prepare_node, lock_hog_age_node),
                              [&]() -> x23::Async<void> {
+                               if (invalid_consensus_value) {
+                                 co_return;
+                               }
                                CHECK_PTR(commit_plan.committed_cache);
                                co_await commit_block(
                                    *commit_plan.committed_cache);
@@ -2127,6 +2152,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   auto abandon_snapshots_node = commit_dag.async<void>(
       "abandon snapshots", commit_dag.after(prepare_node),
       [&]() -> x23::Async<void> {
+        if (invalid_consensus_value) {
+          co_return;
+        }
         x23::Vec<x23::Async<DbSchedResult>> snapshot_handles;
         snapshot_handles.reserve(commit_plan.abandon_block_ids.size());
         for (const BlockID id : commit_plan.abandon_block_ids) {
@@ -2141,6 +2169,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   auto abandon_events_node = commit_dag.async<void>(
       "abandon event blocks", commit_dag.after(prepare_node),
       [&]() -> x23::Async<void> {
+        if (invalid_consensus_value) {
+          co_return;
+        }
         x23::Vec<x23::Async<RPCError>> event_handles;
         event_handles.reserve(commit_plan.abandon_block_ids.size());
         for (const BlockID id : commit_plan.abandon_block_ids) {
@@ -2158,6 +2189,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   auto scheduler_update_node = commit_dag.async<void>(
       "update scheduler", commit_dag.after(prepare_node, lock_hog_age_node),
       [&]() -> x23::Async<void> {
+        if (invalid_consensus_value) {
+          co_return;
+        }
         clear_expired_failed_authentication_txs();
 
         // We need to do two things:
@@ -2234,7 +2268,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
           // [scheduler_->global_lock_] for us, so we do not need to do it here.
           co_await scheduler_->apply_committed_block_hog_ages(
               commit_plan.committed_cache->txs,
-              commit_plan.committed_cache->db_tip.height);
+              commit_plan.committed_cache->db_tip.value.proposal_header
+                  .block_height);
         }
         co_return;
       });
@@ -2257,6 +2292,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       commit_dag.after(release_hog_age_node, abandon_snapshots_node,
                        abandon_events_node),
       [&]() -> x23::Async<void> {
+        if (invalid_consensus_value) {
+          co_return;
+        }
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
@@ -2266,9 +2304,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
         scheduler_->increment_current_block();
         co_await Health::instance().set_current_block_height(
-            last_committed_block_.height);
+            last_committed_block_.value.proposal_header.block_height);
         MempoolMetrics::instance().current_block_height.record(
-            last_committed_block_.height);
+            last_committed_block_.value.proposal_header.block_height);
         MempoolMetrics::instance().scheduler_pending_tx_count.record(
             scheduler_->size());
         MempoolMetrics::instance().scheduler_tx_cache_size.record(

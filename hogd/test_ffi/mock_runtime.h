@@ -130,7 +130,7 @@ public:
 
   ~EmptyRuntime() override = default;
 
-private:
+protected:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {

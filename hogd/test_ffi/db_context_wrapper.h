@@ -108,7 +108,8 @@ public:
     x23::span<const SignedTransaction> txs(&tx, 1);
     auto dbtip = get_base_db().get_db().read_dbtip();
     CHECK(dbtip.has_value());
-    auto res = auth_server_->verify_transactions(dbtip->height, txs)();
+    auto res = auth_server_->verify_transactions(
+        dbtip->value.proposal_header.block_height, txs)();
     CHECK_EQ(res.size(), 1U);
     return res[0];
   }

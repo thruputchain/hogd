@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -24,24 +25,24 @@
 
 namespace hogd {
 
-std::expected<DbHash, DbSchedResult>
+std::expected<StorageShortHash, DbSchedResult>
 NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
 {
-  // Closing finalizes the block's resulting trie root; capture it so callers
+  // Closing finalizes the block's resulting storage hash; capture it so callers
   // can compare committed-block state (mirrors discard_block's return).
-  DbHash closed_hash{};
+  StorageShortHash closed_hash{};
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       return std::unexpected(r.result());
     }
-    closed_hash = r.db_hash();
+    closed_hash = r.block().storage_hash;
   }
   {
-    auto r = coord_wrapper_->client().dbsched_commit_snapshot(
-        block_number_,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*block_hash=*/{}, /*events_hash=*/{});
+    ConsensusValue value{};
+    value.proposal_header.block_height = block_number_;
+    auto r =
+        coord_wrapper_->client().dbsched_commit_snapshot(block_number_, value);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       return std::unexpected(r.result());
     }
@@ -66,7 +67,7 @@ NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
   return closed_hash;
 }
 
-DbHash
+StorageShortHash
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
   auto res = try_advance_block(mode);
@@ -110,7 +111,7 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   if (!tip_after) {
     panic("reject_block: failed to read dbtip from DAO after abandon");
   }
-  if (tip_before.db_hash != tip_after->db_hash) {
+  if (tip_before.storage_long_hash != tip_after->storage_long_hash) {
     panic("reject_block: db hash changed after block rejection — "
           "DAO was mutated before prepare failure");
   }
@@ -133,21 +134,21 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
       std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
 }
 
-DbHash
+StorageShortHash
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
-  // Close the block first (which finalizes its resulting trie root), capture
+  // Close the block first (which finalizes its resulting storage hash), capture
   // that hash, then abandon it so the committed tip is unchanged. This lets a
   // caller learn what state the abandoned block WOULD have produced (e.g. to
   // compare a proposal block against a validation replay) without committing
   // it, so the next block replays against the same pre-block state.
-  DbHash closed_hash{};
+  StorageShortHash closed_hash{};
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       panic("discard_block: dbsched_close_snapshot failed: {}", r.result());
     }
-    closed_hash = r.db_hash();
+    closed_hash = r.block().storage_hash;
   }
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
@@ -246,11 +247,10 @@ NativeContractTestFramework::run_genesis_initialization(
   assert(!storage_snapshot_cache_);
   assert(block_number_ == 0);
 
-  uint64_t network_id = 0x0;
-  SHA256Hash txset_hash{};
-  SHA256Hash events_hash{};
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
   auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
-      genesis_configuration, network_id, txset_hash, events_hash);
+      genesis_configuration, genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {
     panic("run_genesis_initialization: dbsched_load_genesis_block failed: {}",
           r);

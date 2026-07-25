@@ -378,8 +378,8 @@ BlockTX::close_skip_hash_for_testing()
   return {};
 }
 
-HogDBStatus<DbHash>
-BlockTX::close(const DbHash &base_hash)
+HogDBStatus<StorageLongHash>
+BlockTX::close(const StorageLongHash &base_hash)
 {
   if (is_poisoned()) {
     return HogDBError(HogDBCode::kInternal);

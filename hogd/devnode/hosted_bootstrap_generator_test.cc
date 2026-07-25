@@ -107,7 +107,12 @@ run_hosted_bootstrap(std::vector<std::string> args)
 TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
 {
   HostedBootstrapGeneratorConfig config{
-      .network_id = "devnet-test",
+      .network_hash =
+          [] {
+            NetworkHash hash{};
+            hash.back() = 1;
+            return hash;
+          }(),
       .bootstrap_config =
           BootstrapAccountConfig{
               .count = 2,
@@ -144,8 +149,8 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
   EXPECT_EQ(require_string(require_field(*metadata, "kind")),
             "hog-hosted-bootstrap");
-  EXPECT_EQ(require_string(require_field(*metadata, "networkId")),
-            "devnet-test");
+  EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),
+            "0000000000000000000000000000000000000000000000000000000000000001");
   EXPECT_EQ(require_string(require_field(*metadata, "genesisHash")),
             hex_string(artifact.genesis_hash));
   EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),

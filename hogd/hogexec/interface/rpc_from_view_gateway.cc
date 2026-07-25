@@ -86,7 +86,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 }
 
 ViewGatewayIntroOutcome
-ViewGatewayRpc::viewgateway_intro(Protocol const &protocol)
+ViewGatewayRpc::viewgateway_intro(ProtocolCommit const &protocol)
 {
   if (std::string_view(protocol) !=
       std::string_view(version::kHogdProtocol())) {
@@ -174,12 +174,13 @@ ViewGatewayRpc::probe_refresh_tip()
     ViewState const &current_state =
         view_states_.at(current_view_block_id_).get();
     block_id = current_state.block_id;
-    view_height = current_state.tip.height;
+    view_height = current_state.tip.value.proposal_header.block_height;
   }
 
   auto tip_res = db_proxy_.get_db_tip(block_id);
   bool should_refresh =
-      !tip_res.has_value() || tip_res.value().height > view_height;
+      !tip_res.has_value() ||
+      tip_res.value().value.proposal_header.block_height > view_height;
   if (!should_refresh) {
     return;
   }
@@ -191,7 +192,8 @@ ViewGatewayRpc::probe_refresh_tip()
   }
   ViewState const &current_state = view_states_.at(block_id).get();
   if (!tip_res.has_value() ||
-      tip_res.value().height > current_state.tip.height) {
+      tip_res.value().value.proposal_header.block_height >
+          current_state.tip.value.proposal_header.block_height) {
     refresh_flag_.store(true, std::memory_order_release);
   }
 }
@@ -208,14 +210,16 @@ ViewGatewayRpc::get_current_view_state()
     // tip.  The hot view path only consumes that flag so repeated views can
     // keep reusing the snapshot without polling HogDB on every request.
     auto res = db_proxy_.open_viewing_snapshot();
-    if (res.has_value() && res.value().block_id != current_view_block_id_) {
+    if (res.has_value() &&
+        res.value().viewing_block_id != current_view_block_id_) {
       BlockID old_block_id = current_view_block_id_;
       bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
 
       auto &snapshot = res.value();
-      view_states_.try_emplace(snapshot.block_id, snapshot.block_id,
-                               snapshot.tip, db_proxy_);
-      current_view_block_id_ = snapshot.block_id;
+      view_states_.try_emplace(snapshot.viewing_block_id,
+                               snapshot.viewing_block_id, snapshot.tip,
+                               db_proxy_);
+      current_view_block_id_ = snapshot.viewing_block_id;
 
       if (can_gc) {
         auto close_res = db_proxy_.close_viewing_snapshot(old_block_id);
@@ -241,9 +245,10 @@ ViewGatewayRpc::get_current_view_state()
       return nullptr;
     }
     auto &snapshot = res.value();
-    view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
+    view_states_.try_emplace(snapshot.viewing_block_id,
+                             snapshot.viewing_block_id, snapshot.tip,
                              db_proxy_);
-    current_view_block_id_ = snapshot.block_id;
+    current_view_block_id_ = snapshot.viewing_block_id;
   }
   auto *state = &view_states_.at(current_view_block_id_);
   if (!state->try_acquire_reference()) {
@@ -268,9 +273,9 @@ ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
     return false;
   }
   auto &snapshot = res.value();
-  view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
-                           db_proxy_);
-  current_view_block_id_ = snapshot.block_id;
+  view_states_.try_emplace(snapshot.viewing_block_id, snapshot.viewing_block_id,
+                           snapshot.tip, db_proxy_);
+  current_view_block_id_ = snapshot.viewing_block_id;
   return true;
 }
 
@@ -339,7 +344,8 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
       PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
       query, *context, {});
-  return view_gateway_result_from_raw_view_result(tip.height, std::move(raw));
+  return view_gateway_result_from_raw_view_result(
+      tip.value.proposal_header.block_height, std::move(raw));
 }
 
 ViewGatewayResult

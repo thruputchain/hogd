@@ -19,6 +19,25 @@ ci_wait_port() {
     "$CI_BENCH_REPO_ROOT/scripts/wait-port.sh" "$@"
 }
 
+ci_wait_port_hosts() {
+  local port=$1
+  local host
+  local status=0
+  local -a wait_pids=()
+  shift
+
+  for host in "$@"; do
+    ci_wait_port "$host" "$port" &
+    wait_pids+=("$!")
+  done
+  for wait_pid in "${wait_pids[@]}"; do
+    if ! wait "$wait_pid"; then
+      status=1
+    fi
+  done
+  return "$status"
+}
+
 ci_remote_run() {
   local host=$1
   shift

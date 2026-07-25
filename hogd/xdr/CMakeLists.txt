@@ -6,7 +6,6 @@ add_xdr(
   ../../protocol/auth_claim.x
   ../../protocol/auth_rpc.x
   ../../protocol/batch.x
-  ../../protocol/block.x
   ../../protocol/catchup.x
   ../../protocol/ci_server.x
   ../../protocol/consensus.x
@@ -22,6 +21,7 @@ add_xdr(
   ../../protocol/exec_sched.x
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
+  ../../protocol/header.x
   ../../protocol/hogexec_constants.x
   ../../protocol/indexer.x
   ../../protocol/integration.x
@@ -29,11 +29,11 @@ add_xdr(
   ../../protocol/invoke_args.x
   ../../protocol/loadgen.x
   ../../protocol/network.x
-  ../../protocol/nomination.x
   ../../protocol/pagination.x
   ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
+  ../../protocol/proposal.x
   ../../protocol/preimage.x
   ../../protocol/rpc_types.x
   ../../protocol/scp.x
@@ -51,6 +51,7 @@ add_xdr(
   ../../protocol/transaction.x
   ../../protocol/transaction_trace.x
   ../../protocol/types.x
+  ../../protocol/validator.x
   ../../protocol/view.x
   ../../protocol/db_gateway.x
   ../../protocol/view_gateway.x

@@ -12,6 +12,7 @@ namespace hogd {
 
 // Test against hogd/issues/493: UAF when hogdb closes a block before all
 // pending transactions are closed.
+// NOLINTNEXTLINE(misc-multiple-inheritance,misc-use-internal-linkage)
 class ShutdownTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
