@@ -870,12 +870,12 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
   const bool key_shorter = key_window.size() <= leaf->path().size();
   const Key &shorter_path = key_shorter ? key_window : leaf->path();
   const Key &longer_path = key_shorter ? leaf->path() : key_window;
-  SHA256Hash &&shorter_value =
+  SHA256Hash shorter_value =
       key_shorter
           ? obj_hash
           : std::move(
                 *leaf->value_hash()); // NOLINT(bugprone-unchecked-optional-access)
-  SHA256Hash &&longer_value =
+  SHA256Hash longer_value =
       key_shorter
           ? std::move(
                 *leaf->value_hash()) // NOLINT(bugprone-unchecked-optional-access)
@@ -894,12 +894,9 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
     // nodes children of the branch.
 
     // Shorter key's leaf node. Note that we reuse [leaf] for the longer node
-    // below, so we allocate a new node here.
-    //
-    // Note that I am deliberately allocating a new node first *before* reusing
-    // [leaf]. The [shorter_*] and [longer_*] variables above are references to
-    // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
-    // those references.
+    // below, so we allocate a new node here. [shorter_value] and [longer_value]
+    // already hold copies of the hashes (moved/copied out of [leaf] above), so
+    // reusing [leaf] afterwards is safe.
     Node *shorter_leaf = Node::create_leaf(/*parent=*/branch, allocator_);
     // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
