@@ -897,6 +897,101 @@ TEST_F(SyscallRcqPeekTest, EmptyPeekReadCapReturnsSyscallErrorAndBoundsBits)
   EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// #3141: the read cap is enforced symmetrically in proposal and validation, so
+// replaying the proposer's recorded bits for repeated empty peeks must consume
+// them at the same read count (including the cap-crossing bit) and reach the
+// same read-limit error. Drives proposal then validation of the same empty-peek
+// tx and asserts both replay successfully and commit identical state.
+TEST_F(SyscallRcqPeekTest, EmptyPeekReadCapReplayAgreesProposalAndValidation)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  constexpr uint32_t kPeekCount = kMaxConcurrentRcqReadsPerTx + 8;
+
+  NativeContractBuilder builder;
+  // method 14: peek the same empty key `count` times, checking the per-read
+  // status. If validation replay diverged from proposal, a peek would report a
+  // different status and the contract would revert -- so root success in both
+  // modes proves the cap path replays identically.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      14, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              SyscallRcqPeekTest::kStorageKey, len);
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (status.value() !=
+                    SyscallErrorCode::
+                        kSyscallErrorCodeNoRetrocausalQueueEntry ||
+                len != 0) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          else if (status.value() !=
+                   SyscallErrorCode::
+                       kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kPeekCount);
+  ASSERT_TRUE(calldata.has_value());
+
+  auto tx =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(14),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = calldata.value()},
+                  .uniquifier = make_new_uniquifier()};
+
+  NondeterministicProposalData proposal_data;
+
+  // Proposal: run, capture the recorded bits, and commit.
+  {
+    auto handler = make_new_system_call_handler(tx, *context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    ASSERT_EQ(proposal_data.nondeterministic_bit_count,
+              kMaxConcurrentRcqReadsPerTx + 1);
+    ASSERT_TRUE(proposal_data.observed_queue_entry_sequence.empty());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  auto proposal_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: replay the same tx against the recorded bits and commit.
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx, *context, proposal_data);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  auto validation_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  EXPECT_TRUE(proposal_hash == validation_hash)
+      << "proposal and validation must agree after the empty-peek read-limit "
+         "cap (#3141)";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
