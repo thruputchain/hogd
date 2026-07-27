@@ -44,17 +44,14 @@ namespace hogd {
 // requests (db tip) route here. See the sharding model above.
 inline constexpr size_t kPrimaryShard = 0;
 
-// Routes by account address so all of an address's storage items co-locate on
-// one shard. Deterministic within a process. Precondition: `shard_count >= 1`.
-// Returns a value in [0, shard_count).
+// Routes by account address so an address's storage items co-locate on one
+// shard. Deterministic within a process. Precondition: shard_count >= 1;
+// returns a value in [0, shard_count).
 //
-// The hash is a placeholder (FNV-1a) until a network-agreed function replaces
-// it; this is its only definition. KNOWN LIMITATION (low priority): FNV is
-// unkeyed, so an adversary who grinds addresses can bias the distribution and
-// overload one shard. The intended fix is a keyed hash (SipHash-2-4 is already
-// available), but that needs a validator-recoverable key so the key->shard
-// mapping survives restart; until we solve key recovery this stays FNV. Not
-// worth bug reports in the meantime.
+// Placeholder hash (FNV-1a) until a network-agreed function replaces it -- its
+// only definition. KNOWN LIMITATION (low priority): FNV is unkeyed, so ground
+// addresses can bias shard load. The fix is a keyed hash (SipHash-2-4), which
+// needs a restart-recoverable key; stays FNV until then. Not worth bug reports.
 inline size_t
 shard_of_address(ContractAddress const &address, size_t shard_count)
 {
@@ -82,10 +79,9 @@ shard_of_key(AddressAndKey const &key, size_t shard_count)
 // input order. Zero-copy: it records only per-shard indices and serializes
 // source items in place via ShardGatherView, never duplicating the batch.
 
-// A non-owning view of shard s's subset of a source `Batch` (the source plus
-// its origin[s] indices) that serializes like the Batch the RPC expects without
-// copying. A borrow: the source and index span must outlive it (they live in
-// the ShardSplit, and x23 serializes args before the first co_await anyway).
+// A non-owning view of shard s's subset of a `Batch` (source + its origin[s]
+// indices) that serializes like the Batch the RPC expects, without copying.
+// Borrows: source and indices (both in the ShardSplit) must outlive it.
 template<typename Batch> struct ShardGatherView {
   using value_type = typename Batch::value_type;
 
@@ -125,15 +121,12 @@ xdr_serialize(auto &serializer, ShardGatherView<Batch> const &v)
   }
 }
 
-// The routing map from splitting a `Batch` across `shard_count` shards. Holds
-// only indices plus a borrow of the source batch; per-shard sub-batches are
-// produced on demand as zero-copy ShardGatherViews via shard_view().
-//
-// `src` borrows the exact container passed to split_by_shard, which must
-// outlive the split (and the split must outlive any views / awaits). Binding it
-// here rather than re-passing it to shard_view means the indices can only ever
-// be resolved against the batch they were computed from -- there is no way to
-// hand shard_view the wrong container or one resized since the split.
+// The routing map from splitting a `Batch` across `shard_count` shards: only
+// indices plus a borrow of the source, from which shard_view() produces
+// zero-copy ShardGatherViews on demand. `src` must outlive the split, the split
+// its views/awaits. Binding it here (vs re-passing to shard_view) means indices
+// can only resolve against the batch they came from -- no wrong or since-resized
+// container.
 template<typename Batch> struct ShardSplit {
   using value_type = typename Batch::value_type;
 
@@ -191,12 +184,11 @@ gather_positional(ShardSplit<Batch> const &split,
 
   std::vector<Result> out(split.total);
   for (size_t s = 0; s < split.shard_count(); ++s) {
-    // A shard must return exactly one result per item we routed to it. This is
-    // shard-controlled (per_shard[s] is the shard's RPC reply): a too-long
-    // reply would index past origin[s] below -- an OOB read/write on the
-    // critical path -- and there is no error channel out of here. A shard
-    // answering a count we never asked for is broken; stop rather than march on
-    // against it (same call as the db-tip divergence check).
+    // A shard must return exactly one result per item routed to it. This is
+    // shard-controlled: a too-long reply would index past origin[s] below (OOB
+    // on the critical path) and there is no error channel here. A count we never
+    // asked for means a broken shard; stop rather than continue (like the db-tip
+    // divergence check).
     CHECK_EQ(per_shard[s].size(), split.origin[s].size());
     for (size_t j = 0; j < per_shard[s].size(); ++j) {
       out[split.origin[s][j]] = per_shard[s][j];
