@@ -34,7 +34,7 @@ namespace hogd {
 //      (height, id, block_hash), NOT db_hash (legitimately per-shard).
 //   4. Per-shard-minted (viewing snapshot ids): each shard mints its own, so a
 //      cross-shard op holds one per shard. NOT yet wired -- DatabaseProxy opens
-//      on the primary alone (tracked separately).
+//      on the primary alone; see TODO(sharding) in open_viewing_snapshot.
 
 // ---------------------------------------------------------------------------
 // Routing
