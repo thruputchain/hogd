@@ -528,14 +528,28 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
       auto res = clients_[shard].try_push_new_subtransaction(
           block_id, tx_id, split.shard_view(shard));
-      // Stop on the first error or conflict; the caller aborts, which fans the
-      // abort out to every shard.
       switch (res.error()) {
       case RPCError::kRPCNone:
         break;
       case RPCError::kRPCStorageWriteFailed:
         if (conflict_out != nullptr) {
           *conflict_out = std::move(res.conflict());
+        }
+        // A failed push must leave every shard at the depth it started at, so
+        // that `false` means "nothing pushed" regardless of shard count -- then
+        // both possible follow-ups (the caller aborts, or it pops 1 and
+        // carries on) stay correct without any cross-shard rule to remember.
+        // The conflicting shard already rolled itself back (hogdb's
+        // rollback_to_savepoint(depth-1), rpc_from_exec.cc); undo the earlier
+        // shards that accepted by popping the one subtransaction each just took.
+        for (size_t undo = 0; undo < shard; ++undo) {
+          auto pr = clients_[undo].pop_subtransactions(block_id, tx_id, 1);
+          if (to_system_error_code<VoidMarker{}>(pr, [] {}).has_value()) {
+            continue;
+          }
+          error("Unrecoverable: failed to unwind subtransaction on shard {}",
+                undo);
+          return SystemError{SystemErrorCode::Unrecoverable};
         }
         return false;
       case RPCError::kRPCBadBlockID:
