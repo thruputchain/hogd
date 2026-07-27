@@ -74,21 +74,14 @@ ShardedDbSched::load_genesis(GenesisConfiguration genesis_configuration,
 x23::Async<DbTipResult>
 ShardedDbSched::get_tip()
 {
-  // Read EVERY shard, never just shard 0. This is the validator-startup check
-  // that a partially-committed cluster refuses to start rather than livelock:
-  // commit fans out non-atomically, so a crash mid-fan-out can leave shards at
-  // genuinely different tips, and create_snapshot(prev=tip) on a lagging shard
-  // would then fail block after block. Two invariants, both fail-stop:
-  //   (1) genesis presence is unanimous -- every shard has a committed tip or
-  //       none do. Trusting shard 0 alone would let a wiped/replaced shard-0
-  //       data dir report "no genesis" while other shards still hold committed
-  //       state, and the caller would re-run the genesis fan-out against shards
-  //       that already have it.
-  //   (2) committed shards agree on (height, id, txs_hash). The storage hashes
-  //       are legitimately per-shard (each shard's own root), so they are NOT
-  //       checked.
-  // Log before each CHECK so the abort is an actionable operator report rather
-  // than two bare numbers.
+  // Read EVERY shard, never just shard 0: this is the validator-startup check
+  // that a partially-committed cluster (commit fans out non-atomically) refuses
+  // to start rather than livelock on create_snapshot(prev=tip). Two fail-stop
+  // invariants: (1) genesis presence is unanimous -- else a wiped shard 0 would
+  // report "no genesis" and re-run genesis against shards that already have it;
+  // (2) committed shards agree on (height, id, txs_hash), but NOT the storage
+  // hashes (legitimately per-shard). Log before each CHECK for an actionable
+  // report.
   DbTipResult primary = co_await shards_.primary()->dbsched_get_tip();
   bool const primary_ok = primary.result() == DbSchedResult::DbSchedResultOK;
   for (size_t i = 1; i < shards_.shard_count(); ++i) {
