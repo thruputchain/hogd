@@ -330,7 +330,23 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           // case though.
           ParallelBatch response;
           co_await t_to_parallel_batch(*txs, response);
-          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+          try {
+            co_await coord.coord_client_->coordscheduler_notify_vetted(
+                response);
+          } catch (const x23::XdrException &e) {
+            // A closed/failed coordinator connection resolves this in-flight
+            // call with an empty reply, so deserializing it throws
+            // [x23::XdrBadInput]. Mirror
+            // [AuthChangeSubscriptionManager::publish_auth_changes]: log and
+            // drop the notification rather than let the exception escape this
+            // detached coroutine and [terminate()] the whole mempool.
+            error("coordscheduler_notify_vetted failed: {}. Dropping vetted-tx "
+                  "notification.",
+                  e.what());
+          }
+          // [fetch_sub] must run on both the success and failure paths, else a
+          // failed notify would leak [pending_detached_coroutines_] and hang
+          // the destructor drain in [rpc_from_coord.h].
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
         }(*this, txs);
