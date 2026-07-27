@@ -101,30 +101,38 @@ xdr_serialize(auto &serializer, ShardGatherView<Batch> const &v)
 }
 
 // The routing map from splitting a `Batch` across `shard_count` shards. Holds
-// only indices; per-shard sub-batches are produced on demand as zero-copy
-// ShardGatherViews via shard_view().
+// only indices plus a borrow of the source batch; per-shard sub-batches are
+// produced on demand as zero-copy ShardGatherViews via shard_view().
+//
+// `src` borrows the exact container passed to split_by_shard, which must
+// outlive the split (and the split must outlive any views / awaits). Binding it
+// here rather than re-passing it to shard_view means the indices can only ever
+// be resolved against the batch they were computed from -- there is no way to
+// hand shard_view the wrong container or one resized since the split.
 template<typename Batch> struct ShardSplit {
   using value_type = typename Batch::value_type;
 
   // origin[s][j] is the input index of the j-th item routed to shard s, in
   // input order. Drives both shard_view and positional reassembly.
   std::vector<std::vector<size_t>> origin;
-  size_t total = 0; // original input item count
+  Batch const *src = nullptr; // the batch these indices index into
+  size_t total = 0;           // original input item count
 
   size_t shard_count() const { return origin.size(); }
   bool shard_empty(size_t s) const { return origin[s].empty(); }
 
-  // Zero-copy view of shard s's sub-batch over `items`, which must be the same
-  // container passed to split_by_shard and must outlive the view.
-  ShardGatherView<Batch> shard_view(Batch const &items, size_t s) const
+  // Zero-copy view of shard s's sub-batch over the bound source batch.
+  ShardGatherView<Batch> shard_view(size_t s) const
   {
-    return ShardGatherView<Batch>(items, origin[s]);
+    assert(src != nullptr);
+    return ShardGatherView<Batch>(*src, origin[s]);
   }
 };
 
 // Split `items` across `shard_count` shards. `route(item, shard_count)` returns
 // the owning shard index (typically shard_of_address/shard_of_key). Records
-// only the routing map; no items are copied.
+// only the routing map and a borrow of `items` (which must outlive the split);
+// no items are copied.
 template<typename Batch, typename Route>
 ShardSplit<Batch>
 split_by_shard(Batch const &items, size_t shard_count, Route route)
@@ -132,6 +140,7 @@ split_by_shard(Batch const &items, size_t shard_count, Route route)
   assert(shard_count >= 1);
   ShardSplit<Batch> split;
   split.origin.resize(shard_count);
+  split.src = &items;
 
   size_t i = 0;
   for (auto const &item : items) {

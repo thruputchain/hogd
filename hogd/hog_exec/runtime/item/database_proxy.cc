@@ -516,7 +516,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                 });
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
       auto res = clients_[shard].try_push_new_subtransaction(
-          block_id, tx_id, split.shard_view(delta_batch, shard));
+          block_id, tx_id, split.shard_view(shard));
       // Stop on the first error or conflict; the caller aborts, which fans the
       // abort out to every shard.
       switch (res.error()) {

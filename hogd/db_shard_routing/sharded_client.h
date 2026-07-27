@@ -55,7 +55,7 @@ public:
     std::vector<ShardGatherView<Batch>> views;
     views.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
-      views.push_back(split.shard_view(items, s));
+      views.push_back(split.shard_view(s));
     }
     using CallResult = decltype(call(clients_[0], views[0]));
     std::vector<std::pair<size_t, CallResult>> in_flight;
@@ -122,7 +122,7 @@ public:
     std::vector<ShardGatherView<Batch>> views;
     views.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
-      views.push_back(split.shard_view(items, s));
+      views.push_back(split.shard_view(s));
     }
     using CallResult = decltype(call(clients_[0], views[0]));
     std::vector<CallResult> in_flight;
