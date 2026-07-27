@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
@@ -147,6 +148,10 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);
   ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  std::optional<std::int64_t> schema_version =
+      require_field(*metadata, "schemaVersion").as_integer();
+  ASSERT_TRUE(schema_version.has_value());
+  EXPECT_EQ(*schema_version, 1);
   EXPECT_EQ(require_string(require_field(*metadata, "kind")),
             "hog-hosted-bootstrap");
   EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),

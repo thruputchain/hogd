@@ -67,10 +67,12 @@ public:
     HogDBStatus<DbTip> ret = db_.read_dbtip();
     if (ret.has_value()) {
       // There is an existing dbtip, meaning that blocks have already been
-      // committed to the db. If [ret.has_value()] is false, then no blocks have
-      // been committed yet.
+      // committed to the db.
       *tip_.take() = *ret;
       current_committed_height_ = ret->value.proposal_header.block_height;
+    }
+    else if (ret.error().code() != HogDBCode::kNotFound) {
+      ret.error().raise("failed to read DbTip");
     }
   }
 

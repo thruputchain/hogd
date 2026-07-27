@@ -135,8 +135,10 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
-    w.field("kind", "hog-devnode-runtime");
+    w.field("schemaVersion", std::int64_t{2});
+    w.field("kind", "hogd-dev-runtime");
+    w.field("chainState",
+            node.recovered_existing_chain() ? "recovered" : "fresh");
     w.field("networkHash", format_network_hash(network_hash));
     w.field("protocol", version::kHogdProtocol());
     w.field("genesisHash", hex_string(genesis_hash));
@@ -270,7 +272,7 @@ build_readiness_payload(std::filesystem::path const &manifest_path,
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", std::int64_t{2});
     w.field("status", "ready");
     w.field("manifestPath", manifest_path.string());
     w.field("manifestHash", hex_string(manifest_hash));

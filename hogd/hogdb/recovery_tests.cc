@@ -3,6 +3,8 @@
 
 #include <memory>
 #include <span>
+#include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "consensus.hh"
@@ -48,6 +50,45 @@ make_hog_age(uint128_t num_hogs, BlockHeight average_age)
 }
 
 } // namespace
+
+TEST(RecoveryTests, RPCContextAcceptsMissingDbTipAsFresh)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), 1024 * 1024 * 1024, 0);
+  ASSERT_TRUE(db.has_value());
+
+  RPCContext ctx(HogDBDAO(RAMDB(std::move(*db))), nullptr);
+  EXPECT_FALSE(ctx.has_committed_tip());
+  EXPECT_EQ(ctx.get_tip().storage_long_hash, StorageLongHash{});
+}
+
+TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), 1024 * 1024 * 1024, 0);
+  ASSERT_TRUE(db.has_value());
+  HogDBDAO dao(RAMDB(std::move(*db)));
+
+  constexpr std::string_view kDbTipKey = "<DBTIP";
+  constexpr uint8_t kWrongType = 1;
+  std::array<std::byte, 1> value{};
+  ASSERT_TRUE(
+      dao.get_ramdb()
+          .put(std::as_bytes(std::span(kDbTipKey.data(), kDbTipKey.size())),
+               kWrongType, value)
+          .has_value());
+
+  HogDBStatus<DbTip> tip = dao.read_dbtip();
+  ASSERT_FALSE(tip.has_value());
+  ASSERT_EQ(tip.error().code(), HogDBCode::kTypeMismatch);
+  EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
+}
 
 TEST(RecoveryTests, RecoveryVaryingItems)
 {

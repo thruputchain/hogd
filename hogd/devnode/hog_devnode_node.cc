@@ -35,6 +35,7 @@
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -468,6 +469,8 @@ HogDevnodeNode::HogDevnodeNode(
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
+    HogDBDAO db = open_db_backend();
+
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -491,7 +494,7 @@ HogDevnodeNode::HogDevnodeNode(
             sched_db_client_res.error().error_code().message());
     auto sched_db_client =
         std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
-    init_db_backend(std::move(sched_db_client));
+    init_db_backend(std::move(db), std::move(sched_db_client));
 
     // [db_executor_server_] handles RPCs from the executor.
     db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
@@ -944,9 +947,8 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
   }
 }
 
-void
-HogDevnodeNode::init_db_backend(
-    std::unique_ptr<sched_db_client_t> sched_db_client)
+HogDBDAO
+HogDevnodeNode::open_db_backend() const
 {
   DBStatus<std::uint64_t> lsn =
       Database::check(db_dir_.directory(), kRamDbBytes);
@@ -958,7 +960,38 @@ HogDevnodeNode::init_db_backend(
       Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
   CHECK(ramdb.has_value());
 
-  auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
+  HogDBDAO db(RAMDB(std::move(*ramdb)));
+  HogDBStatus<DbTip> recovered_tip = db.read_dbtip();
+  if (!recovered_tip && recovered_tip.error().code() != HogDBCode::kNotFound) {
+    recovered_tip.error().raise("failed to read recovered DbTip");
+  }
+
+  StorageLongHash full_hash = db.compute_full_db_hash();
+  if (!recovered_tip) {
+    if (full_hash != StorageLongHash{}) {
+      throw std::runtime_error("recovered database has state but no DbTip");
+    }
+    return db;
+  }
+  if (full_hash != recovered_tip->storage_long_hash) {
+    throw std::runtime_error(
+        "recovered database storage hash does not match DbTip");
+  }
+  if (RPCContext::has_committed_tip(*recovered_tip) &&
+      recovered_tip->value.proposal_header.network_hash != network_hash_) {
+    throw std::runtime_error(std::format(
+        "recovered chain network hash {} does not match requested network "
+        "hash {}",
+        format_network_hash(recovered_tip->value.proposal_header.network_hash),
+        format_network_hash(network_hash_)));
+  }
+  return db;
+}
+
+void
+HogDevnodeNode::init_db_backend(
+    HogDBDAO db, std::unique_ptr<sched_db_client_t> sched_db_client)
+{
   ctx_ =
       std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
   if (ctx_->has_committed_tip()) {

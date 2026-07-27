@@ -54,7 +54,7 @@ real_dev_wallet_content_hash()
 // manifest. Tests tweak only the field(s) under test.
 struct ManifestBuilder {
   bool include_schema_version = true;
-  std::int64_t schema_version = 1;
+  std::int64_t schema_version = 2;
 
   std::string kind = "groundhog-bootstrap";
 
@@ -240,7 +240,7 @@ TEST(BootstrapManifest, RejectsInvalidJson)
 TEST(BootstrapManifest, RejectsWrongSchemaVersion)
 {
   ManifestBuilder builder;
-  builder.schema_version = 2;
+  builder.schema_version = 3;
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
