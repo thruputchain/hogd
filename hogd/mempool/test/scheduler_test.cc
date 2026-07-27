@@ -28,6 +28,39 @@ constexpr size_t kNumTxs = 100;
 
 } // namespace
 
+// A Scheduler over `shard_count` db shards. record_shard_transfer_finished
+// only reads shard_count(), never the clients, so null client handles suffice.
+std::shared_ptr<Scheduler>
+make_scheduler_with_shards(size_t shard_count)
+{
+  std::vector<std::shared_ptr<db_sched_client_t>> clients(shard_count);
+  auto sharded_db = std::make_shared<ShardedDbSched>(std::move(clients));
+  return std::make_shared<Scheduler>(/*current_block=*/-1, std::move(sharded_db));
+}
+
+// The transfer barrier must advance to block N only once EVERY shard has
+// reported N, even when shards' notifications arrive interleaved and out of
+// height order. Here shard A races ahead to block 1 before shard B has
+// reported block 0; block 0 must not be considered complete until shard B's
+// block-0 notification lands, and each height completes exactly once.
+TEST(Scheduler, TransferBarrierAdvancesOnlyAfterAllShardsReportOutOfOrder)
+{
+  std::shared_ptr<Scheduler> scheduler = make_scheduler_with_shards(2);
+  EXPECT_FALSE(scheduler->record_shard_transfer_finished(0)); // shard A, block 0
+  EXPECT_FALSE(scheduler->record_shard_transfer_finished(1)); // shard A, block 1
+  EXPECT_TRUE(scheduler->record_shard_transfer_finished(0));  // shard B -> 0 done
+  EXPECT_TRUE(scheduler->record_shard_transfer_finished(1));  // shard B -> 1 done
+}
+
+// A single shard completes every block on its one and only notification, so
+// the barrier behaves exactly as before sharding.
+TEST(Scheduler, TransferBarrierSingleShardCompletesImmediately)
+{
+  std::shared_ptr<Scheduler> scheduler = make_scheduler_with_shards(1);
+  EXPECT_TRUE(scheduler->record_shard_transfer_finished(5));
+  EXPECT_TRUE(scheduler->record_shard_transfer_finished(6));
+}
+
 TEST(Scheduler, ReadAge)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
