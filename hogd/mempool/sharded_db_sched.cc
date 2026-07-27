@@ -74,29 +74,51 @@ ShardedDbSched::load_genesis(GenesisConfiguration genesis_configuration,
 x23::Async<DbTipResult>
 ShardedDbSched::get_tip()
 {
+  // Read EVERY shard, never just shard 0. This is the validator-startup check
+  // that a partially-committed cluster refuses to start rather than livelock:
+  // commit fans out non-atomically, so a crash mid-fan-out can leave shards at
+  // genuinely different tips, and create_snapshot(prev=tip) on a lagging shard
+  // would then fail block after block. Two invariants, both fail-stop:
+  //   (1) genesis presence is unanimous -- every shard has a committed tip or
+  //       none do. Trusting shard 0 alone would let a wiped/replaced shard-0
+  //       data dir report "no genesis" while other shards still hold committed
+  //       state, and the caller would re-run the genesis fan-out against shards
+  //       that already have it.
+  //   (2) committed shards agree on (height, id, txs_hash). The storage hashes
+  //       are legitimately per-shard (each shard's own root), so they are NOT
+  //       checked.
+  // Log before each CHECK so the abort is an actionable operator report rather
+  // than two bare numbers.
   DbTipResult primary = co_await shards_.primary()->dbsched_get_tip();
-  if (primary.result() != DbSchedResult::DbSchedResultOK) {
-    co_return primary; // no committed genesis yet; nothing to reconcile
-  }
-  // Shards commit in lockstep, so height/id must match. db_hash legitimately
-  // differs per shard, so it is not part of the check.
+  bool const primary_ok = primary.result() == DbSchedResult::DbSchedResultOK;
   for (size_t i = 1; i < shards_.shard_count(); ++i) {
     DbTipResult r = co_await shards_.shard(i)->dbsched_get_tip();
-    // Log before the CHECK: a tip divergence is the most important line the
-    // operator will see, and CHECK_EQ alone prints two bare numbers with no
-    // context. This turns "mempool aborted" into an actionable report.
-    if (r.result() != DbSchedResult::DbSchedResultOK ||
-        r.db_tip().height != primary.db_tip().height ||
-        r.db_tip().id != primary.db_tip().id) {
-      error("db shard tip divergence: shard {} at height {} (id {}, result {}), "
-            "shard 0 at height {} (id {}); refusing to start",
-            i, r.db_tip().height, r.db_tip().id, r.result(),
-            primary.db_tip().height, primary.db_tip().id);
+    bool const r_ok = r.result() == DbSchedResult::DbSchedResultOK;
+
+    if (r_ok != primary_ok) {
+      error("db shard genesis-presence divergence: shard 0 result {}, shard {} "
+            "result {}; refusing to start",
+            primary.result(), i, r.result());
+      CHECK_EQ(r_ok, primary_ok);
     }
-    CHECK_EQ(r.result(), DbSchedResult::DbSchedResultOK);
-    CHECK_EQ(r.db_tip().value.proposal_header.block_height,
-             primary.db_tip().value.proposal_header.block_height);
+    if (!primary_ok) {
+      continue; // both agree "no committed tip"; nothing more to reconcile
+    }
+
+    ProposalHeader const &r_header = r.db_tip().value.proposal_header;
+    ProposalHeader const &primary_header =
+        primary.db_tip().value.proposal_header;
+    if (r_header.block_height != primary_header.block_height ||
+        r.db_tip().id != primary.db_tip().id ||
+        r_header.txs_hash != primary_header.txs_hash) {
+      error("db shard tip divergence: shard {} at height {} (id {}), shard 0 at "
+            "height {} (id {}); refusing to start",
+            i, r_header.block_height, r.db_tip().id,
+            primary_header.block_height, primary.db_tip().id);
+    }
+    CHECK_EQ(r_header.block_height, primary_header.block_height);
     CHECK_EQ(r.db_tip().id, primary.db_tip().id);
+    CHECK_EQ(r_header.txs_hash, primary_header.txs_hash);
   }
   co_return primary;
 }
