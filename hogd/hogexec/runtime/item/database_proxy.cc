@@ -163,6 +163,12 @@ DatabaseProxy::client_for(AddressAndKey const &key)
 }
 
 DatabaseProxy::client_t &
+DatabaseProxy::client_for(ContractAddress const &addr)
+{
+  return clients_[shard_of_address(addr, clients_.size())];
+}
+
+DatabaseProxy::client_t &
 DatabaseProxy::client_for()
 {
   // Primary shard: global/keyless requests (db tip, viewing snapshots) and
@@ -226,7 +232,12 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  auto &client = client_for();
+  // Deployment metadata is address-keyed (written via try_push_new_subtransaction,
+  // routed by shard_of_key), so read it from the shard that owns `addr` -- NOT
+  // the primary shard. Reading from the primary made any runtime-deployed
+  // contract whose address does not hash to shard 0 uninvokable; genesis
+  // contracts hid it because genesis is replicated on every shard.
+  auto &client = client_for(addr);
   auto res = client.get_deployment(block_id, addr);
   return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
     return std::make_optional<DeployedContractHash>(std::move(x));
