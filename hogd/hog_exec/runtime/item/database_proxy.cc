@@ -620,6 +620,12 @@ DatabaseProxy::get_db_tip(BlockID block_id)
 SystemStatus<ViewingSnapshot>
 DatabaseProxy::open_viewing_snapshot()
 {
+  // TODO(sharding): opens on the primary only, but snapshot-scoped reads route
+  // by address to the owner shard, which never opened this snapshot (each shard
+  // mints its own id) -- so with >1 shard, non-primary accounts are unreadable
+  // via the view gateway. Latent (read path unexercised, single-shard fine).
+  // Fix: open on every shard, thread one id per shard through ViewState/reads,
+  // and fan out close.
   auto &client = client_for();
   auto res = client.open_viewing_snapshot();
   return to_system_error_code<NotFoundIsUnrecoverableError{}>(
@@ -630,6 +636,8 @@ DatabaseProxy::open_viewing_snapshot()
 SystemStatus<void>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
+  // TODO(sharding): primary-shard only; must fan out to every shard once
+  // viewing snapshots are sharded (see open_viewing_snapshot).
   auto &client = client_for();
   auto res = client.close_viewing_snapshot(block_id);
   return to_system_error_code<VoidMarker{}>(res, [] {});
