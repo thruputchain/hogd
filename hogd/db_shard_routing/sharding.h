@@ -8,6 +8,7 @@
 
 #include "types.hh" // AddressAndKey, ContractAddress
 
+#include "hogd/base/log.h" // CHECK_EQ
 #include "x23/x23/serialize.h"
 
 // The execution-model-agnostic core of database sharding: key->shard routing
@@ -144,8 +145,8 @@ split_by_shard(Batch const &items, size_t shard_count, Route route)
 }
 
 // Reassemble per-shard results into input order: per_shard[s][j] is the result
-// for the item at split.origin[s][j]. Precondition: per_shard has one entry per
-// shard, each matching split.origin[s] in length. Returns split.total results.
+// for the item at split.origin[s][j]. per_shard has one entry per shard (an
+// internal invariant of the caller). Returns split.total results.
 template<typename ResultBatch, typename Batch>
 std::vector<typename ResultBatch::value_type>
 gather_positional(ShardSplit<Batch> const &split,
@@ -156,7 +157,13 @@ gather_positional(ShardSplit<Batch> const &split,
 
   std::vector<Result> out(split.total);
   for (size_t s = 0; s < split.shard_count(); ++s) {
-    assert(per_shard[s].size() == split.origin[s].size());
+    // A shard must return exactly one result per item we routed to it. This is
+    // shard-controlled (per_shard[s] is the shard's RPC reply): a too-long
+    // reply would index past origin[s] below -- an OOB read/write on the
+    // critical path -- and there is no error channel out of here. A shard
+    // answering a count we never asked for is broken; stop rather than march on
+    // against it (same call as the db-tip divergence check).
+    CHECK_EQ(per_shard[s].size(), split.origin[s].size());
     for (size_t j = 0; j < per_shard[s].size(); ++j) {
       out[split.origin[s][j]] = per_shard[s][j];
     }
