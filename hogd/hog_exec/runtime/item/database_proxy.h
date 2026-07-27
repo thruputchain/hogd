@@ -107,6 +107,10 @@ private:
 
   // The client for the shard that owns `key` (per-key routing, by address).
   client_t &client_for(AddressAndKey const &key);
+  // The client for the shard that owns `addr` (routing by account address).
+  // Address-keyed records (e.g. deployment metadata) must be read from the same
+  // shard try_push_new_subtransaction wrote them to.
+  client_t &client_for(ContractAddress const &addr);
   // The client for the primary shard (shard 0). Used by global/keyless requests
   // (db tip, viewing snapshots) and content-addressed lookups (contracts).
   client_t &client_for();
