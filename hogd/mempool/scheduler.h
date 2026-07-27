@@ -174,6 +174,30 @@ public:
   x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
+  // Called once per shard per committed block by [handle_transfer] (which
+  // applies each shard's delta slice as it arrives). Every shard sends exactly
+  // one HogsTransferred per block (even an empty slice); this counts them per
+  // height and returns true only when the LAST shard reports `block`, at which
+  // point the caller advances [transfer_finished_]. Because each shard emits
+  // its blocks in commit order, the last report for N cannot precede the last
+  // for N-1, so heights complete in order and the barrier advances monotonically
+  // by one. Advancing on any single shard's slice would let a waiter see a block
+  // "done" with other shards' deltas unapplied (stale ages), and a late slice
+  // could move the barrier backwards and trip wait_for_transfer_data's CHECK_EQ.
+  // Serialized by scheduler_lock_ (handle_transfer holds it), so no locking.
+  bool record_shard_transfer_finished(BlockHeight block)
+  {
+    size_t const shards = sharded_db_->shard_count();
+    uint32_t const seen = ++transfer_reports_[block];
+    // A shard reports each block at most once; exceeding shard_count is a bug.
+    CHECK_LE(static_cast<size_t>(seen), shards);
+    if (static_cast<size_t>(seen) < shards) {
+      return false;
+    }
+    transfer_reports_.erase(block);
+    return true;
+  }
+
   // Barrier raised once genesis has loaded on every db shard; [handle_transfer]
   // waits on it before reading hog ages, since the first shard's block-0 deltas
   // route to accounts on shards that have not run genesis yet.
@@ -327,6 +351,11 @@ private:
   // Reads/writes hog ages, routed to the shard that owns each account. See
   // ShardedDbSched.
   std::shared_ptr<ShardedDbSched> sharded_db_;
+
+  // height -> number of shards that have reported that block's transfers,
+  // erased once every shard has (see record_shard_transfer_finished). Advances
+  // the transfer barrier only after all shards report a block.
+  std::unordered_map<BlockHeight, uint32_t> transfer_reports_;
 
   // Block-0 addresses already applied, so the genesis deltas replicated from
   // each shard are counted once (see [process_transfers]). TODO: remove once
