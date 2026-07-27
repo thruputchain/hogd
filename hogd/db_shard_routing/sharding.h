@@ -22,14 +22,23 @@ namespace hogd {
 // Routing
 // ---------------------------------------------------------------------------
 
-// The primary shard. Global/keyless requests (db tip, viewing snapshots) and
-// content-addressed lookups (contracts) route here for now.
+// The primary shard. Global/keyless requests (db tip) and content-addressed
+// lookups (contracts) route here for now. (Viewing snapshots are NOT keyless:
+// each shard mints its own snapshot id, so a cross-shard viewing operation
+// holds one per shard, not a single primary-shard snapshot.)
 inline constexpr size_t kPrimaryShard = 0;
 
 // Routes by account address so all of an address's storage items co-locate on
-// one shard. Deterministic within a process. The hash is a placeholder (FNV-1a)
-// until a network-agreed function replaces it; this is its only definition.
-// Precondition: `shard_count >= 1`. Returns a value in [0, shard_count).
+// one shard. Deterministic within a process. Precondition: `shard_count >= 1`.
+// Returns a value in [0, shard_count).
+//
+// The hash is a placeholder (FNV-1a) until a network-agreed function replaces
+// it; this is its only definition. KNOWN LIMITATION (low priority): FNV is
+// unkeyed, so an adversary who grinds addresses can bias the distribution and
+// overload one shard. The intended fix is a keyed hash (SipHash-2-4 is already
+// available), but that needs a validator-recoverable key so the key->shard
+// mapping survives restart; until we solve key recovery this stays FNV. Not
+// worth bug reports in the meantime.
 inline size_t
 shard_of_address(ContractAddress const &address, size_t shard_count)
 {
