@@ -242,7 +242,7 @@ TEST(ShardedBatchTest, GatherViewSerializesLikeMaterializedVec)
     for (size_t idx : split.origin[s]) {
       materialized.push_back(items[idx]);
     }
-    auto view = split.shard_view(items, s);
+    auto view = split.shard_view(s);
 
     EXPECT_EQ(xdr_size(view), xdr_size(materialized));
     EXPECT_EQ(x23::serialize(view), x23::serialize(materialized));
