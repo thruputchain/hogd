@@ -18,14 +18,30 @@
 
 namespace hogd {
 
+// The db sharding model. State is placed one of four ways; every RPC must read
+// the way its writes routed (a mismatch reads the wrong shard -- the
+// get_deployment bug). Classify every new RPC against this.
+//
+//   1. Keyed (storage items, deployments, balances, RCQ, hog ages): owner
+//      shard, shard_of_address(address). By address, not full key, so an
+//      account's items co-locate; addresses are sha256-derived, so never route
+//      by user-chosen bytes.
+//   2. Content-addressed (contract code): primary shard (kPrimaryShard) only,
+//      by hash. Interim -- code is immutable, so hash % N is also safe.
+//   3. Replicated control (block lifecycle, genesis): written to every shard;
+//      each keeps its own chain and validates create_snapshot(prev) against it,
+//      so shards advance in lockstep. Reads require agreement on
+//      (height, id, block_hash), NOT db_hash (legitimately per-shard).
+//   4. Per-shard-minted (viewing snapshot ids): each shard mints its own, so a
+//      cross-shard op holds one per shard. NOT yet wired -- DatabaseProxy opens
+//      on the primary alone (tracked separately).
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
 
-// The primary shard. Global/keyless requests (db tip) and content-addressed
-// lookups (contracts) route here for now. (Viewing snapshots are NOT keyless:
-// each shard mints its own snapshot id, so a cross-shard viewing operation
-// holds one per shard, not a single primary-shard snapshot.)
+// The primary shard: content-addressed lookups (class 2) and global/keyless
+// requests (db tip) route here. See the sharding model above.
 inline constexpr size_t kPrimaryShard = 0;
 
 // Routes by account address so all of an address's storage items co-locate on
