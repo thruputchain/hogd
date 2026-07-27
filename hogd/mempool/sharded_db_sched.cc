@@ -82,6 +82,17 @@ ShardedDbSched::get_tip()
   // differs per shard, so it is not part of the check.
   for (size_t i = 1; i < shards_.shard_count(); ++i) {
     DbTipResult r = co_await shards_.shard(i)->dbsched_get_tip();
+    // Log before the CHECK: a tip divergence is the most important line the
+    // operator will see, and CHECK_EQ alone prints two bare numbers with no
+    // context. This turns "mempool aborted" into an actionable report.
+    if (r.result() != DbSchedResult::DbSchedResultOK ||
+        r.db_tip().height != primary.db_tip().height ||
+        r.db_tip().id != primary.db_tip().id) {
+      error("db shard tip divergence: shard {} at height {} (id {}, result {}), "
+            "shard 0 at height {} (id {}); refusing to start",
+            i, r.db_tip().height, r.db_tip().id, r.result(),
+            primary.db_tip().height, primary.db_tip().id);
+    }
     CHECK_EQ(r.result(), DbSchedResult::DbSchedResultOK);
     CHECK_EQ(r.db_tip().value.proposal_header.block_height,
              primary.db_tip().value.proposal_header.block_height);
@@ -91,7 +102,7 @@ ShardedDbSched::get_tip()
 }
 
 x23::Async<DbSchedResult>
-ShardedDbSched::write_hog_ages(HogAgeBatch ages)
+ShardedDbSched::write_hog_ages(HogAgeBatch const &ages)
 {
   co_return co_await shards_.scatter_write(
       ages,

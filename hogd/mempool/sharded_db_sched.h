@@ -52,7 +52,7 @@ public:
   x23::Async<DbTipResult> get_tip();
 
   // Scatter by account address; reads gather back into input order.
-  x23::Async<DbSchedResult> write_hog_ages(HogAgeBatch ages);
+  x23::Async<DbSchedResult> write_hog_ages(HogAgeBatch const &ages);
   x23::Async<HogAgeResults> read_hog_ages(ContractAddressBatch const &accounts);
 
 private:
