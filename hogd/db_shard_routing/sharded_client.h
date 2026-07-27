@@ -85,13 +85,22 @@ public:
   // Fan the same call out to every shard (visiting all even after a failure)
   // and reduce to the first non-`ok` status, or `ok` if all succeed. For the
   // homogeneous block-lifecycle fan-outs; contrast the keyed scatter_write.
+  // Concurrent like scatter_gather: launch every shard, then await -- a
+  // per-block-critical-path op costs one round-trip, not N.
   //   call(client) -> x23::Async<Status>
   template<typename Status, typename Call>
   x23::Async<Status> broadcast_status(Call call, Status ok)
   {
-    Status result = ok;
+    using CallResult = decltype(call(clients_[0]));
+    std::vector<CallResult> in_flight;
+    in_flight.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
-      Status r = co_await call(clients_[s]);
+      in_flight.push_back(call(clients_[s]));
+    }
+
+    Status result = ok;
+    for (auto &async : in_flight) {
+      Status r = co_await async;
       if (result == ok && !(r == ok)) {
         result = r;
       }
