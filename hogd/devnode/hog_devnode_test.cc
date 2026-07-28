@@ -817,7 +817,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "groundhog-bootstrap");
     w.field("networkHash",
             "00000000000000000000000000000000000000000000000000000000000000aa");

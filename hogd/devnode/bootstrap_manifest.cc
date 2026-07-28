@@ -295,9 +295,9 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   }
   // Additive optional fields do not bump schemaVersion, so exact-match is
   // correct under the additive-only contract.
-  if (*schema_version != 2) {
+  if (*schema_version != 1) {
     return std::unexpected(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 2",
+        "unsupported bootstrap manifest schemaVersion {}, expected 1",
         *schema_version));
   }
 
