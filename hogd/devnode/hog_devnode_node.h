@@ -82,6 +82,10 @@ public:
   {
     return genesis_configuration_;
   }
+  bool recovered_existing_chain() const noexcept
+  {
+    return recovered_existing_chain_;
+  }
   std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
@@ -89,7 +93,9 @@ private:
   static constexpr std::size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
   static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
 
-  void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client);
+  HogDBDAO open_db_backend() const;
+  void init_db_backend(HogDBDAO db,
+                       std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
   void reconcile_indexer_with_recovered_tip();
   void register_indexer_with_event_service();
