@@ -60,6 +60,7 @@
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
