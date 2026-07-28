@@ -138,27 +138,6 @@ public:
     scheduler_.reset();
   }
 
-  static x23::Async<x23::Vec<db_sched_client_t>> get_clients()
-  {
-    x23::XdrVec<ShardCard> cards;
-    Registration::registration().shards_registered(&cards);
-
-    x23::Vec<db_sched_client_t> ret;
-    ret.reserve(cards.size());
-
-    for (const ShardCard &card : cards) {
-      auto client = co_await create_client<DbSched1>(
-          server_address_to_sockaddr(card.address_for_sched),
-          /*retry=*/false,
-          /*max_message_size=*/kBulkRpcMaxMessageSize);
-      if (!client)
-        panic("rpc_from_db get_clients connect failed: {}",
-              client.error().error_code().message());
-      ret.push_back(std::move(*client));
-    }
-    co_return ret;
-  }
-
   void shut_down()
   {
     // TODO(jhumphri): Implement.

@@ -7,11 +7,13 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "rpc_types.hh"
+#include "sched_db.hh" // ShardCard
 #include "types.hh"
 
 #include "hogd/db_shard_routing/sharded_client.h"
 #include "hogd/mempool/shared.h" // db_sched_client_t
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -26,6 +28,15 @@ public:
       std::vector<std::shared_ptr<db_sched_client_t>> clients)
     : shards_(std::move(clients))
   {}
+
+  // Connect one db-sched client per shard card and build the facade, binding
+  // each client at index == its declared shard_id (not connection-arrival
+  // order). Fail-stops unless the declared ids form exactly
+  // {0..cards.size()-1}, every card agrees on total_shards == cards.size(), and
+  // every card uses the running routing function (kShardFunctionId). This is
+  // the single place shard identity is enforced mempool-side.
+  static x23::Async<std::shared_ptr<ShardedDbSched>>
+  connect(x23::XdrVec<ShardCard> cards);
 
   size_t shard_count() const { return shards_.shard_count(); }
 

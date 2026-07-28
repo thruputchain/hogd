@@ -518,17 +518,12 @@ private:
     coord_client_ =
         std::make_unique<coord_sched_client_t>(co_await get_client());
     {
-      // One client per db shard, wrapped in the ShardedDbSched facade.
-      auto clients = co_await MempoolDbRpc::get_clients();
-      std::vector<std::shared_ptr<db_sched_client_t>> shard_clients;
-      shard_clients.reserve(clients.size());
-      for (auto &c : clients) {
-        shard_clients.push_back(
-            std::make_shared<db_sched_client_t>(std::move(c)));
-      }
-      CHECK(!shard_clients.empty());
+      // The facade connects one client per shard, bound by declared shard_id
+      // and fail-stopping on a bad identity set (see ShardedDbSched::connect).
+      x23::XdrVec<ShardCard> cards;
+      Registration::registration().shards_registered(&cards);
       sharded_db_sched_client_ =
-          std::make_shared<ShardedDbSched>(std::move(shard_clients));
+          co_await ShardedDbSched::connect(std::move(cards));
     }
     {
       DbTipResult db_res = co_await sharded_db_sched_client_->get_tip();
