@@ -15,46 +15,29 @@ ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
   size_t const n = cards.size();
   CHECK_GT(n, size_t{0});
 
-  // Validate the declared identities form exactly {0..n-1}: every card agrees
-  // on total_shards == n (the number that registered, i.e. --num-db-shards),
-  // uses the running routing function, and each shard_id appears once. Any
-  // violation is a misconfigured cluster -- fail-stop rather than bind clients
-  // to the wrong shards.
-  std::vector<bool> seen(n, false);
-  for (ShardCard const &card : cards) {
-    if (card.total_shards != n) {
-      panic("db shard {} declares total_shards={} but {} shards registered; "
-            "refusing to start",
-            card.shard_id, card.total_shards, n);
-    }
-    if (card.shard_function_id != kShardFunctionId) {
-      panic("db shard {} uses routing function {} but this binary uses {}; "
-            "refusing to start",
-            card.shard_id, card.shard_function_id, kShardFunctionId);
-    }
-    if (card.shard_id >= n) {
-      panic("db shard id {} out of range for {} shards; refusing to start",
-            card.shard_id, n);
-    }
-    if (seen[card.shard_id]) {
-      panic("duplicate db shard id {}; refusing to start", card.shard_id);
-    }
-    seen[card.shard_id] = true;
+  // Validate the declared identity set and get the shard_id -> card-index
+  // binding order. Shared with the executor's DatabaseProxy so both sides agree
+  // on which shard is which; a bad set is a misconfigured cluster -> fail-stop.
+  auto order_result = order_shards_by_id(cards);
+  if (!order_result) {
+    panic("ShardedDbSched::connect: {}; refusing to start",
+          order_result.error());
   }
+  std::vector<size_t> const &order = *order_result;
 
   // Connect one client per shard, bound at index == its declared shard_id.
   std::vector<std::shared_ptr<db_sched_client_t>> clients(n);
-  for (ShardCard const &card : cards) {
+  for (size_t id = 0; id < n; ++id) {
+    ShardCard const &card = cards[order[id]];
     auto client = co_await create_client<DbSched1>(
         server_address_to_sockaddr(card.address_for_sched),
         /*retry=*/false,
         /*max_message_size=*/kBulkRpcMaxMessageSize);
     if (!client) {
-      panic("ShardedDbSched::connect failed to connect db shard {}: {}",
-            card.shard_id, client.error().error_code().message());
+      panic("ShardedDbSched::connect failed to connect db shard {}: {}", id,
+            client.error().error_code().message());
     }
-    clients[card.shard_id] =
-        std::make_shared<db_sched_client_t>(std::move(*client));
+    clients[id] = std::make_shared<db_sched_client_t>(std::move(*client));
   }
   co_return std::make_shared<ShardedDbSched>(std::move(clients));
 }

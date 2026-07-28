@@ -249,5 +249,77 @@ TEST(ShardedBatchTest, GatherViewSerializesLikeMaterializedVec)
   }
 }
 
+// ---------------------------------------------------------------------------
+// order_shards_by_id
+// ---------------------------------------------------------------------------
+
+// A minimal stand-in for ShardCard: order_shards_by_id is templated and only
+// reads these three fields, so the test needs no protocol types.
+struct FakeCard {
+  uint32_t shard_id;
+  uint32_t total_shards;
+  uint32_t shard_function_id;
+};
+
+FakeCard
+make_card(uint32_t id, uint32_t total)
+{
+  return FakeCard{.shard_id = id,
+                  .total_shards = total,
+                  .shard_function_id = kShardFunctionId};
+}
+
+// A well-formed set binds each shard at its declared id, regardless of the
+// order the cards arrived in: order[shard_id] == index in `cards`.
+TEST(OrderShardsById, OrdersByDeclaredIdRegardlessOfInputOrder)
+{
+  std::vector<FakeCard> cards{make_card(2, 3), make_card(0, 3), make_card(1, 3)};
+  auto order = order_shards_by_id(cards);
+  ASSERT_TRUE(order.has_value());
+  EXPECT_EQ(*order, (std::vector<size_t>{1, 2, 0}));
+}
+
+TEST(OrderShardsById, SingleShard)
+{
+  std::vector<FakeCard> cards{make_card(0, 1)};
+  auto order = order_shards_by_id(cards);
+  ASSERT_TRUE(order.has_value());
+  EXPECT_EQ(*order, (std::vector<size_t>{0}));
+}
+
+// Every violation of the identity set is rejected (the caller fail-stops).
+TEST(OrderShardsById, RejectsTotalShardsDisagreeingWithCount)
+{
+  std::vector<FakeCard> cards{make_card(0, 2)}; // total_shards=2 but 1 present
+  auto order = order_shards_by_id(cards);
+  ASSERT_FALSE(order.has_value());
+  EXPECT_NE(order.error().find("total_shards"), std::string::npos);
+}
+
+TEST(OrderShardsById, RejectsDuplicateId)
+{
+  std::vector<FakeCard> cards{make_card(0, 2), make_card(0, 2)};
+  auto order = order_shards_by_id(cards);
+  ASSERT_FALSE(order.has_value());
+  EXPECT_NE(order.error().find("duplicate"), std::string::npos);
+}
+
+TEST(OrderShardsById, RejectsIdOutOfRange)
+{
+  std::vector<FakeCard> cards{make_card(5, 1)};
+  auto order = order_shards_by_id(cards);
+  ASSERT_FALSE(order.has_value());
+  EXPECT_NE(order.error().find("out of range"), std::string::npos);
+}
+
+TEST(OrderShardsById, RejectsWrongRoutingFunction)
+{
+  std::vector<FakeCard> cards{make_card(0, 1)};
+  cards[0].shard_function_id = kShardFunctionId + 1;
+  auto order = order_shards_by_id(cards);
+  ASSERT_FALSE(order.has_value());
+  EXPECT_NE(order.error().find("routing function"), std::string::npos);
+}
+
 } // namespace
 } // namespace hogd

@@ -191,10 +191,19 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   if (std::holds_alternative<ShardedDB>(db_identifier)) {
     auto sharded_db = std::get<ShardedDB>(db_identifier);
     assert(!sharded_db.shards_.empty());
-    // Connect to every discovered shard; requests are routed per key by
-    // look_up_shard / client_for.
-    clients_.reserve(sharded_db.shards_.size());
-    for (ShardCard const &shard : sharded_db.shards_) {
+    // Bind one client per shard at index == its declared shard_id, so
+    // client_for's shard_of_address routing agrees with how the mempool wrote
+    // the data. order_shards_by_id fail-stops on a bad identity set (shared
+    // with the mempool facade). Requests are routed per key by client_for.
+    auto order_result = order_shards_by_id(sharded_db.shards_);
+    if (!order_result) {
+      throw std::runtime_error(
+          std::format("db shard identity invalid: {}", order_result.error()));
+    }
+    std::vector<size_t> const &order = *order_result;
+    clients_.reserve(order.size());
+    for (size_t id = 0; id < order.size(); ++id) {
+      ShardCard const &shard = sharded_db.shards_[order[id]];
       x23::HostPort hostport;
       if (!hostport.parse(shard.address_for_exec)) {
         throw std::runtime_error("Failed to parse database shard address");
