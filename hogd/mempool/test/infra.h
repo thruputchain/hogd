@@ -34,6 +34,7 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
@@ -326,6 +327,9 @@ private:
     std::string auth_address = make_address(kAddress, db_auth_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
+                                .shard_id = 0,
+                                .total_shards = 1,
+                                .shard_function_id = kShardFunctionId,
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str(),
                                 .address_for_auth = auth_address.c_str()})();

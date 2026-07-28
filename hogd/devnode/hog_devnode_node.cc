@@ -31,6 +31,7 @@
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -1087,6 +1088,9 @@ HogDevnodeNode::register_db_with_mempool()
                             BlockHeight{0});
   client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                               .block_height = block_height,
+                              .shard_id = 0,
+                              .total_shards = 1,
+                              .shard_function_id = kShardFunctionId,
                               .address_for_exec = exec_address.c_str(),
                               .address_for_sched = sched_address.c_str(),
                               .address_for_auth = auth_address.c_str()})();
