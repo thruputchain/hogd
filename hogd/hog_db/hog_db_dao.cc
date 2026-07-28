@@ -52,6 +52,7 @@ static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
 
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
+constexpr std::string kGlobalShardIdentityKey = "<SHARDID";
 
 } // namespace
 
@@ -105,6 +106,31 @@ HogDbDAO::write_dbtip(const DbTip &tip)
 {
   auto buf = x23::serialize(tip);
   return db_.put(std::as_bytes(std::span(kGlobalTipKey)), 0,
+                 std::as_bytes(std::span(buf)));
+}
+
+HogDbStatus<ShardIdentity>
+HogDbDAO::read_shard_identity()
+{
+  HogDbStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(kGlobalShardIdentityKey)), 0);
+  if (!raw)
+    return raw.error();
+
+  ShardIdentity identity;
+  try {
+    x23::deserialize(&identity, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDbError(HogDbCode::kInternal);
+  }
+  return identity;
+}
+
+HogDbStatus<void>
+HogDbDAO::write_shard_identity(const ShardIdentity &identity)
+{
+  auto buf = x23::serialize(identity);
+  return db_.put(std::as_bytes(std::span(kGlobalShardIdentityKey)), 0,
                  std::as_bytes(std::span(buf)));
 }
 

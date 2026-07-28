@@ -25,6 +25,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "retrocausal_queue.hh"
+#include "sched_db.hh" // ShardIdentity
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -489,6 +490,11 @@ public:
 
   HogDbStatus<DbTip> read_dbtip();
   HogDbStatus<void> write_dbtip(const DbTip &tip);
+
+  // This shard's persisted identity (kNotFound on a pre-sharding db). Under a
+  // kGlobalMetadata key, so excluded from the consensus db hash.
+  HogDbStatus<ShardIdentity> read_shard_identity();
+  HogDbStatus<void> write_shard_identity(const ShardIdentity &identity);
 
   HogDbStatus<StorageCostModel> read_cost_model();
   HogDbStatus<void> write_cost_model(const StorageCostModel &cost_model);

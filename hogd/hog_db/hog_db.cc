@@ -27,9 +27,10 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_db/hog_age_reconciliation.h"
-#include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -74,9 +75,11 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
 int
 hog_db_init(std::string_view path, size_t ram_bytes,
-            const std::string *coordinator_addr, std::string_view bind_ip,
-            uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
-            uint16_t gateway_port, uint16_t metrics_port)
+           const std::string *coordinator_addr, std::string_view bind_ip,
+           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
+           uint16_t gateway_port, uint16_t metrics_port,
+           std::optional<uint32_t> flag_shard_id,
+           std::optional<uint32_t> flag_total_shards)
 {
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -146,6 +149,58 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
+  // Resolve this shard's stable identity. A persisted record is authoritative
+  // (flags may confirm, never override); with no record (fresh or pre-sharding
+  // db) the flags seed it -- default single-shard -- and it is persisted.
+  // Under a kGlobalMetadata key, so excluded from the consensus hash.
+  ShardIdentity shard_identity{};
+  {
+    HogDbStatus<ShardIdentity> persisted = ctx.get_db().read_shard_identity();
+    if (persisted) {
+      shard_identity = *persisted;
+      if ((flag_shard_id && *flag_shard_id != shard_identity.shard_id) ||
+          (flag_total_shards &&
+           *flag_total_shards != shard_identity.total_shards)) {
+        critical("shard identity mismatch: persisted {{id={}, total={}}} but "
+                 "flags {{id={}, total={}}}; refusing to start",
+                 shard_identity.shard_id, shard_identity.total_shards,
+                 flag_shard_id ? std::to_string(*flag_shard_id) : "unset",
+                 flag_total_shards ? std::to_string(*flag_total_shards)
+                                   : "unset");
+        return EXIT_FAILURE;
+      }
+      if (shard_identity.shard_function_id != kShardFunctionId) {
+        critical("shard routing-function mismatch: persisted {} but this "
+                 "binary uses {}; refusing to start",
+                 shard_identity.shard_function_id, kShardFunctionId);
+        return EXIT_FAILURE;
+      }
+    }
+    else {
+      shard_identity = ShardIdentity{.shard_id = flag_shard_id.value_or(0),
+                                     .total_shards = flag_total_shards.value_or(1),
+                                     .shard_function_id = kShardFunctionId};
+      if (shard_identity.total_shards < 1 ||
+          shard_identity.shard_id >= shard_identity.total_shards) {
+        critical("invalid shard identity: id={}, total={}; require "
+                 "total >= 1 and 0 <= id < total",
+                 shard_identity.shard_id, shard_identity.total_shards);
+        return EXIT_FAILURE;
+      }
+      if (auto w = ctx.get_db().write_shard_identity(shard_identity); !w) {
+        critical("failed to persist shard identity: {}", w.error());
+        return EXIT_FAILURE;
+      }
+      if (auto c = ctx.get_db().commit(); !c) {
+        critical("failed to commit shard identity: {}", c.error());
+        return EXIT_FAILURE;
+      }
+    }
+  }
+  info("shard identity: id={}, total_shards={}, function_id={}",
+       shard_identity.shard_id, shard_identity.total_shards,
+       shard_identity.shard_function_id);
+
   HogDbStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
   if (!reconcile_status.has_value()) {
     critical("Failed to reconcile startup hog ages: {}",
@@ -198,6 +253,9 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     ShardCard card{.protocol = version::kHogdProtocol(),
                    .upid = {},
                    .block_height = 0,
+                   .shard_id = shard_identity.shard_id,
+                   .total_shards = shard_identity.total_shards,
+                   .shard_function_id = shard_identity.shard_function_id,
                    .address_for_exec = exec_address.c_str(),
                    .address_for_sched = sched_address.c_str(),
                    .address_for_auth = auth_address.c_str()};
@@ -226,7 +284,8 @@ print_usage(char *argv[])
                "--bind-ip <ip> [--coordinator-addr <host:port>] "
                "[--executor-port <port>] [--mempool-port <port>] "
                "[--auth-port <port>] [--gateway-port <port>] "
-               "[--metrics-port <port>] [-h|--help] [--version]",
+               "[--metrics-port <port>] [--shard-id <n>] "
+               "[--total-shards <n>] [-h|--help] [--version]",
                argv[0]);
 }
 
@@ -263,9 +322,21 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t auth_port = 0;
   uint16_t gateway_port = 0;
   uint16_t metrics_port = 0;
+  std::optional<uint32_t> shard_id;
+  std::optional<uint32_t> total_shards;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--shard-id" && i + 1 < argc) {
+      shard_id = hogd::parse_integer_arg<uint32_t>("--shard-id", argv[++i],
+                                                   argv, usage);
+      continue;
+    }
+    if (arg == "--total-shards" && i + 1 < argc) {
+      total_shards = hogd::parse_integer_arg<uint32_t>("--total-shards",
+                                                       argv[++i], argv, usage);
+      continue;
+    }
     if (arg == "--metrics-port" && i + 1 < argc) {
       metrics_port =
           hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
@@ -318,6 +389,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hog_db_init(path, *ram_bytes, coordinator_addr, bind_ip,
-                           exec_port, mempool_port, auth_port, gateway_port,
-                           metrics_port);
+                          exec_port, mempool_port, auth_port, gateway_port,
+                          metrics_port, shard_id, total_shards);
 };

@@ -62,6 +62,11 @@ namespace hogd {
 // (db tip, viewing snapshots).
 inline constexpr size_t kPrimaryShard = 0;
 
+// Identifies shard_of_address below. Persisted per shard and declared in its
+// ShardCard; a mismatch is fail-stop (changing the function once a cluster has
+// data would misroute lookups). Bump when shard_of_address changes.
+inline constexpr uint32_t kShardFunctionId = 0;
+
 // Deterministic within a process. Precondition: shard_count >= 1; returns a
 // value in [0, shard_count).
 //
