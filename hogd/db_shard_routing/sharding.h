@@ -3,7 +3,10 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "types.hh" // AddressAndKey, ContractAddress
@@ -91,6 +94,48 @@ inline size_t
 shard_of_key(AddressAndKey const &key, size_t shard_count)
 {
   return shard_of_address(key.address, shard_count);
+}
+
+// Validate a set of db shard cards and return the binding order:
+// order[shard_id] == the index of that shard in `cards`. Requires every card
+// to agree on total_shards == cards.size(), use the running routing function
+// (kShardFunctionId), and the shard_ids to be exactly {0..cards.size()-1}. A
+// violation is a misconfigured cluster: returns an error message (the caller
+// fail-stops in its own style -- panic in the mempool, throw in the executor)
+// rather than bind a client to the wrong shard. `Card` exposes shard_id /
+// total_shards / shard_function_id (e.g. ShardCard). Both the mempool facade
+// and the executor DatabaseProxy route through here, so the two sides agree on
+// which shard is which. Precondition: cards is non-empty.
+template<typename Cards>
+inline std::expected<std::vector<size_t>, std::string>
+order_shards_by_id(Cards const &cards)
+{
+  size_t const n = cards.size();
+  assert(n >= 1);
+  std::vector<size_t> order(n, SIZE_MAX);
+  for (size_t i = 0; i < n; ++i) {
+    auto const &card = cards[i];
+    if (card.total_shards != n) {
+      return std::unexpected(std::format(
+          "db shard {} declares total_shards={} but {} shards present",
+          card.shard_id, card.total_shards, n));
+    }
+    if (card.shard_function_id != kShardFunctionId) {
+      return std::unexpected(std::format(
+          "db shard {} uses routing function {} but this binary uses {}",
+          card.shard_id, card.shard_function_id, kShardFunctionId));
+    }
+    if (card.shard_id >= n) {
+      return std::unexpected(std::format(
+          "db shard id {} out of range for {} shards", card.shard_id, n));
+    }
+    if (order[card.shard_id] != SIZE_MAX) {
+      return std::unexpected(
+          std::format("duplicate db shard id {}", card.shard_id));
+    }
+    order[card.shard_id] = i;
+  }
+  return order;
 }
 
 // ---------------------------------------------------------------------------

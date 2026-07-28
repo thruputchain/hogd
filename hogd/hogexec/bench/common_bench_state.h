@@ -25,6 +25,7 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -189,7 +190,10 @@ private:
         hogdb_addr() + ":" + std::to_string(exec_port_);
     db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(IntroExecResult{
         .exec_id = 0,
-        .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
+        .shards = {ShardCard{.shard_id = 0,
+                             .total_shards = 1,
+                             .shard_function_id = kShardFunctionId,
+                             .address_for_exec = server_addrport.c_str()}}}));
   }
 
   void start_db_server()
