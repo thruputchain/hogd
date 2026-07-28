@@ -25,13 +25,11 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/shared.h"
-#include "integration.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23/async.h"
 
@@ -484,17 +482,6 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 
           size_t num_added = 0;
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-            // Enforce the assumed per-transaction size bound at ingress
-            // (#3144). Otherwise an oversized tx is stored here and later
-            // forwarded to the executor, which decodes the whole batch before
-            // its own guard (#2857) rejects it. Dropping it here keeps it out
-            // of mempool memory and off the executor RPC entirely.
-            const size_t tx_size = x23::xdr_size(txs[tx_idx]);
-            if (tx_size > kMaxBytesSignedTransaction) {
-              info("scheduler: dropping oversized tx ({} bytes > {} limit)",
-                   tx_size, kMaxBytesSignedTransaction);
-              continue;
-            }
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
               // The account for this tx does not exist in our copy of hogdb, so
               // we silently drop the tx.
