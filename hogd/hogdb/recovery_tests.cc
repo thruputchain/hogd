@@ -1,6 +1,8 @@
 #include <cassert>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string_view>

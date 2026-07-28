@@ -150,8 +150,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
   std::optional<std::int64_t> schema_version =
       require_field(*metadata, "schemaVersion").as_integer();
-  ASSERT_TRUE(schema_version.has_value());
-  EXPECT_EQ(*schema_version, 1);
+  EXPECT_EQ(schema_version, std::optional<std::int64_t>{1});
   EXPECT_EQ(require_string(require_field(*metadata, "kind")),
             "hog-hosted-bootstrap");
   EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),

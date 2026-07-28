@@ -49,6 +49,7 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -2131,6 +2132,47 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
               std::string::npos)
         << stderr_output;
     EXPECT_TRUE(process.read_remaining_stdout().empty());
+  }
+}
+
+TEST(HogDevnode, DataDirPersistsGenesisNetworkHashAcrossRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+
+  auto wallet_contract = load_default_dev_wallet_contract();
+  const std::string manifest =
+      bootstrap_manifest_json(0, "groundhog-dev-accounts", "1000000000",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  for (std::string_view expected_state : {"fresh", "recovered"}) {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--bootstrap-manifest",
+        manifest_path.string(),
+    });
+    Readiness readiness = process.wait_for_readiness();
+    EXPECT_EQ(readiness.chain_state, expected_state);
+    EXPECT_EQ(
+        readiness.network_hash,
+        "00000000000000000000000000000000000000000000000000000000000000aa");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
+    EXPECT_EQ(format_network_hash(
+                  tip.db_tip().value.proposal_header.network_hash),
+              readiness.network_hash);
+
+    expect_clean_exit(process);
   }
 }
 
