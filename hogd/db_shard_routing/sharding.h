@@ -18,35 +18,52 @@
 
 namespace hogd {
 
-// The db sharding model. State is placed one of four ways; every RPC must read
-// the way its writes routed (a mismatch reads the wrong shard -- the
-// get_deployment bug). Classify every new RPC against this.
+// Which hogdb holds a given key.
 //
-//   1. Keyed (storage items, deployments, balances, RCQ, hog ages): owner
-//      shard, shard_of_address(address). By address, not full key, so an
-//      account's items co-locate; addresses are sha256-derived, so never route
-//      by user-chosen bytes.
-//   2. Content-addressed (contract code): primary shard (kPrimaryShard) only,
-//      by hash. Interim -- code is immutable, so hash % N is also safe.
-//   3. Replicated control (block lifecycle, genesis): written to every shard;
-//      each keeps its own chain and validates create_snapshot(prev) against it,
-//      so shards advance in lockstep. Reads require agreement on
-//      (height, id, block_hash), NOT db_hash (legitimately per-shard).
-//   4. Per-shard-minted (viewing snapshot ids): each shard mints its own, so a
-//      cross-shard op holds one per shard. NOT yet wired -- DatabaseProxy opens
-//      on the primary alone; see TODO(sharding) in open_viewing_snapshot.
+// A ramdb key is a one-byte prefix (hogdb_dao.h Prefix) followed by 32-byte
+// fields:
+//
+//   'B' | address              native token balance       hashed
+//   'D' | address              auth data                  hashed
+//   'K' | address | key        contract data              hashed
+//   'Q' | address | key        retrocausal queue block    hashed
+//   'C' | code hash            wasm code                  hashed
+//   'A' | address              hog age                    not hashed
+//   '<' ...                    db tip, cost model         not hashed
+//
+// An address is the sha256 of a public key (accounts) or of a deployment
+// preimage (contracts), so addresses spread uniformly on their own.
+//
+// shard_of_address() picks the shard from the address field alone. Everything
+// one account owns therefore lands on one shard, which is why the key field is
+// left out of the choice. A read has to repeat the routing its write used, or
+// it asks a shard that does not hold the item.
+//
+// 'C' keys hold a content hash where the others hold an address, so code lives
+// on shard 0 for now. Code never changes after it is written, so routing on the
+// code hash would work as well.
+//
+// '<' keys are not sharded. Each shard keeps its own globals and runs the whole
+// block lifecycle, validating create_snapshot(prev) against its own chain, so
+// shard tips must agree on height, id, and block_hash.
+//
+// db_hash is the one field that differs, because a shard hashes only the items
+// it holds (is_state_item in hogdb_dao.h decides which prefixes count). Those
+// hashes are LtHash16 multiset values, so the shards' sum to the hash an
+// unsharded db would produce, as long as each item is hashed on exactly one
+// shard. Genesis breaks that today by writing every item to every shard, and
+// the block header carries shard 0's hash alone.
 
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
 
-// The primary shard: content-addressed lookups (class 2) and global/keyless
-// requests (db tip) route here. See the sharding model above.
+// Shard 0. Holds the wasm code, and answers the requests that carry no address
+// (db tip, viewing snapshots).
 inline constexpr size_t kPrimaryShard = 0;
 
-// Routes by account address so an address's storage items co-locate on one
-// shard. Deterministic within a process. Precondition: shard_count >= 1;
-// returns a value in [0, shard_count).
+// Deterministic within a process. Precondition: shard_count >= 1; returns a
+// value in [0, shard_count).
 //
 // Placeholder hash (FNV-1a) until a network-agreed function replaces it -- its
 // only definition. KNOWN LIMITATION (low priority): FNV is unkeyed, so ground
