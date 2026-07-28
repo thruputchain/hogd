@@ -2135,7 +2135,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
   }
 }
 
-TEST(HogDevnode, DataDirPersistsGenesisNetworkHashAcrossRestart)
+TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2147,7 +2147,7 @@ TEST(HogDevnode, DataDirPersistsGenesisNetworkHashAcrossRestart)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  for (std::string_view expected_state : {"fresh", "recovered"}) {
+  auto start_and_check = [&](std::string_view expected_state) {
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
@@ -2173,7 +2173,19 @@ TEST(HogDevnode, DataDirPersistsGenesisNetworkHashAcrossRestart)
               readiness.network_hash);
 
     expect_clean_exit(process);
+  };
+
+  start_and_check("fresh");
+  {
+    HogDBDAO db = open_persistent_hogdb(data_dir);
+    HogDBStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    tip->value.proposal_header.network_hash = {};
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
   }
+  start_and_check("recovered");
+  start_and_check("recovered");
 }
 
 TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)

@@ -979,11 +979,25 @@ HogDevnodeNode::open_db_backend() const
   }
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       recovered_tip->value.proposal_header.network_hash != network_hash_) {
-    throw std::runtime_error(std::format(
-        "recovered chain network hash {} does not match requested network "
-        "hash {}",
-        format_network_hash(recovered_tip->value.proposal_header.network_hash),
-        format_network_hash(network_hash_)));
+    ProposalHeader &header = recovered_tip->value.proposal_header;
+    if (header.block_height == 0 && header.network_hash == NetworkHash{}) {
+      header.network_hash = network_hash_;
+      if (HogDBStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
+        status.error().raise("failed to migrate genesis network hash");
+      }
+      if (HogDBStatus<std::uint64_t> status = db.commit(); !status) {
+        status.error().raise("failed to persist genesis network hash");
+      }
+      info("migrated legacy genesis network hash to {}",
+           format_network_hash(network_hash_));
+    }
+    else {
+      throw std::runtime_error(std::format(
+          "recovered chain network hash {} does not match requested network "
+          "hash {}",
+          format_network_hash(header.network_hash),
+          format_network_hash(network_hash_)));
+    }
   }
   return db;
 }
