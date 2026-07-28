@@ -1,9 +1,63 @@
 #include "hogd/mempool/sharded_db_sched.h"
 
+#include <vector>
+
 #include "hogd/base/log.h"
-#include "hogd/db_shard_routing/sharding.h" // shard_of_address
+#include "hogd/base/rpc_message_size.h"       // kBulkRpcMaxMessageSize
+#include "hogd/base/rpc_server.h"             // create_client, server_address_to_sockaddr
+#include "hogd/db_shard_routing/sharding.h"   // shard_of_address, kShardFunctionId
 
 namespace hogd {
+
+x23::Async<std::shared_ptr<ShardedDbSched>>
+ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
+{
+  size_t const n = cards.size();
+  CHECK_GT(n, size_t{0});
+
+  // Validate the declared identities form exactly {0..n-1}: every card agrees
+  // on total_shards == n (the number that registered, i.e. --num-db-shards),
+  // uses the running routing function, and each shard_id appears once. Any
+  // violation is a misconfigured cluster -- fail-stop rather than bind clients
+  // to the wrong shards.
+  std::vector<bool> seen(n, false);
+  for (ShardCard const &card : cards) {
+    if (card.total_shards != n) {
+      panic("db shard {} declares total_shards={} but {} shards registered; "
+            "refusing to start",
+            card.shard_id, card.total_shards, n);
+    }
+    if (card.shard_function_id != kShardFunctionId) {
+      panic("db shard {} uses routing function {} but this binary uses {}; "
+            "refusing to start",
+            card.shard_id, card.shard_function_id, kShardFunctionId);
+    }
+    if (card.shard_id >= n) {
+      panic("db shard id {} out of range for {} shards; refusing to start",
+            card.shard_id, n);
+    }
+    if (seen[card.shard_id]) {
+      panic("duplicate db shard id {}; refusing to start", card.shard_id);
+    }
+    seen[card.shard_id] = true;
+  }
+
+  // Connect one client per shard, bound at index == its declared shard_id.
+  std::vector<std::shared_ptr<db_sched_client_t>> clients(n);
+  for (ShardCard const &card : cards) {
+    auto client = co_await create_client<DbSched1>(
+        server_address_to_sockaddr(card.address_for_sched),
+        /*retry=*/false,
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
+    if (!client) {
+      panic("ShardedDbSched::connect failed to connect db shard {}: {}",
+            card.shard_id, client.error().error_code().message());
+    }
+    clients[card.shard_id] =
+        std::make_shared<db_sched_client_t>(std::move(*client));
+  }
+  co_return std::make_shared<ShardedDbSched>(std::move(clients));
+}
 
 x23::Async<DbSchedResult>
 ShardedDbSched::create_snapshot(BlockID prev_block_id, BlockID block_id,
