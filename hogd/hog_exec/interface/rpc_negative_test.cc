@@ -21,6 +21,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -29,6 +30,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
@@ -106,6 +108,9 @@ protected:
         .protocol = hogd::version::kHogdProtocol(),
         .upid = {},
         .block_height = 0,
+        .shard_id = 0,
+        .total_shards = 1,
+        .shard_function_id = kShardFunctionId,
         .address_for_exec = std::format("localhost:{}", exec_port).c_str(),
         .address_for_sched =
             std::format("localhost:{}", db_wrapper_.coord_port()).c_str()};

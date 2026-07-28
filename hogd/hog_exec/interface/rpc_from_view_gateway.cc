@@ -16,6 +16,7 @@
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -63,6 +64,9 @@ make_view_database_identifier(std::string const &db_executor_address)
           .protocol = version::kHogdProtocol(),
           .upid = {},
           .block_height = 0,
+          .shard_id = 0,
+          .total_shards = 1,
+          .shard_function_id = kShardFunctionId,
           .address_for_exec = db_executor_address.c_str(),
           .address_for_sched = "",
           .address_for_auth = "",
