@@ -84,27 +84,30 @@ def plot_cost(ax, rows, total_loglets=290):
         seen.setdefault((moved, amat), []).append(thr)
     points = sorted(seen.items())
 
-    xs = [m / total_loglets for (m, _), _ in points]
+    # Percent of the loglets that actually hold data, not of the whole heap:
+    # the bench provisions 8x headroom so the heap is 30x the live set, which
+    # would make any "fraction of heap" figure meaninglessly small.
+    xs = [100.0 * m / total_loglets for (m, _), _ in points]
     ys = [a for (_, a), _ in points]
     ax.step(xs, ys, where="post", color=INK_MUTED, linewidth=1.5, zorder=2)
     ax.scatter(xs, ys, s=42, color=CONSOLIDATED, edgecolor=SURFACE,
                linewidth=1.2, zorder=4)
 
     for (moved, amat), thrs in points:
-        x = moved / total_loglets
+        x = 100.0 * moved / total_loglets
         label = f"θmix≥{min(thrs):.3f}" if moved else "no pass"
-        ax.annotate(f"{label}\n{moved} loglets", (x, amat),
+        ax.annotate(f"{label}\n{moved} loglets, {moved * 2} MiB", (x, amat),
                     textcoords="offset points",
-                    xytext=(8, 10 if moved else -22), fontsize=7.5,
+                    xytext=(8, 12), fontsize=7.5,
                     color=INK_SOFT, ha="left")
 
     ax.axhline(FAST_NS, color=INK_MUTED, linewidth=1, dashes=(4, 3), zorder=1)
-    ax.text(0.02, FAST_NS - 6, "DRAM", fontsize=7.5, color=INK_SOFT,
+    ax.text(-6, FAST_NS - 6, "DRAM", fontsize=7.5, color=INK_SOFT,
             ha="left", va="top")
 
-    ax.set_xlim(-0.08, 1.32)
+    ax.set_xlim(-8, 132)
     ax.set_ylim(0, 200)
-    ax.set_xlabel("Fraction of loglets relocated", fontsize=8.5, color=INK)
+    ax.set_xlabel("Occupied loglets relocated (%)", fontsize=8.5, color=INK)
     ax.set_ylabel("Modelled AMAT (ns)", fontsize=8.5, color=INK)
     ax.set_title("(b)", fontsize=9, color=INK, loc="left", pad=6)
 
