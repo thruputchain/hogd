@@ -61,9 +61,9 @@ public:
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
     : dir_(std::move(dir)),
-      loglet_allocator_(LogletAllocator::create(heap_size,
-                                                available_parallelism(),
-                                                [this] { notify_low_mem(); })),
+      loglet_allocator_(LogletAllocator::create(
+          heap_size, available_parallelism() * kCompactionLogletsPerThread,
+          [this] { notify_low_mem(); })),
       pool_(available_parallelism()),
       item_allocator_(*loglet_allocator_, pool_, &map_),
       disk_writer_(*loglet_allocator_, dir_, write_head_order,

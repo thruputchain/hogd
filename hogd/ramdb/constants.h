@@ -20,6 +20,15 @@ inline constexpr size_t kDiskLogCleanupRatio = 4;
 inline constexpr float kLowMemoryRatio = 0.1F;
 // the min fraction of a loglet's memory utilization before it can be compacted.
 inline constexpr float kMinCompactUtilization = 0.8F;
+// the number of loglets reserved per compactor thread. A compaction worker
+// needs one open destination plus one more to roll over into when that fills,
+// and it cannot release its source until the loglet is fully drained. Reserving
+// only one per thread starves every worker the first time it rolls over, since
+// compaction runs precisely when free loglets are already scarce.
+//
+// Database::estimate_heap_size provisions against this same figure; the two
+// must agree or the heap is sized for a reserve the allocator does not keep.
+inline constexpr size_t kCompactionLogletsPerThread = 2;
 // the fraction of available cores that can be used for BG activity when active.
 inline constexpr int kActiveBGCoreFraction = 4;
 // the number of locks per core for the ScalableMap.

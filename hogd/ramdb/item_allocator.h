@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include "hogd/base/perthread.h"
@@ -72,7 +73,11 @@ private:
 struct CompactionStats {
   size_t items;
   size_t live_items;
-  size_t loglets_freed;
+  // net loglets released: sources freed minus destinations taken. Signed
+  // because a pass can legitimately take more than it frees -- as an unsigned
+  // count that wraps, and the wrapped value reads as an enormous amount of
+  // memory reclaimed.
+  ptrdiff_t loglets_freed;
 
   CompactionStats &operator+=(const CompactionStats &stats)
   {

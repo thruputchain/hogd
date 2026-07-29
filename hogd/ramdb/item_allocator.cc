@@ -170,7 +170,13 @@ ItemAllocator::compact(float utilization_thresh)
   }
 
   // determine how much memory was freed.
-  size_t free_bytes = stats.loglets_freed * kLogletRegionSize;
+  // A pass that took more loglets than it released reclaimed nothing; report
+  // it as such rather than letting the negative net wrap into a huge figure
+  // that would convince background_worker memory had been recovered.
+  size_t free_bytes =
+      stats.loglets_freed > 0
+          ? static_cast<size_t>(stats.loglets_freed) * kLogletRegionSize
+          : 0;
   size_t total_bytes = allocator_.size();
   info("reclaimed {}/{} ({}% freed)", print_iec_bytes(free_bytes),
        print_iec_bytes(total_bytes), free_bytes * 100 / total_bytes);
@@ -183,18 +189,26 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 {
   CompactionStats stats{};
   size_t bytes_moved = 0;
+  // set when the reserved pool runs dry mid-loglet, which leaves live items
+  // behind in src and makes it unsafe to free.
+  bool exhausted = false;
 
-  // alloc_loglet is a utility for allocating reserved loglets.
+  // alloc_loglet is a utility for allocating reserved loglets. It returns an
+  // empty UniqueLoglet if the reserve is exhausted; every caller must check.
   auto alloc_loglet = [this, &stats]() {
     UniqueLoglet dst =
         make_unique_loglet(allocator_, LogletMode::kMemoryItems, true);
-    assert(static_cast<bool>(dst));
-    stats.loglets_freed--;
+    if (dst) [[likely]]
+      stats.loglets_freed--;
     return dst;
   };
 
   // compact items in this loglet: move live items and skip dead items.
   for (ItemHeader &h : *src) {
+    // stop as soon as there is nowhere left to relocate to.
+    if (exhausted) [[unlikely]]
+      break;
+
     stats.items++;
     ItemHeader *src_item = std::addressof(h);
 
@@ -213,8 +227,8 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
         src_item->get_key(),
-        [this, alloc_loglet, src_item, &bytes_moved,
-         &stats](ItemHeader **hptr, size_t /* hash */) mutable {
+        [this, alloc_loglet, src_item, &bytes_moved, &stats,
+         &exhausted](ItemHeader **hptr, size_t /* hash */) mutable {
           // modify_locked matched by key, not by pointer. A concurrent
           // different-sized put or remove+put may have already unlinked
           // src_item and inserted a new same-key header; unlink()
@@ -226,10 +240,17 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           if (*hptr != src_item)
             return;
 
-          // initialize the first use of the per-thread loglet.
+          // initialize the first use of the per-thread loglet. Leaving the
+          // item where it is costs only a deferred relocation; dereferencing
+          // an exhausted reserve would be a crash.
           static thread_local UniqueLoglet dst;
-          if (!dst) [[unlikely]]
+          if (!dst) [[unlikely]] {
             dst = alloc_loglet();
+            if (!dst) [[unlikely]] {
+              exhausted = true;
+              return;
+            }
+          }
 
           // allocate the destination item
           ItemHeader *dst_item = dst->clone(src_item);
@@ -237,6 +258,10 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
             // loglet is full; get a new one.
             give_to_compactor(std::move(dst));
             dst = alloc_loglet();
+            if (!dst) [[unlikely]] {
+              exhausted = true;
+              return;
+            }
             dst_item = dst->clone(src_item);
             assert(dst_item != nullptr);
           }
@@ -251,6 +276,18 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           stats.live_items++;
           bytes_moved += dst_item->total_bytes();
         });
+  }
+
+  if (exhausted) [[unlikely]] {
+    // Live items are still in src, so freeing it would lose them. Put it back
+    // on the compactable list for a later pass instead. The pass reclaims less
+    // than it hoped to, which background_worker already handles: a compaction
+    // that frees nothing escalates, and a still-starved allocator reports
+    // kNoMemory rather than crashing.
+    warn("compaction reserve exhausted; deferring a partially compacted "
+         "loglet");
+    give_to_compactor(std::move(src));
+    return stats;
   }
 
   stats.loglets_freed++;

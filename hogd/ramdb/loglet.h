@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -351,7 +352,14 @@ public:
 
   LogletAllocator(std::byte *base, size_t len, size_t reserved_count,
                   std::function<void()> low_mem_observer)
-    : base_addr_(base), len_(len), reserved_count_(reserved_count),
+    : base_addr_(base), len_(len),
+      // Ordinary allocation waits for free_loglets_ to exceed the reserve, so
+      // a reserve at or above the region's total loglet count would make that
+      // wait unsatisfiable and turn every allocation into an OOM. Callers
+      // sizing via estimate_heap_size are always well clear of this; the clamp
+      // is for heap sizes chosen directly.
+      reserved_count_(
+          std::min(reserved_count, (len / kLogletRegionSize) / 4)),
       loglets_(len / kLogletRegionSize),
       low_mem_observer_(std::move(low_mem_observer))
   {}

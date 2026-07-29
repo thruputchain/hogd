@@ -208,7 +208,15 @@ LogletAllocator::alloc(LogletMode mode, bool use_reserved)
   }
 
   // allocate a free loglet.
-  assert(!free_loglets_.empty());
+  //
+  // The reserved path skips the wait above, so the free list can legitimately
+  // be empty here: sustained compaction draws reserved loglets faster than
+  // finishing compactors return their sources. Fail closed and let the caller
+  // cope -- make_unique_loglet() already documents that its result must be
+  // checked. Asserting instead left Release builds reading back() off an empty
+  // vector.
+  if (unlikely(free_loglets_.empty()))
+    return nullptr;
   Loglet *ll = free_loglets_.back();
   free_loglets_.pop_back();
   if constexpr (is_debug_build())
