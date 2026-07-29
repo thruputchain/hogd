@@ -261,13 +261,14 @@ remote_launch "$indexer_server" "$INDEXER_BINARY" \
 
 # Start hogdb.
 echo "Start hogdb..."
-for s in "${hogdb_servers[@]}"; do
+for i in "${!hogdb_servers[@]}"; do
+  s="${hogdb_servers[$i]}"
   # Remove any existing database so the experiment starts from a clean slate.
   if $delete_db; then
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   fi
   remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT --shard-id "$i" --total-shards "${#hogdb_servers[@]}"
 done
 
 # Start auth.
