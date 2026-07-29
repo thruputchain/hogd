@@ -31,9 +31,10 @@ constexpr size_t kNumTxs = 100;
 
 } // namespace
 
+namespace {
 // A Scheduler over `shard_count` db shards. record_shard_transfer_finished
 // only reads shard_count(), never the clients, so null client handles suffice.
-static std::shared_ptr<Scheduler>
+std::shared_ptr<Scheduler>
 make_scheduler_with_shards(size_t shard_count)
 {
   std::vector<std::shared_ptr<db_sched_client_t>> clients(shard_count);
@@ -41,6 +42,7 @@ make_scheduler_with_shards(size_t shard_count)
   return std::make_shared<Scheduler>(/*current_block=*/-1,
                                      std::move(sharded_db));
 }
+} // namespace
 
 // The transfer barrier must advance to block N only once EVERY shard has
 // reported N, even when shards' notifications arrive interleaved and out of
