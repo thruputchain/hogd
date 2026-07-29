@@ -74,6 +74,10 @@ constexpr uint64_t kBenchSeed = 0x5DEECE66DULL;
 // layout, which bounds what any consolidator could achieve.
 bool bench_sorted_hot = false;
 
+// Number of times the payment set is replayed. More than one round is what lets
+// the compactor run; payers must be funded for every round.
+int bench_rounds = 1;
+
 // Two-tier latency model and fast-tier share, matching ramdb_bench so the
 // numbers from the two binaries are comparable.
 constexpr double kFastNs = 70.0;
@@ -353,14 +357,17 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
     if (auto ret = bench->db_.write_nnint128(make_key(0, i), 0); !ret)
       fail(ret.error());
   }
+  // Each payer sends one unit per round, so it has to hold one unit per round.
+  auto rounds = static_cast<int128_t>(std::max(bench_rounds, 1));
   for (size_t i = 1; i < n; i++) {
-    if (auto ret = bench->db_.write_nnint128(make_key(i, 0), 1); !ret)
+    if (auto ret = bench->db_.write_nnint128(make_key(i, 0), rounds); !ret)
       fail(ret.error());
   }
   // as in manytoone, each source records a single replay entry.
   populate_account_balances(bench->db_, n,
-                            bench->cost_model_.kBaseItemCost +
-                                bench->cost_model_.kReplayCacheCostPerEntry);
+                            (bench->cost_model_.kBaseItemCost +
+                             bench->cost_model_.kReplayCacheCostPerEntry) *
+                                rounds);
   auto lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
@@ -442,8 +449,6 @@ Benchmark::run()
 
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1,
-                              BlockExecutionMode::kBlockExecutionModeProposal);
 
   ConsensusValue tip_value{};
   tip_value.proposal_header.block_height = 0;
@@ -453,61 +458,72 @@ Benchmark::run()
   if (auto ret = db_.write_dbtip(tip); !ret)
     fail(ret.error());
 
-  // invoke_tx simulates DB operations from a contract invocation.
-  auto invoke_fn = [&block, &tip](const Payment &p) {
-    CHECK(block.try_acquire_reference());
+  // Each round replays every payment as a fresh block. Repeating is what
+  // pressures the heap: one pass writes a bounded amount and never reaches
+  // kLowMemoryRatio, so the compactor -- the thing that actually relocates
+  // items, and therefore the thing that determines steady-state layout --
+  // never runs.
+  for (int round = 0; round < bench_rounds; ++round) {
+    PerThreadARC<BlockTX> block(
+        db_, cost_model_, background_commit_worker, 1,
+        BlockExecutionMode::kBlockExecutionModeProposal);
 
-    InvokeTX tx(block);
-    if (p.uniquifier) {
-      CHECK_GE(p.uniquifier->block_expiry_height,
-               tip.value.proposal_header.block_height);
-      auto ret =
-          tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
-                                        std::to_underlying(
-                                            StorageDeltaFlags::None));
-      if (!ret)
+    // invoke_tx simulates DB operations from a contract invocation.
+    auto invoke_fn = [&block, &tip](const Payment &p) {
+      CHECK(block.try_acquire_reference());
+
+      InvokeTX tx(block);
+      if (p.uniquifier) {
+        CHECK_GE(p.uniquifier->block_expiry_height,
+                 tip.value.proposal_header.block_height);
+        auto ret =
+            tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
+                                          std::to_underlying(
+                                              StorageDeltaFlags::None));
+        if (!ret)
+          fail(ret.error());
+      }
+      if (auto ret =
+              tx.request_nnint128(p.src, -p.amount,
+                                  std::to_underlying(StorageDeltaFlags::None));
+          !ret)
         fail(ret.error());
+      if (auto ret =
+              tx.request_nnint128(p.dst, p.amount,
+                                  std::to_underlying(StorageDeltaFlags::None));
+          !ret)
+        fail(ret.error());
+      if (auto ret = tx.sync_balance_locks(); !ret)
+        fail(ret.error());
+      if (auto ret = tx.commit(); !ret)
+        fail(ret.error());
+    };
+
+    // run invoke_tx in parallel on the workers for all payment ops.
+    constexpr size_t kBatchesPerWorker = 4;
+    size_t width = ops_.size() / workers_.worker_count() / kBatchesPerWorker;
+    workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
+
+    // Close the block: stage changes and optionally compute the hash.
+    if (compute_db_hash_) {
+      auto hash_result = block.get().close(StorageLongHash{});
+      CHECK(hash_result.has_value());
+      asm volatile("" : : "m"(*hash_result) : "memory");
     }
-    if (auto ret =
-            tx.request_nnint128(p.src, -p.amount,
-                                std::to_underlying(StorageDeltaFlags::None));
-        !ret)
-      fail(ret.error());
-    if (auto ret =
-            tx.request_nnint128(p.dst, p.amount,
-                                std::to_underlying(StorageDeltaFlags::None));
-        !ret)
-      fail(ret.error());
-    if (auto ret = tx.sync_balance_locks(); !ret)
-      fail(ret.error());
-    if (auto ret = tx.commit(); !ret)
-      fail(ret.error());
-  };
+    else {
+      CHECK(block.get().close_skip_hash_for_testing().has_value());
+    }
 
-  // run invoke_tx in parallel on the workers for all payment ops.
-  constexpr size_t kBatchesPerWorker = 4;
-  size_t width = ops_.size() / workers_.worker_count() / kBatchesPerWorker;
-  workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
+    // commit changes to the ramdb.
+    auto ret = block.get().commit(workers_).and_then([this] {
+      // persist everything to the database.
+      return db_.commit().transform([](uint64_t lsn) {});
+    });
+    if (!ret)
+      fail(ret.error());
 
-  // Close the block: stage changes and optionally compute the hash.
-  if (compute_db_hash_) {
-    auto hash_result = block.get().close(StorageLongHash{});
-    CHECK(hash_result.has_value());
-    asm volatile("" : : "m"(*hash_result) : "memory");
+    CHECK(block.initiate_shutdown());
   }
-  else {
-    CHECK(block.get().close_skip_hash_for_testing().has_value());
-  }
-
-  // commit changes to the ramdb.
-  auto ret = block.get().commit(workers_).and_then([this] {
-    // persist everything to the database.
-    return db_.commit().transform([](uint64_t lsn) {});
-  });
-  if (!ret)
-    fail(ret.error());
-
-  CHECK(block.initiate_shutdown());
 }
 
 void
@@ -1109,6 +1125,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "(default: 8.0; lower lets the compactor run)");
     std::println("  -S, --sorted           place the hot payees contiguously "
                  "(consolidated ceiling)");
+    std::println("  -r, --rounds <N>       replay the payment set N times "
+                 "(default: 1; >1 lets the compactor run)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1139,6 +1157,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"theta",     required_argument, nullptr, 't'},
       {"heap",      required_argument, nullptr, 'H'},
       {"sorted",    no_argument,       nullptr, 'S'},
+      {"rounds",    required_argument, nullptr, 'r'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1154,7 +1173,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:S", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1183,6 +1202,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'S':
       hogd::bench_sorted_hot = true;
+      break;
+    case 'r':
+      hogd::bench_rounds = std::stoi(optarg);
       break;
     case 'h':
       print_usage();

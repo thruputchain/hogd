@@ -205,7 +205,46 @@ So B2 (the classifier study) is back to being load-bearing rather than a sensiti
 analysis, and it has to be a genuine *read*-hotness signal — bit-stolen counter, CLOCK
 bits, or the off-header sketch. Which reopens the three blockers listed below.
 
-### Consequence for D2
+### D2 answered: a ledger's layout is frozen at creation
+
+Measured on the real hogdb path via `hogdb_bench zipf_payments` (2 M accounts,
+θ=0.99, 290 occupied loglets):
+
+| | fast-tier hot util | hit rate | modelled AMAT |
+|---|---|---|---|
+| hot payees scattered | 0.204 | 0.699 | **139.3 ns** |
+| hot payees sorted (ceiling, `--sorted`) | 0.304 | 0.957 | **79.8 ns** |
+| θ=0 scattered (control) | 0.594 | 0.546 | 174.4 ns |
+
+**1.75× of headroom — and it is permanent.** Replaying the payment set 40 times
+produced a byte-identical layout line and **zero compaction passes**. Items never
+moved.
+
+The reason is [scalable_map.cc:212-221](../../hogd/ramdb/scalable_map.cc#L212-L221):
+a `put` whose value size is unchanged updates **in place** — no allocation, no
+tombstone, no log growth. Account balances are `int128_xdr`, a fixed 16 bytes, so
+*every* payment takes that path. Payment traffic therefore never fragments the
+item log, never pressures memory, and never wakes the compactor.
+
+**This inverts the earlier reasoning.** The implicit self-consolidation measured
+in H5 depended on *size-changing* overwrites forcing realloc, which is what moved
+hot items to the write head and stratified loglets by age. Fixed-width balance
+updates bypass that mechanism entirely. So for a ledger:
+
+- the layout is whatever the initial write order produced, permanently;
+- the 1.75× gap is not a transient to be washed out, it is the steady state;
+- compaction cannot fix it, because compaction never touches these items;
+- **relocation driven by read popularity is the only mechanism that can** — which
+  is precisely what ObjecTier proposes.
+
+That makes the ledger a *stronger* case for ObjecTier than the synthetic churn
+experiments suggested, not a weaker one. It also means B1 alone is insufficient
+here: routing relocations by temperature only helps items the compactor visits,
+and it visits none of these. A ledger needs consolidation triggered by
+*mixedness* (V1) independent of fragmentation — the paper's §4.2 victim
+selection, not ramdb's liveness-driven trigger.
+
+### Earlier consequence for D2 (superseded by the above)
 
 Groundhog p2p payments are the correlated case: an account being transacted is both read
 and written. If the deployed workload sits near ρ=1, ObjecTier's headroom there is closer
