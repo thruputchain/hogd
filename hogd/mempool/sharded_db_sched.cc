@@ -56,11 +56,42 @@ x23::Async<DbSchedResult>
 ShardedDbSched::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                 BlockExecutionMode mode)
 {
-  co_return co_await shards_.broadcast_status(
-      [&](auto &client) {
+  // All-or-nothing: create must succeed on every shard. Collect per-shard
+  // results (not a reduced first-error) so that on a partial failure we can
+  // abandon exactly the shards that did create -- otherwise those shards leak
+  // an open BlockTX for this block.
+  std::vector<DbSchedResult> results =
+      co_await shards_.broadcast_collect<DbSchedResult>([&](auto &client) {
         return client->dbsched_create_snapshot(prev_block_id, block_id, mode);
-      },
-      DbSchedResult::DbSchedResultOK);
+      });
+
+  DbSchedResult first_error = DbSchedResult::DbSchedResultOK;
+  for (DbSchedResult r : results) {
+    if (r != DbSchedResult::DbSchedResultOK) {
+      first_error = r;
+      break;
+    }
+  }
+  if (first_error == DbSchedResult::DbSchedResultOK) {
+    co_return DbSchedResult::DbSchedResultOK;
+  }
+
+  // Roll back the shards that succeeded. Abandon only those: abandoning a shard
+  // that never created returns non-OK and trips a CHECK downstream. Best-effort
+  // -- log but keep the original create error, which is what we report.
+  for (size_t s = 0; s < shards_.shard_count(); ++s) {
+    if (results[s] != DbSchedResult::DbSchedResultOK) {
+      continue;
+    }
+    DbSchedResult abandoned =
+        co_await shards_.shard(s)->dbsched_abandon_snapshot(block_id);
+    if (abandoned != DbSchedResult::DbSchedResultOK) {
+      error("create_snapshot rollback: abandon_snapshot failed on shard {} for "
+            "block {}: {}",
+            s, block_id, abandoned);
+    }
+  }
+  co_return first_error;
 }
 
 x23::Async<DbSchedResult>
