@@ -78,6 +78,7 @@ endif()
 add_executable(
   hog_db_test
   auth_subscription_test.cc
+  genesis_sharding_test.cc
   hog_db_test.cc
   item_change_auth_test.cc
   item_change_exclusive_test.cc

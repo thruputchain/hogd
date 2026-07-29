@@ -793,23 +793,9 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     account_state.hog_age.address = account;
   }
 
-  // Genesis is replicated on every shard, so each dispatches the same block-0
-  // deltas; apply each exactly once (else [kHogAgeGroupReceived] is multiplied
-  // by the shard count). It is a tiny one-time batch, so apply it serially --
-  // non-genesis blocks take the parallel, dedup-free path below.
-  // TODO(vpawar): drop once genesis dispatch is shard-owner-only on the hogdb
-  // side.
-  if (transfers.block == 0) {
-    x23::CoroGuard cg;
-    co_await cg(global_lock_);
-    for (const Delta &delta : transfers.deltas) {
-      if (genesis_applied_deltas_.insert(delta.address).second) {
-        process_transfers_helper(delta, transfers.block);
-      }
-    }
-    co_return;
-  }
-
+  // Genesis is now loaded shard-owner-only on the hogdb side, so each block-0
+  // delta arrives from exactly one shard -- no cross-shard dedup needed, and
+  // block 0 takes the same parallel path as every other block.
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;

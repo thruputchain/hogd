@@ -352,11 +352,6 @@ private:
   // record_shard_transfer_finished.
   std::unordered_map<BlockHeight, uint32_t> transfer_reports_;
 
-  // Block-0 addresses already applied, so the genesis deltas replicated from
-  // each shard are counted once (see [process_transfers]). TODO: remove once
-  // genesis dispatch is shard-owner-only.
-  std::unordered_set<ContractAddress, ByteArrayHasher> genesis_applied_deltas_;
-
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };
 
