@@ -104,12 +104,9 @@ public:
     // commit either.
     co_await scheduler_->write_all_average_hog_ages_to_db();
 
-    // Each shard sends one HogsTransferred per committed block; we apply each
-    // slice above as it arrives, but only advance the barrier once EVERY shard
-    // has reported this block. Advancing on a single shard's slice would let a
-    // waiter see the block "done" with other shards' deltas unapplied (stale
-    // ages), and a late slice could move the futex backwards and trip
-    // wait_for_transfer_data's CHECK. Serialized here by scheduler_lock_.
+    // Apply each shard's slice above as it arrives, but advance the barrier
+    // only once every shard has reported this block (see
+    // record_shard_transfer_finished).
     if (scheduler_->record_shard_transfer_finished(transfers.block)) {
       scheduler_->transfer_finished_.store(transfers.block);
       scheduler_->transfer_finished_.broadcast(&default_threadpool());

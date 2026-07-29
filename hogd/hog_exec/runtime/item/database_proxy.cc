@@ -192,10 +192,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   if (std::holds_alternative<ShardedDB>(db_identifier)) {
     auto sharded_db = std::get<ShardedDB>(db_identifier);
     assert(!sharded_db.shards_.empty());
-    // Bind one client per shard at index == its declared shard_id, so
-    // client_for's shard_of_address routing agrees with how the mempool wrote
-    // the data. order_shards_by_id fail-stops on a bad identity set (shared
-    // with the mempool facade). Requests are routed per key by client_for.
+    // Bind clients by declared shard_id (fail-stop on a bad set, shared with
+    // the mempool) so client_for's routing matches how the mempool wrote.
     auto order_result = order_shards_by_id(sharded_db.shards_);
     if (!order_result) {
       throw std::runtime_error(
@@ -244,12 +242,9 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  // Deployment metadata is address-keyed (written via
-  // try_push_new_subtransaction, routed by shard_of_key), so read it from the
-  // shard that owns `addr` -- NOT the primary shard. Reading from the primary
-  // made any runtime-deployed contract whose address does not hash to shard 0
-  // uninvokable; genesis contracts hid it because genesis is replicated on
-  // every shard.
+  // Deployment metadata is address-keyed, so read it from the owner shard, not
+  // the primary -- else a contract whose address isn't on shard 0 is
+  // uninvokable.
   auto &client = client_for(addr);
   auto res = client.get_deployment(block_id, addr);
   return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
@@ -287,19 +282,15 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
-    // Fan out commit to every shard (each has the tx open from the prepare
-    // push) -- the commit phase of the cross-shard 2PC. New contracts are
-    // content-addressed and live on the primary shard (shard 0); other shards
-    // commit only their own deltas, with an empty contract batch.
+    // Fan out commit to every shard (2PC commit phase). New contracts are
+    // content-addressed (primary shard); others commit only their own deltas.
     static const BorrowedContractBatch::hash_set_t kEmptyHashes;
     static const BorrowedContractBatch::contract_map_t kEmptyContracts;
     static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
                                                    kEmptyContracts);
-    // Visit ALL shards even after one fails and return the first error:
-    // stopping early would leave shards 0..N-1 committed while shards N+1..K
-    // are only prepared. The caller's abort is a no-op on the already-committed
-    // shards, so the abandoned prepared shards would diverge permanently
-    // (mirrors abort_transaction).
+    // Visit ALL shards and return the first error: stopping early would leave
+    // some shards committed and others only prepared -- abort can't undo the
+    // committed ones, so they'd diverge permanently.
     SystemStatus<void> first_error{};
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
       auto res = clients_[shard].commit_transaction(block_id, tx_id,
@@ -337,11 +328,8 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
 SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  // Fan out abort to every shard the transaction has open. Visit ALL shards
-  // even after one fails and return the first error:
-  // try_push_new_subtransaction may have opened a transaction on shards past a
-  // failing one, and stopping early would leak that open state indefinitely
-  // (mirrors broadcast_status).
+  // Visit ALL shards and return the first error: stopping early would leak the
+  // open transaction on shards past the failing one.
   SystemStatus<void> first_error{};
   for (auto &client : clients_) {
     auto res = client.abort_transaction(block_id, tx_id);
@@ -549,14 +537,9 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
         if (conflict_out != nullptr) {
           *conflict_out = std::move(res.conflict());
         }
-        // A failed push must leave every shard at the depth it started at, so
-        // that `false` means "nothing pushed" regardless of shard count -- then
-        // both possible follow-ups (the caller aborts, or it pops 1 and
-        // carries on) stay correct without any cross-shard rule to remember.
-        // The conflicting shard already rolled itself back (hogdb's
-        // rollback_to_savepoint(depth-1), rpc_from_exec.cc); undo the earlier
-        // shards that accepted by popping the one subtransaction each just
-        // took.
+        // A failed push must leave every shard at its start depth (so `false`
+        // means "nothing pushed"). The conflicting shard already rolled itself
+        // back; pop the subtransaction each earlier shard accepted.
         for (size_t undo = 0; undo < shard; ++undo) {
           auto pr = clients_[undo].pop_subtransactions(block_id, tx_id, 1);
           if (to_system_error_code<VoidMarker{}>(pr, [] {}).has_value()) {
@@ -598,12 +581,8 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  // Every shard has an aligned savepoint stack (see
-  // try_push_new_subtransaction), so pop `count` from each. Visit ALL shards
-  // even after one fails and return the first error: stopping early would leave
-  // shards past the failing one a pop deeper, desynchronising the savepoint
-  // stacks the next try_push_new_subtransaction relies on (mirrors
-  // broadcast_status).
+  // Pop `count` from every shard's (aligned) savepoint stack. Visit ALL shards
+  // and return the first error: stopping early would desync the stacks.
   SystemStatus<void> first_error{};
   for (auto &client : clients_) {
     auto res = client.pop_subtransactions(block_id, tx_id, count);

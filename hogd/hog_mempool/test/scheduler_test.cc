@@ -44,11 +44,9 @@ make_scheduler_with_shards(size_t shard_count)
 }
 } // namespace
 
-// The transfer barrier must advance to block N only once EVERY shard has
-// reported N, even when shards' notifications arrive interleaved and out of
-// height order. Here shard A races ahead to block 1 before shard B has
-// reported block 0; block 0 must not be considered complete until shard B's
-// block-0 notification lands, and each height completes exactly once.
+// The barrier advances to N only once EVERY shard reports N, even when reports
+// interleave out of height order (shard A races ahead to block 1 before shard B
+// reports block 0).
 TEST(Scheduler, TransferBarrierAdvancesOnlyAfterAllShardsReportOutOfOrder)
 {
   std::shared_ptr<Scheduler> scheduler = make_scheduler_with_shards(2);

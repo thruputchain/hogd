@@ -28,9 +28,7 @@ ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
   size_t const n = cards.size();
   CHECK_GT(n, size_t{0});
 
-  // Validate the declared identity set and get the shard_id -> card-index
-  // binding order. Shared with the executor's DatabaseProxy so both sides agree
-  // on which shard is which; a bad set is a misconfigured cluster -> fail-stop.
+  // Bind clients by declared shard_id (fail-stop on a bad set).
   auto order_result = order_shards_by_id(cards);
   if (!order_result) {
     panic("ShardedDbSched::connect: {}; refusing to start",
@@ -38,7 +36,6 @@ ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
   }
   std::vector<size_t> const &order = *order_result;
 
-  // Connect one client per shard, bound at index == its declared shard_id.
   std::vector<std::shared_ptr<db_sched_client_t>> clients(n);
   for (size_t id = 0; id < n; ++id) {
     ShardCard const &card = cards[order[id]];
@@ -124,14 +121,10 @@ ShardedDbSched::load_genesis(GenesisConfiguration genesis_configuration,
 x23::Async<DbTipResult>
 ShardedDbSched::get_tip()
 {
-  // Read EVERY shard, never just shard 0: this is the validator-startup check
-  // that a partially-committed cluster (commit fans out non-atomically) refuses
-  // to start rather than livelock on create_snapshot(prev=tip). Two fail-stop
-  // invariants: (1) genesis presence is unanimous -- else a wiped shard 0 would
-  // report "no genesis" and re-run genesis against shards that already have it;
-  // (2) committed shards agree on (height, id, txs_hash), but NOT the storage
-  // hashes (legitimately per-shard). Log before each CHECK for an actionable
-  // report.
+  // Startup fail-stop for a partially-committed cluster: read every shard and
+  // require (1) unanimous genesis presence (else a wiped shard 0 re-runs
+  // genesis against shards that have it) and (2) agreement on (height, id,
+  // txs_hash) -- not the per-shard storage hashes. Log before each CHECK.
   DbTipResult primary = co_await shards_.primary()->dbsched_get_tip();
   bool const primary_ok = primary.result() == DbSchedResult::DbSchedResultOK;
   for (size_t i = 1; i < shards_.shard_count(); ++i) {

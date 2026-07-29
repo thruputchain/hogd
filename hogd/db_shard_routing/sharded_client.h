@@ -10,13 +10,10 @@
 
 namespace hogd {
 
-// One client per shard plus the async primitives for talking to a sharded
-// database over a coroutine RPC interface, routing via the shared sharding.h
-// core. `Client` is any per-shard handle (a value or shared_ptr); the caller's
-// lambdas dereference it, so both `client.m(...)` and `client->m(...)` work.
-// Async-only -- the synchronous executor DatabaseProxy uses the sharding.h core
-// directly instead. sharding.h says which shard holds which keys; a new RPC has
-// to follow it.
+// One client per shard plus the async fan-out primitives, routing via
+// sharding.h. `Client` is any per-shard handle; the caller's lambdas
+// dereference it. Async-only (the executor's DatabaseProxy uses the sharding.h
+// core).
 template<typename Client> class ShardedClient {
 public:
   explicit ShardedClient(std::vector<Client> clients)
@@ -27,32 +24,26 @@ public:
 
   size_t shard_count() const { return clients_.size(); }
 
-  // The primary shard, for global/keyless requests (db tip, snapshots) and
-  // content-addressed lookups.
+  // The primary shard (global/keyless + content-addressed requests).
   Client &primary() { return clients_[kPrimaryShard]; }
 
-  // Shard s's client, for per-shard fan-outs that don't reduce cleanly through
-  // the broadcast/scatter helpers (genesis load, close/commit snapshot).
-  // Precondition: s < shard_count().
+  // Shard s's client, for fan-outs that don't reduce through the helpers
+  // (genesis load, close/commit snapshot). Precondition: s < shard_count().
   Client &shard(size_t s)
   {
     assert(s < clients_.size());
     return clients_[s];
   }
 
-  // Scatter a keyed batch across shards and gather the per-item results back
-  // into the ORIGINAL input order (empty shards skipped).
-  //   route(item, shard_count) -> owning shard index in [0, shard_count)
-  //   call(client, sub_batch)  -> x23::Async<ResultBatch>, results in sub-batch
-  //                               order
-  // Every shard's call is launched before any is awaited (Async is
-  // suspend_never), so N shards cost one round-trip, not N.
+  // Scatter a keyed batch (empty shards skipped) and gather results into input
+  // order. call(client, sub_batch) -> Async<ResultBatch>. Every shard's call is
+  // launched before any is awaited, so N shards cost one round-trip, not N.
   template<typename ResultBatch, typename Batch, typename Route, typename Call>
   x23::Async<ResultBatch> scatter_gather(Batch const &items, Route route,
                                          Call call)
   {
     auto split = split_by_shard(items, clients_.size(), route);
-    // Zero-copy views over `items`; both outlive every await below.
+    // Views outlive every await below.
     std::vector<ShardGatherView<Batch>> views;
     views.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {
@@ -84,11 +75,8 @@ public:
   }
 
   // Fan the same call out to every shard (visiting all even after a failure)
-  // and reduce to the first non-`ok` status, or `ok` if all succeed. For the
-  // homogeneous block-lifecycle fan-outs; contrast the keyed scatter_write.
-  // Concurrent like scatter_gather: launch every shard, then await -- a
-  // per-block-critical-path op costs one round-trip, not N.
-  //   call(client) -> x23::Async<Status>
+  // and reduce to the first non-`ok` status. For block-lifecycle fan-outs.
+  // Concurrent like scatter_gather. call(client) -> Async<Status>.
   template<typename Status, typename Call>
   x23::Async<Status> broadcast_status(Call call, Status ok)
   {
@@ -109,17 +97,14 @@ public:
     co_return result;
   }
 
-  // Keyed counterpart to broadcast_status: scatter a batch to its owning shards
-  // (empty shards skipped) and reduce to the first non-`ok` status. Concurrent
-  // like scatter_gather.
-  //   route(item, shard_count) -> owning shard index
-  //   call(client, sub_batch)  -> x23::Async<Status>
+  // Keyed counterpart to broadcast_status: scatter to owning shards and reduce
+  // to the first non-`ok` status. call(client, sub_batch) -> Async<Status>.
   template<typename Status, typename Batch, typename Route, typename Call>
   x23::Async<Status> scatter_write(Batch const &items, Route route, Call call,
                                    Status ok)
   {
     auto split = split_by_shard(items, clients_.size(), route);
-    // Zero-copy views over `items`; both outlive every await below.
+    // Views outlive every await below.
     std::vector<ShardGatherView<Batch>> views;
     views.reserve(clients_.size());
     for (size_t s = 0; s < clients_.size(); ++s) {

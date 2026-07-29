@@ -149,10 +149,10 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
-  // Resolve this shard's stable identity. A persisted record is authoritative
-  // (flags may confirm, never override); with no record (fresh or pre-sharding
-  // db) the flags seed it -- default single-shard -- and it is persisted.
-  // Under a kGlobalMetadata key, so excluded from the consensus hash.
+  // Resolve shard identity: a persisted record is authoritative (flags only
+  // confirm); with no record the flags seed it (default single-shard) and it is
+  // persisted. Under a kGlobalMetadata key, so excluded from the consensus
+  // hash.
   ShardIdentity shard_identity{};
   {
     HogDbStatus<ShardIdentity> persisted = ctx.get_db().read_shard_identity();

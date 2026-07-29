@@ -793,9 +793,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     account_state.hog_age.address = account;
   }
 
-  // Genesis is now loaded shard-owner-only on the hogdb side, so each block-0
-  // delta arrives from exactly one shard -- no cross-shard dedup needed, and
-  // block 0 takes the same parallel path as every other block.
+  // Genesis is loaded shard-owner-only, so each block-0 delta arrives from one
+  // shard -- no dedup needed; block 0 takes the same path as every other block.
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;

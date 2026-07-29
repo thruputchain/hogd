@@ -128,9 +128,8 @@ public:
     tip_.with([&](DbTip &tip) { tip.default_wallet = default_wallet; });
   }
 
-  // This shard's identity, resolved at startup (see hog_db_init). Genesis uses
-  // it to write only the items this shard owns while still deriving the global
-  // block hash. Defaults to single-shard {0, 1} until set.
+  // This shard's identity, resolved at startup (see hog_db_init); used by
+  // genesis to write only owned items. Defaults to single-shard until set.
   void set_shard_identity(ShardIdentity identity)
   {
     shard_identity_ = identity;
