@@ -192,6 +192,9 @@ Database::background_worker(const std::stop_token &stoken)
         warn("still out of memory; compacting all loglets (no threshold)");
         freed_bytes = item_allocator_.compact(1.0F);
       }
+      compaction_passes_.fetch_add(1, std::memory_order_relaxed);
+      compaction_bytes_reclaimed_.fetch_add(freed_bytes,
+                                            std::memory_order_relaxed);
       bool not_oom = freed_bytes > 0 || disk_writer_.bytes_buffered() > 0;
       loglet_allocator_->low_mem_done(not_oom);
     }

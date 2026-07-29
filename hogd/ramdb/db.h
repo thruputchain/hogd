@@ -36,6 +36,12 @@ namespace hogd {
 using GetEachCallback = std::function<void(std::span<const std::byte>, uint8_t,
                                            std::span<const std::byte>)>;
 
+// LayoutCallback is used by for_each_location(). Arguments are the item's key,
+// its total size in bytes (header included), and the index of the loglet
+// holding it.
+using LayoutCallback =
+    std::function<void(std::span<const std::byte>, size_t, size_t)>;
+
 // Database provides the interface for using ramdb. Normally, you should only
 // interact with this class.
 class Database {
@@ -135,6 +141,19 @@ public:
                          size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool());
 
+  // for_each_location reports which loglet holds each live item. Joining the
+  // loglet index against an externally recorded access set yields per-loglet
+  // hot-byte utilization, which get_each() cannot produce because it does not
+  // expose item locations.
+  //
+  // Read-only, with the same rules as get_each(), but the layout it reports is
+  // only meaningful if no compaction is relocating items underneath it.
+  void for_each_location(LayoutCallback fn);
+
+  // loglet_count returns the number of loglets the heap region is divided
+  // into. Each is one tiering unit of kLogletRegionSize bytes.
+  size_t loglet_count() const { return loglet_allocator_->loglet_count(); }
+
   // sync writes pending items to disk. Any calls to put() or remove() performed
   // before this call are guaranteed to be recoverable after a failure.
   // returns an lsn that can be passed to snapshot() to indicate which
@@ -174,6 +193,20 @@ public:
   size_t snapshot_bytes_written() const
   {
     return metrics_.snap_bytes_out_.load(std::memory_order_relaxed);
+  }
+
+  // compaction_passes returns how many times the compactor has run since the
+  // last recovery, and compaction_bytes_reclaimed the memory it gave back.
+  // Compaction is demand-driven, so a workload that never pressures memory
+  // leaves both at zero -- which is itself worth asserting in experiments that
+  // mean to exercise the compactor.
+  uint64_t compaction_passes() const
+  {
+    return compaction_passes_.load(std::memory_order_relaxed);
+  }
+  uint64_t compaction_bytes_reclaimed() const
+  {
+    return compaction_bytes_reclaimed_.load(std::memory_order_relaxed);
   }
 
   // estimate_heap_size returns the heap size needed to store n items,
@@ -219,6 +252,10 @@ private:
   // sync_and_snapshot() — begin_lsn must be 0 or <= this value to avoid
   // creating snapshot gaps that recovery cannot bridge.
   uint64_t max_snapshot_end_lsn_{0};
+
+  // compaction activity since recovery; written only by background_worker.
+  std::atomic<uint64_t> compaction_passes_{0};
+  std::atomic<uint64_t> compaction_bytes_reclaimed_{0};
 
   // periodically updated stats; registered in register_metrics().
   struct DbMetrics {
@@ -327,6 +364,16 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
         fn(hdr->get_key(), hdr->type, hdr->get_value());
       },
       width, pool);
+}
+
+inline void
+Database::for_each_location(LayoutCallback fn)
+{
+  assert(active_);
+  map_.for_each([this, &fn](ItemHeader *hdr) {
+    fn(hdr->get_key(), hdr->total_bytes(),
+       loglet_allocator_->loglet_index(hdr));
+  });
 }
 
 // Only safe to call while Database instance is quiescent (no ongoing calls to

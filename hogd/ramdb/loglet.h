@@ -389,15 +389,20 @@ public:
   // pending attempts to allocate loglets.
   void low_mem_done(bool success);
 
-  // get_loglet returns the loget the item is stored in.
-  Loglet &get_loglet(ItemHeader *item)
+  // loglet_index returns the index of the loglet the item is stored in. Two
+  // items share an index exactly when they share a loglet, so this is the
+  // tiering-unit identity that layout analysis groups by.
+  size_t loglet_index(ItemHeader *item) const
   {
     assert(item_is_within(item));
     // Byte-pointer subtraction within base_addr_'s std::byte[] array.
     auto *byte_ptr = reinterpret_cast<std::byte *>(item);
     ptrdiff_t offset = byte_ptr - base_addr_;
-    return loglets_[static_cast<size_t>(offset) / kLogletRegionSize];
+    return static_cast<size_t>(offset) / kLogletRegionSize;
   }
+
+  // get_loglet returns the loget the item is stored in.
+  Loglet &get_loglet(ItemHeader *item) { return loglets_[loglet_index(item)]; }
 
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
