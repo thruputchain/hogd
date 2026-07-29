@@ -242,8 +242,53 @@ public:
   void reset()
   {
     free_len_ = 0;
+    hot_len_ = 0;
     pos_ = 0;
     mode_.store(LogletMode::kFree, std::memory_order_relaxed);
+  }
+
+  // measure_hotness walks the live items and caches how many of their bytes
+  // is_hot accepts. Recomputing rather than maintaining a running counter keeps
+  // the item write paths untouched: an item's temperature changes as it ages
+  // with no corresponding event, so an incrementally maintained count would
+  // drift anyway. The cached result is what makes victim selection cheap --
+  // ObjecTier's "one additional word of metadata (a counter) that tracks
+  // fraction of hot objects".
+  //
+  // Callers must hold the loglet exclusively (i.e. own its UniqueLoglet), as
+  // compaction does; this walks item headers without the bucket locks.
+  size_t measure_hotness(const std::function<bool(ItemHeader *)> &is_hot)
+  {
+    size_t hot = 0;
+    for (ItemHeader &h : *this) {
+      ItemHeader *item = std::addressof(h);
+      if (std::atomic_ref<ItemStorage>(item->storage)
+              .load(std::memory_order_acquire) == ItemStorage::kTombstone)
+        continue;
+      if (is_hot(item))
+        hot += item->total_bytes();
+    }
+    hot_len_.store(hot, std::memory_order_release);
+    return hot;
+  }
+
+  // hot_size returns the cached hot byte count from the last measure_hotness.
+  size_t hot_size() const { return hot_len_.load(std::memory_order_acquire); }
+
+  // mixedness returns how evenly this loglet's live bytes are split between hot
+  // and cold, in [0, 1]: 0 when it is entirely one temperature and 1 at an even
+  // split. This is the quantity ObjecTier selects victims on -- a region worth
+  // reorganizing is one whose hot fraction is "neither near 0 nor 1". Note that
+  // a loglet can be perfectly compacted by liveness and still be maximally
+  // mixed, which is the whole reason liveness-driven selection misses them.
+  float mixedness() const
+  {
+    size_t live = live_size();
+    if (live == 0)
+      return 0.0F;
+    float hot_frac = static_cast<float>(hot_size()) / static_cast<float>(live);
+    hot_frac = std::min(hot_frac, 1.0F);
+    return 1.0F - std::abs((2.0F * hot_frac) - 1.0F);
   }
 
   // dont_need releases the backing pages. They will be zeroed when the OS
@@ -296,6 +341,9 @@ private:
   size_t len_{0};
   // the number of bytes that are unused (fragmented) below pos_
   std::atomic<size_t> free_len_{0};
+  // cached hot byte count from the last measure_hotness(); a hint used only for
+  // victim selection, never for correctness.
+  std::atomic<size_t> hot_len_{0};
   // the number of bytes that are allocated so far (must be <= len_)
   size_t pos_{0};
   // the current usage mode for the loglet.

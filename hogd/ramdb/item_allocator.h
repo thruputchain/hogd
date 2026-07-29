@@ -133,6 +133,23 @@ public:
   // spent moving items. Returns the bytes that were reclaimed.
   size_t compact(float utilization_thresh);
 
+  // consolidate separates hot from cold items rather than live from dead.
+  //
+  // It selects victims by *mixedness* instead of fragmentation: a loglet whose
+  // live bytes are split between temperatures is worth reorganizing even when it
+  // is perfectly compacted, and compact() will never pick it. Each victim's
+  // items are then relocated into one of two destinations by is_hot, so a
+  // freshly written loglet is homogeneous in temperature.
+  //
+  // This matters for workloads whose items are updated in place -- fixed-size
+  // values never fragment the log, so compaction never visits them and their
+  // layout is otherwise frozen for the lifetime of the store.
+  //
+  // min_mixedness selects how aggressive to be: 0 reorganizes everything, 1 only
+  // perfectly even splits. Returns the number of loglets reorganized.
+  size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
+                     float min_mixedness);
+
   // used to steal or return the set of compactible loglets.
   // used by snapshotting to find loglets and pause compaction on them.
   std::vector<UniqueLoglet> take_loglets();
@@ -157,8 +174,12 @@ private:
   // each thread gets its own loglet head.
   PerThread<detail::ItemHead> head_;
 
-  // compact_one is a helper function that compacts a single loglet.
-  CompactionStats compact_one(UniqueLoglet &&src);
+  // compact_one is a helper function that compacts a single loglet. When is_hot
+  // is non-null, relocations are split across two destinations by temperature
+  // instead of all landing in one.
+  CompactionStats
+  compact_one(UniqueLoglet &&src,
+              const std::function<bool(ItemHeader *)> *is_hot = nullptr);
 };
 
 template<bool Rewind>

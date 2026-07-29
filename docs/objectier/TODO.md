@@ -26,7 +26,9 @@ and cold objects primarily under a single index").
 | X4 | Measured skew sweep (ramdb's Fig 3) | pilot run, null in flat DRAM |
 | X1 | Per-loglet utilization CDF (ramdb's Fig 2) | **done** — replicates the paper |
 | B1 | Temperature-routed `compact_one` | todo |
-| V1 | Per-`Loglet` hot-fraction counter + mixedness victim selection | todo |
+| V1 | Per-`Loglet` hot metadata + mixedness victim selection | **done** |
+| B1 | Temperature-routed `compact_one` | **done** (folded into V1) |
+| — | **First working ObjecTier: 139.3 → 86.6 ns, 88% of the gap** | see below |
 | H5 | Churn workload that actually triggers compaction | **built** — but see BUG-1 |
 | BUG-1 | `LogletAllocator::alloc` segfaults when the reserve drains | **fixed** |
 | BUG-2 | Compaction reserve is structurally marginal (heavy deferral) | **fixed** |
@@ -243,6 +245,62 @@ here: routing relocations by temperature only helps items the compactor visits,
 and it visits none of these. A ledger needs consolidation triggered by
 *mixedness* (V1) independent of fragmentation — the paper's §4.2 victim
 selection, not ramdb's liveness-driven trigger.
+
+### V1+B1 result — ObjecTier works, on a real store
+
+`ItemAllocator::consolidate()` selects victims by **mixedness** and relocates their
+items into two temperature-homogeneous destinations. Driven from
+`hogdb_bench zipf_payments -C` with an *oracle* classifier built from the generated
+access distribution, so this measures the relocation mechanism independently of any
+hotness signal's accuracy.
+
+2 M accounts, θ=0.99, hot payees scattered:
+
+| | hit rate | modelled AMAT |
+|---|---|---|
+| after workload (scattered) | 0.699 | **139.3 ns** |
+| after one consolidation pass | 0.928 | **86.6 ns** |
+| oracle ceiling (`--sorted` prefill) | 0.957 | 79.8 ns |
+
+**1.61×, capturing 88.5% of the available gap** — `(139.3−86.6)/(139.3−79.8)`.
+Reproduces at 500 K accounts with 3 rounds and db_hash on: 143.0 → 87.0 ns.
+
+Cost: 289 loglets, 5.98 M items relocated in 7.0 s single-threaded ≈ 85 MB/s. The
+paper's back-of-envelope assumes 150 MB/s for a 256 GB heap relocated hourly, so the
+rate is the same order; consolidation is deliberately serial (see below).
+
+Design notes:
+
+- **No `ItemHeader` change.** Hotness lives in the `Loglet` as a cached word
+  (`hot_len_`), refreshed by `measure_hotness()` rather than maintained
+  incrementally — an item's temperature changes as it ages with no corresponding
+  event, so a running counter would drift regardless. This sidesteps all three
+  bit-stealing blockers below, and preserves the paper's "no memory space overhead"
+  claim.
+- **`mixedness()`** is `1 − |2·hot_frac − 1|`: 0 when a loglet is one temperature,
+  1 at an even split. A loglet can be perfectly compacted by liveness and maximally
+  mixed, which is exactly why `compact()`'s selection rule never picks it.
+- **`compact_one` takes an optional `is_hot`**, choosing between two per-thread
+  destinations. The relocation contract, `modify_locked` re-check, and reserve
+  handling are all unchanged — only the choice of destination differs.
+- **Consolidation runs serially**, not on the pool. It has no memory-pressure
+  deadline behind it, and serial relocation keeps two per-thread destinations from
+  multiplying across 128 workers and re-triggering BUG-2's reserve drain.
+
+`ramdb_test` 20/20, `hogdb_test` 214 passed / 2 skipped.
+
+### Still to do here
+
+- A dedicated integrity test for `consolidate()`: current evidence is indirect (the
+  post-pass layout walk finds every payee and the hit rate rises, item counts match,
+  db_hash run is clean). It deserves a test that asserts every key/value survives a
+  consolidation pass, in `ramdb_test`.
+- `fast_hot` barely moves (0.204 → 0.245) because payer balances and replay entries
+  dominate the item population and dilute it. Hit rate is the metric that drives
+  AMAT; worth stating plainly rather than reporting utilization as the headline.
+- Real classifiers (B2) measured against this oracle.
+- Cost at scale, parallel consolidation, and a trigger policy (the paper's third
+  §5 component) instead of an explicit call.
 
 ### Earlier consequence for D2 (superseded by the above)
 

@@ -154,6 +154,16 @@ public:
   // into. Each is one tiering unit of kLogletRegionSize bytes.
   size_t loglet_count() const { return loglet_allocator_->loglet_count(); }
 
+  // consolidate reorganizes loglets so each holds items of a single
+  // temperature. See ItemAllocator::consolidate. Must not overlap put()/
+  // remove(): it relocates items, and does so outside the compactor's
+  // memory-pressure trigger.
+  size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
+                     float min_mixedness)
+  {
+    return item_allocator_.consolidate(is_hot, min_mixedness);
+  }
+
   // sync writes pending items to disk. Any calls to put() or remove() performed
   // before this call are guaranteed to be recoverable after a failure.
   // returns an lsn that can be passed to snapshot() to indicate which

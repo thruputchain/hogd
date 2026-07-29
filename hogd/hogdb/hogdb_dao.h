@@ -126,6 +126,11 @@ public:
     db_->for_each_location(std::move(fn));
   }
   size_t loglet_count() const { return db_->loglet_count(); }
+  size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
+                     float min_mixedness)
+  {
+    return db_->consolidate(is_hot, min_mixedness);
+  }
   uint64_t compaction_passes() const { return db_->compaction_passes(); }
   uint64_t compaction_bytes_reclaimed() const
   {

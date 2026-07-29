@@ -78,6 +78,13 @@ bool bench_sorted_hot = false;
 // the compactor run; payers must be funded for every round.
 int bench_rounds = 1;
 
+// When true, run a consolidation pass after the workload and report the layout
+// again, so the before/after pair isolates what relocation alone buys.
+bool bench_consolidate = false;
+
+// Minimum payee access count for the oracle classifier to call an item hot.
+int bench_hot_hits = 2;
+
 // Two-tier latency model and fast-tier share, matching ramdb_bench so the
 // numbers from the two binaries are comparable.
 constexpr double kFastNs = 70.0;
@@ -144,6 +151,12 @@ public:
   // run executes the benchmark. This function can be timed directly to measure
   // performance.
   void run();
+
+  // consolidate runs a popularity-driven relocation pass using an oracle
+  // classifier built from the generated access distribution. Using an oracle
+  // separates the value of the relocation mechanism from the accuracy of any
+  // particular hotness signal.
+  void consolidate();
 
   // report_layout joins the payee access counts this benchmark generated
   // against the loglet each item actually landed in, and reports the resulting
@@ -524,6 +537,25 @@ Benchmark::run()
 
     CHECK(block.initiate_shutdown());
   }
+}
+
+void
+Benchmark::consolidate()
+{
+  size_t hot_items = 0;
+  for (const auto &[k, hits] : payee_hits_)
+    if (hits >= static_cast<uint32_t>(bench_hot_hits))
+      ++hot_items;
+  info("oracle classifier: {} of {} payees hot (>= {} accesses)", hot_items,
+       payee_hits_.size(), bench_hot_hits);
+
+  auto is_hot = [this](ItemHeader *item) {
+    auto it = payee_hits_.find(key_bytes_string(item->get_key()));
+    return it != payee_hits_.end() &&
+           it->second >= static_cast<uint32_t>(bench_hot_hits);
+  };
+  size_t moved = db_.get_ramdb().consolidate(is_hot, 0.0F);
+  info("consolidated {} loglets", moved);
 }
 
 void
@@ -1127,6 +1159,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "(consolidated ceiling)");
     std::println("  -r, --rounds <N>       replay the payment set N times "
                  "(default: 1; >1 lets the compactor run)");
+    std::println("  -C, --consolidate      run a consolidation pass after the "
+                 "workload and re-report layout");
+    std::println("  -k, --hot-hits <N>     accesses for the oracle classifier "
+                 "to call a payee hot (default: 2)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1158,6 +1194,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"heap",      required_argument, nullptr, 'H'},
       {"sorted",    no_argument,       nullptr, 'S'},
       {"rounds",    required_argument, nullptr, 'r'},
+      {"consolidate", no_argument,     nullptr, 'C'},
+      {"hot-hits",  required_argument, nullptr, 'k'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1173,7 +1211,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1205,6 +1243,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'r':
       hogd::bench_rounds = std::stoi(optarg);
+      break;
+    case 'C':
+      hogd::bench_consolidate = true;
+      break;
+    case 'k':
+      hogd::bench_hot_hits = std::stoi(optarg);
       break;
     case 'h':
       print_usage();
@@ -1238,6 +1282,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     hogd::info("took {} seconds", sec);
     // Report where items landed, once the workload has finished placing them.
     bench->report_layout(cmd);
+    if (hogd::bench_consolidate) {
+      bench->consolidate();
+      bench->report_layout(cmd + "+consolidated");
+    }
     return 0;
   }
 
