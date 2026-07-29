@@ -199,18 +199,43 @@ enum class Layout : uint8_t {
   kScattered,
 };
 
+// build_permutation returns a fixed shuffle of [0, count).
+std::vector<uint32_t>
+build_permutation(int count, uint64_t seed)
+{
+  std::vector<uint32_t> perm(static_cast<size_t>(count));
+  std::iota(perm.begin(), perm.end(), 0U);
+  std::mt19937_64 rng(seed);
+  std::ranges::shuffle(perm, rng);
+  return perm;
+}
+
 // build_insertion_order returns the ranks to insert, in insertion order.
 std::vector<uint32_t>
 build_insertion_order(int count, Layout layout)
 {
+  if (layout == Layout::kScattered)
+    return build_permutation(count, kBenchSeed);
+
   std::vector<uint32_t> order(static_cast<size_t>(count));
   std::iota(order.begin(), order.end(), 0U);
-  if (layout == Layout::kScattered) {
-    std::mt19937_64 rng(kBenchSeed);
-    std::ranges::shuffle(order, rng);
-  }
   return order;
 }
+
+// WriteHotness controls whether the churn stream's hot set coincides with the
+// read stream's.
+enum class WriteHotness : uint8_t {
+  // Overwrites target the same keys that reads target. This is the easy case
+  // for a log-structured store: hot keys are continuously rewritten to the
+  // current write head, so write recency is a free and accurate hotness
+  // signal, and loglets segregate by temperature without anyone trying.
+  kCorrelated,
+  // Overwrites target keys unrelated to the ones reads target, via a fixed
+  // shuffle seeded differently from the layout shuffle. Write recency now says
+  // nothing about read hotness, which is the case a read-hotness classifier
+  // exists to handle.
+  kIndependent,
+};
 
 class Benchmark {
 public:
@@ -235,7 +260,7 @@ public:
   void track_accesses();
   // churn_items overwrites Zipf-selected items until the log has been forced
   // to recycle, which is what makes the compactor run at all.
-  void churn_items(int rounds);
+  void churn_items(int rounds, WriteHotness hotness);
   // report_compaction prints what the compactor did during the run.
   void report_compaction(std::string_view label);
   // report_layout joins the recorded access counts against each item's loglet
@@ -339,7 +364,7 @@ Benchmark::track_accesses()
 }
 
 void
-Benchmark::churn_items(int rounds)
+Benchmark::churn_items(int rounds, WriteHotness hotness)
 {
   // Each overwrite alternates the value size. A same-size put updates in place
   // (scalable_map.cc) -- it allocates nothing and tombstones nothing, so it
@@ -351,7 +376,16 @@ Benchmark::churn_items(int rounds)
   // Overwriting (rather than remove-then-put) keeps every key continuously
   // present, so concurrent readers never observe a miss.
   Zipf zipf(static_cast<uint64_t>(item_count()), bench_theta);
-  invoke_on_threads([this, &zipf, rounds](int thread_id, int samples) {
+
+  // For kIndependent, the write stream draws from its own rank space and maps
+  // through a shuffle seeded apart from the layout's, so the most-overwritten
+  // keys bear no relation to the most-read ones.
+  std::vector<uint32_t> write_map;
+  if (hotness == WriteHotness::kIndependent)
+    write_map = build_permutation(item_count(), kBenchSeed ^ 0xC0FFEEULL);
+
+  invoke_on_threads([this, &zipf, &write_map, rounds](int thread_id,
+                                                     int samples) {
     std::vector<std::byte> value(static_cast<size_t>(value_size_) +
                                  alignof(ItemHeader));
     uint64_t rng = kBenchSeed + 0x9E37U + static_cast<uint64_t>(thread_id);
@@ -359,7 +393,10 @@ Benchmark::churn_items(int rounds)
       size_t len = static_cast<size_t>(value_size_) +
                    ((round % 2 == 0) ? alignof(ItemHeader) : 0);
       for (int i = 0; i < samples; ++i) {
-        uint64_t key = make_rank_key(zipf(rng));
+        uint32_t rank = zipf(rng);
+        if (!write_map.empty())
+          rank = write_map[rank];
+        uint64_t key = make_rank_key(rank);
         DBStatus<void> ret =
             db_->put(byte_view(key), 0, std::span(value).first(len));
         if (unlikely(!ret))
@@ -676,7 +713,7 @@ do_layout(int num, int cores, int value_size, Layout layout,
 // liveness-driven relocation destroys popularity locality that was there.
 double
 do_churn(int num, int cores, int value_size, Layout layout,
-         std::string_view label)
+         WriteHotness hotness, std::string_view label)
 {
   // A tighter heap than the other benchmarks use: with 2x provisioning, free
   // loglets bottom out around 30% and kLowMemoryRatio (10%) is never reached,
@@ -687,8 +724,9 @@ do_churn(int num, int cores, int value_size, Layout layout,
   std::unique_ptr<Benchmark> benchmark =
       make_benchmark(num, cores, value_size, factor);
   benchmark->prefill_ranked(layout);
-  double seconds =
-      measure([&benchmark] { benchmark->churn_items(bench_access_mult); });
+  double seconds = measure([&benchmark, hotness] {
+    benchmark->churn_items(bench_access_mult, hotness);
+  });
 
   // Measure the layout the compactor left behind, not the one prefill built.
   benchmark->track_accesses();
@@ -702,14 +740,26 @@ double
 do_churn_consolidated(int num, int cores, int value_size)
 {
   return do_churn(num, cores, value_size, Layout::kConsolidated,
-                  "churn_consolidated");
+                  WriteHotness::kCorrelated, "churn_consolidated");
 }
 
 double
 do_churn_scattered(int num, int cores, int value_size)
 {
   return do_churn(num, cores, value_size, Layout::kScattered,
-                  "churn_scattered");
+                  WriteHotness::kCorrelated, "churn_scattered");
+}
+
+// do_churn_decorrelated is the control for the H5 finding. churn_scattered
+// draws its overwrites from the same Zipf as its reads, so write recency is a
+// near-perfect hotness proxy and the store segregates by temperature for free.
+// This run changes only that one thing, so the difference between the two is
+// how much of ramdb's implicit consolidation was an artifact of the workload.
+double
+do_churn_decorrelated(int num, int cores, int value_size)
+{
+  return do_churn(num, cores, value_size, Layout::kScattered,
+                  WriteHotness::kIndependent, "churn_decorrelated");
 }
 
 double
@@ -825,6 +875,10 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      "churns a popularity-oblivious layout until the compactor runs, then "
      "reports the layout it left",
      do_churn_scattered},
+    {"churn_decorrelated",
+     "churns keys unrelated to the ones being read, so write recency is not a "
+     "hotness signal",
+     do_churn_decorrelated},
     {"delete", "deletes items", do_deletions},
     {"reload", "reloads items from disk", do_reload},
     {"snapshot", "fills some, then snapshots", do_snapshot},

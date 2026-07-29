@@ -168,6 +168,58 @@ publishable negative result and a direct answer to the paper's own §6 question.
 
 Do this before building V1/B1. It decides whether they are worth building.
 
+### Resolved: the confound was the entire effect
+
+`churn_decorrelated` changes exactly one thing — the overwrite stream draws from its own
+rank space through a separately seeded shuffle, so the most-written keys are unrelated to
+the most-read ones. Same size, skew, thread count, rounds, heap, and access total.
+
+| | hit rate | AMAT | share of gap captured |
+|---|---|---|---|
+| prefill scattered (artificial floor) | 0.450 | 196.4 ns | — |
+| **churn, decorrelated writes** | **0.481** | **189.3 ns** | **7%** |
+| churn, correlated writes | 0.858 | 102.7 ns | 91% |
+| prefill consolidated (oracle ceiling) | 0.898 | 93.4 ns | 100% |
+
+Implicit segregation **collapses**: 189.3 ns is within 4% of the artificial floor. So the
+91% figure was almost entirely an artifact of drawing reads and writes from one
+distribution, and ramdb's log structure buys essentially nothing once read hotness stops
+tracking write recency.
+
+Headroom for a consolidator in the decorrelated regime: 189.3 → 93.4 ns = **2.03×** —
+which is the paper's claimed 2×, now on a real store with a defensible baseline.
+
+**The real contribution is the conditioning variable, not a single number.** Consolidation
+is worth 1.10× or 2.03× on the *same store under the same skew*, depending only on
+read/write correlation. Nothing in the paper distinguishes these regimes.
+
+### This invalidates the `lsn`-as-classifier plan
+
+Earlier design note recommended `ItemHeader::lsn` as a free hotness signal, on the
+grounds that it is information the store already keeps (paper §4.1). That reasoning only
+holds in the correlated regime. Where it holds, ramdb needs no classifier at all — it is
+already at 91%. Where a classifier is actually needed, `lsn` carries no read-hotness
+information by construction. **The free proxy is useful exactly where it is unnecessary.**
+
+So B2 (the classifier study) is back to being load-bearing rather than a sensitivity
+analysis, and it has to be a genuine *read*-hotness signal — bit-stolen counter, CLOCK
+bits, or the off-header sketch. Which reopens the three blockers listed below.
+
+### Consequence for D2
+
+Groundhog p2p payments are the correlated case: an account being transacted is both read
+and written. If the deployed workload sits near ρ=1, ObjecTier's headroom there is closer
+to 1.10× than 2.03×, and the honest framing for the "real application" section is that
+log-structured ledger stores largely self-consolidate. Worth measuring the actual
+correlation in ledger traffic before claiming otherwise.
+
+### Next: sweep the correlation
+
+Two extremes are a result; the curve is the figure. Interpolate with probability ρ that a
+given overwrite targets the read-hot rank space instead of the independent one, and plot
+AMAT against ρ. That produces a figure the paper has no analogue for and locates any real
+workload on it. Cheap — one knob in `churn_items`.
+
 ---
 
 ## X3 result — §4.3's prediction confirmed, but we are on the plateau
