@@ -119,6 +119,57 @@ distribution moves. If these ever diverge, the analysis is buggy.
 
 ---
 
+## H5 result — ramdb already captures ~91% of the benefit, implicitly
+
+This is the most consequential measurement so far and it cuts against the headline.
+
+All four rows at 10 M items, 64 B, θ=0.99, 16 threads, 80 M accesses — matched, so
+directly comparable. Churn rows ran 8 overwrite rounds at 1.5× heap first.
+
+| layout | fast-tier hot util | hit rate | live util | AMAT |
+|---|---|---|---|---|
+| prefill scattered (artificial floor) | 0.676 | 0.450 | 0.987 | **196.4 ns** |
+| churn from scattered | 0.608 | 0.858 | 0.724 | **102.6 ns** |
+| churn from consolidated | 0.664 | 0.859 | 0.726 | **102.4 ns** |
+| prefill consolidated (oracle ceiling) | 0.975 | 0.898 | 0.987 | **93.4 ns** |
+
+**The two churn rows converge.** 102.6 vs 102.4 ns, hit rate 0.858 vs 0.859 — the
+starting layout is almost entirely washed out. Under realistic churn ramdb lands in the
+same place whether it began perfectly sorted or perfectly shuffled.
+
+And that place is close to the ceiling: `(196.4 − 102.5) / (196.4 − 93.4)` = **91% of the
+available AMAT gap is already captured**. Remaining headroom for any consolidator is
+102.5 → 93.4 ns, i.e. **1.10×**, not the 2.05× the prefill-only X1 figure implies.
+
+**Why:** a log-structured store appends writes in time order, so a loglet's items share a
+write epoch. Hot keys get overwritten and move to the current write head; cold keys stay
+behind. Loglets therefore stratify by age, and age correlates with hotness — and
+compaction gathers survivors (the cold ones) into separate destinations. The store is
+doing temporal segregation as a side effect of being log-structured.
+
+The paper anticipates exactly this, for a different runtime — §6: *"Generational garbage
+collectors already perform a form of hot and cold separation. One area of future work we
+plan to investigate is the extent to which these runtimes already help perform similar
+consolidation to what ObjecTier does."* A log cleaner is the same phenomenon, and this
+measurement answers that question with a number.
+
+### The confound that has to be resolved next
+
+`churn_items` overwrites **Zipf-selected** keys, and `read_items_zipf` reads with the
+same distribution and the same generator. So write-recency is a near-perfect proxy for
+read-hotness *by construction*, which is the best possible case for implicit temporal
+segregation. The 91% is therefore an upper bound on how much ramdb gets for free.
+
+The experiment that settles it: **decorrelate the read and write distributions** — hot
+reads over cold-written keys. If implicit segregation collapses there, ObjecTier's
+read-hotness classifier earns its keep and B1 has real headroom. If it holds up, the
+honest paper claim is that log-structured stores mostly solve this already, which is a
+publishable negative result and a direct answer to the paper's own §6 question.
+
+Do this before building V1/B1. It decides whether they are worth building.
+
+---
+
 ## X3 result — §4.3's prediction confirmed, but we are on the plateau
 
 25 M items (fixed), θ=0.99, 32 threads, 3 accesses/item, `value_size` swept. Item count
