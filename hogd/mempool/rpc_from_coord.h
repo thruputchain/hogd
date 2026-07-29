@@ -220,8 +220,9 @@ public:
     // Load genesis on every shard (fan-out lives in ShardedDbSched); the
     // cross-shard readiness barrier is ours to coordinate.
     {
-      DbSchedResult ret = co_await sharded_db_sched_client_->load_genesis(
-          genesis_configuration, genesis_value);
+      DbSchedResult ret =
+          co_await sharded_db_sched_client_->load_genesis(genesis_configuration,
+                                                          genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
         // Genesis failed on a shard: latch the failure and open the barrier so
         // a waiting [handle_transfer] drops its transfer instead of hanging.

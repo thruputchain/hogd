@@ -25,8 +25,8 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "retrocausal_queue.hh"
-#include "sched_db.hh" // ShardIdentity
 #include "rpc_types.hh"
+#include "sched_db.hh" // ShardIdentity
 #include "storage_item.hh"
 #include "types.hh"
 

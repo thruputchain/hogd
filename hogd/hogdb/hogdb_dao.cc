@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <cstring>
 #include <optional>
 #include <span>
 #include <string>
@@ -24,6 +23,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "types.hh"

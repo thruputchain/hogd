@@ -175,13 +175,13 @@ public:
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
   // Called once per shard per committed block by [handle_transfer]. Every shard
-  // sends one HogsTransferred per block (even an empty slice); returns true only
-  // when the LAST shard reports `block`, at which point the caller advances
-  // [transfer_finished_]. Shards emit blocks in commit order, so the last report
-  // for N follows the last for N-1: heights complete in order and the barrier
-  // advances by one. Advancing on any single slice would let a waiter see a
-  // block "done" with other shards' deltas unapplied, or move the barrier
-  // backwards. Serialized by scheduler_lock_, so no locking.
+  // sends one HogsTransferred per block (even an empty slice); returns true
+  // only when the LAST shard reports `block`, at which point the caller
+  // advances [transfer_finished_]. Shards emit blocks in commit order, so the
+  // last report for N follows the last for N-1: heights complete in order and
+  // the barrier advances by one. Advancing on any single slice would let a
+  // waiter see a block "done" with other shards' deltas unapplied, or move the
+  // barrier backwards. Serialized by scheduler_lock_, so no locking.
   bool record_shard_transfer_finished(BlockHeight block)
   {
     size_t const shards = sharded_db_->shard_count();

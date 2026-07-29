@@ -1,11 +1,24 @@
 #include "hogd/mempool/sharded_db_sched.h"
 
+#include <memory>
+#include <utility>
 #include <vector>
 
+#include "consensus.hh"
+#include "db_sched.hh"
+#include "genesis.hh"
+#include "header.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/rpc_message_size.h"       // kBulkRpcMaxMessageSize
-#include "hogd/base/rpc_server.h"             // create_client, server_address_to_sockaddr
-#include "hogd/db_shard_routing/sharding.h"   // shard_of_address, kShardFunctionId
+#include "hogd/base/rpc_message_size.h" // kBulkRpcMaxMessageSize
+#include "hogd/base/rpc_server.h" // create_client, server_address_to_sockaddr
+#include "hogd/base/types.h"
+#include "hogd/db_shard_routing/sharding.h" // shard_of_address, kShardFunctionId
+#include "hogd/mempool/shared.h"
+#include "rpc_types.hh"
+#include "sched_db.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -141,10 +154,11 @@ ShardedDbSched::get_tip()
     if (r_header.block_height != primary_header.block_height ||
         r.db_tip().id != primary.db_tip().id ||
         r_header.txs_hash != primary_header.txs_hash) {
-      error("db shard tip divergence: shard {} at height {} (id {}), shard 0 at "
-            "height {} (id {}); refusing to start",
-            i, r_header.block_height, r.db_tip().id,
-            primary_header.block_height, primary.db_tip().id);
+      error(
+          "db shard tip divergence: shard {} at height {} (id {}), shard 0 at "
+          "height {} (id {}); refusing to start",
+          i, r_header.block_height, r.db_tip().id, primary_header.block_height,
+          primary.db_tip().id);
     }
     CHECK_EQ(r_header.block_height, primary_header.block_height);
     CHECK_EQ(r.db_tip().id, primary.db_tip().id);

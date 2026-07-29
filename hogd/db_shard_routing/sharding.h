@@ -126,8 +126,9 @@ order_shards_by_id(Cards const &cards)
           card.shard_id, card.shard_function_id, kShardFunctionId));
     }
     if (card.shard_id >= n) {
-      return std::unexpected(std::format(
-          "db shard id {} out of range for {} shards", card.shard_id, n));
+      return std::unexpected(
+          std::format("db shard id {} out of range for {} shards",
+                      card.shard_id, n));
     }
     if (order[card.shard_id] != SIZE_MAX) {
       return std::unexpected(
@@ -192,8 +193,8 @@ xdr_serialize(auto &serializer, ShardGatherView<Batch> const &v)
 // indices plus a borrow of the source, from which shard_view() produces
 // zero-copy ShardGatherViews on demand. `src` must outlive the split, the split
 // its views/awaits. Binding it here (vs re-passing to shard_view) means indices
-// can only resolve against the batch they came from -- no wrong or since-resized
-// container.
+// can only resolve against the batch they came from -- no wrong or
+// since-resized container.
 template<typename Batch> struct ShardSplit {
   using value_type = typename Batch::value_type;
 
@@ -253,9 +254,9 @@ gather_positional(ShardSplit<Batch> const &split,
   for (size_t s = 0; s < split.shard_count(); ++s) {
     // A shard must return exactly one result per item routed to it. This is
     // shard-controlled: a too-long reply would index past origin[s] below (OOB
-    // on the critical path) and there is no error channel here. A count we never
-    // asked for means a broken shard; stop rather than continue (like the db-tip
-    // divergence check).
+    // on the critical path) and there is no error channel here. A count we
+    // never asked for means a broken shard; stop rather than continue (like the
+    // db-tip divergence check).
     CHECK_EQ(per_shard[s].size(), split.origin[s].size());
     for (size_t j = 0; j < per_shard[s].size(); ++j) {
       out[split.origin[s][j]] = per_shard[s][j];
