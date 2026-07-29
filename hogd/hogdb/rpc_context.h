@@ -111,6 +111,15 @@ public:
     cost_model_.emplace(cost_model);
   }
 
+  // This shard's identity, resolved at startup (see hogdb_init). Genesis uses
+  // it to write only the items this shard owns while still deriving the global
+  // block hash. Defaults to single-shard {0, 1} until set.
+  void set_shard_identity(ShardIdentity identity)
+  {
+    shard_identity_ = identity;
+  }
+  ShardIdentity const &get_shard_identity() const { return shard_identity_; }
+
   // opens a new block transaction.
   // Does not acquire a reference to the blocktx.
   HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid,
@@ -244,6 +253,8 @@ private:
   // the storage cost model for computing storage costs at the current block
   // height.
   std::optional<StorageCostModel> cost_model_;
+  // This shard's identity; see set_shard_identity. Single-shard until set.
+  ShardIdentity shard_identity_{.shard_id = 0, .total_shards = 1};
   // protects block_txes_.
   std::mutex lock_;
   std::atomic<bool> commit_publishing_{false};
