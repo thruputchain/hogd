@@ -402,8 +402,8 @@ private:
     coord_client_ =
         std::make_unique<coord_sched_client_t>(co_await get_client());
     {
-      // The facade connects one client per shard, bound by declared shard_id
-      // and fail-stopping on a bad identity set (see ShardedDbSched::connect).
+      // The facade connects and binds clients by shard_id (fail-stop on a bad
+      // set; see ShardedDbSched::connect).
       x23::XdrVec<ShardCard> cards;
       Registration::registration().shards_registered(&cards);
       sharded_db_sched_client_ =

@@ -111,9 +111,8 @@ public:
     cost_model_.emplace(cost_model);
   }
 
-  // This shard's identity, resolved at startup (see hogdb_init). Genesis uses
-  // it to write only the items this shard owns while still deriving the global
-  // block hash. Defaults to single-shard {0, 1} until set.
+  // This shard's identity, resolved at startup (see hogdb_init); used by
+  // genesis to write only owned items. Defaults to single-shard until set.
   void set_shard_identity(ShardIdentity identity)
   {
     shard_identity_ = identity;

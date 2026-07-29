@@ -335,11 +335,11 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     }
   }
 
-  // Genesis is loaded on every shard, but each shard must write only the items
-  // it owns, so its lthash covers each item exactly once and the shards' hashes
-  // sum to the value an unsharded db computes (the header carries that global
-  // sum; see the two-pass hashing below). Ownership is by shard_of_address,
-  // except content-addressed contracts, which live on the primary shard.
+  // Each shard writes only the items it owns, so its lthash covers each item
+  // once and the shards' hashes sum to the unsharded value (the header carries
+  // that sum; see the two-pass hashing below). Ownership is by
+  // shard_of_address, except content-addressed contracts, which live on the
+  // primary shard.
   ShardIdentity const &ident = ctx_.get_shard_identity();
   auto owns_address = [&](ContractAddress const &addr) {
     return shard_of_address(addr, ident.total_shards) == ident.shard_id;
@@ -348,10 +348,8 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
       owns_address(GenesisConfigurationLoader::kDeployContractAddress);
   bool const owns_contract_code = (kPrimaryShard == ident.shard_id);
 
-  // The initial token supply's hog age is keyed by kDeployContractAddress, so
-  // only that address's owner shard keeps the row. (Hog ages are not in the db
-  // hash, so this does not affect the block hash -- but the row must not be
-  // replicated onto non-owner shards.)
+  // The supply hog-age is keyed by kDeployContractAddress; only its owner keeps
+  // the row (hog ages aren't in the db hash, but mustn't be replicated).
   if (owns_deploy_address) {
     uint128_t initial_hog_token_supply =
         GenesisConfigurationLoader::initial_hog_token_supply();
@@ -451,10 +449,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     return failure;
   };
 
-  // Pass 1: apply ALL items to a throwaway block tx to derive the GLOBAL block
-  // hash -- the value an unsharded db computes, so every shard (any N) produces
-  // the same block hash. close() only stages an in-memory changeset and this tx
-  // is never committed, so the ramdb is left untouched.
+  // Pass 1: apply ALL items to a throwaway block tx for the GLOBAL hash (the
+  // block header, identical on every shard). close() only stages a changeset;
+  // never committing it leaves the ramdb untouched.
   StorageLongHash global_hash;
   {
     constexpr BlockTXID kScratchBlockID =
@@ -494,9 +491,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     ctx_.remove_shutdown_block_tx(kScratchBlockID);
   }
 
-  // Pass 2: apply only THIS shard's items to the real genesis block tx; its
-  // close() gives this shard's PARTIAL hash (persisted in the DbTip). The
-  // additive lthash makes the shards' partials sum to the global hash above.
+  // Pass 2: apply only THIS shard's items to the real block tx; its close()
+  // gives this shard's PARTIAL hash (persisted in the DbTip), and the partials
+  // sum to the global hash above.
   auto r = ctx_.open_block_tx(kGenesisBlockID,
                               BlockExecutionMode::kBlockExecutionModeProposal);
   if (!r.has_value()) {
@@ -534,8 +531,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   StorageLongHash partial_hash = *partial_hash_result;
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
-  // The header carries the GLOBAL hash (identical on every shard, whatever N);
-  // the shard commits and persists its own PARTIAL hash in the DbTip.
+  // Header carries the GLOBAL hash; the shard persists its PARTIAL hash.
   value.proposal_header.storage_hash =
       sha256(std::as_bytes(std::span(global_hash)));
   auto ret = to_db_result(
@@ -544,8 +540,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_await Health::instance().set_current_block_height(
         ctx_.get_tip().value.proposal_header.block_height);
   }
-  // The committed ramdb holds only this shard's owned items, so a full
-  // recompute must equal the PARTIAL hash we persisted.
+  // The committed ramdb holds only owned items, so a recompute == the partial.
   StorageLongHash full_hash = ctx_.get_db().compute_full_db_hash();
   CHECK_EQ(full_hash, partial_hash);
   co_return ret;
