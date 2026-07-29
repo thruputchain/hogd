@@ -73,11 +73,9 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
           .global_header = tip.value.proposal_header.storage_hash};
 }
 
-// Each shard writes only the genesis items it owns, so their partial hashes
-// (LtHash16, additive) must sum to the value a single-shard db computes --
-// which is also the GLOBAL hash every shard puts in its block header. This is
-// the only coverage of the shard-owner-only genesis filtering for N > 1; the
-// rest of the suite runs single-shard.
+// Each shard writes only the items it owns, so their partial hashes must sum to
+// the single-shard hash -- which is also the global hash every shard's header
+// carries. The only coverage of the genesis filtering for N > 1.
 TEST(GenesisSharding, PartialsSumToSingleShardGlobalForAnyShardCount)
 {
   GenesisHashes single = load_genesis_for_shard(/*shard_id=*/0,

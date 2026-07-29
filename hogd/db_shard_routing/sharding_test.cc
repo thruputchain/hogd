@@ -79,14 +79,10 @@ TEST(ShardRouterTest, SpreadsAcrossShards)
   EXPECT_GT(hit.size(), 1U);
 }
 
-// Pins the address -> shard mapping to concrete values. The other router tests
-// (determinism, range, spread) pass for ANY hash function; this one fails if
-// the routing function itself changes -- which matters because once a cluster
-// has data, altering the function points every lookup at a shard that no longer
-// holds the data. The expected shards are from an independent reference
-// implementation of the FNV-1a routing over make_address(seed). Changing
-// shard_of_address is intentional only alongside a kShardFunctionId bump;
-// update these golden values then.
+// Pins the address -> shard mapping to concrete values (the other router tests
+// pass for any hash), so changing shard_of_address fails here. Golden values
+// are from an independent reference impl; update alongside a kShardFunctionId
+// bump.
 TEST(ShardRouterTest, PinsAddressToShardMapping)
 {
   auto expect_shard = [](uint64_t seed, size_t shard_count,

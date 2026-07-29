@@ -14,10 +14,9 @@
 #include "hogd/base/log.h" // CHECK_EQ
 #include "x23/x23/serialize.h"
 
-// The execution-model-agnostic core of database sharding: key->shard routing
-// and the cross-shard batch split/gather. Header-only; the async fan-out facade
-// lives separately in sharded_client.h so synchronous consumers need not pull
-// in the coroutine machinery.
+// Core of database sharding: key->shard routing and cross-shard batch
+// split/gather. Header-only; the async fan-out facade lives in
+// sharded_client.h.
 
 namespace hogd {
 
@@ -65,18 +64,15 @@ namespace hogd {
 // (db tip, viewing snapshots).
 inline constexpr size_t kPrimaryShard = 0;
 
-// Identifies shard_of_address below. Persisted per shard and declared in its
-// ShardCard; a mismatch is fail-stop (changing the function once a cluster has
-// data would misroute lookups). Bump when shard_of_address changes.
+// Identifies shard_of_address; persisted/declared per shard, mismatch is
+// fail-stop. Bump when shard_of_address changes.
 inline constexpr uint32_t kShardFunctionId = 0;
 
 // Deterministic within a process. Precondition: shard_count >= 1; returns a
 // value in [0, shard_count).
 //
-// Placeholder hash (FNV-1a) until a network-agreed function replaces it -- its
-// only definition. KNOWN LIMITATION (low priority): FNV is unkeyed, so ground
-// addresses can bias shard load. The fix is a keyed hash (SipHash-2-4), which
-// needs a restart-recoverable key; stays FNV until then. Not worth bug reports.
+// Placeholder FNV-1a (unkeyed, so grindable -- swap for a keyed hash once we
+// can recover the key across restarts).
 inline size_t
 shard_of_address(ContractAddress const &address, size_t shard_count)
 {
@@ -96,16 +92,11 @@ shard_of_key(AddressAndKey const &key, size_t shard_count)
   return shard_of_address(key.address, shard_count);
 }
 
-// Validate a set of db shard cards and return the binding order:
-// order[shard_id] == the index of that shard in `cards`. Requires every card
-// to agree on total_shards == cards.size(), use the running routing function
-// (kShardFunctionId), and the shard_ids to be exactly {0..cards.size()-1}. A
-// violation is a misconfigured cluster: returns an error message (the caller
-// fail-stops in its own style -- panic in the mempool, throw in the executor)
-// rather than bind a client to the wrong shard. `Card` exposes shard_id /
-// total_shards / shard_function_id (e.g. ShardCard). Both the mempool facade
-// and the executor DatabaseProxy route through here, so the two sides agree on
-// which shard is which. Precondition: cards is non-empty.
+// Validate shard cards and return the binding order (order[shard_id] == index
+// in `cards`), or an error string the caller fail-stops on. Requires the ids to
+// be exactly {0..n-1} with matching total_shards and shard_function_id. Shared
+// by the mempool facade and executor DatabaseProxy so both agree on shard
+// order.
 template<typename Cards>
 inline std::expected<std::vector<size_t>, std::string>
 order_shards_by_id(Cards const &cards)
@@ -143,13 +134,12 @@ order_shards_by_id(Cards const &cards)
 // Cross-shard batch split / gather
 // ---------------------------------------------------------------------------
 
-// Splits a keyed batch per-shard and reassembles results into the original
-// input order. Zero-copy: it records only per-shard indices and serializes
-// source items in place via ShardGatherView, never duplicating the batch.
+// Splits a keyed batch per-shard and reassembles results into input order,
+// zero-copy: it records only per-shard indices and serializes source items in
+// place via ShardGatherView.
 
-// A non-owning view of shard s's subset of a `Batch` (source + its origin[s]
-// indices) that serializes like the Batch the RPC expects, without copying.
-// Borrows: source and indices (both in the ShardSplit) must outlive it.
+// Non-owning view of shard s's subset of a `Batch`, serializing like the Batch
+// the RPC expects. Borrows source + indices (both in the ShardSplit).
 template<typename Batch> struct ShardGatherView {
   using value_type = typename Batch::value_type;
 
@@ -189,12 +179,10 @@ xdr_serialize(auto &serializer, ShardGatherView<Batch> const &v)
   }
 }
 
-// The routing map from splitting a `Batch` across `shard_count` shards: only
-// indices plus a borrow of the source, from which shard_view() produces
-// zero-copy ShardGatherViews on demand. `src` must outlive the split, the split
-// its views/awaits. Binding it here (vs re-passing to shard_view) means indices
-// can only resolve against the batch they came from -- no wrong or
-// since-resized container.
+// The routing map from a split: per-shard indices plus a borrow of the source
+// (which must outlive the split), from which shard_view() produces zero-copy
+// ShardGatherViews. Binding src here means indices can only resolve against the
+// batch they came from.
 template<typename Batch> struct ShardSplit {
   using value_type = typename Batch::value_type;
 
@@ -215,10 +203,8 @@ template<typename Batch> struct ShardSplit {
   }
 };
 
-// Split `items` across `shard_count` shards. `route(item, shard_count)` returns
-// the owning shard index (typically shard_of_address/shard_of_key). Records
-// only the routing map and a borrow of `items` (which must outlive the split);
-// no items are copied.
+// Split `items` across `shard_count` shards via `route`, recording only the
+// routing map and a borrow of `items` (which must outlive the split).
 template<typename Batch, typename Route>
 ShardSplit<Batch>
 split_by_shard(Batch const &items, size_t shard_count, Route route)
@@ -239,9 +225,8 @@ split_by_shard(Batch const &items, size_t shard_count, Route route)
   return split;
 }
 
-// Reassemble per-shard results into input order: per_shard[s][j] is the result
-// for the item at split.origin[s][j]. per_shard has one entry per shard (an
-// internal invariant of the caller). Returns split.total results.
+// Reassemble per-shard results into input order (per_shard[s][j] is the result
+// for split.origin[s][j]).
 template<typename ResultBatch, typename Batch>
 std::vector<typename ResultBatch::value_type>
 gather_positional(ShardSplit<Batch> const &split,
@@ -252,11 +237,8 @@ gather_positional(ShardSplit<Batch> const &split,
 
   std::vector<Result> out(split.total);
   for (size_t s = 0; s < split.shard_count(); ++s) {
-    // A shard must return exactly one result per item routed to it. This is
-    // shard-controlled: a too-long reply would index past origin[s] below (OOB
-    // on the critical path) and there is no error channel here. A count we
-    // never asked for means a broken shard; stop rather than continue (like the
-    // db-tip divergence check).
+    // A shard returning the wrong count would index past origin[s] below; there
+    // is no error channel here, so fail-stop on a broken shard.
     CHECK_EQ(per_shard[s].size(), split.origin[s].size());
     for (size_t j = 0; j < per_shard[s].size(); ++j) {
       out[split.origin[s][j]] = per_shard[s][j];

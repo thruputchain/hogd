@@ -17,11 +17,9 @@
 
 namespace hogd {
 
-// The mempool's sole handle to the sharded database: owns one db-sched client
-// per shard and exposes only the operations the mempool uses, each a named
-// method fixing that RPC's sharding policy in one place. No generic
-// pass-through -- adding an RPC means adding a method here. Delegates to
-// ShardedClient; deliberately not a mirror of the generated DbSched1 interface.
+// The mempool's sole handle to the sharded db: one client per shard, exposing
+// only the operations the mempool uses, each fixing that RPC's sharding policy.
+// Adding an RPC means adding a method here.
 class ShardedDbSched {
 public:
   explicit ShardedDbSched(
@@ -29,12 +27,9 @@ public:
     : shards_(std::move(clients))
   {}
 
-  // Connect one db-sched client per shard card and build the facade, binding
-  // each client at index == its declared shard_id (not connection-arrival
-  // order). Fail-stops unless the declared ids form exactly
-  // {0..cards.size()-1}, every card agrees on total_shards == cards.size(), and
-  // every card uses the running routing function (kShardFunctionId). This is
-  // the single place shard identity is enforced mempool-side.
+  // Connect one client per card, bound by declared shard_id (fail-stop on a bad
+  // identity set -- see order_shards_by_id). The one place identity is enforced
+  // mempool-side.
   static x23::Async<std::shared_ptr<ShardedDbSched>>
   connect(x23::XdrVec<ShardCard> cards);
 
@@ -58,8 +53,7 @@ public:
   load_genesis(GenesisConfiguration genesis_configuration,
                ConsensusValue value);
 
-  // Read every shard's tip and require unanimous height/id (a divergence is a
-  // CHECK), returning shard 0's DbTip. A missing shard-0 tip is returned as-is.
+  // Read every shard's tip, fail-stop on divergence, return shard 0's DbTip.
   x23::Async<DbTipResult> get_tip();
 
   // Scatter by account address; reads gather back into input order.
