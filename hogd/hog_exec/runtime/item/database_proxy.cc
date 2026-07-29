@@ -281,18 +281,20 @@ SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
-  try {
-    // Fan out commit to every shard (2PC commit phase). New contracts are
-    // content-addressed (primary shard); others commit only their own deltas.
-    static const BorrowedContractBatch::hash_set_t kEmptyHashes;
-    static const BorrowedContractBatch::contract_map_t kEmptyContracts;
-    static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
-                                                   kEmptyContracts);
-    // Visit ALL shards and return the first error: stopping early would leave
-    // some shards committed and others only prepared -- abort can't undo the
-    // committed ones, so they'd diverge permanently.
-    SystemStatus<void> first_error{};
-    for (size_t shard = 0; shard < clients_.size(); ++shard) {
+  // Fan out commit to every shard (2PC commit phase). New contracts are
+  // content-addressed (primary shard); others commit only their own deltas.
+  static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+  static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+  static const BorrowedContractBatch kEmptyBatch(kEmptyHashes, kEmptyContracts);
+  // Visit ALL shards and return the first error: stopping early would leave
+  // some shards committed and others only prepared -- abort can't undo the
+  // committed ones, so they'd diverge permanently. The try/catch is per-shard
+  // so a throw on one shard still commits the rest (this runs on a detached
+  // executor worker, where an escaping exception terminates hogexec -- contain
+  // XdrBadInput / XdrCallFailed / bad_alloc here).
+  SystemStatus<void> first_error{};
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
+    try {
       auto res = clients_[shard].commit_transaction(block_id, tx_id,
                                                     shard == 0 ? new_contracts
                                                                : kEmptyBatch);
@@ -300,29 +302,20 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
       if (!status.has_value() && first_error.has_value()) {
         first_error = status;
       }
+    } catch (std::exception const &e) {
+      // The diagnostic can throw again under memory pressure, so guard it.
+      try {
+        error("Unrecoverable: commit_transaction failed on shard {}: {}", shard,
+              e.what());
+      } catch (...) {
+        report_dropped_log("commit_transaction failure diagnostic");
+      }
+      if (first_error.has_value()) {
+        first_error = SystemError{SystemErrorCode::Unrecoverable};
+      }
     }
-    return first_error;
-  } catch (std::exception const &e) {
-    // commit_transaction runs on a detached executor worker; any escaping
-    // exception terminates hog_exec. Contain every failure here and return a
-    // structured Unrecoverable result instead. This covers:
-    //   - x23::XdrBadInput   -- client-side, oversized new contract batch
-    //   - x23::XdrCallFailed -- server-side SYSTEM_ERR (e.g. HogDb's contract
-    //                           rehash throwing while re-serializing a
-    //                           Contract)
-    //   - std::bad_alloc     -- local OOM, e.g. while serializing the request
-    // The diagnostic itself allocates while formatting and can throw again
-    // under the same memory pressure, so guard it and fall back to the
-    // no-allocation reporter before returning (cf. syscall_invoke.cc, #2719).
-    try {
-      error("Unrecoverable: commit_transaction failed "
-            "(transport/serialization/allocation failure): {}",
-            e.what());
-    } catch (...) {
-      report_dropped_log("commit_transaction failure diagnostic");
-    }
-    return SystemError{SystemErrorCode::Unrecoverable};
   }
+  return first_error;
 }
 
 SystemStatus<void>

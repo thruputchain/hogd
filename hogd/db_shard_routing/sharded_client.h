@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <utility>
 #include <vector>
 
@@ -50,19 +51,28 @@ public:
       views.push_back(split.shard_view(s));
     }
     using CallResult = decltype(call(clients_[0], views[0]));
-    std::vector<std::pair<size_t, CallResult>> in_flight;
+    std::vector<CallResult> in_flight;
+    std::vector<size_t> shard_of;
     in_flight.reserve(clients_.size());
-    for (size_t s = 0; s < clients_.size(); ++s) {
-      if (views[s].empty()) {
-        continue;
+    shard_of.reserve(clients_.size());
+    std::exception_ptr launch_error;
+    try {
+      for (size_t s = 0; s < clients_.size(); ++s) {
+        if (views[s].empty()) {
+          continue;
+        }
+        in_flight.push_back(call(clients_[s], views[s]));
+        shard_of.push_back(s);
       }
-      in_flight.emplace_back(s, call(clients_[s], views[s]));
+    } catch (...) {
+      launch_error = std::current_exception();
     }
 
     std::vector<ResultBatch> per_shard(clients_.size());
-    for (auto &[s, async] : in_flight) {
-      per_shard[s] = co_await async;
-    }
+    co_await drain_awaits(in_flight, launch_error,
+                          [&](size_t i, ResultBatch r) {
+                            per_shard[shard_of[i]] = std::move(r);
+                          });
 
     std::vector<typename ResultBatch::value_type> ordered =
         gather_positional(split, per_shard);
@@ -83,18 +93,49 @@ public:
     using CallResult = decltype(call(clients_[0]));
     std::vector<CallResult> in_flight;
     in_flight.reserve(clients_.size());
-    for (size_t s = 0; s < clients_.size(); ++s) {
-      in_flight.push_back(call(clients_[s]));
+    std::exception_ptr launch_error;
+    try {
+      for (size_t s = 0; s < clients_.size(); ++s) {
+        in_flight.push_back(call(clients_[s]));
+      }
+    } catch (...) {
+      launch_error = std::current_exception();
     }
 
     Status result = ok;
-    for (auto &async : in_flight) {
-      Status r = co_await async;
+    co_await drain_awaits(in_flight, launch_error, [&](size_t, Status r) {
       if (result == ok && !(r == ok)) {
         result = r;
       }
-    }
+    });
     co_return result;
+  }
+
+  // Like broadcast_status but keeps every shard's result (positionally, by
+  // shard index) instead of reducing, so the caller can act on exactly which
+  // shards succeeded -- e.g. roll back a partial create_snapshot. Concurrent
+  // and drains on exception like the other helpers. call(client) ->
+  // Async<Result>.
+  template<typename Result, typename Call>
+  x23::Async<std::vector<Result>> broadcast_collect(Call call)
+  {
+    using CallResult = decltype(call(clients_[0]));
+    std::vector<CallResult> in_flight;
+    in_flight.reserve(clients_.size());
+    std::exception_ptr launch_error;
+    try {
+      for (size_t s = 0; s < clients_.size(); ++s) {
+        in_flight.push_back(call(clients_[s]));
+      }
+    } catch (...) {
+      launch_error = std::current_exception();
+    }
+
+    std::vector<Result> results(clients_.size());
+    co_await drain_awaits(in_flight, launch_error, [&](size_t i, Result r) {
+      results[i] = std::move(r);
+    });
+    co_return results;
   }
 
   // Keyed counterpart to broadcast_status: scatter to owning shards and reduce
@@ -113,24 +154,59 @@ public:
     using CallResult = decltype(call(clients_[0], views[0]));
     std::vector<CallResult> in_flight;
     in_flight.reserve(clients_.size());
-    for (size_t s = 0; s < clients_.size(); ++s) {
-      if (views[s].empty()) {
-        continue;
+    std::exception_ptr launch_error;
+    try {
+      for (size_t s = 0; s < clients_.size(); ++s) {
+        if (views[s].empty()) {
+          continue;
+        }
+        in_flight.push_back(call(clients_[s], views[s]));
       }
-      in_flight.push_back(call(clients_[s], views[s]));
+    } catch (...) {
+      launch_error = std::current_exception();
     }
 
     Status result = ok;
-    for (auto &async : in_flight) {
-      Status r = co_await async;
+    co_await drain_awaits(in_flight, launch_error, [&](size_t, Status r) {
       if (result == ok && !(r == ok)) {
         result = r;
       }
-    }
+    });
     co_return result;
   }
 
 private:
+  // Await every launched Async in `in_flight`, calling visit(i, result) for
+  // each while no exception is pending. `launch_error` carries any exception
+  // thrown while launching (before all Asyncs existed). On any exception --
+  // from a co_await here or from launch -- drain the remaining Asyncs before
+  // rethrowing the first: destroying a still-running Async un-awaited is a UAF
+  // (x23 ~Async), so a throw mid-gather must not abandon its siblings.
+  template<typename InFlight, typename Visit>
+  static x23::Async<void> drain_awaits(InFlight &in_flight,
+                                       std::exception_ptr launch_error,
+                                       Visit visit)
+  {
+    std::exception_ptr pending = std::move(launch_error);
+    size_t i = 0;
+    for (auto &async : in_flight) {
+      try {
+        auto result = co_await async;
+        if (!pending) {
+          visit(i, std::move(result));
+        }
+      } catch (...) {
+        if (!pending) {
+          pending = std::current_exception();
+        }
+      }
+      ++i;
+    }
+    if (pending) {
+      std::rethrow_exception(pending);
+    }
+  }
+
   std::vector<Client> clients_;
 };
 

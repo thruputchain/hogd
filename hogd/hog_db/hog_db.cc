@@ -176,11 +176,30 @@ hog_db_init(std::string_view path, size_t ram_bytes,
         return EXIT_FAILURE;
       }
     }
+    else if (persisted.error().code() != HogDBCode::kNotFound) {
+      // An unreadable identity record is not the same as "no record" -- do not
+      // silently overwrite it.
+      critical("failed to read shard identity: {}; refusing to start",
+               persisted.error());
+      return EXIT_FAILURE;
+    }
     else {
       shard_identity =
           ShardIdentity{.shard_id = flag_shard_id.value_or(0),
                         .total_shards = flag_total_shards.value_or(1),
                         .shard_function_id = kShardFunctionId};
+      // A db with committed state but no identity predates sharding, so it
+      // holds the full single-shard dataset and can only be shard 0 of 1 --
+      // reject flags that would relabel it. A fresh db may adopt any valid
+      // identity.
+      if (tip.has_value() &&
+          (shard_identity.shard_id != 0 || shard_identity.total_shards != 1)) {
+        critical("db has committed state but no shard identity (pre-sharding); "
+                 "it can only be shard 0 of 1, not id={} of {}; refusing to "
+                 "start",
+                 shard_identity.shard_id, shard_identity.total_shards);
+        return EXIT_FAILURE;
+      }
       if (shard_identity.total_shards < 1 ||
           shard_identity.shard_id >= shard_identity.total_shards) {
         critical("invalid shard identity: id={}, total={}; require "
