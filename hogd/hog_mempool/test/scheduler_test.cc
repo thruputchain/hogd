@@ -33,7 +33,7 @@ constexpr size_t kNumTxs = 100;
 
 // A Scheduler over `shard_count` db shards. record_shard_transfer_finished
 // only reads shard_count(), never the clients, so null client handles suffice.
-std::shared_ptr<Scheduler>
+static std::shared_ptr<Scheduler>
 make_scheduler_with_shards(size_t shard_count)
 {
   std::vector<std::shared_ptr<db_sched_client_t>> clients(shard_count);
