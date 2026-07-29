@@ -22,8 +22,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/components/execution_mode.h"

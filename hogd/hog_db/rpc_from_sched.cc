@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <sys/socket.h>
@@ -16,11 +17,12 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "sched_db.hh" // ShardIdentity
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/db_shard_routing/sharding.h" // shard_of_address, kPrimaryShard
 #include "hogd/base/string.h"
+#include "hogd/db_shard_routing/sharding.h" // shard_of_address, kPrimaryShard
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -407,8 +409,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           auto item_key = make_item_key(AddressAndKey{
               .address = GenesisConfigurationLoader::kDeployContractAddress,
               .key = key});
-          auto r = gitx->request_nnint128(
-              item_key, value, std::to_underlying(StorageDeltaFlags::None));
+          auto r = gitx->request_nnint128(item_key, value,
+                                          std::to_underlying(
+                                              StorageDeltaFlags::None));
           if (!r.has_value()) {
             error("failed to write genesis block storage: {}", r.error());
             failure = true;
@@ -456,9 +459,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
               .auth_data_change_signers = auth_data_change_signers,
               .new_required_weight = auth_data.required_weight,
           };
-          auto r = gitx->request_auth_data(
-              addr, auth_data_change,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r = gitx->request_auth_data(addr, auth_data_change,
+                                           std::to_underlying(
+                                               StorageDeltaFlags::None));
           if (!r.has_value()) {
             error("failed to write genesis block auth data: {}", r.error());
             failure = true;
@@ -476,8 +479,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   {
     constexpr BlockTXID kScratchBlockID =
         std::numeric_limits<BlockTXID>::max() - 1;
-    auto gr = ctx_.open_block_tx(
-        kScratchBlockID, BlockExecutionMode::kBlockExecutionModeProposal);
+    auto gr =
+        ctx_.open_block_tx(kScratchBlockID,
+                           BlockExecutionMode::kBlockExecutionModeProposal);
     if (!gr.has_value()) {
       error("failed to open genesis global-hash block tx: {}", gr.error());
       co_return DbSchedResult::DbSchedResultError;
@@ -560,8 +564,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     co_await Health::instance().set_current_block_height(
         ctx_.get_tip().value.proposal_header.block_height);
   }
-  // The committed ramdb holds only this shard's owned items, so a full recompute
-  // must equal the PARTIAL hash we persisted.
+  // The committed ramdb holds only this shard's owned items, so a full
+  // recompute must equal the PARTIAL hash we persisted.
   StorageLongHash full_hash = ctx_.get_db().compute_full_db_hash();
   CHECK_EQ(full_hash, partial_hash);
   co_return ret;

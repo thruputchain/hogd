@@ -26,7 +26,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/base/xdr_util.h"             // IWYU pragma: keep
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_types.h"
@@ -177,9 +177,10 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       }
     }
     else {
-      shard_identity = ShardIdentity{.shard_id = flag_shard_id.value_or(0),
-                                     .total_shards = flag_total_shards.value_or(1),
-                                     .shard_function_id = kShardFunctionId};
+      shard_identity =
+          ShardIdentity{.shard_id = flag_shard_id.value_or(0),
+                        .total_shards = flag_total_shards.value_or(1),
+                        .shard_function_id = kShardFunctionId};
       if (shard_identity.total_shards < 1 ||
           shard_identity.shard_id >= shard_identity.total_shards) {
         critical("invalid shard identity: id={}, total={}; require "

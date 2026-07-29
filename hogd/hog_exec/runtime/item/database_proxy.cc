@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -202,8 +203,10 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
     }
     std::vector<size_t> const &order = *order_result;
     clients_.reserve(order.size());
-    for (size_t id = 0; id < order.size(); ++id) {
-      ShardCard const &shard = sharded_db.shards_[order[id]];
+    // order is indexed by shard_id, so iterating it in order pushes clients in
+    // shard_id order: clients_[shard_id] ends up as that shard's client.
+    for (size_t card_index : order) {
+      ShardCard const &shard = sharded_db.shards_[card_index];
       x23::HostPort hostport;
       if (!hostport.parse(shard.address_for_exec)) {
         throw std::runtime_error("Failed to parse database shard address");
@@ -241,11 +244,12 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  // Deployment metadata is address-keyed (written via try_push_new_subtransaction,
-  // routed by shard_of_key), so read it from the shard that owns `addr` -- NOT
-  // the primary shard. Reading from the primary made any runtime-deployed
-  // contract whose address does not hash to shard 0 uninvokable; genesis
-  // contracts hid it because genesis is replicated on every shard.
+  // Deployment metadata is address-keyed (written via
+  // try_push_new_subtransaction, routed by shard_of_key), so read it from the
+  // shard that owns `addr` -- NOT the primary shard. Reading from the primary
+  // made any runtime-deployed contract whose address does not hash to shard 0
+  // uninvokable; genesis contracts hid it because genesis is replicated on
+  // every shard.
   auto &client = client_for(addr);
   auto res = client.get_deployment(block_id, addr);
   return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
@@ -535,8 +539,9 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                   return shard_of_key(delta.addrkey, n);
                                 });
     for (size_t shard = 0; shard < clients_.size(); ++shard) {
-      auto res = clients_[shard].try_push_new_subtransaction(
-          block_id, tx_id, split.shard_view(shard));
+      auto res =
+          clients_[shard].try_push_new_subtransaction(block_id, tx_id,
+                                                      split.shard_view(shard));
       switch (res.error()) {
       case RPCError::kRPCNone:
         break;
@@ -550,7 +555,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
         // carries on) stay correct without any cross-shard rule to remember.
         // The conflicting shard already rolled itself back (hogdb's
         // rollback_to_savepoint(depth-1), rpc_from_exec.cc); undo the earlier
-        // shards that accepted by popping the one subtransaction each just took.
+        // shards that accepted by popping the one subtransaction each just
+        // took.
         for (size_t undo = 0; undo < shard; ++undo) {
           auto pr = clients_[undo].pop_subtransactions(block_id, tx_id, 1);
           if (to_system_error_code<VoidMarker{}>(pr, [] {}).has_value()) {
