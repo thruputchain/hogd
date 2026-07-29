@@ -2,6 +2,7 @@
 #include "hogd/db_shard_routing/sharding.h"
 
 #include <set>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -88,26 +89,35 @@ TEST(ShardRouterTest, SpreadsAcrossShards)
 // update these golden values then.
 TEST(ShardRouterTest, PinsAddressToShardMapping)
 {
-  struct Case {
-    uint64_t seed;
-    size_t shard_count;
-    size_t expected_shard;
+  auto expect_shard = [](uint64_t seed, size_t shard_count,
+                         size_t expected_shard) {
+    EXPECT_EQ(shard_of_address(make_address(seed), shard_count), expected_shard)
+        << "seed=" << seed << " shard_count=" << shard_count;
   };
-  constexpr Case cases[] = {
-      {0, 2, 1},   {1, 2, 0},       {2, 2, 1},        {42, 2, 1},
-      {255, 2, 0}, {1000000, 2, 0}, {0xABCDEF, 2, 0},
 
-      {0, 4, 1},   {1, 4, 0},       {2, 4, 3},        {42, 4, 3},
-      {255, 4, 2}, {1000000, 4, 0}, {0xABCDEF, 4, 2},
+  expect_shard(0, 2, 1);
+  expect_shard(1, 2, 0);
+  expect_shard(2, 2, 1);
+  expect_shard(42, 2, 1);
+  expect_shard(255, 2, 0);
+  expect_shard(1000000, 2, 0);
+  expect_shard(0xABCDEF, 2, 0);
 
-      {0, 8, 5},   {1, 8, 4},       {2, 8, 7},        {42, 8, 7},
-      {255, 8, 2}, {1000000, 8, 0}, {0xABCDEF, 8, 2},
-  };
-  for (Case const &c : cases) {
-    EXPECT_EQ(shard_of_address(make_address(c.seed), c.shard_count),
-              c.expected_shard)
-        << "seed=" << c.seed << " shard_count=" << c.shard_count;
-  }
+  expect_shard(0, 4, 1);
+  expect_shard(1, 4, 0);
+  expect_shard(2, 4, 3);
+  expect_shard(42, 4, 3);
+  expect_shard(255, 4, 2);
+  expect_shard(1000000, 4, 0);
+  expect_shard(0xABCDEF, 4, 2);
+
+  expect_shard(0, 8, 5);
+  expect_shard(1, 8, 4);
+  expect_shard(2, 8, 7);
+  expect_shard(42, 8, 7);
+  expect_shard(255, 8, 2);
+  expect_shard(1000000, 8, 0);
+  expect_shard(0xABCDEF, 8, 2);
 }
 
 // ---------------------------------------------------------------------------

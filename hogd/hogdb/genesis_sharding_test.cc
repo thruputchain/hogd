@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
@@ -70,7 +69,8 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
   CHECK_EQ(res, DbSchedResult::DbSchedResultOK);
 
   DbTip tip = ctx.get_tip();
-  return {tip.storage_long_hash, tip.value.proposal_header.storage_hash};
+  return {.partial = tip.storage_long_hash,
+          .global_header = tip.value.proposal_header.storage_hash};
 }
 
 // Each shard writes only the genesis items it owns, so their partial hashes
