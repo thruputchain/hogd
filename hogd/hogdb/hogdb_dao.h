@@ -119,6 +119,19 @@ public:
     db_->get_each_parallel(std::move(fn), width, pool);
   }
 
+  // Layout and compaction introspection, for benchmarks that measure where
+  // items physically land rather than what they contain.
+  void for_each_location(LayoutCallback fn)
+  {
+    db_->for_each_location(std::move(fn));
+  }
+  size_t loglet_count() const { return db_->loglet_count(); }
+  uint64_t compaction_passes() const { return db_->compaction_passes(); }
+  uint64_t compaction_bytes_reclaimed() const
+  {
+    return db_->compaction_bytes_reclaimed();
+  }
+
 private:
   std::unique_ptr<Database> db_;
 };

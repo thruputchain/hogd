@@ -9,12 +9,15 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <print>
+#include <random>
 #include <span>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -35,6 +38,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/base/zipf.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -52,6 +56,29 @@ constexpr int128_t kDefaultBalance = 100;
 
 // config parameter: location to store ramdb.
 std::string db_path;
+
+// Zipf skew for zipf_payments. 0.99 matches the ObjecTier paper; 0 is uniform,
+// which makes zipf_payments equivalent to a random-payee workload.
+double bench_theta = 0.99;
+
+// Multiplier on the provisioned heap. The other payment benchmarks inflate the
+// heap so the compactor never runs, which is right for measuring execution
+// throughput and wrong for measuring layout -- compaction is what relocates
+// items. Lower this to let the compactor run.
+double bench_heap_factor = 8.0;
+
+// fixed seed so repeated runs generate the same payee distribution.
+constexpr uint64_t kBenchSeed = 0x5DEECE66DULL;
+
+// when true, hot payees occupy contiguous payee slots: the oracle-consolidated
+// layout, which bounds what any consolidator could achieve.
+bool bench_sorted_hot = false;
+
+// Two-tier latency model and fast-tier share, matching ramdb_bench so the
+// numbers from the two binaries are comparable.
+constexpr double kFastNs = 70.0;
+constexpr double kSlowNs = 300.0;
+constexpr double kFastTierFraction = 0.20;
 
 void
 fail(HogDBError err)
@@ -95,6 +122,9 @@ public:
   static std::unique_ptr<Benchmark>
   make_round_robin_payments_benchmark(size_t n, int workers, bool use_nonces,
                                       bool db_hash);
+  static std::unique_ptr<Benchmark>
+  make_zipf_payments_benchmark(size_t n, int workers, bool use_nonces,
+                               bool db_hash);
   static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
                                                                int workers,
                                                                bool use_nonces,
@@ -111,10 +141,22 @@ public:
   // performance.
   void run();
 
+  // report_layout joins the payee access counts this benchmark generated
+  // against the loglet each item actually landed in, and reports the resulting
+  // fast-tier occupancy and modelled AMAT. Only meaningful for a skewed
+  // command; a uniform one has no hot set to consolidate.
+  void report_layout(std::string_view label);
+
 private:
   HogDBDAO db_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
+  // Access count per payee, keyed by the exact ramdb key bytes hogdb stores the
+  // item under. Built by the skewed builder via the same make_contract_data_key
+  // the DAO uses, so matching needs no assumptions about key layout. The
+  // benchmark generates the workload, so it knows the distribution exactly and
+  // needs no instrumentation on the read path.
+  std::unordered_map<std::string, uint32_t> payee_hits_;
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -127,6 +169,14 @@ constexpr ItemKey
 make_key(size_t addr, size_t item)
 {
   return make_item_key(make_address(addr), item);
+}
+
+// key_bytes_string renders a ramdb key as a lookup-friendly opaque string. Only
+// used to match items against the generated access distribution.
+inline std::string
+key_bytes_string(std::span<const std::byte> key)
+{
+  return std::string(reinterpret_cast<const char *>(key.data()), key.size());
 }
 
 constexpr std::optional<Uniquifier>
@@ -143,8 +193,10 @@ open_ramdb(size_t n)
   // estimate size based on 1 x nnint128 and 1 x account_balance per account
   size_t heap_size =
       Database::estimate_heap_size(n * 2, sizeof(ItemKey), sizeof(int128_t));
-  // heap should be large enough to avoid compaction.
-  heap_size *= 8;
+  // Inflated so the compactor stays idle by default; lower bench_heap_factor to
+  // let it run (see the flag's declaration).
+  heap_size = static_cast<size_t>(static_cast<double>(heap_size) *
+                                  bench_heap_factor);
 
   int bucket_order = std::countr_zero(std::bit_floor(n));
   HogDBStatus<std::unique_ptr<Database>> db =
@@ -238,6 +290,74 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
   }
   // initial storage amount per account should be sufficient for replay cache
   // entries because each source only needs to record a single entry.
+  populate_account_balances(bench->db_, n,
+                            bench->cost_model_.kBaseItemCost +
+                                bench->cost_model_.kReplayCacheCostPerEntry);
+  auto lsn = bench->db_.commit();
+  if (!lsn)
+    fail(lsn.error());
+
+  return bench;
+}
+
+std::unique_ptr<Benchmark>
+Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
+                                       bool db_hash)
+{
+  // Everyone pays a Zipf-selected payee. This is manytoone_payments generalized
+  // off its degenerate endpoint: that mode sends every payment to a single
+  // account, which is a hot set of one item and therefore permanently
+  // cache-resident and invisible to a memory-tiering experiment. Grading the
+  // payee distribution produces a hot set with real byte extent -- large enough
+  // to miss cache, small enough to fit a fast tier -- which is the regime
+  // consolidation actually addresses.
+  //
+  // Each payer is still used exactly once, so replay-cache and balance setup
+  // stay identical to manytoone_payments.
+  std::vector<Payment> ops;
+  ops.reserve(n - 1);
+  std::vector<uint32_t> hits(n, 0);
+  Zipf zipf(n, bench_theta);
+  uint64_t rng = kBenchSeed;
+  // Payee items are created in index order during setup, so a Zipf rank used
+  // directly as an index would make the hot set physically contiguous -- the
+  // oracle-consolidated layout, by accident. Map rank through a fixed shuffle so
+  // hot payees are scattered across the log the way a popularity-oblivious
+  // allocator would leave them. Pass --sorted to measure the ceiling instead.
+  std::vector<uint32_t> slot(n);
+  std::iota(slot.begin(), slot.end(), 0U);
+  if (!bench_sorted_hot) {
+    std::mt19937_64 shuffle_rng(kBenchSeed ^ 0xA5A5A5ULL);
+    std::ranges::shuffle(slot, shuffle_rng);
+  }
+  for (size_t i = 1; i < n; i++) {
+    uint32_t payee = slot[zipf(rng)];
+    hits[payee]++;
+    ops.emplace_back(make_key(i, 0), make_key(0, payee), 1,
+                     maybe_uniquifier(1, i, nonces));
+  }
+
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
+                                           std::move(ops));
+  // Record hits against the exact key bytes hogdb will store each payee under.
+  for (size_t i = 0; i < n; i++) {
+    if (hits[i] == 0)
+      continue;
+    auto db_key = make_contract_data_key(make_key(0, i));
+    bench->payee_hits_.emplace(key_bytes_string(std::as_bytes(std::span(db_key))),
+                               hits[i]);
+  }
+
+  // set up initial DB state: one nnint128 per payee item, one per payer.
+  for (size_t i = 0; i < n; i++) {
+    if (auto ret = bench->db_.write_nnint128(make_key(0, i), 0); !ret)
+      fail(ret.error());
+  }
+  for (size_t i = 1; i < n; i++) {
+    if (auto ret = bench->db_.write_nnint128(make_key(i, 0), 1); !ret)
+      fail(ret.error());
+  }
+  // as in manytoone, each source records a single replay entry.
   populate_account_balances(bench->db_, n,
                             bench->cost_model_.kBaseItemCost +
                                 bench->cost_model_.kReplayCacheCostPerEntry);
@@ -390,6 +510,72 @@ Benchmark::run()
   CHECK(block.initiate_shutdown());
 }
 
+void
+Benchmark::report_layout(std::string_view label)
+{
+  if (payee_hits_.empty()) {
+    warn("{}: no access distribution recorded; layout report skipped", label);
+    return;
+  }
+
+  RAMDB &ramdb = db_.get_ramdb();
+  const size_t nloglets = ramdb.loglet_count();
+  std::vector<size_t> touched_bytes(nloglets);
+  std::vector<size_t> live_bytes(nloglets);
+  std::vector<uint64_t> accesses(nloglets);
+
+  // Recover each payee item's index from its key so it can be matched against
+  // the generated hit counts. Items that are not payees (payer balances, replay
+  // entries) contribute live bytes but no accesses -- which is correct: they are
+  // cold data competing for the same loglets.
+  ramdb.for_each_location([&](std::span<const std::byte> key, size_t bytes,
+                              size_t idx) {
+    live_bytes[idx] += bytes;
+    auto it = payee_hits_.find(key_bytes_string(key));
+    if (it == payee_hits_.end())
+      return;
+    accesses[idx] += it->second;
+    touched_bytes[idx] += bytes;
+  });
+
+  std::vector<size_t> occupied;
+  for (size_t i = 0; i < nloglets; ++i)
+    if (live_bytes[i] > 0)
+      occupied.push_back(i);
+  if (occupied.empty()) {
+    warn("{}: no occupied loglets", label);
+    return;
+  }
+
+  std::ranges::sort(occupied, [&accesses](size_t a, size_t b) {
+    return accesses[a] > accesses[b];
+  });
+  auto fast_count = static_cast<size_t>(
+      std::ceil(kFastTierFraction * static_cast<double>(occupied.size())));
+
+  uint64_t total = 0;
+  for (size_t i : occupied)
+    total += accesses[i];
+  uint64_t fast = 0;
+  double fast_hot = 0.0;
+  for (size_t i = 0; i < fast_count; ++i) {
+    fast += accesses[occupied[i]];
+    fast_hot += static_cast<double>(touched_bytes[occupied[i]]) /
+                static_cast<double>(kLogletRegionSize);
+  }
+  fast_hot /= static_cast<double>(fast_count);
+
+  double hit = total > 0 ? static_cast<double>(fast) /
+                               static_cast<double>(total)
+                         : 0.0;
+  double amat = (hit * kFastNs) + ((1.0 - hit) * kSlowNs);
+
+  std::println("layout,{},{},{},{:.4f},{:.4f},{:.2f}", label, occupied.size(),
+               fast_count, fast_hot, hit, amat);
+  std::println("compaction,{},{},{}", label, ramdb.compaction_passes(),
+               ramdb.compaction_bytes_reclaimed());
+}
+
 using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers,
                                                 bool use_nonces, bool db_hash);
 
@@ -400,6 +586,8 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      Benchmark::make_one_to_many_payments_benchmark},
     {"manytoone_payments", "everyone pays one payee",
      Benchmark::make_many_to_one_payments_benchmark},
+    {"zipf_payments", "everyone pays a Zipf-selected payee (graded hot set)",
+     Benchmark::make_zipf_payments_benchmark},
     {"new_storage", "new nnint128's are stored on the ledger",
      Benchmark::make_new_storage_benchmark},
 };
@@ -915,6 +1103,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "(default: workers/2)");
     std::println("  -N, --nonces           enable nonces (payment commands)");
     std::println("  -d, --db_hash          compute db hash after execution");
+    std::println("  -t, --theta <F>        zipf_payments skew "
+                 "(default: 0.99; 0 is uniform)");
+    std::println("  -H, --heap <F>         heap provisioning multiplier "
+                 "(default: 8.0; lower lets the compactor run)");
+    std::println("  -S, --sorted           place the hot payees contiguously "
+                 "(consolidated ceiling)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -942,6 +1136,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"producers", required_argument, nullptr, 'p'},
       {"nonces",    no_argument,       nullptr, 'N'},
       {"db_hash",   no_argument,       nullptr, 'd'},
+      {"theta",     required_argument, nullptr, 't'},
+      {"heap",      required_argument, nullptr, 'H'},
+      {"sorted",    no_argument,       nullptr, 'S'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -957,7 +1154,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndh", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:S", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -977,6 +1174,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'd':
       db_hash = true;
+      break;
+    case 't':
+      hogd::bench_theta = std::stod(optarg);
+      break;
+    case 'H':
+      hogd::bench_heap_factor = std::stod(optarg);
+      break;
+    case 'S':
+      hogd::bench_sorted_hot = true;
       break;
     case 'h':
       print_usage();
@@ -1008,6 +1214,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     double sec = hogd::measure([&bench] { bench->run(); });
     std::println("took {} seconds", sec);
     hogd::info("took {} seconds", sec);
+    // Report where items landed, once the workload has finished placing them.
+    bench->report_layout(cmd);
     return 0;
   }
 
