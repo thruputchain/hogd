@@ -85,6 +85,10 @@ bool bench_consolidate = false;
 // Minimum payee access count for the oracle classifier to call an item hot.
 int bench_hot_hits = 2;
 
+// Minimum Loglet::mixedness for consolidate() to reorganize a loglet. Higher
+// values touch fewer loglets, so this is the cost/benefit knob for the pass.
+double bench_min_mixedness = 0.0;
+
 // Two-tier latency model and fast-tier share, matching ramdb_bench so the
 // numbers from the two binaries are comparable.
 constexpr double kFastNs = 70.0;
@@ -554,8 +558,9 @@ Benchmark::consolidate()
     return it != payee_hits_.end() &&
            it->second >= static_cast<uint32_t>(bench_hot_hits);
   };
-  size_t moved = db_.get_ramdb().consolidate(is_hot, 0.0F);
-  info("consolidated {} loglets", moved);
+  size_t moved = db_.get_ramdb().consolidate(
+      is_hot, static_cast<float>(bench_min_mixedness));
+  std::println("consolidated,{},{:.2f}", moved, bench_min_mixedness);
 }
 
 void
@@ -1163,6 +1168,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "workload and re-report layout");
     std::println("  -k, --hot-hits <N>     accesses for the oracle classifier "
                  "to call a payee hot (default: 2)");
+    std::println("  -m, --mixedness <F>    minimum loglet mixedness to "
+                 "consolidate (default: 0.0 = all)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1196,6 +1203,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"rounds",    required_argument, nullptr, 'r'},
       {"consolidate", no_argument,     nullptr, 'C'},
       {"hot-hits",  required_argument, nullptr, 'k'},
+      {"mixedness", required_argument, nullptr, 'm'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1211,7 +1219,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1249,6 +1257,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'k':
       hogd::bench_hot_hits = std::stoi(optarg);
+      break;
+    case 'm':
+      hogd::bench_min_mixedness = std::stod(optarg);
       break;
     case 'h':
       print_usage();

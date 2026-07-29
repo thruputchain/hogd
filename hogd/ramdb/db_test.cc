@@ -115,6 +115,7 @@ protected:
   open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max(),
           size_t log_file_size_threshold = kDiskLogFileThreshold);
   void insert_n(size_t count);
+  void insert_serial(size_t count);
   DBError insert_until_failure();
   void remove_every_n(int n);
   void check_integrity();
@@ -171,6 +172,21 @@ DatabaseTest::insert_n(size_t count)
 
   // update the oracle
   for (auto &[key, value] : inserts) {
+    oracle_.emplace(std::move(key), std::move(value));
+  }
+}
+
+void
+DatabaseTest::insert_serial(size_t count)
+{
+  for (size_t i = 0; i < count; ++i) {
+    std::string key(kKeySize, '0');
+    rand_(std::span(key));
+    std::string value(kValueSize, '0');
+    rand_(std::span(value));
+    DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
+                                  std::as_bytes(std::span(value)));
+    ASSERT_TRUE(static_cast<bool>(ret));
     oracle_.emplace(std::move(key), std::move(value));
   }
 }
@@ -363,6 +379,54 @@ TEST_F(DatabaseTest, Compact)
     insert_n(kInsertions / 2);
     check_integrity();
   }
+}
+
+// Consolidation relocates live items outside the compactor's memory-pressure
+// trigger, so it must preserve every key, value and type exactly. Splitting the
+// hot set by a hash of the key means both destinations receive items, and the
+// interleaving guarantees the source loglets really are mixed rather than
+// trivially homogeneous.
+TEST_F(DatabaseTest, Consolidate)
+{
+  // Insert serially. consolidate() can only consider loglets already handed to
+  // the compactor, and a per-thread write head is handed over only when it
+  // fills. insert_n() spreads its writes across every core, so no single head
+  // gets near 2 MiB and nothing reaches the compactable set at all. One writer
+  // fills one head and rolls it over.
+  insert_serial(kInsertions);
+  check_integrity();
+
+  auto is_hot = [](ItemHeader *item) {
+    return (std::hash<std::string_view>{}(std::string_view(
+                reinterpret_cast<const char *>(item->get_key().data()),
+                item->get_key().size())) &
+            1U) != 0U;
+  };
+
+  size_t moved = db_->consolidate(is_hot, 0.0F);
+  EXPECT_GT(moved, 0U) << "no loglets were consolidated";
+  check_integrity();
+
+  // A second pass over already-homogeneous loglets should find nothing to do,
+  // and must still not disturb the contents.
+  db_->consolidate(is_hot, 0.99F);
+  check_integrity();
+
+  // The store stays usable afterwards: relocated items must remain reachable
+  // for update and removal through the repointed index.
+  remove_every_n(2);
+  insert_n(kInsertions / 2);
+  check_integrity();
+}
+
+// Consolidation must survive being handed only cold items: every item routes to
+// one destination and the other is never allocated.
+TEST_F(DatabaseTest, ConsolidateAllCold)
+{
+  insert_serial(kInsertions);
+  check_integrity();
+  db_->consolidate([](ItemHeader *) { return false; }, 0.0F);
+  check_integrity();
 }
 
 TEST_F(DatabaseTest, Active)

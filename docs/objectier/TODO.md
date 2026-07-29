@@ -289,12 +289,60 @@ Design notes:
 
 `ramdb_test` 20/20, `hogdb_test` 214 passed / 2 skipped.
 
+### Sweeps — `figures/v1_consolidation.{pdf,png}`, `python3 plot_v1.py`
+
+**(a) AMAT vs skew** (2 M accounts, oracle classifier), `data/v1_skew.csv`:
+
+| θ | scattered | consolidated | rank-sorted prefill |
+|---|---|---|---|
+| 0 | 174.4 | 122.0 | 174.5 |
+| 0.6 | 172.7 | 110.2 | 119.9 |
+| 0.9 | 153.7 | 93.0 | 87.3 |
+| 0.99 | 139.3 | 86.6 | 79.8 |
+
+**(b) Cost/benefit** (θ=0.99), `data/v1_mixedness.csv` — the headline:
+
+| victims | loglets relocated | AMAT |
+|---|---|---|
+| `mixedness ≥ 0` | 289 (all) | 86.64 ns |
+| `mixedness ≥ 0.005 … 0.05` | **107 (37%)** | **86.64 ns** |
+| `mixedness ≥ 0.10` | 0 | 139.32 ns |
+
+**Identical AMAT for 37% of the relocation work.** The per-loglet mixedness
+distribution is bimodal — 182 loglets are essentially pure cold (< 0.005) and
+consolidating them is wasted effort; 107 hold the mixed data and carry the entire
+benefit. This is the measurement behind the paper's §6 assertion that "very hot
+and very cold objects would rarely be relocated", which it states without
+evidence, and it speaks directly to the cleaning-cost debate §6 concedes is
+unresolved.
+
+### Two caveats that must travel with panel (a)
+
+1. **Oracle leak at low θ.** The classifier is built from the *same* access counts
+   the hit rate is then scored against. At high θ that is benign — Zipf hotness is
+   stable across samples, so a hot item is hot in any draw. At θ→0 it is
+   train-on-test: the pass separates items by their realized sample counts and is
+   then rewarded on those counts. That is why consolidated (122.0) appears to beat
+   the rank-sorted arm (174.5) at θ=0. **The low-θ improvements are not real.**
+   Fixing it needs a train/score split — classify on one access trace, score on an
+   independent one.
+2. **"Rank-sorted" is only a ceiling at high θ.** It orders payees by Zipf *rank*,
+   which coincides with popularity only when the distribution is steep. At θ=0 rank
+   carries no information, so that arm collapses onto scattered. Labelled
+   "rank-sorted prefill" rather than "ceiling" for this reason.
+
 ### Still to do here
 
-- A dedicated integrity test for `consolidate()`: current evidence is indirect (the
-  post-pass layout walk finds every payee and the hit rate rises, item counts match,
-  db_hash run is clean). It deserves a test that asserts every key/value survives a
-  consolidation pass, in `ramdb_test`.
+- ~~A dedicated integrity test for `consolidate()`~~ — **done**:
+  `DatabaseTest.Consolidate` and `.ConsolidateAllCold` in `db_test.cc` check the
+  whole DB against the oracle after a pass, after a second no-op pass, and after
+  further removes/inserts through the repointed index. Writing it immediately found
+  that `consolidate()` sees **nothing** unless write heads have rolled over: a
+  per-thread head reaches the compactable set only when it fills, so `insert_n()`
+  spread across 128 cores leaves every head partly full and the candidate set
+  empty. Tests insert serially now. The underlying limitation is real and
+  unaddressed — **up to one partly-filled loglet per core (256 MB on this box) of
+  the newest data is invisible to consolidation.**
 - `fast_hot` barely moves (0.204 → 0.245) because payer balances and replay entries
   dominate the item population and dilute it. Hit rate is the metric that drives
   AMAT; worth stating plainly rather than reporting utilization as the headline.
