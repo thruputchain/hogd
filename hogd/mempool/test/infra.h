@@ -24,6 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -34,7 +35,6 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
-#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"

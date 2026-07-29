@@ -7,17 +7,21 @@
 #include <utility>
 
 #include "consensus.hh" // ConsensusValue
-#include "db_sched.hh"  // ShardIdentity, DbSchedResult
+#include "db_sched.hh"  // DbSchedResult
 #include "genesis.hh"   // GenesisConfiguration
 #include "rpc_types.hh" // DbTip
+#include "sched_db.hh"  // ShardIdentity
 #include "types.hh"
 
-#include "hogd/base/io.h"    // Directory
-#include "hogd/base/types.h" // 10_MiB
+#include "hogd/base/io.h" // Directory
+#include "hogd/base/log.h"
+#include "hogd/base/status.h" // ErrnoStatus
+#include "hogd/base/types.h"  // 10_MiB
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/lthash16.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hogdb/db_hash.h"
+#include "hogd/hogdb/hog_types.h" // BlockTXID
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_sched.h"
@@ -40,8 +44,9 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   CHECK(static_cast<bool>(dir));
   constexpr size_t kHeapSize = 10_MiB;
-  DBStatus<std::unique_ptr<Database>> db = Database::open(
-      dir->get_path(), Database::estimate_heap_size(kHeapSize), 0);
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(kHeapSize),
+                     0);
   CHECK(db.has_value());
   HogDBDAO dao(RAMDB(std::move(*db)));
   RPCContext ctx(std::move(dao), nullptr);
@@ -59,8 +64,9 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
   HogDBSchedRpc sched(ctx);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  DbSchedResult res = sched.dbsched_load_genesis_configuration(
-      GenesisConfiguration{}, genesis_value)();
+  DbSchedResult res =
+      sched.dbsched_load_genesis_configuration(GenesisConfiguration{},
+                                               genesis_value)();
   CHECK_EQ(res, DbSchedResult::DbSchedResultOK);
 
   DbTip tip = ctx.get_tip();
@@ -68,10 +74,10 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
 }
 
 // Each shard writes only the genesis items it owns, so their partial hashes
-// (LtHash16, additive) must sum to the value a single-shard db computes -- which
-// is also the GLOBAL hash every shard puts in its block header. This is the only
-// coverage of the shard-owner-only genesis filtering for N > 1; the rest of the
-// suite runs single-shard.
+// (LtHash16, additive) must sum to the value a single-shard db computes --
+// which is also the GLOBAL hash every shard puts in its block header. This is
+// the only coverage of the shard-owner-only genesis filtering for N > 1; the
+// rest of the suite runs single-shard.
 TEST(GenesisSharding, PartialsSumToSingleShardGlobalForAnyShardCount)
 {
   GenesisHashes single = load_genesis_for_shard(/*shard_id=*/0,

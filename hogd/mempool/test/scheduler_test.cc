@@ -3,6 +3,7 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
@@ -11,6 +12,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/scheduler.h"
+#include "hogd/mempool/sharded_db_sched.h" // ShardedDbSched
+#include "hogd/mempool/shared.h"           // db_sched_client_t
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "sched_db.hh"
@@ -35,7 +38,8 @@ make_scheduler_with_shards(size_t shard_count)
 {
   std::vector<std::shared_ptr<db_sched_client_t>> clients(shard_count);
   auto sharded_db = std::make_shared<ShardedDbSched>(std::move(clients));
-  return std::make_shared<Scheduler>(/*current_block=*/-1, std::move(sharded_db));
+  return std::make_shared<Scheduler>(/*current_block=*/-1,
+                                     std::move(sharded_db));
 }
 
 // The transfer barrier must advance to block N only once EVERY shard has
@@ -46,10 +50,14 @@ make_scheduler_with_shards(size_t shard_count)
 TEST(Scheduler, TransferBarrierAdvancesOnlyAfterAllShardsReportOutOfOrder)
 {
   std::shared_ptr<Scheduler> scheduler = make_scheduler_with_shards(2);
-  EXPECT_FALSE(scheduler->record_shard_transfer_finished(0)); // shard A, block 0
-  EXPECT_FALSE(scheduler->record_shard_transfer_finished(1)); // shard A, block 1
-  EXPECT_TRUE(scheduler->record_shard_transfer_finished(0));  // shard B -> 0 done
-  EXPECT_TRUE(scheduler->record_shard_transfer_finished(1));  // shard B -> 1 done
+  EXPECT_FALSE(
+      scheduler->record_shard_transfer_finished(0)); // shard A, block 0
+  EXPECT_FALSE(
+      scheduler->record_shard_transfer_finished(1)); // shard A, block 1
+  EXPECT_TRUE(
+      scheduler->record_shard_transfer_finished(0)); // shard B -> 0 done
+  EXPECT_TRUE(
+      scheduler->record_shard_transfer_finished(1)); // shard B -> 1 done
 }
 
 // A single shard completes every block on its one and only notification, so
