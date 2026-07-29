@@ -195,6 +195,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   info("shard identity: id={}, total_shards={}, function_id={}",
        shard_identity.shard_id, shard_identity.total_shards,
        shard_identity.shard_function_id);
+  ctx.set_shard_identity(shard_identity);
 
   HogDBStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
   if (!reconcile_status.has_value()) {

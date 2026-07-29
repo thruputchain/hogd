@@ -19,6 +19,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/db_shard_routing/sharding.h" // shard_of_address, kPrimaryShard
 #include "hogd/base/string.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -332,18 +333,37 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     }
   }
 
-  uint128_t initial_hog_token_supply =
-      GenesisConfigurationLoader::initial_hog_token_supply();
-  HogAge ages{
-      .address = GenesisConfigurationLoader::kDeployContractAddress,
-      .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
-                   to_xdr(uint128_t{0})},
-      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+  // Genesis is loaded on every shard, but each shard must write only the items
+  // it owns, so its lthash covers each item exactly once and the shards' hashes
+  // sum to the value an unsharded db computes (the header carries that global
+  // sum; see the two-pass hashing below). Ownership is by shard_of_address,
+  // except content-addressed contracts, which live on the primary shard.
+  ShardIdentity const &ident = ctx_.get_shard_identity();
+  auto owns_address = [&](ContractAddress const &addr) {
+    return shard_of_address(addr, ident.total_shards) == ident.shard_id;
   };
-  if (auto age_write = ctx_.get_db().write_address_average_hog_age(ages);
-      !age_write.has_value()) {
-    error("failed to write genesis block hog ages: {}", age_write.error());
-    co_return DbSchedResult::DbSchedResultError;
+  bool const owns_deploy_address =
+      owns_address(GenesisConfigurationLoader::kDeployContractAddress);
+  bool const owns_contract_code = (kPrimaryShard == ident.shard_id);
+
+  // The initial token supply's hog age is keyed by kDeployContractAddress, so
+  // only that address's owner shard keeps the row. (Hog ages are not in the db
+  // hash, so this does not affect the block hash -- but the row must not be
+  // replicated onto non-owner shards.)
+  if (owns_deploy_address) {
+    uint128_t initial_hog_token_supply =
+        GenesisConfigurationLoader::initial_hog_token_supply();
+    HogAge ages{
+        .address = GenesisConfigurationLoader::kDeployContractAddress,
+        .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
+                     to_xdr(uint128_t{0})},
+        .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+    };
+    if (auto age_write = ctx_.get_db().write_address_average_hog_age(ages);
+        !age_write.has_value()) {
+      error("failed to write genesis block hog ages: {}", age_write.error());
+      co_return DbSchedResult::DbSchedResultError;
+    }
   }
 
   // Genesis runs after direct db writes in tests (for example wasm
@@ -353,6 +373,126 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // calling close() below.
   StorageLongHash base_hash = ctx_.get_db().compute_full_db_hash();
 
+  // Applies the genesis items to `gitx`. With owned_only, writes just this
+  // shard's items; otherwise writes all of them (to derive the global hash).
+  // Returns true on failure. Walks the config from scratch each call.
+  auto apply_genesis_items = [&](auto *gitx, bool owned_only) -> bool {
+    bool failure = false;
+    GenesisConfigurationLoader loader(genesis_configuration);
+    loader.load_genesis_configuration(
+        [&](StorageKey const &key, int128_t value) -> int128_t {
+          // Storage items are keyed by kDeployContractAddress.
+          if (owned_only && !owns_deploy_address) {
+            return 0;
+          }
+          auto item_key = make_item_key(AddressAndKey{
+              .address = GenesisConfigurationLoader::kDeployContractAddress,
+              .key = key});
+          auto r = gitx->request_nnint128(
+              item_key, value, std::to_underlying(StorageDeltaFlags::None));
+          if (!r.has_value()) {
+            error("failed to write genesis block storage: {}", r.error());
+            failure = true;
+          }
+          // invoketx handles the storage costs
+          return 0;
+        },
+        [&](auto const &contract) {
+          if (owned_only && !owns_contract_code) {
+            return;
+          }
+          auto r = gitx->request_new_contract(*contract);
+          if (!r.has_value()) {
+            error("failed to write genesis block contract: {}", r.error());
+            failure = true;
+          }
+        },
+        [&](ContractAddress const &addr, DeployedContractHash const &hash) {
+          if (owned_only && !owns_address(addr)) {
+            return 0;
+          }
+          auto r = gitx->request_deploy_contract(addr, hash);
+          if (!r.has_value()) {
+            error("failed to write genesis block deployment: {}", r.error());
+            failure = true;
+          }
+          return 0;
+        },
+        [&](ContractAddress const &addr,
+            AddressAuthData const &auth_data) -> int128_t {
+          if (owned_only && !owns_address(addr)) {
+            return 0;
+          }
+          x23::Vec<AuthDataChangeSigner, kMaxSigners> auth_data_change_signers;
+          for (uint32_t i = 0; i < kMaxSigners; i++) {
+            if (auth_data.public_keys[i]) {
+              auth_data_change_signers.push_back({
+                  .public_key_id = i,
+                  .public_key = auth_data.public_keys[i],
+              });
+            }
+          }
+          AuthDataChangeArgs auth_data_change = {
+              .auth_data_change_signers = auth_data_change_signers,
+              .new_required_weight = auth_data.required_weight,
+          };
+          auto r = gitx->request_auth_data(
+              addr, auth_data_change,
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r.has_value()) {
+            error("failed to write genesis block auth data: {}", r.error());
+            failure = true;
+          }
+          return 0;
+        });
+    return failure;
+  };
+
+  // Pass 1: apply ALL items to a throwaway block tx to derive the GLOBAL block
+  // hash -- the value an unsharded db computes, so every shard (any N) produces
+  // the same block hash. close() only stages an in-memory changeset and this tx
+  // is never committed, so the ramdb is left untouched.
+  StorageLongHash global_hash;
+  {
+    constexpr BlockTXID kScratchBlockID =
+        std::numeric_limits<BlockTXID>::max() - 1;
+    auto gr = ctx_.open_block_tx(
+        kScratchBlockID, BlockExecutionMode::kBlockExecutionModeProposal);
+    if (!gr.has_value()) {
+      error("failed to open genesis global-hash block tx: {}", gr.error());
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    auto *gitx = ctx_.get_invoke_tx(kScratchBlockID, 0);
+    gitx->create_savepoint();
+    if (apply_genesis_items(gitx, /*owned_only=*/false)) {
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    if (auto sr = gitx->sync_balance_locks(); !sr) {
+      error("failed to sync balance locks (global pass): {}", sr.error());
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    if (auto cr = gitx->commit(); !cr) {
+      error("failed to commit invoke tx (global pass): {}", cr.error());
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    auto gh = gr.value()->get().close(base_hash);
+    if (!gh) [[unlikely]] {
+      error("genesis global-hash close failed: {}", gh.error());
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    global_hash = *gh;
+    ctx_.close_invoke_tx(kScratchBlockID, 0, gitx);
+    // Discard without committing (mirrors commit_block's teardown).
+    if (!gr.value()->initiate_shutdown()) {
+      error("genesis global-hash block tx had outstanding references");
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    ctx_.remove_shutdown_block_tx(kScratchBlockID);
+  }
+
+  // Pass 2: apply only THIS shard's items to the real genesis block tx; its
+  // close() gives this shard's PARTIAL hash (persisted in the DbTip). The
+  // additive lthash makes the shards' partials sum to the global hash above.
   auto r = ctx_.open_block_tx(kGenesisBlockID,
                               BlockExecutionMode::kBlockExecutionModeProposal);
   if (!r.has_value()) {
@@ -361,74 +501,10 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   }
 
   auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
-  int depth = itx->create_savepoint();
   assert(itx);
+  int depth = itx->create_savepoint();
 
-  bool failure = false;
-  // If initialization fails, then the database is left in an invalid state.
-  // We should abort the entire run of the hog chain to fix if initialization
-  // doesn't work.
-
-  GenesisConfigurationLoader loader(genesis_configuration);
-  loader.load_genesis_configuration(
-      [&](StorageKey const &key, int128_t value) -> int128_t {
-        auto item_key = make_item_key(AddressAndKey{
-            .address = GenesisConfigurationLoader::kDeployContractAddress,
-            .key = key});
-        auto r =
-            itx->request_nnint128(item_key, value,
-                                  std::to_underlying(StorageDeltaFlags::None));
-        if (!r.has_value()) {
-          error("failed to write genesis block storage: {}", r.error());
-          failure = true;
-        }
-
-        // invoketx handles the storage costs
-        return 0;
-      },
-      [&](auto const &contract) {
-        auto r = itx->request_new_contract(*contract);
-        if (!r.has_value()) {
-          error("failed to write genesis block contract: {}", r.error());
-          failure = true;
-        }
-      },
-      [&](ContractAddress const &addr, DeployedContractHash const &hash) {
-        auto r = itx->request_deploy_contract(addr, hash);
-        if (!r.has_value()) {
-          error("failed to write genesis block deployment: {}", r.error());
-          failure = true;
-        }
-        return 0;
-      },
-      [&](ContractAddress const &addr,
-          AddressAuthData const &auth_data) -> int128_t {
-        x23::Vec<AuthDataChangeSigner, kMaxSigners> auth_data_change_signers;
-        for (uint32_t i = 0; i < kMaxSigners; i++) {
-          if (auth_data.public_keys[i]) {
-            auth_data_change_signers.push_back({
-                .public_key_id = i,
-                .public_key = auth_data.public_keys[i],
-            });
-          }
-        }
-
-        AuthDataChangeArgs auth_data_change = {
-            .auth_data_change_signers = auth_data_change_signers,
-            .new_required_weight = auth_data.required_weight,
-        };
-
-        auto r =
-            itx->request_auth_data(addr, auth_data_change,
-                                   std::to_underlying(StorageDeltaFlags::None));
-        if (!r.has_value()) {
-          error("failed to write genesis block auth data: {}", r.error());
-          failure = true;
-        }
-        return 0;
-      });
-
-  if (failure) {
+  if (apply_genesis_items(itx, /*owned_only=*/true)) {
     error("genesis block initialization failed");
     itx->rollback_to_savepoint(depth - 1);
     co_return DbSchedResult::DbSchedResultError;
@@ -438,34 +514,36 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }
 
-  if (auto r = itx->sync_balance_locks(); !r) {
-    error("failed to sync balance locks: {}", r.error());
+  if (auto sr = itx->sync_balance_locks(); !sr) {
+    error("failed to sync balance locks: {}", sr.error());
     co_return DbSchedResult::DbSchedResultError;
   }
   if (auto cr = itx->commit(); !cr) {
     error("failed to commit invoke tx: {}", cr.error());
     co_return DbSchedResult::DbSchedResultError;
   }
-  auto db_hash_result = r.value()->get().close(base_hash);
-  if (!db_hash_result) [[unlikely]] {
-    error("genesis close failed: {}", db_hash_result.error());
+  auto partial_hash_result = r.value()->get().close(base_hash);
+  if (!partial_hash_result) [[unlikely]] {
+    error("genesis close failed: {}", partial_hash_result.error());
     co_return DbSchedResult::DbSchedResultError;
   }
-  StorageLongHash db_hash = *db_hash_result;
+  StorageLongHash partial_hash = *partial_hash_result;
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
+  // The header carries the GLOBAL hash (identical on every shard, whatever N);
+  // the shard commits and persists its own PARTIAL hash in the DbTip.
   value.proposal_header.storage_hash =
-      sha256(std::as_bytes(std::span(db_hash)));
-  auto ret =
-      to_db_result(commit_block(kGenesisBlockID, value, r.value(), db_hash));
+      sha256(std::as_bytes(std::span(global_hash)));
+  auto ret = to_db_result(
+      commit_block(kGenesisBlockID, value, r.value(), partial_hash));
   if (ret == DbSchedResult::DbSchedResultOK) {
     co_await Health::instance().set_current_block_height(
         ctx_.get_tip().value.proposal_header.block_height);
   }
-  // Just to be safe, we recompute the db hash from scratch and ensure that
-  // [db_hash] is equal to it.
+  // The committed ramdb holds only this shard's owned items, so a full recompute
+  // must equal the PARTIAL hash we persisted.
   StorageLongHash full_hash = ctx_.get_db().compute_full_db_hash();
-  CHECK_EQ(full_hash, db_hash);
+  CHECK_EQ(full_hash, partial_hash);
   co_return ret;
 }
 
