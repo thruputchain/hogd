@@ -79,6 +79,38 @@ TEST(ShardRouterTest, SpreadsAcrossShards)
   EXPECT_GT(hit.size(), 1U);
 }
 
+// Pins the address -> shard mapping to concrete values. The other router tests
+// (determinism, range, spread) pass for ANY hash function; this one fails if
+// the routing function itself changes -- which matters because once a cluster
+// has data, altering the function points every lookup at a shard that no longer
+// holds the data. The expected shards are from an independent reference
+// implementation of the FNV-1a routing over make_address(seed). Changing
+// shard_of_address is intentional only alongside a kShardFunctionId bump; update
+// these golden values then.
+TEST(ShardRouterTest, PinsAddressToShardMapping)
+{
+  struct Case {
+    uint64_t seed;
+    size_t shard_count;
+    size_t expected_shard;
+  };
+  constexpr Case cases[] = {
+      {0, 2, 1},       {1, 2, 0},       {2, 2, 1},       {42, 2, 1},
+      {255, 2, 0},     {1000000, 2, 0}, {0xABCDEF, 2, 0},
+
+      {0, 4, 1},       {1, 4, 0},       {2, 4, 3},       {42, 4, 3},
+      {255, 4, 2},     {1000000, 4, 0}, {0xABCDEF, 4, 2},
+
+      {0, 8, 5},       {1, 8, 4},       {2, 8, 7},       {42, 8, 7},
+      {255, 8, 2},     {1000000, 8, 0}, {0xABCDEF, 8, 2},
+  };
+  for (Case const &c : cases) {
+    EXPECT_EQ(shard_of_address(make_address(c.seed), c.shard_count),
+              c.expected_shard)
+        << "seed=" << c.seed << " shard_count=" << c.shard_count;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-shard batch split / gather
 // ---------------------------------------------------------------------------
