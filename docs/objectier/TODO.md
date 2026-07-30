@@ -291,47 +291,65 @@ Design notes:
 
 ### Sweeps — `figures/v1_consolidation.{pdf,png}`, `python3 plot_v1.py`
 
-Scored on an **independent access trace**: the classifier learns from the workload's
-own hits, the hit rate is measured against a separate draw from the same
-distribution. Classifying and scoring on one trace is train-on-test and inflated
-every number below — see the correction note.
+**What is measured, and what is not.** This host has one NUMA node and no slow
+tier, so nothing here times memory. Measured: every item's real loglet
+(`for_each_location`) joined against an independent access trace, giving the
+**fast-tier hit rate** — the share of accesses landing in the hottest 20% of
+loglets. AMAT is then one line, `hit*70 + (1-hit)*300`, an affine rescaling
+carrying no information the hit rate does not. Report the hit rate; treat every
+nanosecond figure as contingent on three assumed constants (`kFastNs`,
+`kSlowNs`, `kFastTierFraction`).
 
-**(a) AMAT vs skew** (2 M accounts), `data/v1_skew.csv`:
+**(a) Hit rate vs skew** (2 M accounts), `data/v1_skew.csv`:
 
-| θ | scattered | consolidated | rank-sorted ceiling | speedup | share of gap |
-|---|---|---|---|---|---|
-| 0 | 174.5 | 172.3 | 174.5 | 1.01× | no gap exists |
-| 0.3 | 174.3 | 165.4 | 150.0 | 1.05× | 37% |
-| 0.6 | 172.9 | 141.2 | 119.9 | 1.22× | 60% |
-| 0.8 | 164.5 | 117.5 | 97.6 | 1.40× | 70% |
-| 0.9 | 154.0 | 104.6 | 87.3 | 1.47× | 74% |
-| 0.99 | 139.4 | 93.8 | 79.8 | **1.49×** | **76%** |
+| θ | scattered | consolidated | rank-sorted ceiling | share of gap |
+|---|---|---|---|---|
+| 0 | 0.546 | 0.555 | 0.546 | no gap exists |
+| 0.3 | 0.547 | 0.585 | 0.652 | 37% |
+| 0.6 | 0.553 | 0.691 | 0.783 | 60% |
+| 0.8 | 0.589 | 0.794 | 0.880 | 70% |
+| 0.9 | 0.635 | 0.850 | 0.925 | 74% |
+| 0.99 | **0.698** | **0.896** | 0.957 | **76%** |
 
-The arms are now correctly ordered everywhere (ceiling ≤ consolidated ≤ scattered)
-and all three converge at θ=0, where no stable hot set exists and consolidation
-correctly achieves nothing (1.01×). The benefit grows monotonically with skew.
+Arms correctly ordered everywhere, all converging at θ=0 where no stable hot set
+exists and consolidation achieves nothing. Benefit grows monotonically with skew.
+
+**Headline, assumption-free:** at θ=0.99 the hit rate rises 19.8 points, 0.698 →
+0.896 — **2.91× fewer accesses falling to the slow tier**, whatever that tier is.
 
 **(b) Cost/benefit** (θ=0.99), `data/v1_mixedness.csv`:
 
-| victims | loglets relocated | bytes moved | AMAT |
+| victims | loglets relocated | bytes moved | hit rate |
 |---|---|---|---|
-| `mixedness ≥ 0.10` | 0 | 0 | 139.40 ns |
-| `mixedness ≥ 0.005 … 0.04` | **107 (37%)** | **214 MiB** | **93.84 ns** |
-| `mixedness ≥ 0` | 289 (100%) | 578 MiB | 93.84 ns |
+| `mixedness ≥ 0.10` | 0 | 0 | 0.698 |
+| `mixedness ≥ 0.005 … 0.04` | **107 (37%)** | **214 MiB** | **0.896** |
+| `mixedness ≥ 0` | 289 (100%) | 578 MiB | 0.896 |
 
-**Identical AMAT for 37% of the work.** The per-loglet mixedness distribution is
+**Identical result for 37% of the work.** The per-loglet mixedness distribution is
 bimodal: 182 loglets are essentially pure cold (< 0.005) and relocating them
-achieves nothing; 107 hold the mixed data and carry the entire benefit. This is the
+achieves nothing; 107 hold the mixed data and carry the whole benefit. This is the
 measurement behind §6's unevidenced claim that "very hot and very cold objects
 would rarely be relocated", and it speaks to the cleaning-cost debate §6 concedes
 is unresolved.
 
-Denominator note: 290 loglets hold data (580 MiB); the heap is 17.7 GiB / ~9062
-loglets because the bench provisions 8× headroom to keep the compactor idle.
-Quoting cost against the heap would read 1.2% instead of 37% purely because of
-that over-provisioning, so the axis is percent of *occupied* loglets. 289 rather
-than 290 because one is the active write head, which consolidation cannot
+Denominator: 290 loglets hold data (580 MiB); the heap is 17.7 GiB / ~9062 loglets
+because the bench provisions 8× headroom to keep the compactor idle. Quoting cost
+against the heap would read 1.2% rather than 37% for reasons unrelated to the work
+done. 289 not 290 because one is the active write head, which consolidation cannot
 relocate out of.
+
+**(c) Model sensitivity.** The speedup is not a property of the measurement:
+
+| assumed slow tier | modelled speedup |
+|---|---|
+| 150 ns | 1.20× |
+| 300 ns (Optane, what is quoted) | **1.49×** |
+| 500 ns | 1.74× |
+| 1000 ns (RDMA-class) | 2.11× |
+
+So "1.49×" means "1.49× if the slow tier is 300 ns". The curve asymptotes to the
+2.91× miss-reduction as the slow tier gets slower. Quote the hit rate or the
+miss-reduction as the result and the ns figure only with its assumption attached.
 
 ### Correction: earlier numbers were inflated by train-on-test
 
