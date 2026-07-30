@@ -245,6 +245,18 @@ BlockTX::read_nnint128_base(const ItemKey &key)
 {
   if (auto s = check_stale(); !s) [[unlikely]]
     return s.error();
+
+  // Record the access here, above the lock cache, because this is the last point
+  // where access *frequency* still exists. Every repeat access to an item within
+  // a block is served from item_locks_ below and never reaches ramdb, so a
+  // counter on the storage read path sees one read per item per block and cannot
+  // distinguish the hottest item from the coldest. Keyed by the bytes the item is
+  // stored under, so a consolidation classifier looking up the same item agrees.
+  if (db_.heat_enabled() && key.is_contract_data()) [[unlikely]] {
+    auto db_key = make_contract_data_key(key);
+    db_.record_heat(std::as_bytes(std::span(db_key)));
+  }
+
   auto *lock = item_locks_.get(key);
   if (!lock) {
     if (!key.is_contract_data()) {

@@ -136,6 +136,8 @@ public:
   {
     return db_->heat_estimate(key);
   }
+  bool heat_enabled() const { return db_->heat_enabled(); }
+  void record_heat(std::span<const std::byte> key) { db_->record_heat(key); }
   size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
                      float min_mixedness)
   {
@@ -470,6 +472,11 @@ public:
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
   size_t disk_bytes_written() const { return db_.disk_bytes_written(); }
+
+  // Hotness tracking, recorded at the logical access point rather than the
+  // storage read path. See Database::record_heat.
+  bool heat_enabled() const { return db_.heat_enabled(); }
+  void record_heat(std::span<const std::byte> key) { db_.record_heat(key); }
 
   void enable_debug_invariants(StorageCostModel const &cost_model)
   {

@@ -155,13 +155,14 @@ public:
   // into. Each is one tiering unit of kLogletRegionSize bytes.
   size_t loglet_count() const { return loglet_allocator_->loglet_count(); }
 
-  // enable_heat_tracking attaches an approximate read-hotness sketch to the read
-  // path, for use as a consolidation classifier. Off by default; see HeatSketch
-  // for why the counts live outside ItemHeader.
+  // enable_heat_tracking allocates the read-hotness sketch. Nothing in ramdb
+  // feeds it: repeat accesses to an item within a block are served from
+  // BlockTX's lock cache and never reach the storage engine, so a counter here
+  // would see one read per item per block and miss frequency entirely. Callers
+  // above that cache feed it via record_heat().
   void enable_heat_tracking(int width_order = 20, size_t rows = 4)
   {
     heat_ = std::make_unique<HeatSketch>(width_order, rows);
-    map_.set_heat_sketch(heat_.get());
   }
 
   // age_heat halves every counter, so the sketch tracks what is hot rather than
@@ -173,6 +174,23 @@ public:
   }
 
   size_t heat_bytes() const { return heat_ ? heat_->size_bytes() : 0; }
+
+  // heat_enabled lets a caller skip building a key it would only throw away.
+  bool heat_enabled() const { return heat_ != nullptr; }
+
+  // record_heat notes one logical access to key. Callers above a caching layer
+  // should use this rather than relying on the ramdb read path: hogdb serves
+  // repeat accesses to an item within a block from BlockTX's lock cache, so the
+  // storage engine sees one read per item per block and access *frequency* is
+  // invisible to it.
+  //
+  // The key must be the same bytes the item is stored under, since that is what
+  // a consolidation classifier will look up.
+  void record_heat(std::span<const std::byte> key)
+  {
+    if (heat_)
+      heat_->touch(ScalableMap::hash_key(key));
+  }
 
   // heat_estimate returns the sketch's approximate access count for a key.
   uint8_t heat_estimate(std::span<const std::byte> key) const
