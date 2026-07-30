@@ -1,7 +1,9 @@
 #include "hogd/ramdb/loglet.h"
 
 extern "C" {
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 }
 
 #include <algorithm>
@@ -9,6 +11,7 @@ extern "C" {
 #include <cassert>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
@@ -27,11 +30,55 @@ namespace hogd {
 
 namespace {
 
+// Backing the heap with a file turns the loglet region into a two-tier memory:
+// pages the kernel keeps resident are the fast tier, evicted ones are served from
+// the device on a major fault. Combined with a cgroup memory cap this gives a
+// real, measured slow tier on a machine with no CXL or NVM, and it is faithful to
+// ObjecTier's framing -- the paper's premise is improving the decisions of an
+// existing page-based tiering system, and Linux LRU reclaim is exactly that.
+//
+// Experimental facility, off unless RAMDB_HEAP_FILE names a path. MAP_SHARED so
+// evicted pages go back to the file rather than to swap.
+inline void *
+map_backing_file(size_t len)
+{
+  const char *path = std::getenv("RAMDB_HEAP_FILE"); // NOLINT(concurrency-mt-unsafe)
+  if (path == nullptr)
+    return nullptr;
+
+  int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+  if (fd < 0) {
+    Errno e;
+    error("Couldn't open heap backing file '{}': {}", path, e);
+    e.raise();
+  }
+  if (ftruncate(fd, static_cast<off_t>(len)) != 0) {
+    Errno e;
+    error("Couldn't size heap backing file to {}: {}", len, e);
+    close(fd);
+    e.raise();
+  }
+  void *addr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  // The mapping keeps the file alive; the descriptor is not needed past this.
+  close(fd);
+  if (addr == MAP_FAILED) {
+    Errno e;
+    error("Couldn't mmap heap backing file: {}", e);
+    e.raise();
+  }
+  info("heap backed by '{}' ({} bytes); resident pages are the fast tier", path,
+       len);
+  return addr;
+}
+
 inline void *
 map_segment(size_t len)
 {
   constexpr int kPermissions = PROT_READ | PROT_WRITE;
   constexpr int kFlags = MAP_PRIVATE | MAP_ANONYMOUS;
+
+  if (void *backed = map_backing_file(len); backed != nullptr)
+    return backed;
 
   void *addr;
 #ifdef __linux__

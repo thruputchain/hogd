@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include <sys/resource.h>
+
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -191,6 +193,14 @@ public:
   void churn_items(int rounds, WriteHotness hotness);
   // report_compaction prints what the compactor did during the run.
   void report_compaction(std::string_view label);
+  // consolidate_by_access runs a consolidation pass classifying by the access
+  // counts this benchmark recorded. An oracle, as elsewhere: it bounds what the
+  // relocation mechanism can achieve independently of classifier quality.
+  void consolidate_by_access();
+  // report_faults replays the scored access sequence read-only and reports the
+  // page faults it took. With the heap file-backed and the process capped, the
+  // major count is a direct measurement of slow-tier accesses.
+  void report_faults(std::string_view label);
   // report_layout joins the recorded access counts against each item's loglet
   // to produce the per-loglet utilization distributions and a modelled AMAT.
   void report_layout(std::string_view label);
@@ -373,6 +383,46 @@ emit_cdf(std::string_view label, std::string_view series,
     std::println("layout_cdf,{},{},{:.4f},{:.4f}", label, series,
                  static_cast<double>(i) / kCdfPoints, vals[idx]);
   }
+}
+
+void
+Benchmark::consolidate_by_access()
+{
+  // Keys are the rank itself, so the access count is a direct lookup.
+  auto is_hot = [this](ItemHeader *item) {
+    uint64_t rank = 0;
+    if (item->get_key().size() != sizeof(rank))
+      return false;
+    std::memcpy(&rank, item->get_key().data(), sizeof(rank));
+    return rank < access_counts_.size() &&
+           access_counts_[rank].load(std::memory_order_relaxed) >= 2;
+  };
+  size_t moved = db_->consolidate(is_hot, 0.0F);
+  std::println("consolidated,{}", moved);
+}
+
+void
+Benchmark::report_faults(std::string_view label)
+{
+  struct rusage before{};
+  struct rusage after{};
+  getrusage(RUSAGE_SELF, &before);
+
+  Zipf zipf(static_cast<uint64_t>(item_count()), bench_theta);
+  uint64_t rng = kBenchSeed + 0xFA17U;
+  double seconds = measure([&] {
+    for (int i = 0; i < item_count(); ++i) {
+      uint64_t key = make_rank_key(zipf(rng));
+      DBStatus<DBItem> ret = db_->get(byte_view(key));
+      if (unlikely(!ret))
+        fail(ret.error());
+    }
+  });
+
+  getrusage(RUSAGE_SELF, &after);
+  std::println("faults,{},{},{},{:.3f}", label,
+               after.ru_majflt - before.ru_majflt,
+               after.ru_minflt - before.ru_minflt, seconds);
 }
 
 void
@@ -617,6 +667,30 @@ do_read_zipf_scattered(int num, int cores, int value_size)
   return measure([&benchmark] { benchmark->read_items_zipf(); });
 }
 
+// do_ssd_tier is Phase 3a: the same scattered-vs-consolidated comparison, but
+// with the heap file-backed and the process memory-capped so page faults are a
+// real, measured count of slow-tier accesses rather than a modelled AMAT.
+//
+// Run through ramdb_bench rather than hogdb_bench deliberately: hogdb's
+// per-block item_locks_ and ops vector make its *anonymous* footprint larger
+// than its heap working set, so a memory cap OOM-kills the process before it can
+// evict any heap pages. Here the heap dominates, which is what the cap needs.
+double
+do_ssd_tier(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill_ranked(Layout::kScattered);
+  benchmark->track_accesses();
+  benchmark->read_items_zipf();
+  benchmark->report_layout("scattered");
+  benchmark->report_faults("scattered");
+
+  benchmark->consolidate_by_access();
+  benchmark->report_layout("consolidated");
+  benchmark->report_faults("consolidated");
+  return 0.0;
+}
+
 // do_layout_* are X1: after a skewed read workload, report how much of each
 // loglet is data that was actually accessed. The consolidated run is the
 // oracle-sorted upper bound; the scattered run is the layout a
@@ -789,6 +863,9 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      "skewed reads over a popularity-ordered layout", do_read_zipf_consolidated},
     {"read_zipf_scattered",
      "skewed reads over a popularity-oblivious layout", do_read_zipf_scattered},
+    {"ssd_tier",
+     "scattered vs consolidated page-fault counts against a file-backed heap",
+     do_ssd_tier},
     {"layout_consolidated",
      "per-loglet utilization CDF over a popularity-ordered layout",
      do_layout_consolidated},

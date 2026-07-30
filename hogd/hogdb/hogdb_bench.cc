@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <getopt.h> // NOLINT(misc-include-cleaner)
+#include <sys/resource.h>
 
 #include "consensus.hh"
 #include "header.hh"
@@ -128,6 +129,23 @@ measure(auto &&fn)
   return std::chrono::duration<double>(end - start).count();
 }
 
+// Major faults are pages fetched from the backing device; minor faults are
+// resolved without I/O. With the heap file-backed and the process memory-capped,
+// the major count is a direct, unmodelled measurement of slow-tier accesses --
+// the one number here that assumes no latency constants at all.
+struct Faults {
+  long major;
+  long minor;
+};
+
+Faults
+read_faults()
+{
+  struct rusage ru{};
+  getrusage(RUSAGE_SELF, &ru);
+  return {.major = ru.ru_majflt, .minor = ru.ru_minflt};
+}
+
 struct Payment {
   ItemKey src;
   ItemKey dst;
@@ -171,6 +189,12 @@ public:
   // particular hotness signal.
   void consolidate();
 
+  // replay_reads reissues the scored access sequence as reads only. Used to
+  // count page faults against a given layout: it exercises the same accesses the
+  // hit rate models without spending balances or writing anything, so it can be
+  // run before and after consolidation and compared.
+  void replay_reads();
+
   // report_layout joins the payee access counts this benchmark generated
   // against the loglet each item actually landed in, and reports the resulting
   // fast-tier occupancy and modelled AMAT. Only meaningful for a skewed
@@ -195,6 +219,11 @@ private:
   // exists. The workload's own hits are what a classifier could legitimately
   // learn from; future traffic is what determines the payoff.
   std::unordered_map<std::string, uint32_t> payee_score_hits_;
+  // Rank -> payee slot, kept so replay_reads can regenerate the exact scored
+  // access sequence rather than approximating it from the hit counts (page
+  // faults depend on access *order*, not just multiplicity).
+  std::vector<uint32_t> payee_slot_;
+  size_t payee_space_{0};
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -381,6 +410,9 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
   // whole workload rather than whatever is left after setup.
   if (bench_sketch_classifier)
     bench->db_.get_ramdb().enable_heat_tracking(bench_sketch_width);
+
+  bench->payee_slot_ = slot;
+  bench->payee_space_ = n;
 
   // An independent draw of the same size from the same distribution, for
   // scoring. Different seed, identical slot mapping, so it covers the same keys.
@@ -626,6 +658,21 @@ Benchmark::consolidate()
   size_t moved = db_.get_ramdb().consolidate(
       is_hot, static_cast<float>(bench_min_mixedness));
   std::println("consolidated,{},{:.2f}", moved, bench_min_mixedness);
+}
+
+void
+Benchmark::replay_reads()
+{
+  if (payee_slot_.empty())
+    return;
+  Zipf zipf(payee_space_, bench_theta);
+  uint64_t rng = kBenchSeed ^ 0x5C0DE5ULL;
+  for (size_t i = 1; i < payee_space_; i++) {
+    ItemKey key = make_key(0, payee_slot_[zipf(rng)]);
+    auto ret = db_.read_nnint128(key);
+    if (unlikely(!ret))
+      fail(ret.error());
+  }
 }
 
 void
@@ -1392,9 +1439,29 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     hogd::info("took {} seconds", sec);
     // Report where items landed, once the workload has finished placing them.
     bench->report_layout(cmd);
+
+    // Fault count for this layout, from a read-only replay of the scored
+    // accesses. Read-only so it neither spends balances nor perturbs the layout
+    // being measured.
+    {
+      hogd::Faults b = hogd::read_faults();
+      double rsec = hogd::measure([&bench] { bench->replay_reads(); });
+      hogd::Faults a = hogd::read_faults();
+      std::println("faults,{},{},{},{:.3f}", cmd, a.major - b.major,
+                   a.minor - b.minor, rsec);
+    }
     if (hogd::bench_consolidate) {
       bench->consolidate();
       bench->report_layout(cmd + "+consolidated");
+
+      // Replay the workload against the reorganized layout and count faults
+      // again. This is the comparison the SSD tier exists for: same accesses,
+      // same capacity, different placement.
+      hogd::Faults rb = hogd::read_faults();
+      double rsec = hogd::measure([&bench] { bench->replay_reads(); });
+      hogd::Faults ra = hogd::read_faults();
+      std::println("faults,{}+consolidated,{},{},{:.3f}", cmd,
+                   ra.major - rb.major, ra.minor - rb.minor, rsec);
     }
     return 0;
   }
