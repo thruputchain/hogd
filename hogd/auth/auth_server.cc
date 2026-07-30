@@ -1,5 +1,6 @@
 #include "hogd/auth/auth_server.h"
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <span>
@@ -76,6 +77,31 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   co_return entry;
 }
 
+x23::Async<std::optional<KeyChangeBatch>>
+AuthServer::merge_shard_key_changes(BlockHeight height,
+                                    KeyChangeBatch key_changes)
+{
+  size_t const shards = dbauth_client_.shard_count();
+
+  // Released before the caller's futex waits, so other heights can accumulate
+  // while one is being applied.
+  x23::CoroGuard guard;
+  co_await guard(pending_key_changes_lock_);
+
+  PendingKeyChanges &pending = pending_key_changes_[height];
+  pending.merged.append_range(key_changes);
+  ++pending.shards_reported;
+  // Each shard forwards exactly one slice per block, empty included.
+  CHECK_LE(pending.shards_reported, shards);
+  if (pending.shards_reported < shards) {
+    co_return std::nullopt;
+  }
+
+  KeyChangeBatch merged = std::move(pending.merged);
+  pending_key_changes_.erase(height);
+  co_return merged;
+}
+
 x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
                                        KeyChangeBatch key_changes)
@@ -84,6 +110,19 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   // multiple batches of updates from the same block height. Probably the
   // simplest solution will be to have a separate coro futex and separate auth
   // cache for each one.
+  //
+  // Handled below by merging the per-shard slices instead: the sequencing
+  // advances the height on the first slice it sees and refuses later ones as
+  // stale, so a sharded db's slices must arrive as one complete batch.
+  if (dbauth_client_.shard_count() > 1) {
+    std::optional<KeyChangeBatch> merged =
+        co_await merge_shard_key_changes(height, std::move(key_changes));
+    if (!merged) {
+      co_return;
+    }
+    key_changes = std::move(*merged);
+  }
+
   for (;;) {
     BlockHeight current_height = current_height_futex_.load();
     if (current_height == kUninitializedHeight) {
