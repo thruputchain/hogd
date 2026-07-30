@@ -95,8 +95,8 @@ def plot_skew(ax, arms):
                 markersize=4.5, markeredgecolor=SURFACE, markeredgewidth=1.2,
                 label=name, zorder=4)
 
-    ax.set_xlim(-0.04, 1.03)
-    ax.set_ylim(0.4, 1.02)
+    ax.set_xlim(0, 1.03)
+    ax.set_ylim(0, 1.02)
     ax.set_xlabel("Access skew (Zipf θ)", fontsize=8.5, color=INK)
     ax.set_ylabel("Fast-tier hit rate (measured)", fontsize=8.5, color=INK)
     ax.set_title("(a)", fontsize=9, color=INK, loc="left", pad=6)
@@ -114,7 +114,7 @@ def plot_cost(ax, points):
                linewidth=1.2, zorder=4)
 
     # The two relocating points share a y, so stagger their labels vertically.
-    offsets = {0: (9, -6), 107: (6, -30), 289: (6, 16)}
+    offsets = {0: (9, -14), 107: (8, -16), 289: (6, 14)}
     for (moved, hit), thrs in points:
         x = 100.0 * moved / OCCUPIED
         head = f"θmix≥{min(thrs):.3f}" if moved else "no pass"
@@ -123,8 +123,8 @@ def plot_cost(ax, points):
                     xytext=offsets.get(moved, (9, -6)),
                     fontsize=7.5, color=INK_SOFT, ha="left", va="center")
 
-    ax.set_xlim(-8, 142)
-    ax.set_ylim(0.4, 1.02)
+    ax.set_xlim(0, 142)
+    ax.set_ylim(0, 1.02)
     ax.set_xlabel("Occupied loglets relocated (%)", fontsize=8.5, color=INK)
     ax.set_ylabel("Fast-tier hit rate (measured)", fontsize=8.5, color=INK)
     ax.set_title("(b)", fontsize=9, color=INK, loc="left", pad=6)
@@ -146,12 +146,16 @@ def plot_sensitivity(ax, hit_scattered, hit_consolidated):
     # The assumption-free statement: proportionally fewer slow-tier accesses.
     invariant = (1 - hit_scattered) / (1 - hit_consolidated)
     ax.axhline(invariant, color=INK_MUTED, linewidth=1, dashes=(4, 3), zorder=1)
-    ax.text(FAST_NS + 25, invariant + 0.04,
+    ax.text(30, invariant + 0.05,
             f"{invariant:.2f}× fewer slow-tier accesses\n(no latency assumed)",
             fontsize=7.5, color=INK_SOFT, ha="left", va="bottom")
 
-    ax.set_xlim(FAST_NS, 1060)
-    ax.set_ylim(1.0, 3.3)
+    ax.axhline(1.0, color=INK_MUTED, linewidth=1, dashes=(2, 3), zorder=1)
+    ax.text(30, 1.06, "no change", fontsize=7.5, color=INK_SOFT,
+            ha="left", va="bottom")
+
+    ax.set_xlim(0, 1060)
+    ax.set_ylim(0, 3.3)
     ax.set_xlabel("Assumed slow-tier latency (ns)", fontsize=8.5, color=INK)
     ax.set_ylabel("Modelled speedup", fontsize=8.5, color=INK)
     ax.set_title("(c)", fontsize=9, color=INK, loc="left", pad=6)
