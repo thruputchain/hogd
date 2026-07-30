@@ -12,7 +12,10 @@ plots that dependence rather than burying it in a constant.
 (a) Hit rate against access skew, for the scattered layout, after consolidation,
     and for a rank-sorted prefill.
 (b) What the pass costs: hit rate against the share of occupied loglets moved.
-(c) How much the headline speedup depends on the assumed slow-tier latency.
+(c) Access concentration: cumulative share of accesses against share of loglets,
+    hottest first. The hit rate at *any* fast-tier capacity is a point on this
+    curve, so the 20% used elsewhere is only where we read it off.
+(d) How much the headline speedup depends on the assumed slow-tier latency.
 
 Reads data/v1_skew.csv and data/v1_mixedness.csv from run_v1.sh.
 """
@@ -39,6 +42,11 @@ CEILING = "#1baf7a"
 # heap would understate it 30x for reasons unrelated to the work done.
 OCCUPIED = 290
 
+# Fast-tier capacity, as a share of occupied loglets. The paper's oracle picks the
+# top 20% of pages (50 GB DRAM against 200 GB Optane); matching it keeps the
+# comparison aligned. Panel (c) shows how much this choice matters.
+FAST_TIER_FRACTION = 0.20
+
 
 def amat(hit, slow=SLOW_NS, fast=FAST_NS):
     return (hit * fast) + ((1.0 - hit) * slow)
@@ -52,6 +60,42 @@ def read_skew():
                 (float(row["theta"]), float(row["hit"]))
             )
     return {k: sorted(v) for k, v in arms.items()}
+
+
+def read_capacity():
+    arms = {}
+    with open(HERE / "data" / "v1_capacity.csv", newline="") as fh:
+        for row in csv.reader(fh):
+            arms.setdefault(row[1], []).append((float(row[2]), float(row[3])))
+    return {k: sorted(v) for k, v in arms.items()}
+
+
+def plot_capacity(ax, arms):
+    for key, color, dash, name in (
+        ("zipf_payments", SCATTERED, (5, 2), "Scattered"),
+        ("zipf_payments+consolidated", CONSOLIDATED, None, "Consolidated"),
+    ):
+        xs = [100.0 * x for x, _ in arms[key]]
+        ys = [y for _, y in arms[key]]
+        ax.plot(xs, ys, color=color, linewidth=2,
+                dashes=dash if dash else (None, None), label=name, zorder=4)
+
+    ax.axvline(100.0 * FAST_TIER_FRACTION, color=INK_MUTED, linewidth=1,
+               dashes=(4, 3), zorder=1)
+    ax.text(100.0 * FAST_TIER_FRACTION + 2, 0.06,
+            f"{100 * FAST_TIER_FRACTION:.0f}% — where\nevery other panel reads",
+            fontsize=7.5, color=INK_SOFT, ha="left", va="bottom")
+
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel("Fast-tier capacity (% of occupied loglets)", fontsize=8.5,
+                  color=INK)
+    ax.set_ylabel("Fast-tier hit rate (measured)", fontsize=8.5, color=INK)
+    ax.set_title("(c)", fontsize=9, color=INK, loc="left", pad=6)
+    leg = ax.legend(fontsize=7.5, loc="lower right", frameon=False,
+                    handlelength=2.2, borderpad=0.2, labelspacing=0.35)
+    for t in leg.get_texts():
+        t.set_color(INK_SOFT)
 
 
 def read_mixedness():
@@ -158,26 +202,31 @@ def plot_sensitivity(ax, hit_scattered, hit_consolidated):
     ax.set_ylim(0, 3.3)
     ax.set_xlabel("Assumed slow-tier latency (ns)", fontsize=8.5, color=INK)
     ax.set_ylabel("Modelled speedup", fontsize=8.5, color=INK)
-    ax.set_title("(c)", fontsize=9, color=INK, loc="left", pad=6)
+    ax.set_title("(d)", fontsize=9, color=INK, loc="left", pad=6)
 
 
 def main():
     arms = read_skew()
     points = read_mixedness()
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.6, 3.1), layout="constrained")
-    fig.get_layout_engine().set(w_pad=0.12, wspace=0.09)
+    caps = read_capacity()
+
+    fig, axes = plt.subplots(2, 2, figsize=(7.6, 6.0), layout="constrained")
+    fig.get_layout_engine().set(w_pad=0.12, h_pad=0.12, wspace=0.08,
+                                hspace=0.08)
     fig.patch.set_facecolor(SURFACE)
-    for ax in axes:
+    flat = axes.flatten()
+    for ax in flat:
         style_axes(ax)
 
-    plot_skew(axes[0], arms)
-    add_amat_axis(axes[0])
-    plot_cost(axes[1], points)
+    plot_skew(flat[0], arms)
+    add_amat_axis(flat[0])
+    plot_cost(flat[1], points)
+    plot_capacity(flat[2], caps)
 
     hs = dict(arms["scattered"])[0.99]
     hc = dict(arms["consolidated"])[0.99]
-    plot_sensitivity(axes[2], hs, hc)
+    plot_sensitivity(flat[3], hs, hc)
 
     figs = HERE / "figures"
     figs.mkdir(exist_ok=True)

@@ -338,7 +338,26 @@ against the heap would read 1.2% rather than 37% for reasons unrelated to the wo
 done. 289 not 290 because one is the active write head, which consolidation cannot
 relocate out of.
 
-**(c) Model sensitivity.** The speedup is not a property of the measurement:
+**(c) Fast-tier capacity.** The third assumed constant, and the one that matters
+most. `data/v1_capacity.csv` holds the access-concentration curve — cumulative
+share of accesses against share of loglets, hottest first — so the hit rate at any
+capacity is a point on it and one run characterises every tier size:
+
+| fast-tier capacity | scattered | consolidated | gain |
+|---|---|---|---|
+| 5% | 0.326 | 0.800 | **+47.4 pp** |
+| 10% | 0.473 | 0.832 | +35.9 pp |
+| 20% (what is quoted) | 0.698 | 0.895 | +19.6 pp |
+| 30% | 0.886 | 0.957 | +7.1 pp |
+| ≥50% | 1.000 | 1.000 | **0** |
+
+**20% is not a conservative choice — it is mid-slope.** The benefit is ~2.4× larger
+at a 5% tier and vanishes entirely by 50%, where the hot set fits regardless of
+layout so there is nothing to consolidate. Any claim of the form "consolidation is
+worth X" is really "worth X at this tier size", and the tier size is the parameter
+an operator actually picks.
+
+**(d) Slow-tier latency.** The same measured hit rates give:
 
 | assumed slow tier | modelled speedup |
 |---|---|
@@ -348,8 +367,15 @@ relocate out of.
 | 1000 ns (RDMA-class) | 2.11× |
 
 So "1.49×" means "1.49× if the slow tier is 300 ns". The curve asymptotes to the
-2.91× miss-reduction as the slow tier gets slower. Quote the hit rate or the
-miss-reduction as the result and the ns figure only with its assumption attached.
+2.91× miss-reduction as the slow tier gets slower.
+
+**One more assumption, not swept:** the fast tier is chosen by an *oracle* that
+takes the top-N loglets by true access count — the paper's method ("if a
+memory-tiering system had an oracle that perfectly picked out the top 20% of
+hottest pages"). Real tiering systems classify by page faults, ACCESSED bits or
+PEBS sampling and pick worse than perfect. That handicaps the scattered baseline
+less than reality would, so the measured improvement is conservative in this one
+respect.
 
 ### Correction: earlier numbers were inflated by train-on-test
 

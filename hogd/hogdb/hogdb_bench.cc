@@ -643,6 +643,29 @@ Benchmark::report_layout(std::string_view label)
 
   std::println("layout,{},{},{},{:.4f},{:.4f},{:.2f}", label, occupied.size(),
                fast_count, fast_hot, hit, amat);
+
+  // Emit the access-concentration curve: cumulative share of accesses against
+  // the share of loglets, hottest first. The fast-tier hit rate for *any*
+  // capacity is a point on this curve, so one run characterises every tier size
+  // instead of needing a run per size. kFastTierFraction is only where we choose
+  // to read it off.
+  constexpr size_t kRankPoints = 50;
+  uint64_t running = 0;
+  size_t next = 1;
+  std::println("layout_rank,{},0.0000,0.0000", label);
+  for (size_t i = 0; i < occupied.size(); ++i) {
+    running += accesses[occupied[i]];
+    if (i + 1 >= (next * occupied.size()) / kRankPoints || i + 1 == occupied.size()) {
+      std::println("layout_rank,{},{:.4f},{:.4f}", label,
+                   static_cast<double>(i + 1) /
+                       static_cast<double>(occupied.size()),
+                   total > 0 ? static_cast<double>(running) /
+                                   static_cast<double>(total)
+                             : 0.0);
+      while (i + 1 >= (next * occupied.size()) / kRankPoints)
+        ++next;
+    }
+  }
   std::println("compaction,{},{},{}", label, ramdb.compaction_passes(),
                ramdb.compaction_bytes_reclaimed());
 }
