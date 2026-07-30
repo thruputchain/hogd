@@ -107,7 +107,7 @@ def main():
     # decade labels straight through these; pin both explicitly.
     top.xaxis.set_major_locator(FixedLocator(sizes))
     top.xaxis.set_major_formatter(
-        FixedFormatter([f"{items_per_loglet(s) // 1000}k" for s in sizes])
+        FixedFormatter([f"{items_per_loglet(s) / 1000:.1f}k" for s in sizes])
     )
     top.xaxis.set_minor_locator(NullLocator())
     top.set_xlabel("Items per 2 MiB loglet", fontsize=8.5, color=INK,
