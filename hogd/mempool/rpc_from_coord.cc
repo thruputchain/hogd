@@ -41,6 +41,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
+#include "integration.hh"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -52,6 +53,7 @@
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -76,6 +78,27 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
     }
   }
   remove_from.resize(write_idx);
+}
+
+// Drop transactions larger than the assumed-but-unenforced
+// kMaxBytesSignedTransaction bound (#3144) before they are stored or forwarded
+// to the executor, which would otherwise buffer and XDR-decode the whole batch
+// before its own per-tx guard (#2857) rejects the oversized tx. Returns the
+// number dropped. Indices are collected in ascending order as required by
+// [remove_indices].
+size_t
+remove_oversized_txs(SignedTransactionBatch &txs)
+{
+  x23::Vec<size_t> to_remove_indices;
+  for (size_t i = 0; i < txs.size(); i++) {
+    if (x23::xdr_size(txs[i]) > kMaxBytesSignedTransaction) {
+      to_remove_indices.push_back(i);
+    }
+  }
+  if (!to_remove_indices.empty()) {
+    remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
+  }
+  return to_remove_indices.size();
 }
 
 bool
@@ -232,6 +255,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           co_return;
         }
         record_submitted_unvetted(txs->size());
+        if (const size_t dropped = remove_oversized_txs(*txs); dropped > 0) {
+          info("submit_unvetted dropped {} oversized tx(s) (> {} bytes)",
+               dropped, kMaxBytesSignedTransaction);
+        }
         co_return;
       });
 
@@ -414,6 +441,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
           co_return;
         }
         record_submitted_vetted(txs->size());
+        if (const size_t dropped = remove_oversized_txs(*txs); dropped > 0) {
+          info("submit_vetted dropped {} oversized tx(s) (> {} bytes)", dropped,
+               kMaxBytesSignedTransaction);
+        }
         co_return;
       });
 

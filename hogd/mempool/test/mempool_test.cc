@@ -7,6 +7,7 @@
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -30,6 +31,7 @@
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "integration.hh"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -139,6 +141,23 @@ TEST(Mempool, SubmitUnvetted)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// A submitted tx larger than kMaxBytesSignedTransaction is dropped at ingress
+// (#3144) rather than stored and later forwarded to the executor, which would
+// otherwise buffer and decode the whole batch before its own guard (#2857)
+// rejects it. Oversized calldata alone pushes the tx past the 2 MB bound.
+TEST(Mempool, SubmitUnvettedDropsOversizedTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const std::vector<uint8_t> big(kMaxBytesSignedTransaction + 1, 0);
+  txs[0].tx.invocation.calldata = Calldata(big.begin(), big.end());
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 // This submits duplicate txs at the same block height, which tests that the
@@ -262,6 +281,21 @@ TEST(Mempool, SubmitVetted)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// Same ingress enforcement on the vetted path (#3144).
+TEST(Mempool, SubmitVettedDropsOversizedTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const std::vector<uint8_t> big(kMaxBytesSignedTransaction + 1, 0);
+  txs[0].tx.invocation.calldata = Calldata(big.begin(), big.end());
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 // This submits duplicate txs at the same block height, which tests that the
