@@ -104,9 +104,13 @@ public:
     // commit either.
     co_await scheduler_->write_all_average_hog_ages_to_db();
 
-    // Apply each shard's slice above as it arrives, but advance the barrier
-    // only once every shard has reported this block (see
-    // record_shard_transfer_finished).
+    // scheduler_lock_ is still held here: `cg` was moved in from
+    // scheddb_hogs_transferred and is released only at the end of this
+    // function, so every shard's handle_transfer runs serially. That is what
+    // serializes record_shard_transfer_finished (and the transfer_finished_
+    // update below) across shards -- do not release cg earlier without adding a
+    // lock here. Apply each shard's slice above as it arrives, but advance the
+    // barrier only once every shard has reported this block.
     if (scheduler_->record_shard_transfer_finished(transfers.block)) {
       scheduler_->transfer_finished_.store(transfers.block);
       scheduler_->transfer_finished_.broadcast(&default_threadpool());
