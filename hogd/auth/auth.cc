@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -5,6 +6,7 @@
 #include <print>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
@@ -17,6 +19,7 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
@@ -77,14 +80,25 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   if (intro.shards().empty()) {
     panic("No db shards registered with mempool");
   }
-  ShardCard &shard = intro.shards()[0];
-  const std::string address_for_auth = shard.address_for_auth.c_str();
-  auto dbauth_res = make_dbauth_client(address_for_auth)();
-  if (!dbauth_res)
-    panic("auth connect to dbauth failed: {}",
-          dbauth_res.error().error_code().message());
-  dbauth_client_t dbauth_client = std::move(*dbauth_res);
-  AuthServer auth_server(std::move(dbauth_client));
+  // Bind every shard, ordered by declared shard_id rather than arrival order so
+  // the routing agrees with the mempool's and the executor's.
+  auto shard_order = order_shards_by_id(intro.shards());
+  if (!shard_order) {
+    panic("db shard identity: {}", shard_order.error());
+  }
+  std::vector<dbauth_client_t> dbauth_clients;
+  dbauth_clients.reserve(shard_order->size());
+  for (size_t shard_id = 0; shard_id < shard_order->size(); ++shard_id) {
+    const ShardCard &shard = intro.shards()[(*shard_order)[shard_id]];
+    const std::string address_for_auth = shard.address_for_auth.c_str();
+    auto dbauth_res = make_dbauth_client(address_for_auth)();
+    if (!dbauth_res)
+      panic("auth connect to dbauth shard {} at {} failed: {}", shard_id,
+            address_for_auth, dbauth_res.error().error_code().message());
+    dbauth_clients.push_back(std::move(*dbauth_res));
+  }
+  info("auth server bound {} db shard(s)", dbauth_clients.size());
+  AuthServer auth_server(std::move(dbauth_clients));
 
   auth_server.set_mempool_client(std::move(mempool_client));
   auth_db_rpc->impl()->set_auth_server(auth_server);
