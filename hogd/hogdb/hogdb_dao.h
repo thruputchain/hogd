@@ -126,6 +126,16 @@ public:
     db_->for_each_location(std::move(fn));
   }
   size_t loglet_count() const { return db_->loglet_count(); }
+  void enable_heat_tracking(int width_order = 20)
+  {
+    db_->enable_heat_tracking(width_order);
+  }
+  void age_heat() { db_->age_heat(); }
+  size_t heat_bytes() const { return db_->heat_bytes(); }
+  uint8_t heat_estimate(std::span<const std::byte> key) const
+  {
+    return db_->heat_estimate(key);
+  }
   size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
                      float min_mixedness)
   {

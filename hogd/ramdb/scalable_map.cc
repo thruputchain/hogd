@@ -63,6 +63,12 @@ calculate_hash(std::span<const std::byte> key)
 
 } // namespace
 
+size_t
+ScalableMap::hash_key(std::span<const std::byte> key)
+{
+  return calculate_hash(key);
+}
+
 ATTRIBUTE_ALWAYS_INLINE std::tuple<std::unique_lock<std::mutex>, ItemHeader **,
                                    std::atomic<uint16_t> &>
 ScalableMap::acquire_bucket(size_t hash)
@@ -100,9 +106,11 @@ ScalableMap::unlink(ItemHeader **item_ptr)
 DBStatus<DBItem>
 ScalableMap::get(std::span<const std::byte> key)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      record_heat(hash);
       return DBItem{.type = (*bu)->type,
                     .value = make_byte_buffer((*bu)->get_value())};
     }
@@ -113,11 +121,13 @@ ScalableMap::get(std::span<const std::byte> key)
 DBStatus<OwningSpan<const std::byte>>
 ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
       if ((*bu)->type != type)
         return DBError(DBCode::kTypeMismatch);
+      record_heat(hash);
       return make_byte_buffer((*bu)->get_value());
     }
   }
@@ -128,13 +138,15 @@ DBStatus<void>
 ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
                          std::span<std::byte> val_out)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
       if ((*bu)->type != type || (*bu)->get_value().size() != val_out.size())
         return DBError(DBCode::kTypeMismatch);
 
       // success, copy out the item's value.
+      record_heat(hash);
       std::ranges::copy((*bu)->get_value(), val_out.begin());
       return {};
     }
@@ -145,11 +157,13 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
 DBStatus<size_t>
 ScalableMap::get_size(std::span<const std::byte> key)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() != key)
       continue;
 
+    record_heat(hash);
     return (*bu)->get_value().size();
   }
   return DBError(DBCode::kNotFound);
@@ -158,11 +172,13 @@ ScalableMap::get_size(std::span<const std::byte> key)
 DBStatus<uint8_t>
 ScalableMap::get_type(std::span<const std::byte> key)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() != key)
       continue;
 
+    record_heat(hash);
     return (*bu)->type;
   }
   return DBError(DBCode::kNotFound);

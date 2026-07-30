@@ -89,6 +89,15 @@ int bench_hot_hits = 2;
 // values touch fewer loglets, so this is the cost/benefit knob for the pass.
 double bench_min_mixedness = 0.0;
 
+// When true, classify with the read-path heat sketch instead of the oracle. The
+// oracle bounds what any classifier could achieve; this measures what a real one
+// does.
+bool bench_sketch_classifier = false;
+
+// log2 of the counters per sketch row. Collisions only ever inflate a count-min
+// estimate, so too small a table makes cold items look hot.
+int bench_sketch_width = 20;
+
 // Two-tier latency model and fast-tier share, matching ramdb_bench so the
 // numbers from the two binaries are comparable.
 constexpr double kFastNs = 70.0;
@@ -368,6 +377,11 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
 
   auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
                                            std::move(ops));
+  // Attach the read-path sketch before any traffic runs, so it observes the
+  // whole workload rather than whatever is left after setup.
+  if (bench_sketch_classifier)
+    bench->db_.get_ramdb().enable_heat_tracking(bench_sketch_width);
+
   // An independent draw of the same size from the same distribution, for
   // scoring. Different seed, identical slot mapping, so it covers the same keys.
   std::vector<uint32_t> score_hits(n, 0);
@@ -571,10 +585,43 @@ Benchmark::consolidate()
   info("oracle classifier: {} of {} payees hot (>= {} accesses)", hot_items,
        payee_hits_.size(), bench_hot_hits);
 
-  auto is_hot = [this](ItemHeader *item) {
-    auto it = payee_hits_.find(key_bytes_string(item->get_key()));
+  auto oracle_hot = [this](std::span<const std::byte> key) {
+    auto it = payee_hits_.find(key_bytes_string(key));
     return it != payee_hits_.end() &&
            it->second >= static_cast<uint32_t>(bench_hot_hits);
+  };
+  auto sketch_hot = [this](std::span<const std::byte> key) {
+    return db_.get_ramdb().heat_estimate(key) >=
+           static_cast<uint8_t>(bench_hot_hits);
+  };
+
+  // Score the sketch against the oracle over the payees it can be scored on:
+  // how often does an approximate count agree with the exact one?
+  if (bench_sketch_classifier) {
+    size_t tp = 0;
+    size_t fp = 0;
+    size_t fn = 0;
+    for (const auto &[k, hits] : payee_hits_) {
+      std::span<const std::byte> key = std::as_bytes(std::span(k));
+      bool want = hits >= static_cast<uint32_t>(bench_hot_hits);
+      bool got = sketch_hot(key);
+      tp += static_cast<size_t>(want && got);
+      fp += static_cast<size_t>(!want && got);
+      fn += static_cast<size_t>(want && !got);
+    }
+    double precision = (tp + fp) > 0 ? static_cast<double>(tp) /
+                                           static_cast<double>(tp + fp)
+                                     : 0.0;
+    double recall = (tp + fn) > 0 ? static_cast<double>(tp) /
+                                        static_cast<double>(tp + fn)
+                                  : 0.0;
+    std::println("classifier,sketch,{},{},{},{:.4f},{:.4f},{}", tp, fp, fn,
+                 precision, recall, db_.get_ramdb().heat_bytes());
+  }
+
+  auto is_hot = [&](ItemHeader *item) {
+    std::span<const std::byte> key = item->get_key();
+    return bench_sketch_classifier ? sketch_hot(key) : oracle_hot(key);
   };
   size_t moved = db_.get_ramdb().consolidate(
       is_hot, static_cast<float>(bench_min_mixedness));
@@ -1211,6 +1258,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "to call a payee hot (default: 2)");
     std::println("  -m, --mixedness <F>    minimum loglet mixedness to "
                  "consolidate (default: 0.0 = all)");
+    std::println("  -K, --sketch           classify with the read-path heat "
+                 "sketch instead of the oracle");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1245,6 +1294,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"consolidate", no_argument,     nullptr, 'C'},
       {"hot-hits",  required_argument, nullptr, 'k'},
       {"mixedness", required_argument, nullptr, 'm'},
+      {"sketch",    no_argument,       nullptr, 'K'},
+      {"width",     required_argument, nullptr, 'W'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1260,7 +1311,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1301,6 +1352,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'm':
       hogd::bench_min_mixedness = std::stod(optarg);
+      break;
+    case 'K':
+      hogd::bench_sketch_classifier = true;
+      break;
+    case 'W':
+      hogd::bench_sketch_width = std::stoi(optarg);
+      hogd::bench_sketch_classifier = true;
       break;
     case 'h':
       print_usage();

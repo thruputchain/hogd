@@ -22,6 +22,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/heat_sketch.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
@@ -167,7 +168,29 @@ public:
         width);
   }
 
+  // hash_key exposes the hash the map itself uses, so a heat sketch keyed by
+  // hash can be consulted for an item outside the read path.
+  static size_t hash_key(std::span<const std::byte> key);
+
+  // set_heat_sketch attaches (or with nullptr detaches) approximate read-hotness
+  // tracking. Off by default: it adds a relaxed load and store per row to every
+  // successful lookup, which is not a cost to impose on a store that is not
+  // using consolidation.
+  void set_heat_sketch(HeatSketch *sketch) { heat_ = sketch; }
+  HeatSketch *heat_sketch() const { return heat_; }
+
 private:
+  // record_heat notes a successful lookup. A miss is not an access to any item,
+  // so only hits are counted.
+  void record_heat(size_t hash)
+  {
+    if (heat_ != nullptr) [[unlikely]]
+      heat_->touch(hash);
+  }
+
+  // approximate read-hotness tracking; nullptr when disabled.
+  HeatSketch *heat_{nullptr};
+
   // used to allocate the items in the map.
   ItemAllocator &allocator_;
   // used to log changes to disk.

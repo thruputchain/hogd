@@ -22,6 +22,32 @@
 
 namespace hogd {
 
+namespace {
+
+// The per-thread relocation destinations, one per temperature.
+//
+// These deliberately outlive a single compact_one call so a partly filled
+// destination carries over. That is safe when the pass runs on the WorkerPool,
+// because Database destroys pool_ before loglet_allocator_, so a worker's
+// destinations are released while the allocator is still alive. It is *not* safe
+// for a pass running on an arbitrary caller thread: those thread_locals are
+// destroyed at thread exit, potentially long after the allocator, and freeing a
+// loglet through a dangling allocator aborts inside the allocator's mutex.
+// Any such pass must call flush_compact_dests() before returning.
+struct CompactDests {
+  UniqueLoglet cold;
+  UniqueLoglet hot;
+};
+
+CompactDests &
+compact_dests()
+{
+  static thread_local CompactDests dests;
+  return dests;
+}
+
+} // namespace
+
 namespace detail {
 
 ItemHead::~ItemHead()
@@ -233,6 +259,17 @@ ItemAllocator::consolidate(const std::function<bool(ItemHeader *)> &is_hot,
   for (UniqueLoglet &ll : victims)
     stats += compact_one(std::move(ll), &is_hot);
 
+  // Hand both destinations back before returning. Required for correctness:
+  // this pass ran on the caller's thread, whose thread_locals outlive the
+  // allocator, so leaving a loglet in one would free it through a dangling
+  // pointer at thread exit. It also stops a partly filled destination from
+  // being stranded where nothing can reclaim it.
+  CompactDests &dests = compact_dests();
+  if (dests.cold)
+    give_to_compactor(std::move(dests.cold));
+  if (dests.hot)
+    give_to_compactor(std::move(dests.hot));
+
   auto seconds = timer.elapsed();
   info("consolidated {} loglets in {:.3f} seconds ({} items, {} live)", count,
        seconds, stats.items, stats.live_items);
@@ -304,10 +341,10 @@ ItemAllocator::compact_one(UniqueLoglet &&src,
           // These live as long as the thread, exactly as the single
           // destination always has, and each is handed to the compactor when
           // full.
-          static thread_local UniqueLoglet dst_cold;
-          static thread_local UniqueLoglet dst_hot;
-          UniqueLoglet &dst =
-              (is_hot != nullptr && (*is_hot)(src_item)) ? dst_hot : dst_cold;
+          CompactDests &dests = compact_dests();
+          UniqueLoglet &dst = (is_hot != nullptr && (*is_hot)(src_item))
+                                  ? dests.hot
+                                  : dests.cold;
 
           // initialize the first use of the per-thread loglet. Leaving the
           // item where it is costs only a deferred relocation; dereferencing

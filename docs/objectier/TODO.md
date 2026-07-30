@@ -32,6 +32,8 @@ and cold objects primarily under a single index").
 | H5 | Churn workload that actually triggers compaction | **built** — but see BUG-1 |
 | BUG-1 | `LogletAllocator::alloc` segfaults when the reserve drains | **fixed** |
 | BUG-2 | Compaction reserve is structurally marginal (heavy deferral) | **fixed** |
+| B2 | Real classifier scored against the oracle | **done — negative result** |
+| BUG-3 | `consolidate()` freed loglets through a dangling allocator at exit | **fixed** |
 | X5 | Measured cleaner cost vs the 0.06% estimate | unblocked |
 | C1 | Tier-aware `LogletAllocator` | todo |
 | X3 | Item-size sweep (tests paper §4.3's untested prediction) | **done** — prediction holds |
@@ -395,6 +397,92 @@ than one noisy sample, so it sits at or below the consolidated line everywhere. 
 is still only informative where rank tracks popularity — at θ=0 rank carries no
 information and it collapses onto scattered, which is why it is labelled
 "rank-sorted prefill" and not "ceiling".
+
+### B2 result — a storage-layer classifier cannot see access frequency
+
+Built `HeatSketch`: a count-min sketch over key hashes, 4 rows × 2^w counters of
+1 byte, touched on every successful `ScalableMap` lookup. Off-header by design, so
+it avoids all three `ItemHeader` blockers and its space cost is O(1) in the item
+count rather than O(n) — preserving the paper's no-per-object-overhead claim.
+`hogdb_bench -K` classifies with it instead of the oracle; `-W` sets the width.
+
+**It does not work, and the reason is architectural.** At 2 M accounts, θ=0.99:
+
+| sketch | table | precision | recall | hit after |
+|---|---|---|---|---|
+| oracle | — | 1.000 | 1.000 | 0.896 |
+| w=20 | 4 MiB | 0.307 | 0.664 | 0.815 |
+| w=22 | 16 MiB | 0.300 | 0.037 | 0.718 |
+| w=24 | 64 MiB | 0.318 | 0.0003 | 0.705 |
+
+**A bigger table performs worse** — which is impossible for count-min if the
+signal were real. Count-min only ever over-counts, so recall should be ~1.0 at any
+size. Recall collapsing as collisions disappear proves the w=20 result was
+**collision inflation**, not signal: cold items were being pushed over the
+threshold by other items' counts. The apparent 57% recovery of the oracle's
+benefit was an artifact. *A too-small count-min sketch can look like a working
+classifier; check that a larger one does not do worse.*
+
+The real cause, with a collision-free sketch (w=24) at 500 K accounts:
+
+| blocks | precision | recall |
+|---|---|---|
+| 1 | 1.000 | **0.0004** |
+| 4 | 0.314 | 1.000 |
+| 16 | 0.314 | 1.000 |
+
+One block: the sketch sees almost nothing. Four or more: everything crosses the
+threshold, so precision falls to the base rate (0.31 = the true hot fraction).
+Either way it carries no information.
+
+[block_tx.cc:248-251](../../hogd/hogdb/block_tx.cc#L248-L251) is why:
+
+```cpp
+  auto *lock = item_locks_.get(key);
+  if (!lock) {
+      auto r = db_.read_nnint128(key);
+```
+
+ramdb is read only when the item is **not already in the block's lock cache**. The
+2nd through Nth access to an item within a block never reaches the storage engine.
+**ramdb sees one read per item per block, so access frequency within a block is
+invisible below `BlockTX`.** The sketch measures how many blocks touched an item,
+not how often it was touched.
+
+**This is the paper's §4.1 principle rediscovered from the other side.** ObjecTier
+says to reuse the application's existing popularity information — memcached's
+eviction queues — i.e. classify at the *application* layer. Trying to classify at
+the storage layer fails because the information has already been coalesced away by
+the time it arrives. For hogdb the classifier has to live in `BlockTX`/`InvokeTX`,
+where accesses are actually counted, or reuse whatever the scheduler already
+tracks. That is the redirect for B2, and the sketch stays as working
+infrastructure for whichever layer ends up feeding it.
+
+### BUG-3 — `consolidate()` freed loglets through a dangling allocator
+
+Introduced by V1 and **shipped in 29290751**; found only when a later change made
+me check the test process's exit code rather than its output.
+
+All 22 tests pass and then the process aborts in teardown:
+
+    Fatal glibc error: pthread_mutex_lock.c:426: assertion failed: e != ESRCH || !robust
+
+`compact_one` keeps its relocation destinations in `thread_local`s that
+deliberately outlive one call. That is safe for `compact()`, which runs on the
+WorkerPool: `Database` declares `pool_` before `loglet_allocator_`, so workers are
+joined — releasing their destinations — while the allocator is still alive.
+`consolidate()` runs **serially on the caller's thread**, whose `thread_local`s are
+destroyed at thread exit, long after the allocator. Freeing a loglet through the
+dangling allocator aborts inside its mutex. Choosing serial execution is what
+introduced it.
+
+Fixed by hoisting the destinations into an accessor and having `consolidate()` hand
+both back via `give_to_compactor` before returning. That also stops a partly filled
+destination being stranded where nothing can reclaim it. Verified over three runs:
+exit 0, no abort, 22/22.
+
+**Process note:** earlier reports of "ramdb_test 22/22" were checking the summary
+line, not the exit status, so this was missed for several commits. Check exit codes.
 
 ### Still to do here
 

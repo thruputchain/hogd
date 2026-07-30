@@ -26,6 +26,7 @@
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
+#include "hogd/ramdb/heat_sketch.h"
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
@@ -154,6 +155,31 @@ public:
   // into. Each is one tiering unit of kLogletRegionSize bytes.
   size_t loglet_count() const { return loglet_allocator_->loglet_count(); }
 
+  // enable_heat_tracking attaches an approximate read-hotness sketch to the read
+  // path, for use as a consolidation classifier. Off by default; see HeatSketch
+  // for why the counts live outside ItemHeader.
+  void enable_heat_tracking(int width_order = 20, size_t rows = 4)
+  {
+    heat_ = std::make_unique<HeatSketch>(width_order, rows);
+    map_.set_heat_sketch(heat_.get());
+  }
+
+  // age_heat halves every counter, so the sketch tracks what is hot rather than
+  // what was ever hot. The caller owns the epoch.
+  void age_heat()
+  {
+    if (heat_)
+      heat_->halve();
+  }
+
+  size_t heat_bytes() const { return heat_ ? heat_->size_bytes() : 0; }
+
+  // heat_estimate returns the sketch's approximate access count for a key.
+  uint8_t heat_estimate(std::span<const std::byte> key) const
+  {
+    return heat_ ? heat_->estimate(ScalableMap::hash_key(key)) : 0;
+  }
+
   // consolidate reorganizes loglets so each holds items of a single
   // temperature. See ItemAllocator::consolidate. Must not overlap put()/
   // remove(): it relocates items, and does so outside the compactor's
@@ -262,6 +288,9 @@ private:
   // sync_and_snapshot() — begin_lsn must be 0 or <= this value to avoid
   // creating snapshot gaps that recovery cannot bridge.
   uint64_t max_snapshot_end_lsn_{0};
+
+  // approximate read-hotness tracking, when enabled.
+  std::unique_ptr<HeatSketch> heat_;
 
   // compaction activity since recovery; written only by background_worker.
   std::atomic<uint64_t> compaction_passes_{0};
