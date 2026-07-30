@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -105,10 +107,14 @@ public:
   authdb_get_auth_data_batch(BlockHeight height,
                              ContractAddressBatch const &addresses);
 
-  static x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
+  void set_intro_height(BlockHeight height) { intro_height_ = height; }
+  size_t intro_count() const { return intro_count_; }
+
+  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
+    ++intro_count_;
     DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
-    ret.current_height() = -1;
+    ret.current_height() = intro_height_;
     co_return ret;
   }
 
@@ -136,6 +142,10 @@ private:
   std::map<BlockHeight, KeyChangeBatch> changes_by_height_;
   mutable ThreadCheckedMutex<std::mutex> mutex_;
   BlockHeight current_height_ = 0;
+
+  // Read/written off the RPC thread, outside mutex_.
+  std::atomic<BlockHeight> intro_height_ = -1;
+  std::atomic<size_t> intro_count_ = 0;
 };
 
 static_assert(is_DBAuth1<MockDBAuthRpc *, x23::MaybeAsync>);

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <span>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -37,6 +40,12 @@ public:
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client))
   {}
 
+  // Sharded: one dbauth client per shard, in shard_id order.
+  explicit AuthServer(std::vector<dbauth_client_t> &&dbauth_clients,
+                      int bucket_size = 1'048'576)
+    : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_clients))
+  {}
+
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.
@@ -56,6 +65,8 @@ public:
   // initialization from an empty cache, if we get two blocks of updates
   // concurrently, we might process the second before the first.  In this case,
   // the first will be dropped.
+  //
+  // Called once per shard per height; only the last call applies the merge.
   x23::Async<void> register_auth_data_updates(BlockHeight height,
                                               KeyChangeBatch key_changes);
 
@@ -70,6 +81,11 @@ public:
 private:
   x23::Async<AuthStatus<AuthCacheEntry>>
   populate_auth_data(BlockHeight height, ContractAddress const &address);
+
+  // Returns the merged batch once every shard has reported `height`, or nullopt
+  // while slices are still outstanding.
+  x23::Async<std::optional<KeyChangeBatch>>
+  merge_shard_key_changes(BlockHeight height, KeyChangeBatch key_changes);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
@@ -86,6 +102,14 @@ private:
   // Used to stall incoming requests until the updates from the db are present,
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
+
+  // A block's key changes arrive as one slice per shard; erased once merged.
+  struct PendingKeyChanges {
+    size_t shards_reported = 0;
+    KeyChangeBatch merged;
+  };
+  std::unordered_map<BlockHeight, PendingKeyChanges> pending_key_changes_;
+  x23::CoroLock pending_key_changes_lock_;
 
   std::optional<sched_auth_client_t> mempool_client_;
 };

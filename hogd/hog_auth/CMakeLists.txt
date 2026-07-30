@@ -13,6 +13,7 @@ target_link_libraries(hog_auth
 add_executable(hog_auth_test
     auth_data_cache_test.cc
     auth_server_test.cc
+    auth_sharding_test.cc
     auth_verify_test.cc
     mock_dbauth_rpc.cc
 )
