@@ -30,7 +30,9 @@ for th in 0 0.3 0.6 0.8 0.9 0.99; do
 done
 
 echo "min_mixedness,loglets_moved,hit,amat_ns" > "$OUT/v1_mixedness.csv"
-for mx in 0.0 0.005 0.010 0.015 0.020 0.025 0.030 0.040; do
+# Includes a threshold above every loglet's mixedness, which selects nothing
+# and so gives the do-nothing baseline on the same axes.
+for mx in 0.0 0.005 0.010 0.020 0.040 0.100; do
   rm -rf "$DB"; mkdir -p "$DB"
   out=$("$BIN" "$DB" zipf_payments -n "$NUM" -w "$W" -t 0.99 -C -m "$mx" 2>/dev/null)
   moved=$(echo "$out" | grep '^consolidated,' | tail -1 | cut -d, -f2)

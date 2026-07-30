@@ -291,45 +291,66 @@ Design notes:
 
 ### Sweeps — `figures/v1_consolidation.{pdf,png}`, `python3 plot_v1.py`
 
-**(a) AMAT vs skew** (2 M accounts, oracle classifier), `data/v1_skew.csv`:
+Scored on an **independent access trace**: the classifier learns from the workload's
+own hits, the hit rate is measured against a separate draw from the same
+distribution. Classifying and scoring on one trace is train-on-test and inflated
+every number below — see the correction note.
 
-| θ | scattered | consolidated | rank-sorted prefill |
+**(a) AMAT vs skew** (2 M accounts), `data/v1_skew.csv`:
+
+| θ | scattered | consolidated | rank-sorted ceiling | speedup | share of gap |
+|---|---|---|---|---|---|
+| 0 | 174.5 | 172.3 | 174.5 | 1.01× | no gap exists |
+| 0.3 | 174.3 | 165.4 | 150.0 | 1.05× | 37% |
+| 0.6 | 172.9 | 141.2 | 119.9 | 1.22× | 60% |
+| 0.8 | 164.5 | 117.5 | 97.6 | 1.40× | 70% |
+| 0.9 | 154.0 | 104.6 | 87.3 | 1.47× | 74% |
+| 0.99 | 139.4 | 93.8 | 79.8 | **1.49×** | **76%** |
+
+The arms are now correctly ordered everywhere (ceiling ≤ consolidated ≤ scattered)
+and all three converge at θ=0, where no stable hot set exists and consolidation
+correctly achieves nothing (1.01×). The benefit grows monotonically with skew.
+
+**(b) Cost/benefit** (θ=0.99), `data/v1_mixedness.csv`:
+
+| victims | loglets relocated | bytes moved | AMAT |
 |---|---|---|---|
-| 0 | 174.4 | 122.0 | 174.5 |
-| 0.6 | 172.7 | 110.2 | 119.9 |
-| 0.9 | 153.7 | 93.0 | 87.3 |
-| 0.99 | 139.3 | 86.6 | 79.8 |
+| `mixedness ≥ 0.10` | 0 | 0 | 139.40 ns |
+| `mixedness ≥ 0.005 … 0.04` | **107 (37%)** | **214 MiB** | **93.84 ns** |
+| `mixedness ≥ 0` | 289 (100%) | 578 MiB | 93.84 ns |
 
-**(b) Cost/benefit** (θ=0.99), `data/v1_mixedness.csv` — the headline:
+**Identical AMAT for 37% of the work.** The per-loglet mixedness distribution is
+bimodal: 182 loglets are essentially pure cold (< 0.005) and relocating them
+achieves nothing; 107 hold the mixed data and carry the entire benefit. This is the
+measurement behind §6's unevidenced claim that "very hot and very cold objects
+would rarely be relocated", and it speaks to the cleaning-cost debate §6 concedes
+is unresolved.
 
-| victims | loglets relocated | AMAT |
-|---|---|---|
-| `mixedness ≥ 0` | 289 (all) | 86.64 ns |
-| `mixedness ≥ 0.005 … 0.05` | **107 (37%)** | **86.64 ns** |
-| `mixedness ≥ 0.10` | 0 | 139.32 ns |
+Denominator note: 290 loglets hold data (580 MiB); the heap is 17.7 GiB / ~9062
+loglets because the bench provisions 8× headroom to keep the compactor idle.
+Quoting cost against the heap would read 1.2% instead of 37% purely because of
+that over-provisioning, so the axis is percent of *occupied* loglets. 289 rather
+than 290 because one is the active write head, which consolidation cannot
+relocate out of.
 
-**Identical AMAT for 37% of the relocation work.** The per-loglet mixedness
-distribution is bimodal — 182 loglets are essentially pure cold (< 0.005) and
-consolidating them is wasted effort; 107 hold the mixed data and carry the entire
-benefit. This is the measurement behind the paper's §6 assertion that "very hot
-and very cold objects would rarely be relocated", which it states without
-evidence, and it speaks directly to the cleaning-cost debate §6 concedes is
-unresolved.
+### Correction: earlier numbers were inflated by train-on-test
 
-### Two caveats that must travel with panel (a)
+First reported 1.61× and 88% of the gap at θ=0.99, and a spurious 122.0 ns at θ=0.
+Both came from building the hotness labels out of the same access counts the hit
+rate was then scored against — the pass was rewarded for separating items by their
+realized sample counts and then graded on those counts. At high skew that is nearly
+benign (Zipf hotness is sample-stable); at θ=0 it manufactured a benefit out of
+pure sampling noise.
 
-1. **Oracle leak at low θ.** The classifier is built from the *same* access counts
-   the hit rate is then scored against. At high θ that is benign — Zipf hotness is
-   stable across samples, so a hot item is hot in any draw. At θ→0 it is
-   train-on-test: the pass separates items by their realized sample counts and is
-   then rewarded on those counts. That is why consolidated (122.0) appears to beat
-   the rank-sorted arm (174.5) at θ=0. **The low-θ improvements are not real.**
-   Fixing it needs a train/score split — classify on one access trace, score on an
-   independent one.
-2. **"Rank-sorted" is only a ceiling at high θ.** It orders payees by Zipf *rank*,
-   which coincides with popularity only when the distribution is steep. At θ=0 rank
-   carries no information, so that arm collapses onto scattered. Labelled
-   "rank-sorted prefill" rather than "ceiling" for this reason.
+With an independent scoring trace: **1.49× and 76% at θ=0.99**, and θ=0 correctly
+flattens to 1.01×. The honest headline is 1.49×. The cost/benefit structure in (b)
+is unchanged — only the AMAT it plateaus at moved, 86.6 → 93.8 ns.
+
+The rank-sorted arm is now a genuine ceiling: it tracks the *distribution* rather
+than one noisy sample, so it sits at or below the consolidated line everywhere. It
+is still only informative where rank tracks popularity — at θ=0 rank carries no
+information and it collapses onto scattered, which is why it is labelled
+"rank-sorted prefill" and not "ceiling".
 
 ### Still to do here
 

@@ -178,6 +178,14 @@ private:
   // benchmark generates the workload, so it knows the distribution exactly and
   // needs no instrumentation on the read path.
   std::unordered_map<std::string, uint32_t> payee_hits_;
+  // A second, independently drawn access trace over the same key space and the
+  // same distribution, used *only* to score the layout. Classifying and scoring
+  // from one trace is train-on-test: it rewards a pass for separating items by
+  // their realized sample counts and then measures it on those same counts,
+  // which manufactures a benefit even at uniform access where no stable hot set
+  // exists. The workload's own hits are what a classifier could legitimately
+  // learn from; future traffic is what determines the payoff.
+  std::unordered_map<std::string, uint32_t> payee_score_hits_;
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -360,13 +368,23 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
 
   auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
                                            std::move(ops));
+  // An independent draw of the same size from the same distribution, for
+  // scoring. Different seed, identical slot mapping, so it covers the same keys.
+  std::vector<uint32_t> score_hits(n, 0);
+  {
+    uint64_t score_rng = kBenchSeed ^ 0x5C0DE5ULL;
+    for (size_t i = 1; i < n; i++)
+      score_hits[slot[zipf(score_rng)]]++;
+  }
+
   // Record hits against the exact key bytes hogdb will store each payee under.
   for (size_t i = 0; i < n; i++) {
-    if (hits[i] == 0)
-      continue;
     auto db_key = make_contract_data_key(make_key(0, i));
-    bench->payee_hits_.emplace(key_bytes_string(std::as_bytes(std::span(db_key))),
-                               hits[i]);
+    auto key_str = key_bytes_string(std::as_bytes(std::span(db_key)));
+    if (hits[i] > 0)
+      bench->payee_hits_.emplace(key_str, hits[i]);
+    if (score_hits[i] > 0)
+      bench->payee_score_hits_.emplace(std::move(key_str), score_hits[i]);
   }
 
   // set up initial DB state: one nnint128 per payee item, one per payer.
@@ -566,7 +584,7 @@ Benchmark::consolidate()
 void
 Benchmark::report_layout(std::string_view label)
 {
-  if (payee_hits_.empty()) {
+  if (payee_score_hits_.empty()) {
     warn("{}: no access distribution recorded; layout report skipped", label);
     return;
   }
@@ -584,8 +602,8 @@ Benchmark::report_layout(std::string_view label)
   ramdb.for_each_location([&](std::span<const std::byte> key, size_t bytes,
                               size_t idx) {
     live_bytes[idx] += bytes;
-    auto it = payee_hits_.find(key_bytes_string(key));
-    if (it == payee_hits_.end())
+    auto it = payee_score_hits_.find(key_bytes_string(key));
+    if (it == payee_score_hits_.end())
       return;
     accesses[idx] += it->second;
     touched_bytes[idx] += bytes;
