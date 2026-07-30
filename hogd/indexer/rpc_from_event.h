@@ -13,6 +13,68 @@
 
 namespace hogd {
 
+// Strict production handler for replay and live committed-block delivery.
+class IndexerEventRpcV2 {
+public:
+  using rpc_service = IndexerEvent2;
+
+  IndexerEventRpcV2(IndexDB &db, RecentTxFailureCache &failure_cache)
+    : db_(db), failure_cache_(failure_cache)
+  {}
+
+  x23::Async<void> indexer_event_intro()
+  {
+    event_server_connected_.store(true, std::memory_order_release);
+    co_return;
+  }
+
+  x23::Async<IndexerProgress> indexer_event_get_progress()
+  {
+    co_return db_.durable_progress();
+  }
+
+  x23::Async<IndexerEpochResult>
+  indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
+  {
+    co_return db_.initialize_epoch(origin);
+  }
+
+  x23::Async<IndexerBlockApplyResult>
+  indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
+                                      const IndexerCommittedBlock &block)
+  {
+    IndexerBlockApplyResult result = db_.apply_committed_block(origin, block);
+    if (result.outcome() == IndexerBlockApplyOutcome::IndexerBlockApplied ||
+        result.outcome() == IndexerBlockApplyOutcome::IndexerBlockDuplicate) {
+      failure_cache_.prune(result.progress().contiguous_height);
+      co_await Health::instance().set_current_block_height(
+          result.progress().contiguous_height);
+    }
+    co_return result;
+  }
+
+  x23::Async<void>
+  indexer_event_report_tx_failure_v2(const SignedTransactionHash &tx_hash,
+                                     const TxFailureDiagnostic &diag)
+  {
+    failure_cache_.report(tx_hash, diag, db_.latest_block());
+    co_return;
+  }
+
+  bool event_server_connected() const
+  {
+    return event_server_connected_.load(std::memory_order_acquire);
+  }
+
+private:
+  IndexDB &db_;
+  RecentTxFailureCache &failure_cache_;
+  std::atomic<bool> event_server_connected_ = false;
+};
+static_assert(is_IndexerEvent2<IndexerEventRpcV2 *, x23::Async>);
+
+// Compatibility-only V1 handler retained for legacy storage tests. Production
+// event, indexer, and devnode startup do not serve or dial this RPC version.
 class IndexerEventRpc {
 public:
   using rpc_service = IndexerEvent1;
@@ -27,40 +89,30 @@ public:
     co_return;
   }
 
-  // [tx_events] and [tx_bodies] are index-aligned: [tx_bodies][i] is the body
-  // of the transaction whose event log is [tx_events][i].
-  //
-  // [tx_bodies] are consumed into the tx_index value (serving by-hash and
-  // transaction-page lookups) and used to key ROOT_TX rows in the address
-  // index (serving get_transactions_by_address).
-  //
-  // TODO(gramseyer): move body storage out of the tx_index value into a
-  // dedicated flat-file body store, keyed by [tx_events][i].proposed_tx_hash.
   x23::Async<void>
   indexer_event_process_events(BlockHeight block_height,
                                const TxEventLogBatch &tx_events,
                                const ProposedTransactionBatch &tx_bodies)
   {
-    // Careful! [tx_events] and [tx_bodies] are both references. If we change
-    // this function to use [co_await] *before* they are accessed, be sure to
-    // copy those parameters above rather than keep them as references.
+    // [tx_events] and [tx_bodies] are index-aligned: [tx_bodies][i] is the body
+    // of the transaction whose event log is [tx_events][i]. The bodies are
+    // stored for transaction lookups and root-address history.
+    //
+    // Careful: both batches are references. Copy them before introducing any
+    // co_await ahead of their use.
     CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_.consume_events(block_height, tx_events, tx_bodies).has_value());
-    // Expire failure diagnostics as the indexed watermark advances.
     failure_cache_.prune(db_.latest_block());
     co_await Health::instance().set_current_block_height(block_height);
     co_return;
   }
 
-  // Best-effort diagnostic (relayed by the event server) for a tx that
-  // failed nondeterministically at proposal time. Cached briefly so
-  // get_transaction_info can explain the failure.
   x23::Async<void>
   indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
                                   const TxFailureDiagnostic &diag)
   {
-    // Careful! Both parameters are references; copy them before any
-    // co_await is introduced ahead of their use.
+    // Both parameters are references; copy them before introducing any
+    // co_await ahead of their use.
     failure_cache_.report(tx_hash, diag, db_.latest_block());
     co_return;
   }

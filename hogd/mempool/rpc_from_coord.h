@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <exception>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -74,11 +76,15 @@ public:
   static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
-                        NetworkHash network_hash, size_t mempool_tx_size_limit)
+                        NetworkHash network_hash, size_t mempool_tx_size_limit,
+                        size_t num_exec_shards = 1)
     : db_rpc_(db_rpc), auth_rpc_(auth_rpc),
       network_hash_(std::move(network_hash)),
-      mempool_tx_size_limit_(static_cast<ssize_t>(mempool_tx_size_limit))
-  {}
+      mempool_tx_size_limit_(static_cast<ssize_t>(mempool_tx_size_limit)),
+      num_exec_shards_(num_exec_shards)
+  {
+    Health::instance().set_status(Health::Status::kStarting)();
+  }
 
   ~MempoolCoordinatorRpc()
   {
@@ -99,6 +105,28 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
+
+  x23::Async<void> finish_runtime_init()
+  {
+    if (ready()) {
+      co_return;
+    }
+    co_await default_threadpool().bg();
+    while (!initialized_.load(std::memory_order_acquire)) {
+      initialized_.wait(false, std::memory_order_acquire);
+    }
+    std::ignore = MempoolEventRpc::wait_for_registration();
+    event_sched_client_ = std::make_unique<event_sched_client_t>(
+        co_await MempoolEventRpc::get_client());
+    for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {
+      auto clients = co_await MempoolExecutorRpc::get_clients(num_exec_shards_);
+      for (auto &client : clients) {
+        exec_clients_.push_back(std::move(client));
+      }
+    }
+    co_await Health::instance().set_status(Health::Status::kOk);
+    ready_.store(true, std::memory_order_release);
+  }
 
   static x23::Async<coord_sched_client_t> get_client()
   {
@@ -138,9 +166,15 @@ public:
     }
     CHECK(!ready());
 
-    Registration::registration().register_coordinator(card);
-    co_await finish_init();
-    CHECK(ready());
+    try {
+      Registration::registration().register_coordinator(card);
+      co_await finish_init();
+    } catch (const std::exception &e) {
+      panic("fatal coordinator initialization failure: {}", e.what());
+    } catch (...) {
+      panic("fatal coordinator initialization failure");
+    }
+    CHECK(initialized_.load(std::memory_order_acquire));
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
   }
@@ -166,13 +200,11 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
-    CHECK(ready());
-
+    CHECK(initialized_.load(std::memory_order_acquire));
     // [last_committed_block_] is updated by [schedulercoord_commit_block()]
     // under the [commit_lock_] lock.
     x23::CoroGuard cg;
     co_await cg(commit_lock_);
-
     if (last_committed_block_.value.proposal_header.block_height == -1) {
       co_return SchedulerGetTipResult(
           SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
@@ -187,7 +219,9 @@ public:
   // are still running.
   x23::Async<void> schedulercoord_shutdown() const
   {
-    CHECK(ready());
+    if (!ready()) {
+      co_return;
+    }
 
     // TODO(jhumphri): Implement.
     co_return;
@@ -196,7 +230,7 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
-    CHECK(ready());
+    CHECK(initialized_.load(std::memory_order_acquire));
 
     x23::CoroGuard commit_cg;
     co_await commit_cg(commit_lock_);
@@ -213,18 +247,34 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.network_hash = network_hash_;
-    DbSchedResult ret =
-        co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration, genesis_value);
+    DbSchedResult ret;
+    try {
+      ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
+          genesis_configuration, genesis_value);
+    } catch (const std::exception &e) {
+      panic("fatal genesis database load failure: {}", e.what());
+    } catch (...) {
+      panic("fatal genesis database load failure");
+    }
     if (ret != DbSchedResult::DbSchedResultOK) {
       co_return ret;
     }
 
-    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+    DbTipResult db_res;
+    try {
+      db_res = co_await db_sched_client_->dbsched_get_tip();
+    } catch (const std::exception &e) {
+      panic("fatal genesis database tip failure: {}", e.what());
+    } catch (...) {
+      panic("fatal genesis database tip failure");
+    }
     CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
     last_committed_block_ = db_res.db_tip();
     CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
+    Registration::registration().publish_event_canonical_tip(
+        EventCanonicalTip{.block_id = last_committed_block_.id,
+                          .consensus_value = last_committed_block_.value});
     scheduler_->set_current_block(
         last_committed_block_.value.proposal_header.block_height);
     co_await Health::instance().set_current_block_height(
@@ -244,9 +294,11 @@ public:
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    CHECK(ready());
-
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
+    if (!ready()) {
+      ret.resize(tx_hashes.size());
+      co_return ret;
+    }
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
@@ -341,6 +393,62 @@ public:
     co_return;
   }
 
+  void set_finish_executor_started_test_hook(
+      std::function<void(BlockID, size_t)> hook)
+  {
+    finish_executor_started_test_hook_ = std::move(hook);
+  }
+
+  void set_validate_batch_chunk_test_hook(
+      std::function<std::optional<bool>(BlockID, uint64_t)> hook)
+  {
+    validate_batch_chunk_test_hook_ = std::move(hook);
+  }
+
+  void set_prepare_and_validate_chunk_test_hook(
+      std::function<void(BlockID, const SignedTransactionHash &)> hook)
+  {
+    prepare_and_validate_chunk_test_hook_ = std::move(hook);
+  }
+
+  x23::Async<EventBlockResult>
+  test_open_and_close_event_block(BlockID block_id, BlockHeight block_height,
+                                  ProposalTxs txs)
+  {
+    CHECK_EQ(co_await eventsched_open_block(block_id), RPCError::kRPCNone);
+    co_return co_await eventsched_close_block(block_id, block_height, txs);
+  }
+
+  x23::Async<RPCError> test_open_event_block(BlockID block_id)
+  {
+    co_return co_await eventsched_open_block(block_id);
+  }
+
+  x23::Async<RPCError> test_abandon_event_block(BlockID block_id)
+  {
+    co_return co_await eventsched_abandon_block(block_id);
+  }
+
+  x23::Async<void> test_finish_all_executors(BlockID block_id)
+  {
+    co_await finish_all_executors(block_id);
+  }
+
+  x23::Async<bool> test_validate_batch(BlockID block_id,
+                                       const x23::Vec<ProposedTransaction> &txs)
+  {
+    co_return co_await validate_batch(block_id, txs);
+  }
+
+  x23::Async<void> test_prepare_and_validate_chunks(
+      BlockID block_id, const x23::XdrVec<SignedTransactionHash> &tx_hashes,
+      const x23::XdrVec<NondeterministicProposalData> &tx_nominations)
+  {
+    std::ignore = co_await prepare_and_validate_chunks(block_id, tx_hashes,
+                                                       tx_nominations,
+                                                       /*max_chunk_size=*/1);
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -389,15 +497,6 @@ private:
     // distributed across shards?
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move((co_await MempoolDbRpc::get_clients())[0]));
-    for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
-      auto clients = co_await MempoolExecutorRpc::get_clients();
-      for (auto &client : clients) {
-        exec_clients_.push_back(client);
-      }
-    }
-    event_sched_client_ = std::make_unique<event_sched_client_t>(
-        co_await MempoolEventRpc::get_client());
-
     {
       DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
@@ -425,6 +524,9 @@ private:
          show_byte_array(
              last_committed_block_.value.proposal_header.events_hash),
          show_byte_array(last_committed_block_.storage_long_hash));
+    Registration::registration().publish_event_canonical_tip(
+        EventCanonicalTip{.block_id = last_committed_block_.id,
+                          .consensus_value = last_committed_block_.value});
 
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.value.proposal_header
@@ -449,8 +551,8 @@ private:
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
 
-    ready_.store(true, std::memory_order_release);
-    co_await Health::instance().set_status(Health::Status::kOk);
+    initialized_.store(true, std::memory_order_release);
+    initialized_.notify_all();
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
@@ -458,11 +560,13 @@ private:
                                             BlockExecutionMode mode);
   x23::Async<RPCError> eventsched_open_block(BlockID block_id);
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
-  x23::Async<RPCError> eventsched_commit_block(BlockID block_id);
+  x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
+                                               const ConsensusValue &value);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
-                                                      BlockHeight block_height);
+                                                      BlockHeight block_height,
+                                                      const ProposalTxs &txs);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
                                             ConsensusValue value);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
@@ -522,6 +626,7 @@ private:
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
       PendingBlock &cache, const x23::DagDeps &proposal_deps,
+      const x23::DagDeps &proposal_txs_deps,
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
@@ -539,6 +644,11 @@ private:
   x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
       BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
       x23::span<const NondeterministicProposalData> tx_nominations);
+
+  x23::Async<x23::Vec<PreparedAndValidatedChunk>> prepare_and_validate_chunks(
+      BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      size_t max_chunk_size);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
@@ -679,11 +789,17 @@ private:
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
   const ssize_t mempool_tx_size_limit_;
+  const size_t num_exec_shards_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
+  std::function<std::optional<bool>(BlockID, uint64_t)>
+      validate_batch_chunk_test_hook_;
+  std::function<void(BlockID, const SignedTransactionHash &)>
+      prepare_and_validate_chunk_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -718,6 +834,7 @@ private:
 
   std::atomic<size_t> num_coordinators_registered_ = 0;
   std::atomic<bool> ready_ = false;
+  std::atomic<bool> initialized_ = false;
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();

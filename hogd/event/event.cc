@@ -1,15 +1,19 @@
+#include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
 #include <string>
+#include <thread>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
@@ -34,7 +38,7 @@ connect_to_event_sched_server(std::string const &address)
   if (!host_port.parse(address)) {
     panic("Invalid mempool address: {}", address);
   }
-  return make_srpc_client<SchedEvent1>(host_port, true);
+  return make_srpc_client<SchedEvent2>(host_port, true);
 }
 
 int
@@ -53,6 +57,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   EventExecServer exec_server(ctx);
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
+  mempool_server.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
 
   uint16_t actual_exec_port =
       exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
@@ -78,9 +83,39 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
                  .address_for_sched = address_for_mempool.c_str()};
-  CHECK_EQ(client.schedevent_intro_event(card), RPCError::kRPCNone);
+  constexpr auto kInitialRegistrationRetryDelay = std::chrono::milliseconds(50);
+  constexpr auto kMaxRegistrationRetryDelay = std::chrono::milliseconds(1000);
+  auto retry_delay = kInitialRegistrationRetryDelay;
+  const auto wait_to_retry = [&] {
+    std::this_thread::sleep_for(retry_delay);
+    retry_delay = std::min(retry_delay * 2, kMaxRegistrationRetryDelay);
+  };
+  while (true) {
+    auto prepared = client.schedevent2_prepare_event(card);
+    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+      wait_to_retry();
+      continue;
+    }
+    if (prepared.outcome() != EventPrepareOutcome::EventPrepareOK) {
+      panic("mempool failed to prepare event registration");
+    }
+    EventRegistrationSnapshot snapshot = prepared.snapshot();
+    auto reconciled = ctx.reconcile_outbox_tip(snapshot.tip.block_id,
+                                               snapshot.tip.consensus_value)();
+    if (!reconciled) {
+      panic("event outbox reconciliation failed");
+    }
+    auto activated = client.schedevent2_activate_event(snapshot);
+    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+      break;
+    }
+    if (activated.outcome() != EventActivationOutcome::EventActivationRetry) {
+      panic("mempool failed to activate event registration");
+    }
+    wait_to_retry();
+  }
 
-  // The event server is initialized. Now block forever.
+  // Registration and durable outbox reconciliation are complete.
   Health::instance().set_status(Health::Status::kOk)();
   info("event initialization complete.");
   std::promise<void>().get_future().wait();

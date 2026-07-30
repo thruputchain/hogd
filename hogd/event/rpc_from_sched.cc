@@ -1,5 +1,7 @@
 #include "hogd/event/rpc_from_sched.h"
 
+#include <utility>
+
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/event/status.h"
@@ -30,7 +32,7 @@ to_rpc_error(EventErrorCode error_code)
 } // namespace
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched_open_block(BlockID block_id)
+EventMempoolRpc::eventsched2_open_block(BlockID block_id)
 {
   info("eventsched_open_block: block_id={}", block_id);
   auto r = co_await ctx_.open_block(block_id);
@@ -44,7 +46,7 @@ EventMempoolRpc::eventsched_open_block(BlockID block_id)
 }
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
+EventMempoolRpc::eventsched2_abandon_block(BlockID block_id)
 {
   info("eventsched_abandon_block: block_id={}", block_id);
   auto r = co_await ctx_.abandon_block(block_id);
@@ -58,10 +60,11 @@ EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
 }
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched_commit_block(BlockID block_id)
+EventMempoolRpc::eventsched2_commit_block(BlockID block_id,
+                                          ConsensusValue consensus_value)
 {
   info("eventsched_commit_block: block_id={}", block_id);
-  auto r = co_await ctx_.commit_block(block_id);
+  auto r = co_await ctx_.commit_block(block_id, std::move(consensus_value));
   if (!r) {
     info("eventsched_commit_block: block_id={} error={}", block_id,
          static_cast<int>(r.error().code()));
@@ -73,12 +76,14 @@ EventMempoolRpc::eventsched_commit_block(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-EventMempoolRpc::eventsched_close_block(BlockID block_id,
-                                        BlockHeight block_height)
+EventMempoolRpc::eventsched2_close_block(BlockID block_id,
+                                         BlockHeight block_height,
+                                         ProposalTxs proposal_txs)
 {
   info("eventsched_close_block: block_id={} block_height={}", block_id,
        block_height);
-  auto r = co_await ctx_.close_block(block_id, block_height);
+  auto r = co_await ctx_.close_block(block_id, block_height,
+                                     std::move(proposal_txs));
   if (!r) {
     info("eventsched_close_block: block_id={} error={}", block_id,
          static_cast<int>(r.error().code()));

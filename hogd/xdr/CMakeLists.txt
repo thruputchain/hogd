@@ -58,9 +58,21 @@ add_xdr(
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x
   event_cursor_internal.x
+  event_outbox_internal.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
 target_include_directories(protocol INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 add_dependencies(build_protocol generate_syscall_x)
 target_link_libraries(protocol INTERFACE crypto_interface)
+
+add_library(
+  indexer_payload_validation STATIC
+  indexer_payload_validation.cc
+  topic_layout.cc
+)
+target_link_libraries(
+  indexer_payload_validation
+  PUBLIC protocol
+  PRIVATE hogd merkle
+)

@@ -63,7 +63,7 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
   }
 
   // The body is accumulated alongside the event log and forwarded to the
-  // indexer when the block commits (see send_events_to_indexers).
+  // indexer when the durable committed record is delivered.
   bool ok =
       co_await context->add_event(std::move(event_log), std::move(proposed_tx));
 

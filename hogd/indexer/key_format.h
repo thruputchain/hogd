@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "network.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -56,6 +57,23 @@ public:
   // inside consume_events.  Absent on databases that predate this key.
   static constexpr const char *kHighestIndexedBlockMetaKey =
       "meta:highest_indexed_block";
+
+  // V2 strict-ingestion metadata lives in the default column family. The
+  // progress value is XDR IndexerInitializedProgress; each identity value is
+  // XDR IndexerCommittedBlockIdentity.
+  static constexpr const char *kDurableProgressMetaKey =
+      "meta:indexer_v2:progress";
+  static constexpr std::string_view kStrictMetadataPrefix = "meta:indexer_v2:";
+  static constexpr std::string_view kBlockIdentityMetaKeyPrefix =
+      "meta:indexer_v2:block:";
+  static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
+      "meta:indexer_v2:epoch:";
+  static constexpr const char *kRegistrationLineageMetaKey =
+      "meta:indexer_registration:lineage";
+
+  static std::string make_block_identity_meta_key(BlockHeight block_height);
+  static std::string
+  make_epoch_history_meta_key(const ProtocolCommit &protocol);
 
   // Transaction index key format:
   //   tx_hash (32 bytes)

@@ -62,6 +62,50 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
   co_return result;
 }
 
+x23::Async<EventBlockResult>
+TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height,
+                                 ProposalTxs proposal_txs)
+{
+  {
+    x23::CoroGuard guard;
+    co_await guard(lock_);
+    closed_proposal_txs_[block_id] = std::move(proposal_txs);
+  }
+  co_return co_await close_block(block_id, block_height);
+}
+
+x23::Async<RPCError>
+TestEventAggregator::commit_block(BlockID block_id,
+                                  ConsensusValue consensus_value)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  committed_consensus_values_[block_id] = std::move(consensus_value);
+  co_return RPCError::kRPCNone;
+}
+
+x23::Async<std::optional<ProposalTxs>>
+TestEventAggregator::get_closed_proposal_txs(BlockID block_id)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  auto it = closed_proposal_txs_.find(block_id);
+  co_return it == closed_proposal_txs_.end()
+      ? std::nullopt
+      : std::optional<ProposalTxs>(it->second);
+}
+
+x23::Async<std::optional<ConsensusValue>>
+TestEventAggregator::get_committed_consensus_value(BlockID block_id)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  auto it = committed_consensus_values_.find(block_id);
+  co_return it == committed_consensus_values_.end()
+      ? std::nullopt
+      : std::optional<ConsensusValue>(it->second);
+}
+
 x23::Async<RPCError>
 TestEventAggregator::abandon_block(BlockID block_id)
 {

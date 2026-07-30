@@ -59,6 +59,7 @@
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
@@ -108,6 +109,14 @@ maybe_inject_post_genesis_failure()
   if (value != nullptr && std::string_view(value) == "1") {
     throw std::runtime_error("injected hog-devnode post-genesis failure");
   }
+}
+
+bool
+withhold_indexer_registration_for_test()
+{
+  const char *value =
+      std::getenv("HOG_DEVNODE_TEST_WITHHOLD_INDEXER_REGISTRATION");
+  return value != nullptr && std::string_view(value) == "1";
 }
 
 void
@@ -428,32 +437,6 @@ write_metadata_atomically(std::filesystem::path const &path,
   require_io(dir.sync(), "fsync hog-devnode data metadata directory");
 }
 
-TxEventLogBatch
-read_event_log_file(std::filesystem::path const &path)
-{
-  std::expected<x23::Buf, x23::Errno> bytes = x23::readfile<x23::Buf>(path);
-  if (!bytes.has_value()) {
-    throw std::runtime_error(
-        std::format("failed to read recovered event log '{}': {}",
-                    path.string(), bytes.error()));
-  }
-
-  TxEventLogBatch events;
-  TxEventLog log;
-  std::size_t offset = 0;
-  std::span<const std::uint8_t> data(*bytes);
-  try {
-    while (offset < data.size()) {
-      offset += x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
-      events.push_back(log);
-    }
-  } catch (const x23::XdrBadInput &e) {
-    throw std::runtime_error(
-        std::format("failed to parse recovered event log '{}': {}",
-                    path.string(), e.what()));
-  }
-  return events;
-}
 } // namespace
 
 HogDevnodeNode::HogDevnodeNode(
@@ -465,11 +448,17 @@ HogDevnodeNode::HogDevnodeNode(
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
     runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
     event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
-    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+    opened_db_(open_db_backend()), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   try {
-    HogDBDAO db = open_db_backend();
+    // A composed devnode owns the process-wide registration namespace. Tests
+    // construct a fresh node to model a process restart, so discard any prior
+    // in-process instance before running the startup barrier.
+    Registration::registration().clear();
+    HogDBDAO db = std::move(*opened_db_);
+    opened_db_.reset();
 
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -546,7 +535,24 @@ HogDevnodeNode::HogDevnodeNode(
                                                            /*port=*/0));
 
     init_indexer_backend();
+    if (recovered_existing_chain_) {
+      const DbTip tip = ctx_->get_tip();
+      auto origin =
+          event_ctx_.indexer_outbox_store().load_current_epoch_origin();
+      if (!origin) {
+        throw std::runtime_error(
+            "failed to inspect recovered event outbox epoch origin");
+      }
+      if (!*origin) {
+        throw std::runtime_error(
+            "recovered devnode chain has no V2 outbox origin; clean chain "
+            "rollout required");
+      }
+      reconcile_event_outbox_with_recovered_tip();
+      validate_event_outbox_against_recovered_tip();
+    }
     reconcile_indexer_with_recovered_tip();
+    start_indexer_servers();
 
     // We start the executor server in [register_executor_with_mempool()].
 
@@ -558,16 +564,21 @@ HogDevnodeNode::HogDevnodeNode(
                                                                /*port=*/0));
 
     // Now have all of the subsystems register themselves with the mempool.
-    register_indexer_with_event_service();
+    if (recovered_existing_chain_ &&
+        !withhold_indexer_registration_for_test()) {
+      register_indexer_with_event_service();
+    }
     register_db_with_mempool();
-    register_event_with_mempool();
+    const DbTip admission_tip = ctx_->get_tip();
+    Registration::registration().publish_event_canonical_tip(
+        EventCanonicalTip{.block_id = admission_tip.id,
+                          .consensus_value = admission_tip.value});
     register_auth_with_mempool();
-    // The executor must register itself *after* the database and event servers
-    // have registered!
-    register_executor_with_mempool();
-    maybe_inject_post_executor_failure();
     register_coordinator_with_mempool()();
     if (recovered_existing_chain_) {
+      register_event_with_mempool();
+      register_executor_with_mempool();
+      maybe_inject_post_executor_failure();
       bootstrap_config_ = validate_recovered_data_dir(bootstrap_config);
       load_recovered_bootstrap_metadata(bootstrap_config_);
       if (recovered_data_dir_metadata_missing_) {
@@ -688,10 +699,14 @@ HogDevnodeNode::init_indexer_backend()
   }
   IndexDB &db = db_status.value();
   indexer_db_ = std::make_unique<IndexDB>(std::move(db));
+}
 
+void
+HogDevnodeNode::start_indexer_servers()
+{
   indexer_event_server_ =
-      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_,
-                                                   indexer_failure_cache_);
+      std::make_unique<RpcServer<IndexerEventRpcV2>>(*indexer_db_,
+                                                     indexer_failure_cache_);
   indexer_event_server_->max_message_size_ = kDevRpcMaxMessageSize;
   indexer_event_server_->start_server(make_bind_host_port(bind_host_,
                                                           /*port=*/0));
@@ -705,6 +720,54 @@ HogDevnodeNode::init_indexer_backend()
 }
 
 void
+HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
+{
+  const DbTip tip = ctx_->get_tip();
+  auto reconciled = event_ctx_.reconcile_outbox_tip(tip.id, tip.value)();
+  if (!reconciled) {
+    throw std::runtime_error(
+        "recovered event outbox does not reconcile with HogDB tip");
+  }
+}
+
+void
+HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
+{
+  const DbTip tip = ctx_->get_tip();
+  const BlockHeight tip_height = tip.value.proposal_header.block_height;
+  auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
+  if (!latest) {
+    throw std::runtime_error(
+        "failed to inspect recovered event outbox latest record");
+  }
+  if (*latest && (*latest)->block_height > tip_height) {
+    throw std::runtime_error(std::format(
+        "recovered event outbox latest height {} is ahead of HogDB tip {}",
+        (*latest)->block_height, tip_height));
+  }
+
+  if (tip_height == 0) {
+    auto origin = event_ctx_.indexer_outbox_store().load_current_epoch_origin();
+    if (!origin || !*origin || (*origin)->origin.first_height != 1 ||
+        (*origin)->origin.first_prev_hash != sha256(tip.value) || *latest) {
+      throw std::runtime_error(
+          "recovered genesis requires an empty outbox prepared at height 1");
+    }
+    return;
+  }
+
+  if (!*latest || (*latest)->block_height != tip_height) {
+    throw std::runtime_error(std::format(
+        "recovered event outbox is missing canonical HogDB tip height {}",
+        tip_height));
+  }
+  if ((*latest)->consensus_hash != sha256(tip.value)) {
+    throw std::runtime_error(
+        "recovered event outbox latest consensus does not match HogDB tip");
+  }
+}
+
+void
 HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 {
   if (!recovered_existing_chain_) {
@@ -714,51 +777,48 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
   const BlockHeight indexed_height = indexer_db_->latest_block();
-  if (indexed_height >= tip_height) {
-    return;
-  }
-  if (tip_height <= 0 || indexed_height + 1 != tip_height) {
+  if (indexed_height > tip_height) {
     throw std::runtime_error(std::format(
-        "recovered hog-devnode indexer is behind chain tip: indexed height {}, "
-        "chain tip {}; only one-block tip replay is supported",
+        "recovered hog-devnode indexer is ahead of chain tip: indexed height "
+        "{}, chain tip {}",
         indexed_height, tip_height));
   }
-
-  std::filesystem::path event_path = EventBlockContext::final_events_filename(
-      event_dir_.directory(), tip.value.proposal_header.events_hash);
-  TxEventLogBatch events = read_event_log_file(event_path);
-  // The on-disk event log file holds only event logs (transaction bodies are
-  // forwarded out of band and are not part of the event trie), so this
-  // recovery replay supplies no bodies.
-  IndexerStatus<void> status =
-      indexer_db_->consume_events(tip_height, events, {});
-  if (!status.has_value()) {
-    throw std::runtime_error(
-        std::format("failed to replay recovered event log into indexer: {}",
-                    status.error()));
-  }
-  info("replayed recovered event log '{}' into indexer at height {}",
-       event_path.string(), tip_height);
 }
 
 void
 HogDevnodeNode::register_indexer_with_event_service()
 {
   auto client_res =
-      create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
+      create_client<EventIndexer2>(bind_host_, event_indexer_server_.port())();
   if (!client_res)
     panic("devnode register_indexer_with_event_service connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
   std::string indexer_event_address =
       format_advertised_address(bind_host_, indexer_event_server_->port());
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .address_for_event = indexer_event_address.c_str()};
-  const EventIndexerIntroOutcome intro_outcome =
-      client.event_indexer_intro(card)();
-  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
+  UPID proposed_generation;
+  read_random(std::as_writable_bytes(std::span(proposed_generation)));
+  auto lineage = indexer_db_->prepare_registration_lineage(proposed_generation);
+  if (!lineage) {
+    panic("devnode: failed to prepare indexer registration lineage: {}",
+          lineage.error());
+  }
+  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
+                     .generation = lineage->generation,
+                     .address_for_event = indexer_event_address.c_str(),
+                     .progress = indexer_db_->durable_progress()};
+  if (lineage->predecessor_generation) {
+    card.predecessor_generation = *lineage->predecessor_generation;
+  }
+  const EventIndexerRegistrationOutcome intro_outcome =
+      client.event_indexer_register(card)();
+  if (intro_outcome !=
+      EventIndexerRegistrationOutcome::EventRegistrationAccepted)
     panic("devnode: event server rejected/failed indexer registration: {}",
           intro_outcome);
+  if (!indexer_db_->acknowledge_registration(lineage->generation)) {
+    panic("devnode: failed to acknowledge indexer registration lineage");
+  }
 }
 
 BootstrapAccountConfig
@@ -867,6 +927,13 @@ HogDevnodeNode::materialize_bootstrap_accounts(
     CHECK_EQ(client.schedcoord_load_genesis_configuration(
                  GenesisConfiguration(genesis_configuration_))(),
              DbSchedResult::DbSchedResultOK);
+    initialize_fresh_event_outbox_origin();
+    register_event_with_mempool();
+    if (!withhold_indexer_registration_for_test()) {
+      register_indexer_with_event_service();
+    }
+    register_executor_with_mempool();
+    maybe_inject_post_executor_failure();
     return;
   }
 
@@ -875,6 +942,13 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   CHECK_EQ(client.schedcoord_load_genesis_configuration(
                std::move(artifact.genesis_configuration))(),
            DbSchedResult::DbSchedResultOK);
+  initialize_fresh_event_outbox_origin();
+  register_event_with_mempool();
+  if (!withhold_indexer_registration_for_test()) {
+    register_indexer_with_event_service();
+  }
+  register_executor_with_mempool();
+  maybe_inject_post_executor_failure();
   maybe_inject_post_genesis_failure();
 
   SignedTransactionBatch batch;
@@ -883,6 +957,24 @@ HogDevnodeNode::materialize_bootstrap_accounts(
 
   bootstrap_accounts_ = std::move(artifact.accounts);
   refresh_bootstrap_account_balances();
+}
+
+void
+HogDevnodeNode::initialize_fresh_event_outbox_origin()
+{
+  const DbTip genesis_tip = ctx_->get_tip();
+  if (genesis_tip.value.proposal_header.block_height != 0) {
+    throw std::runtime_error(
+        "fresh devnode genesis did not establish canonical height 0");
+  }
+  auto initialized =
+      event_ctx_.indexer_outbox_store().initialize_current_epoch_origin(
+          1, sha256(genesis_tip.value));
+  if (!initialized) {
+    throw std::runtime_error(
+        std::format("failed to initialize fresh devnode outbox origin: {}",
+                    initialized.error()));
+  }
 }
 
 void
@@ -963,7 +1055,8 @@ HogDevnodeNode::open_db_backend() const
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   HogDBStatus<DbTip> recovered_tip = db.read_dbtip();
   if (!recovered_tip && recovered_tip.error().code() != HogDBCode::kNotFound) {
-    recovered_tip.error().raise("failed to read recovered DbTip");
+    throw std::runtime_error(std::format("failed to read recovered DbTip: {}",
+                                         recovered_tip.error()));
   }
 
   StorageLongHash full_hash = db.compute_full_db_hash();
@@ -1052,21 +1145,38 @@ void
 HogDevnodeNode::register_event_with_mempool()
 {
   auto client_res =
-      create_client<SchedEvent1>(bind_host_, sched_event_server_.port())();
+      create_client<SchedEvent2>(bind_host_, sched_event_server_.port())();
   if (!client_res)
     panic("devnode register_event_with_mempool connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
-  RPCError r = client.schedevent_intro_event(
-      {.protocol = version::kHogdProtocol(),
-       .upid = {},
-       .address_for_exec =
-           format_advertised_address(bind_host_, event_exec_server_.port())
-               .c_str(),
-       .address_for_sched =
-           format_advertised_address(bind_host_, event_sched_server_.port())
-               .c_str()})();
-  CHECK_EQ(r, RPCError::kRPCNone);
+  std::string exec_address =
+      format_advertised_address(bind_host_, event_exec_server_.port());
+  std::string sched_address =
+      format_advertised_address(bind_host_, event_sched_server_.port());
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .upid = {},
+                 .address_for_exec = exec_address.c_str(),
+                 .address_for_sched = sched_address.c_str()};
+  while (true) {
+    EventPrepareResult prepared = client.schedevent2_prepare_event(card)();
+    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+    EventRegistrationSnapshot snapshot = prepared.snapshot();
+    CHECK(event_ctx_
+              .reconcile_outbox_tip(snapshot.tip.block_id,
+                                    snapshot.tip.consensus_value)()
+              .has_value());
+    EventActivationResult activated =
+        client.schedevent2_activate_event(snapshot)();
+    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+      break;
+    }
+    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
+  }
 }
 
 void
@@ -1097,6 +1207,7 @@ HogDevnodeNode::register_executor_with_mempool()
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(bind_host_, sched_exec_server_.port());
   executor_.start(bind_host_, /*self_port=*/0, coordinator_sockaddr);
+  mempool_coord_server_->impl()->finish_runtime_init()();
 }
 
 x23::Async<void>

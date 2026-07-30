@@ -59,7 +59,7 @@ public:
 
     db_client_ = make_srpc_multiclient<DbSched1>(
         x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
-    event_client_ = make_srpc_multiclient<EventSched1>(
+    event_client_ = make_srpc_multiclient<EventSched2>(
         x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
 
     ConsensusValue genesis_value{};
@@ -87,7 +87,7 @@ protected:
       client_;
   DbSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
       db_client_;
-  EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
+  EventSched2::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
       event_client_;
 
   x23::Defer<> force_syscallhandler_commit_ =
@@ -132,7 +132,7 @@ protected:
 
   void open_event_block(BlockID block_id)
   {
-    auto event_res = event_client_.eventsched_open_block(block_id);
+    auto event_res = event_client_.eventsched2_open_block(block_id);
     CHECK_EQ(event_res, RPCError::kRPCNone);
   }
 
@@ -491,11 +491,13 @@ TEST_F(RpcNegativeTest,
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched2_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
-                .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                .eventsched2_close_block(recycle_probe_block_id,
+                                         recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   validate_thread.join();
@@ -550,11 +552,13 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched2_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
-                .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                .eventsched2_close_block(recycle_probe_block_id,
+                                         recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();

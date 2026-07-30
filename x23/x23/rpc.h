@@ -460,6 +460,9 @@ struct RpcStream : public detail::RpcStreamImpl {
     BufView rv;
     try {
       rbuf = co_await a;
+      if (rbuf.empty()) {
+        throw XdrException("RPC connection closed before reply");
+      }
       rv = rbuf.subspan(deserialize_from(&msg, rbuf));
     } catch (const XdrBadInput &e) {
       throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());

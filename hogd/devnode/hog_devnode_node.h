@@ -97,6 +97,9 @@ private:
   void init_db_backend(HogDBDAO db,
                        std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
+  void start_indexer_servers();
+  void reconcile_event_outbox_with_recovered_tip();
+  void validate_event_outbox_against_recovered_tip() const;
   void reconcile_indexer_with_recovered_tip();
   void register_indexer_with_event_service();
   void register_db_with_mempool();
@@ -111,6 +114,7 @@ private:
   void write_data_dir_metadata() const;
   void load_recovered_bootstrap_metadata(BootstrapAccountConfig const &config);
   void materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
+  void initialize_fresh_event_outbox_origin();
   void commit_initialization_batch(SignedTransactionBatch const &txs);
   void refresh_bootstrap_account_balances();
   void prepare_for_failed_construction() noexcept;
@@ -130,14 +134,17 @@ private:
   // and the event RPC servers below borrow event_ctx_.
   HogDevnodeTmpDir event_dir_;
   HogDevnodeTmpDir indexer_dir_;
+  // Validate persistent HogDB before constructing runtime services. A corrupt
+  // DbTip must not unwind partially constructed RPC/executor lifetimes.
+  std::optional<HogDBDAO> opened_db_;
   std::unique_ptr<IndexDB> indexer_db_;
   // Declaration order matters: the indexer RPC servers below borrow
   // indexer_failure_cache_ by reference, so it must be declared before (and
   // thus outlive) them.
   RecentTxFailureCache indexer_failure_cache_;
-  // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
+  // IndexerEventRpcV2 is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.
-  std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
+  std::unique_ptr<RpcServer<IndexerEventRpcV2>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
   std::unique_ptr<RPCContext> ctx_;

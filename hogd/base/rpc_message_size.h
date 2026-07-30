@@ -12,4 +12,8 @@ namespace hogd {
 // artifact.
 inline constexpr size_t kBulkRpcMaxMessageSize = 0x7fffffffff;
 
+// EventSched2 carries the full proposal payload so event can durably retain a
+// pre-commit candidate. Keep this cap scoped to that internal RPC surface.
+inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
+
 } // namespace hogd

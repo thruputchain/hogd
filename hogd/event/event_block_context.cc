@@ -1,4 +1,5 @@
 #include "hogd/event/event_block_context.h"
+#include "hogd/event/indexer_outbox.h"
 
 #include <atomic>
 #include <cassert>
@@ -29,6 +30,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -329,12 +331,45 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   rename_file(g, hash);
   auto ts5 = x23::fastclock::now();
   info("time to rename file: {} ns", ts5 - ts4);
+  auto directory = Directory::open(work_directory_, /*create=*/false);
+  if (!directory) {
+    panic("failed to open events directory after rename: {}",
+          directory.error());
+  }
+  if (auto synced = directory->sync(); !synced) {
+    panic("failed to fsync events directory after rename: {}", synced.error());
+  }
   file_done_.store(true);
   auto *pool = x23::ThreadPool::get_thread_pool();
   if (!pool) {
     pool = &default_threadpool();
   }
   file_done_.broadcast(pool);
+}
+
+IndexerOutboxCandidatePayload
+EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
+                                                     SHA256Hash event_root,
+                                                     ProposalTxs proposal_txs)
+{
+  IndexerOutboxCandidatePayload payload{
+      .format_version = kIndexerOutboxFormatVersion,
+      .block_id = block_id_,
+      .block_height = block_height,
+      .event_root = event_root,
+      .proposal_txs = std::move(proposal_txs),
+  };
+
+  std::unique_lock ul = events_with_bodies_.lock_threads();
+  events_with_bodies_.for_each(ul, [&payload](EventWithBodyBatch &batch) {
+    payload.event_logs.reserve(payload.event_logs.size() + batch.size());
+    payload.tx_bodies.reserve(payload.tx_bodies.size() + batch.size());
+    for (const detail::EventWithBody &pair : batch) {
+      payload.event_logs.push_back(pair.event);
+      payload.tx_bodies.push_back(pair.body);
+    }
+  });
+  return payload;
 }
 
 x23::Async<void>
@@ -431,72 +466,6 @@ EventBlockContext::await_all_executors_closed()
     }
   }
   co_return true; // All executors closed normally
-}
-
-x23::Async<void>
-EventBlockContext::send_events_to_indexers(
-    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
-{
-  TxEventLogBatch full_event_log;
-  ProposedTransactionBatch full_tx_bodies;
-  try {
-    // Flatten the single per-thread container once, splitting each pair into
-    // the event-log and body vectors in lockstep.  Because both halves come
-    // from the same traversal of the same container, position i of each vector
-    // always refers to the same EventWithBody (#2826).
-    std::unique_lock ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(ul, [&full_event_log, &full_tx_bodies](
-                                         EventWithBodyBatch &batch) {
-      for (detail::EventWithBody &pair : batch) {
-        full_event_log.push_back(std::move(pair.event));
-        full_tx_bodies.push_back(std::move(pair.body));
-      }
-      batch.clear();
-    });
-
-    // CI tests triggered an std::bad_alloc error here; logging the specifics of
-    // the error in case it occurs again
-  } catch (const std::exception &e) {
-    error("failed to send events to indexers: {}", e.what());
-    throw;
-  }
-
-  // [full_event_log] and [full_tx_bodies] are index-aligned: they are split
-  // from the same EventWithBody pairs in one traversal, so the body at position
-  // i belongs to the event log at position i.  They are forwarded together so
-  // the indexer never re-matches bodies to events.
-  CHECK(full_event_log.size() == full_tx_bodies.size());
-
-  // Per-indexer catch on both loops, like the tx-failure relay in
-  // rpc_context.cc: indexers are decoupled from consensus, so one dead or
-  // misbehaving indexer's RPC-layer error must not fail commit_block (which
-  // would hard-abort the coordinator). The dispatch loop needs its own guard
-  // because x23::Async is eager -- the call runs to its first suspension and
-  // can throw synchronously -- and an unguarded await-loop throw would also
-  // unwind [handles] while other sends are in flight (a panic in debug).
-  std::vector<x23::Async<void>> handles;
-  handles.reserve(indexers.size());
-
-  for (indexer_event_client_t &indexer : indexers) {
-    try {
-      handles.push_back(indexer.indexer_event_process_events(block_height,
-                                                             full_event_log,
-                                                             full_tx_bodies));
-    } catch (x23::XdrException const &e) {
-      warn("dropping block {} events to an indexer (dispatch): {}",
-           block_height, e.what());
-    }
-  }
-  for (x23::Async<void> &handle : handles) {
-    try {
-      co_await handle;
-    } catch (x23::XdrException const &e) {
-      warn("dropping block {} events to an indexer: {}", block_height,
-           e.what());
-    }
-  }
-  handles.clear();
-  co_return;
 }
 
 } // namespace hogd

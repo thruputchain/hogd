@@ -63,28 +63,21 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // Wait for the event subsystem to connect.
+  // Start event registration. Activation waits for the coordinator's recovered
+  // canonical tip, so construction must continue before the card is published.
   RpcServer<MempoolEventRpc> event;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
   info("PORT mempool.event={}", actual_event_port);
-  info("Waiting for event server to connect...");
-  while (!registration.event_registered(/*card=*/nullptr)) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
 
-  // Let the executors connect.
+  // Let executors begin connecting. Coordinator recovery publishes the
+  // canonical tip needed to activate event before executor intro can finish.
   RpcServer<MempoolExecutorRpc> exec;
   uint16_t actual_executor_port =
       exec.start_server(make_bind_host_port(bind_ip, executor_port));
   CHECK(actual_executor_port == executor_port || executor_port == 0);
   info("PORT mempool.executor={}", actual_executor_port);
-  info("Waiting for {} executors to connect...", num_exec_shards);
-  while (registration.executors_registered(/*cards=*/nullptr) <
-         num_exec_shards) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
 
   RpcServer<MempoolAuthRpc> auth;
   auth->max_message_size_ = kBulkRpcMaxMessageSize;
@@ -99,16 +92,18 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // TODO(jhumphri): Make [mempool_tx_size_limit] a command line arg.
   RpcServer<MempoolCoordinatorRpc> coord(
       db->impl(), auth->impl(), std::move(network_hash),
-      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
       coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
 
-  while (!coord->impl()->ready()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
+  // Coordinator/database/genesis initialization is independent of event and
+  // executor registration. Readiness is published only after both runtime
+  // services have activated through the shared barrier.
+  coord->impl()->finish_runtime_init()();
+  CHECK(coord->impl()->ready());
 
   // Public RPC gateway server: shares the scheduler + admission path
   // with the coordinator server, but exposes a gateway-shaped surface

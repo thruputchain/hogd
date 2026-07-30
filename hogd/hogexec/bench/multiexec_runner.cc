@@ -30,13 +30,16 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/mempool/shared.h"
 #include "loadgen.hh"
 #include "network.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -136,7 +139,7 @@ connect_to_event_sched_server(const ServerAddress &address)
   if (!host_port.parse(address)) {
     panic("Failed to parse event sched server address");
   }
-  auto client = make_rpc_client<EventSched1>(host_port, false)();
+  auto client = make_rpc_client<EventSched2>(host_port, false)();
   if (!client)
     panic("connect_to_event_sched_server failed: {}",
           client.error().error_code().message());
@@ -170,6 +173,10 @@ connect_to_exec_server(const ExecCard &card)
 } // namespace
 
 struct BlockValidationQueue {
+  struct Batch {
+    size_t start;
+    x23::span<const SignedTransaction> txs;
+  };
 
   BlockValidationQueue(const x23::XdrVec<SignedTransaction> *txs,
                        size_t batch_size)
@@ -182,11 +189,14 @@ struct BlockValidationQueue {
   const size_t batch_size;
   std::atomic<uint64_t> offset{0};
 
-  x23::span<const SignedTransaction> next_batch()
+  Batch next_batch()
   {
     auto start = offset.fetch_add(batch_size);
-    return {txs_.begin() + std::min<size_t>(start, txs_.size()),
-            txs_.begin() + std::min<size_t>(start + batch_size, txs_.size())};
+    const size_t bounded_start = std::min<size_t>(start, txs_.size());
+    return {.start = bounded_start,
+            .txs = {txs_.begin() + bounded_start,
+                    txs_.begin() +
+                        std::min<size_t>(start + batch_size, txs_.size())}};
   }
 };
 
@@ -219,7 +229,7 @@ open_block(db_sched_client_t &db_sched_client,
     }(exec_client, block_number, n_remaining_execs, cb);
   }
 
-  auto event_async = event_sched_client.eventsched_open_block(block_number);
+  auto event_async = event_sched_client.eventsched2_open_block(block_number);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
@@ -240,7 +250,8 @@ open_block(db_sched_client_t &db_sched_client,
 void
 close_block(db_sched_client_t &db_sched_client,
             event_sched_client_t &event_sched_client,
-            std::vector<exec_client_t> &exec_clients, uint64_t block_number)
+            std::vector<exec_client_t> &exec_clients, uint64_t block_number,
+            const ProposalTxs &proposal_txs)
 {
   auto start_time = x23::fastclock::get_ns();
   info("closing block {}", block_number);
@@ -258,7 +269,8 @@ close_block(db_sched_client_t &db_sched_client,
   }
   // We use [block_number] as the height as well.
   auto event_async =
-      event_sched_client.eventsched_close_block(block_number, block_number);
+      event_sched_client.eventsched2_close_block(block_number, block_number,
+                                                 proposal_txs);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -267,6 +279,7 @@ close_block(db_sched_client_t &db_sched_client,
   auto close_time = x23::fastclock::get_ns();
   ConsensusValue value{};
   value.proposal_header.block_height = block_number;
+  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
   auto commit_res =
       db_sched_client.dbsched_commit_snapshot(block_number, value);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
@@ -287,34 +300,39 @@ close_block(db_sched_client_t &db_sched_client,
 x23::Detached
 connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
                 x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
-                std::atomic<size_t> &n_total_coros)
+                std::atomic<size_t> &n_total_coros,
+                x23::XdrVec<NondeterministicProposalData> *nominations)
 {
   auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
                  BlockValidationQueue *queue, BlockID block_number,
-                 std::atomic<size_t> &n_total_coros) -> x23::Detached {
+                 std::atomic<size_t> &n_total_coros,
+                 x23::XdrVec<NondeterministicProposalData> *nominations)
+      -> x23::Detached {
     co_await default_threadpool().bg();
     while (true) {
       auto batch = queue->next_batch();
-      if (batch.empty()) {
+      if (batch.txs.empty()) {
         if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
           cb();
         }
         co_return;
       }
 
-      auto r =
-          co_await exec_client.executorsched_propose_batch(block_number, batch);
-      assert(r.size() == batch.size());
-      for (auto const &result : r) {
+      auto r = co_await exec_client.executorsched_propose_batch(block_number,
+                                                                batch.txs);
+      assert(r.size() == batch.txs.size());
+      for (size_t i = 0; i < r.size(); ++i) {
+        const ExecProposeResult &result = r[i];
         if (result.result() != ExecResult::ExecResultOK) {
           panic("Failed to propose batch");
         }
+        (*nominations)[batch.start + i] = result.proposal_data();
       }
     }
   };
 
   for (int i = 0; i < ncoro; i++) {
-    coro(exec_client, cb, queue, block_number, n_total_coros);
+    coro(exec_client, cb, queue, block_number, n_total_coros, nominations);
   }
   co_return;
 };
@@ -336,6 +354,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
              parent_block_number, current_block_number);
 
   BlockValidationQueue block_validation_queue(txs, batch_size);
+  x23::XdrVec<NondeterministicProposalData> nominations(txs->size());
 
   auto start_coros_time = x23::fastclock::get_ns();
 
@@ -345,7 +364,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
     for (auto &exec_client : exec_clients) {
       connection_coro(exec_client, &block_validation_queue, cb,
                       n_coros_per_connection, current_block_number,
-                      n_total_coros);
+                      n_total_coros, &nominations);
     }
     async();
   }
@@ -353,8 +372,17 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
+  x23::XdrVec<SignedTransactionHash> hashes;
+  hashes.reserve(txs->size());
+  for (const SignedTransaction &tx : *txs) {
+    hashes.push_back(sha256(tx.tx));
+  }
+  ProposalTxs proposal_txs{
+      .hash = t_to_parallel_batch(hashes)(),
+      .nondeterministic_data = t_to_parallel_batch(nominations)(),
+  };
   close_block(db_sched_client, event_sched_client, exec_clients,
-              current_block_number);
+              current_block_number, proposal_txs);
 
   auto end_block_time = x23::fastclock::get_ns();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",

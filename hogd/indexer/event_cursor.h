@@ -14,7 +14,7 @@ namespace hogd::cursor {
 
 // Bumped any time `EventCursorPayload`'s wire shape changes.
 // Cursors with a different schema version are rejected.
-inline constexpr std::uint32_t kCursorVersion = 1;
+inline constexpr std::uint32_t kCursorVersion = 2;
 
 // Hard cap on accepted cursor bytes.  The encoded form is well
 // below this; the cap is a defensive guard against arbitrarily

@@ -356,6 +356,80 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
   EXPECT_EQ(seen[2], hashes[2]); // block 302
 }
 
+TEST_F(IndexerTest, PaginationKeepsOriginalServingWatermark)
+{
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xD5);
+
+  auto ingest = [&](BlockHeight height, uint8_t fill) {
+    ProposedTransaction body;
+    body.signed_tx.tx.uniquifier.nonce = fill;
+    body.signed_tx.tx.invocation.invoked_address = addr;
+    TxEventLog log;
+    std::ranges::fill(log.proposed_tx_hash, fill);
+    TxEmittedEvent event;
+    event.contract_address = addr;
+    log.events.push_back(event);
+    event_->indexer_event_process_events(height, TxEventLogBatch{log},
+                                         ProposedTransactionBatch{body})();
+  };
+
+  ingest(300, 0x60);
+  ingest(301, 0x61);
+
+  EventQuery event_query{};
+  event_query.filters.push_back(
+      EventFilter{.contract_addresses = {addr}, .topics = {}});
+  event_query.order = IterationOrder::IterationOrderAscending;
+  event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  event_query.limit = 1;
+  EventPage event_page = block_explorer_->get_events(event_query)();
+  ASSERT_EQ(event_page.events.size(), 1UL);
+  ASSERT_FALSE(event_page.cursor.empty());
+
+  TransactionQuery transaction_query{};
+  transaction_query.order = IterationOrder::IterationOrderAscending;
+  transaction_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  transaction_query.limit = 1;
+  TransactionPage transaction_page =
+      block_explorer_->get_transactions(transaction_query)();
+  ASSERT_EQ(transaction_page.transactions.size(), 1UL);
+  ASSERT_FALSE(transaction_page.cursor.empty());
+
+  AddressTransactionQuery address_query{};
+  address_query.address = addr;
+  address_query.order = IterationOrder::IterationOrderAscending;
+  address_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  address_query.limit = 1;
+  TransactionRefPage address_page =
+      block_explorer_->get_transactions_by_address(address_query)();
+  ASSERT_EQ(address_page.refs.size(), 1UL);
+  ASSERT_FALSE(address_page.cursor.empty());
+
+  ingest(302, 0x62);
+
+  event_query.cursor = event_page.cursor;
+  event_page = block_explorer_->get_events(event_query)();
+  ASSERT_EQ(event_page.events.size(), 1UL);
+  EXPECT_EQ(event_page.events[0].block_height, 301);
+  EXPECT_EQ(event_page.latest_block, 301);
+  EXPECT_TRUE(event_page.cursor.empty());
+
+  transaction_query.cursor = transaction_page.cursor;
+  transaction_page = block_explorer_->get_transactions(transaction_query)();
+  ASSERT_EQ(transaction_page.transactions.size(), 1UL);
+  EXPECT_EQ(transaction_page.transactions[0].height, 301);
+  EXPECT_EQ(transaction_page.latest_block, 301);
+  EXPECT_TRUE(transaction_page.cursor.empty());
+
+  address_query.cursor = address_page.cursor;
+  address_page = block_explorer_->get_transactions_by_address(address_query)();
+  ASSERT_EQ(address_page.refs.size(), 1UL);
+  EXPECT_EQ(address_page.refs[0].height, 301);
+  EXPECT_EQ(address_page.latest_block, 301);
+  EXPECT_TRUE(address_page.cursor.empty());
+}
+
 // Regression: a batch in which NO transaction emits any event (every
 // TxEventLog is present but has an empty events vector) must still write a
 // ROOT_TX row for every body.  Guards against the contract-index chunking
@@ -461,19 +535,9 @@ TEST_F(IndexerTest, UnknownTxStillNotFound)
   EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
 }
 
-// WAI / regression lock for #2851. Out-of-order ingest persists a tx-index row
-// for a height above the contiguous serving watermark before latest_block()
-// advances (consume_events writes the SST rows, then record_height() buffers
-// the gapped height in pending_heights_). Such a row is intentionally served by
-// the direct point lookup -- the caller supplied the exact hash and gets the tx
-// with its true height -- but is deliberately hidden from every paginated scan,
-// which clamps iteration to latest_block() so pages stay gapless as the lower
-// gap fills. Returning NotFound from the point lookup instead would be a false
-// negative (the row is genuinely stored) that silently flips to Found once the
-// gap fills. This pins that divergence across all four public surfaces: the
-// point lookup finds the pending tx; get_events, get_transactions, and the
-// indexed get_transactions_by_address all hide it.
-TEST_F(IndexerTest, PendingTxServedByPointLookupButHiddenFromScans)
+// Legacy ingest can still create a pending row above its watermark. All public
+// read surfaces, including point lookup, must hide it until the gap closes.
+TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
 {
   // One address is both the event emitter and the root invoked_address, so it
   // is the single discriminator for the event index, the tx list, and the
@@ -507,10 +571,9 @@ TEST_F(IndexerTest, PendingTxServedByPointLookupButHiddenFromScans)
   ingest_at(12, tx12);
   ASSERT_EQ(db().latest_block(), 10);
 
-  // Point lookup: the pending block-12 tx IS served, with its true height.
+  // Point lookup cannot expose a row above the durable serving boundary.
   TxInfoResult pending = block_explorer_->get_transaction_info(tx12)();
-  ASSERT_EQ(pending.outcome(), TxInfoOutcome::TxInfoFound);
-  EXPECT_EQ(pending.info().height, 12);
+  ASSERT_EQ(pending.outcome(), TxInfoOutcome::TxInfoNotFound);
 
   // The block-10 tx below the watermark is servable too (positive control).
   TxInfoResult settled = block_explorer_->get_transaction_info(tx10)();

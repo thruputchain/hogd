@@ -4,18 +4,18 @@
 #include <future>
 #include <print>
 #include <string>
-#include <utility>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/http/http.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
+#include "hogd/indexer/registration_controller.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/shared.h"
@@ -27,8 +27,6 @@
 #include "x23/sockio.h"
 
 namespace hogd {
-
-namespace {
 
 int
 indexer_init(const std::string &path, const std::string &event_server_addr,
@@ -51,32 +49,29 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   RecentTxFailureCache failure_cache;
 
   // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpc> event(db, failure_cache);
-  event->max_message_size_ = kBulkRpcMaxMessageSize;
+  RpcServer<IndexerEventRpcV2> event(db, failure_cache);
+  event->max_message_size_ = kIndexerRpcMaxMessageSize;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
   info("PORT indexer.event={}", actual_event_port);
 
-  // Register with the event server.
-  auto client_res = make_rpc_client<EventIndexer1>(server_address_to_sockaddr(
-                                                       event_server_addr),
-                                                   /*retry=*/true)();
-  if (!client_res)
-    panic("indexer connect to event server failed: {}",
-          client_res.error().error_code().message());
-  event_indexer_client_t client = std::move(*client_res);
   const std::string indexer_server_addr =
       format_advertised_address(bind_ip, /*port=*/actual_event_port);
-  const IndexerCard card{.protocol = version::kHogdProtocol(),
-                         .address_for_event = indexer_server_addr.c_str()};
-  const EventIndexerIntroOutcome intro_outcome =
-      client.event_indexer_intro(card)();
-  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
-    panic("indexer: event server rejected/failed registration: {}",
-          intro_outcome);
+  UPID generation;
+  read_random(std::as_writable_bytes(std::span(generation)));
+  auto lineage = db.prepare_registration_lineage(generation);
+  if (!lineage) {
+    panic("failed to prepare durable indexer registration lineage: {}",
+          lineage.error());
+  }
 
-  // Create the RPC server that the block explorers talk to.
+  IndexerRegistrationController registration_controller(event_server_addr,
+                                                        indexer_server_addr,
+                                                        *lineage, db);
+  registration_controller.wait_until_registered();
+
+  // Do not serve stale product queries while startup replay is incomplete.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
   block_explorer->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
@@ -85,15 +80,14 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
         block_explorer_port == 0);
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);
 
-  // The indexer is initialized. Now block forever.
   Health::instance().set_status(Health::Status::kOk)();
+
+  // The indexer is initialized. Now block forever.
   info("indexer initialization complete.");
   std::promise<void>().get_future().wait();
 
   return 0;
 }
-
-} // namespace
 
 } // namespace hogd
 

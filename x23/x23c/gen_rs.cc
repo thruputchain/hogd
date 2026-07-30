@@ -408,7 +408,8 @@ GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
   prtop(R"(
 #[allow(non_camel_case_types)]
 #[async_trait::async_trait]
-pub trait {}_{}: Send + Sync {{)",
+pub trait {}_{}: Send + Sync {{
+)",
         prog_name, vers.id);
 
   for (auto const &proc : vers.procs) {
@@ -418,7 +419,8 @@ pub trait {}_{}: Send + Sync {{)",
     for (size_t i = 0; i < proc.arg_types.size(); i++) {
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
-    prtop("    {}\n", proc.comment);
+    if (!proc.comment.empty())
+      prtop("{}\n", proc.comment);
     prtop("    async fn {}({}) -> Result<{}, ::rpc_driver::ProgramError>;\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
@@ -1326,11 +1328,15 @@ use core::ops::{{Deref, DerefMut}};
                   gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
                   gs.cfg("serde", "use ::serde_arrays;"));
 
-  return preamble + gs.top_ + R"(
+  string output = preamble + gs.top_ + R"(
 //
 // XDR internals below this point
 //
 
-)" + gs.bottom_ +
-         "\n";
+)" + gs.bottom_;
+  while (output.ends_with("\n\n"))
+    output.pop_back();
+  if (output.empty() || output.back() != '\n')
+    output.push_back('\n');
+  return output;
 }

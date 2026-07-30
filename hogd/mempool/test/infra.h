@@ -220,6 +220,20 @@ public:
     return *event_sched_server_->impl();
   }
 
+  void register_runtime_after_genesis()
+  {
+    register_event_with_mempool();
+    register_executor_with_mempool();
+    mempool_coord_server_->impl()->finish_runtime_init()();
+  }
+
+  void register_event_only_after_genesis() { register_event_with_mempool(); }
+
+  void register_executor_only_after_event()
+  {
+    register_executor_with_mempool();
+  }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
@@ -333,17 +347,28 @@ private:
 
   void register_event_with_mempool()
   {
-    auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
+    auto client = create_client<SchedEvent2>(MempoolTestInfra::kAddress,
                                              sched_event_server_.port())()
                       .value();
-    auto r = client.schedevent_intro_event(
-        {.protocol = version::kHogdProtocol(),
-         .upid = {},
-         .address_for_exec =
-             make_address(kAddress, event_exec_server_.port()).c_str(),
-         .address_for_sched =
-             make_address(kAddress, event_sched_server_.port()).c_str()})();
-    CHECK_EQ(r, RPCError::kRPCNone);
+    std::string exec_address =
+        make_address(kAddress, event_exec_server_.port());
+    std::string sched_address =
+        make_address(kAddress, event_sched_server_->port());
+    EventCard card{.protocol = version::kHogdProtocol(),
+                   .upid = {},
+                   .address_for_exec = exec_address.c_str(),
+                   .address_for_sched = sched_address.c_str()};
+    while (true) {
+      auto prepared = client.schedevent2_prepare_event(card)();
+      if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        continue;
+      }
+      CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+      auto activated = client.schedevent2_activate_event(prepared.snapshot())();
+      CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationOK);
+      break;
+    }
   }
 
   void register_auth_with_mempool()
@@ -398,8 +423,8 @@ private:
 
   // The event server that the mempool accesses.
   TestEventAggregator event_server_;
-  TestEventAggregatorSchedServer event_sched_server_ =
-      TestEventAggregatorSchedServer(event_server_);
+  std::unique_ptr<TestEventAggregatorSchedServer> event_sched_server_ =
+      std::make_unique<TestEventAggregatorSchedServer>(event_server_);
   TestEventAggregatorExecServer event_exec_server_ =
       TestEventAggregatorExecServer(event_server_);
 

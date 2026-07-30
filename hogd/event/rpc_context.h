@@ -1,23 +1,26 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "db_conflict.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/event/event_block_context.h"
+#include "hogd/event/indexer_outbox.h"
 #include "hogd/event/status.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -26,16 +29,14 @@
 
 namespace hogd {
 
-// Immutable, refcounted snapshot of the registered indexer clients, plus a
-// per-indexer count of best-effort tx-failure relays currently in flight.
-//
-// [clients] and [tx_failure_in_flight] are INDEX-ALIGNED (same pattern as
-// send_events_to_indexers' full_event_log/full_tx_bodies): entry i of each
-// belongs to the same indexer. Both are built together in one pass at publish
-// and never resized afterward, so the alignment holds for the snapshot's life.
-// Keeping [clients] a plain contiguous vector lets commit_block hand it
-// straight to send_events_to_indexers with no copy -- the counters, needed
-// only by the tx-failure relay path, ride alongside without disturbing it.
+namespace detail {
+struct IndexerDeliveryState;
+} // namespace detail
+
+// Immutable, refcounted snapshot used only by the best-effort tx-failure
+// relay. Durable block delivery uses the single serialized V2 lane below.
+// [clients] and [tx_failure_in_flight] are index-aligned and immutable for the
+// snapshot's life.
 //
 // The count is PER INDEXER (#3124): each in-flight relay pins one pending RPC
 // XID on that indexer's stream until it replies or its stream fails, and the
@@ -62,23 +63,9 @@ using indexer_snapshot_t = PerThreadARC<IndexerSnapshot>;
 
 class EventRPCContext {
 public:
-  EventRPCContext(std::string_view work_directory)
-    : work_directory_(work_directory)
-  {}
+  explicit EventRPCContext(std::string_view work_directory);
 
-  ~EventRPCContext()
-  {
-    while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    // Retire the current indexer snapshot. If a fire-and-forget tx-failure
-    // relay is still in flight it holds a reference and touches nothing else
-    // of this object, so we don't wait: the last release deletes the
-    // (heap-allocated) snapshot.
-    if (indexers_snapshot_->initiate_shutdown()) {
-      delete indexers_snapshot_;
-    }
-  }
+  ~EventRPCContext();
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
@@ -93,12 +80,17 @@ public:
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
   x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
-                                                  BlockHeight block_height);
+                                                  BlockHeight block_height,
+                                                  ProposalTxs proposal_txs);
 
   // Commits a closed block.
   // Sends events to indexers and GCs the block context.
   // Returns the block height on success.
-  x23::Async<EventStatus<BlockHeight>> commit_block(BlockID block_id);
+  x23::Async<EventStatus<BlockHeight>>
+  commit_block(BlockID block_id, ConsensusValue consensus_value);
+
+  x23::Async<EventStatus<void>>
+  reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
 
   // Abandons a block (active or already closed but not yet committed).
   // Returns an error if the block_id is not found.
@@ -110,8 +102,9 @@ public:
   // rpc from the executor is in flight.
   x23::Async<void> gc_context(BlockID block_id);
 
-  // Adds an indexer, which the event server will send events to.
-  // Returns an id that can later be passed to remove_indexer().
+  // Test-only multi-receiver helpers for the best-effort diagnostic relay.
+  // Production registration uses register_indexer()'s single startup-only V2
+  // slot and serialized block-delivery lane.
   uint64_t add_indexer(indexer_event_client_t &&indexer);
 
   // Removes a previously added indexer. Returns false if the id is unknown
@@ -119,6 +112,20 @@ public:
   // and may still complete one last send to the removed indexer; its
   // ClientRefs are destroyed once the last such snapshot drains.
   bool remove_indexer(uint64_t indexer_id);
+
+  x23::Async<EventIndexerRegistrationOutcome>
+  register_indexer(indexer_event_client_t indexer, const IndexerCardV2 &card);
+
+  const IndexerOutboxStore &indexer_outbox_store() const
+  {
+    return indexer_outbox_store_;
+  }
+
+  void set_close_reserved_test_hook(std::function<void(BlockID)> hook)
+  {
+    close_reserved_test_hook_ = std::move(hook);
+  }
+  void set_delivery_worker_empty_test_hook(std::function<void()> hook);
 
   // Best-effort relay of a nondeterministic tx-failure diagnostic to every
   // registered indexer. Bypasses the per-block commit pipeline entirely --
@@ -149,13 +156,35 @@ public:
   static constexpr size_t kMaxInFlightTxFailureRelaysPerIndexer = 256;
 
 private:
+  enum class BlockOperation { kClosing, kCommitting, kAbandoning };
+
+  struct CandidatePromotion {
+    BlockID block_id;
+    IndexerOutboxCandidatePayload candidate;
+    IndexerOutboxCommittedPayload committed;
+  };
+
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
   void gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
 
-  x23::Async<EventStatus<void>> wait_for_executors_closed(BlockID block_id);
+  x23::Async<bool> reserve_block_operation(BlockID block_id,
+                                           BlockOperation operation);
+  IndexerOutboxStatus<void>
+  remove_resolved_candidates(BlockHeight committed_height);
+  IndexerOutboxStatus<std::optional<CandidatePromotion>>
+  find_canonical_candidate(const ConsensusValue &consensus_value) const;
+  std::shared_ptr<void>
+  enqueue_indexer_delivery(const IndexerOutboxOrigin &origin,
+                           const IndexerOutboxCommittedPayload &payload);
+  void start_indexer_delivery_worker(std::shared_ptr<void> worker_owner);
+  void replace_diagnostic_indexer_locked(const indexer_event_client_t &indexer);
+  x23::Async<void>
+  finish_block_operation(BlockID block_id,
+                         PerThreadARC<EventBlockContext> *context,
+                         bool shutdown);
 
   struct ContextCache {
     ContextCache() = default;
@@ -194,10 +223,17 @@ private:
   void
   publish_indexer_snapshot(const std::unique_lock<std::mutex> &indexers_ul);
 
-  std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   x23::CoroLock lock_;
+  // Serializes origin selection and committed publication. It is released
+  // before any indexer network delivery.
+  x23::CoroLock outbox_commit_lock_;
+  // Serializes startup registration attempts so an exact-generation retry can
+  // observe and acknowledge a registration whose reply was lost.
+  x23::CoroLock indexer_registration_lock_;
+  std::atomic<bool> outbox_reconciled_ = false;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
+  std::unordered_map<BlockID, BlockOperation> block_operations_;
   // Guards the authoritative indexer list and snapshot publication (writers
   // plus the snapshot slow path). Plain mutex: critical sections are short
   // and never suspend, and in particular no network send happens under it.
@@ -211,6 +247,10 @@ private:
   // nullptr always means "not cached", never "empty").
   indexer_snapshot_t *indexers_snapshot_ =
       new indexer_snapshot_t(IndexerSnapshot{});
+  std::shared_ptr<detail::IndexerDeliveryState> indexer_delivery_state_;
+  // Guarded by outbox_commit_lock_. Records above this scheduler-confirmed
+  // height may be durable after crash reconciliation but are not replayable.
+  std::optional<BlockHeight> admissible_indexer_tail_;
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a
@@ -218,6 +258,8 @@ private:
   constexpr static size_t kMaxCachedBlocks = 5;
   std::vector<ReusableEventBlockContextData> cached_blocks_;
   std::string work_directory_;
+  IndexerOutboxStore indexer_outbox_store_;
+  std::function<void(BlockID)> close_reserved_test_hook_;
 };
 
 } // namespace hogd

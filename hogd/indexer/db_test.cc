@@ -688,7 +688,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
 // max-block-height entry lives under a contract that is NOT
 // lexicographically last reported the wrong [latest_block] after
 // restart.  The meta-key initializer must return the true max.
-TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
+TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
 {
   // Low address, high block.
   ContractAddress addr_low;
@@ -716,17 +716,27 @@ TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
     EXPECT_EQ(db->latest_block(), 101);
   }
 
-  // Reopen.  SeekToLast on contract_index would land on addr_high
-  // (block 100); the meta key keeps us at 101.
+  // Recognized V1 metadata reopens for reads and continued V1 ingest. Strict
+  // epoch initialization remains blocked until an explicit migration.
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_EQ(db->latest_block(), 101);
+  EXPECT_TRUE(db->get_tx_events(tx_low).has_value());
+  EXPECT_TRUE(db->get_tx_events(tx_high).has_value());
+
+  SHA256Hash tx_next;
+  std::ranges::fill(tx_next, 0x30);
+  TxEventLog log_next;
+  log_next.proposed_tx_hash = tx_next;
+  log_next.events.push_back(make_event(addr_low, 0, 0));
+  ASSERT_TRUE(db->consume_events(102, std::vector{log_next}, {}));
+  EXPECT_EQ(db->latest_block(), 102);
+  EXPECT_TRUE(db->get_tx_events(tx_next).has_value());
 }
 
-// Databases that predate the meta key open cleanly: the missing key
-// is treated as an empty database, latest_block defaults to 0, and
-// the next consume_events writes the key.
-TEST_F(IndexDBTest, LatestBlockRecoversAfterRestartWithoutMetaKey)
+// A truly fresh database has neither progress, identities, nor a legacy
+// watermark and reopens as uninitialized.
+TEST_F(IndexDBTest, FreshDatabaseReopensUninitialized)
 {
   {
     auto db = IndexDB::make_new(tmp_dir_.directory());
@@ -766,6 +776,7 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
   payload.block_height = 10;
   payload.tx_hash = tx2;
   payload.sequence_number = 0;
+  payload.max_block_height = 10;
   std::string encoded = cursor::encode(payload);
 
   EventFilterList filters;

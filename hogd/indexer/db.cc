@@ -41,10 +41,11 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/event/topic_layout.h"
 #include "hogd/indexer/event_cursor.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
+#include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/topic_layout.h"
 #include "indexer.hh"
 #include "pagination.hh"
 #include "transaction.hh"
@@ -247,6 +248,150 @@ parse_tx_value(std::string_view value)
   return record;
 }
 
+template<typename T>
+bool
+xdr_equal(const T &lhs, const T &rhs)
+{
+  return x23::serialize(lhs) == x23::serialize(rhs);
+}
+
+std::string
+bounded_diagnostic(std::string message)
+{
+  constexpr size_t kMaxDiagnosticBytes = 1024;
+  if (message.size() > kMaxDiagnosticBytes) {
+    message.resize(kMaxDiagnosticBytes);
+  }
+  return message;
+}
+
+IndexerProgress
+uninitialized_progress()
+{
+  return IndexerProgress(IndexerProgressState::IndexerProgressUninitialized);
+}
+
+IndexerProgress
+initialized_progress(const IndexerInitializedProgress &progress)
+{
+  IndexerProgress result(IndexerProgressState::IndexerProgressInitialized);
+  result.initialized() = progress;
+  return result;
+}
+
+IndexerEpochResult
+epoch_success(IndexerEpochOutcome outcome,
+              const IndexerInitializedProgress &progress)
+{
+  IndexerEpochResult result(outcome);
+  result.progress() = progress;
+  return result;
+}
+
+IndexerEpochResult
+epoch_failure(IndexerEpochOutcome outcome, std::string diagnostic)
+{
+  IndexerEpochResult result(outcome);
+  diagnostic = bounded_diagnostic(std::move(diagnostic));
+  result.diagnostic() =
+      IndexerFailureMessage(diagnostic.data(), diagnostic.size());
+  return result;
+}
+
+IndexerBlockApplyResult
+apply_success(IndexerBlockApplyOutcome outcome,
+              const IndexerInitializedProgress &progress)
+{
+  IndexerBlockApplyResult result(outcome);
+  result.progress() = progress;
+  return result;
+}
+
+IndexerBlockApplyResult
+apply_failure(IndexerBlockApplyOutcome outcome, std::string diagnostic)
+{
+  IndexerBlockApplyResult result(outcome);
+  diagnostic = bounded_diagnostic(std::move(diagnostic));
+  result.diagnostic() =
+      IndexerFailureMessage(diagnostic.data(), diagnostic.size());
+  return result;
+}
+
+IndexerBlockApplyResult
+apply_gap(BlockHeight expected_height)
+{
+  IndexerBlockApplyResult result(IndexerBlockApplyOutcome::IndexerBlockGap);
+  result.gap().expected_height = expected_height;
+  return result;
+}
+
+std::string
+make_tx_value(BlockHeight block_height, const ProposedTransaction &body,
+              const TxEventLog &event_log)
+{
+  static_assert(std::endian::native == std::endian::little);
+  std::string value(reinterpret_cast<const char *>(&block_height),
+                    sizeof(block_height));
+  const x23::Buf body_bytes = x23::serialize(body);
+  value.append(reinterpret_cast<const char *>(body_bytes.data()),
+               body_bytes.size());
+  const x23::Buf event_bytes = x23::serialize(event_log);
+  value.append(reinterpret_cast<const char *>(event_bytes.data()),
+               event_bytes.size());
+  return value;
+}
+
+IndexerStatus<bool>
+column_family_has_rows(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle)
+{
+  std::unique_ptr<rocksdb::Iterator> iterator(
+      db->NewIterator(rocksdb::ReadOptions(), handle));
+  iterator->SeekToFirst();
+  if (!iterator->status().ok()) {
+    error("failed to inspect indexer column family {}: {}", handle->GetName(),
+          iterator->status().ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  return iterator->Valid();
+}
+
+IndexerStatus<bool>
+column_family_has_rows_other_than(rocksdb::DB *db,
+                                  rocksdb::ColumnFamilyHandle *handle,
+                                  std::string_view allowed_key)
+{
+  std::unique_ptr<rocksdb::Iterator> iterator(
+      db->NewIterator(rocksdb::ReadOptions(), handle));
+  for (iterator->SeekToFirst(); iterator->Valid(); iterator->Next()) {
+    if (iterator->key() !=
+        rocksdb::Slice(allowed_key.data(), allowed_key.size())) {
+      return true;
+    }
+  }
+  if (!iterator->status().ok()) {
+    error("failed to inspect indexer column family {}: {}", handle->GetName(),
+          iterator->status().ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  return false;
+}
+
+IndexerStatus<bool>
+column_family_has_prefix(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle,
+                         std::string_view prefix)
+{
+  std::unique_ptr<rocksdb::Iterator> iterator(
+      db->NewIterator(rocksdb::ReadOptions(), handle));
+  iterator->Seek(rocksdb::Slice(prefix.data(), prefix.size()));
+  if (!iterator->status().ok()) {
+    error("failed to inspect indexer metadata prefix: {}",
+          iterator->status().ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  return iterator->Valid() && iterator->key().starts_with(
+                                  rocksdb::Slice(prefix.data(), prefix.size()));
+}
+
 } // namespace
 
 void
@@ -417,7 +562,14 @@ IndexDB::open(const std::filesystem::path &path,
   }
 
   IndexDB idx(db_ptr, tx_cf, contract_cf);
-  idx.initialize_highest_block_from_db();
+  auto initialized = idx.initialize_registration_lineage_from_db();
+  if (!initialized) {
+    return initialized.error();
+  }
+  initialized = idx.initialize_progress_from_db();
+  if (!initialized) {
+    return initialized.error();
+  }
   return idx;
 }
 
@@ -448,6 +600,11 @@ IndexDB::IndexDB(IndexDB &&other) noexcept
     contract_cf_handle_(other.contract_cf_handle_),
     stats_worker_thread_(std::move(other.stats_worker_thread_)),
     pending_heights_(std::move(other.pending_heights_)),
+    durable_progress_(std::move(other.durable_progress_)),
+    registration_lineage_(std::move(other.registration_lineage_)),
+    legacy_v1_mode_(other.legacy_v1_mode_),
+    v1_ingest_test_hook_(std::move(other.v1_ingest_test_hook_)),
+    initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
     highest_indexed_block_(
         other.highest_indexed_block_.load(std::memory_order_acquire))
 {
@@ -480,6 +637,11 @@ IndexDB::operator=(IndexDB &&other) noexcept
     contract_cf_handle_ = other.contract_cf_handle_;
     stats_worker_thread_ = std::move(other.stats_worker_thread_);
     pending_heights_ = std::move(other.pending_heights_);
+    durable_progress_ = std::move(other.durable_progress_);
+    registration_lineage_ = std::move(other.registration_lineage_);
+    legacy_v1_mode_ = other.legacy_v1_mode_;
+    v1_ingest_test_hook_ = std::move(other.v1_ingest_test_hook_);
+    initialize_epoch_test_hook_ = std::move(other.initialize_epoch_test_hook_);
     highest_indexed_block_.store(other.highest_indexed_block_.load(
                                      std::memory_order_acquire),
                                  std::memory_order_release);
@@ -536,16 +698,21 @@ IndexDB::consume_events(BlockHeight block_height,
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  {
-    // Re-ingesting an already-seen height would overwrite served,
-    // immutable history; skip it entirely.  Benign for byte-identical
-    // retries; anything else is an upstream bug.
-    std::lock_guard g(ingest_mutex_);
-    if (height_seen(static_cast<int64_t>(block_height), g)) {
-      warn("consume_events: ignoring duplicate ingest for block {}",
-           static_cast<int64_t>(block_height));
-      return {};
-    }
+  // Compatibility-only V1 ingest must reserve the state through both
+  // external-SST ingests and the watermark write. Production uses V2; there is
+  // intentionally no supported mixed V1/V2 deployment.
+  std::unique_lock ingest_guard(ingest_mutex_);
+  if (durable_progress_) {
+    error("consume_events is disabled after V2 epoch initialization");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  if (height_seen(static_cast<int64_t>(block_height), ingest_guard)) {
+    warn("consume_events: ignoring duplicate ingest for block {}",
+         static_cast<int64_t>(block_height));
+    return {};
+  }
+  if (v1_ingest_test_hook_) {
+    v1_ingest_test_hook_();
   }
 
   auto start_ts = x23::fastclock::get_ns();
@@ -795,10 +962,8 @@ IndexDB::consume_events(BlockHeight block_height,
   // never claims a block whose rows aren't yet visible; the meta key
   // may lag the data (one-block window if we crash here) but can
   // never lead it.
-  {
-    std::lock_guard g(ingest_mutex_);
-    record_height(static_cast<int64_t>(block_height), g);
-  }
+  record_height(static_cast<int64_t>(block_height), ingest_guard);
+  legacy_v1_mode_ = true;
 
   auto end_ts = x23::fastclock::get_ns();
   info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
@@ -808,7 +973,8 @@ IndexDB::consume_events(BlockHeight block_height,
 }
 
 bool
-IndexDB::height_seen(int64_t h, std::lock_guard<std::mutex> const & /*g*/) const
+IndexDB::height_seen(int64_t h,
+                     std::unique_lock<std::mutex> const & /*g*/) const
 {
   const int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
   return (latest != kNoBlocksIndexed && h <= latest) ||
@@ -816,7 +982,7 @@ IndexDB::height_seen(int64_t h, std::lock_guard<std::mutex> const & /*g*/) const
 }
 
 void
-IndexDB::record_height(int64_t h, std::lock_guard<std::mutex> const &g)
+IndexDB::record_height(int64_t h, std::unique_lock<std::mutex> const &g)
 {
   // Re-check under the same lock: the pre-ingest seen() check and
   // this record are separate critical sections, so a concurrent
@@ -865,6 +1031,419 @@ IndexDB::record_height(int64_t h, std::lock_guard<std::mutex> const &g)
     error("consume_events: failed to persist highest_indexed_block "
           "meta key: {}",
           s.ToString());
+  }
+}
+
+IndexerProgress
+IndexDB::durable_progress() const
+{
+  std::lock_guard g(ingest_mutex_);
+  if (!durable_progress_) {
+    return uninitialized_progress();
+  }
+  return initialized_progress(*durable_progress_);
+}
+
+IndexerStatus<IndexerRegistrationLineage>
+IndexDB::prepare_registration_lineage(UPID new_generation)
+{
+  std::lock_guard g(ingest_mutex_);
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+  if (registration_lineage_ && !registration_lineage_->acknowledged) {
+    return *registration_lineage_;
+  }
+  if (registration_lineage_ &&
+      registration_lineage_->generation == new_generation) {
+    error("new indexer registration generation repeats its predecessor");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  IndexerRegistrationLineage next{
+      .format_version = kIndexerRegistrationLineageFormatVersion,
+      .generation = std::move(new_generation),
+      .acknowledged = false,
+  };
+  if (registration_lineage_) {
+    next.predecessor_generation = registration_lineage_->generation;
+  }
+  const x23::Buf bytes = x23::serialize(next);
+  rocksdb::WriteOptions options;
+  options.sync = true;
+  const rocksdb::Status status =
+      db_->Put(options, db_->DefaultColumnFamily(),
+               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
+               rocksdb::Slice(reinterpret_cast<const char *>(bytes.data()),
+                              bytes.size()));
+  if (!status.ok()) {
+    error("failed to persist indexer registration lineage: {}",
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  registration_lineage_ = next;
+  return next;
+}
+
+IndexerStatus<void>
+IndexDB::acknowledge_registration(const UPID &generation)
+{
+  std::lock_guard g(ingest_mutex_);
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+  if (!registration_lineage_ ||
+      registration_lineage_->generation != generation) {
+    error("cannot acknowledge a non-current indexer registration generation");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  if (registration_lineage_->acknowledged) {
+    return {};
+  }
+
+  IndexerRegistrationLineage acknowledged = *registration_lineage_;
+  acknowledged.acknowledged = true;
+  const x23::Buf bytes = x23::serialize(acknowledged);
+  rocksdb::WriteOptions options;
+  options.sync = true;
+  const rocksdb::Status status =
+      db_->Put(options, db_->DefaultColumnFamily(),
+               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
+               rocksdb::Slice(reinterpret_cast<const char *>(bytes.data()),
+                              bytes.size()));
+  if (!status.ok()) {
+    error("failed to acknowledge indexer registration lineage: {}",
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  registration_lineage_ = std::move(acknowledged);
+  return {};
+}
+
+std::optional<IndexerRegistrationLineage>
+IndexDB::registration_lineage() const
+{
+  std::lock_guard g(ingest_mutex_);
+  return registration_lineage_;
+}
+
+IndexerEpochResult
+IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
+{
+  std::lock_guard g(ingest_mutex_);
+  if (initialize_epoch_test_hook_) {
+    initialize_epoch_test_hook_();
+  }
+  if (!is_open()) {
+    return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
+                         "indexer database is not open");
+  }
+  if (origin.protocol.empty() || origin.first_height < 0) {
+    return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                         "invalid outbox epoch origin");
+  }
+
+  if (durable_progress_) {
+    if (xdr_equal(durable_progress_->origin, origin)) {
+      return epoch_success(IndexerEpochOutcome::IndexerEpochUnchanged,
+                           *durable_progress_);
+    }
+    if (durable_progress_->origin.epoch_sequence == UINT64_MAX ||
+        origin.epoch_sequence != durable_progress_->origin.epoch_sequence + 1) {
+      return epoch_failure(
+          IndexerEpochOutcome::IndexerEpochConflict,
+          "outbox epoch sequence is not the next durable sequence");
+    }
+    const bool current_epoch_empty = durable_progress_->contiguous_height ==
+                                     durable_progress_->origin.first_height - 1;
+    const BlockHeight expected_first_height =
+        current_epoch_empty ? durable_progress_->origin.first_height
+                            : durable_progress_->contiguous_height + 1;
+    if (xdr_equal(durable_progress_->origin.protocol, origin.protocol) ||
+        (!current_epoch_empty &&
+         durable_progress_->contiguous_height == INT64_MAX) ||
+        origin.first_height != expected_first_height ||
+        origin.first_prev_hash != durable_progress_->last_consensus_hash) {
+      return epoch_failure(
+          IndexerEpochOutcome::IndexerEpochConflict,
+          "outbox epoch does not continue the durable indexer boundary");
+    }
+  }
+  else {
+    if (legacy_v1_mode_) {
+      return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                           "legacy index data requires explicit migration");
+    }
+    if (origin.epoch_sequence != 0 ||
+        origin.first_height != kFirstOutboxBlockHeight ||
+        origin.first_prev_hash == ConsensusValueHash{}) {
+      return epoch_failure(
+          IndexerEpochOutcome::IndexerEpochConflict,
+          "fresh outbox origin must begin at height 1 and link genesis");
+    }
+    auto default_has_rows = column_family_has_rows_other_than(
+        db_.get(), db_->DefaultColumnFamily(),
+        IndexerKeyFormat::kRegistrationLineageMetaKey);
+    if (!default_has_rows) {
+      return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
+                           "failed to inspect index metadata");
+    }
+    if (*default_has_rows) {
+      return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                           "legacy index data requires explicit migration");
+    }
+    for (rocksdb::ColumnFamilyHandle *handle :
+         {tx_cf_handle_, contract_cf_handle_}) {
+      auto has_rows = column_family_has_rows(db_.get(), handle);
+      if (!has_rows) {
+        return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
+                             "failed to inspect legacy index data");
+      }
+      if (*has_rows) {
+        return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                             "legacy index data requires explicit migration");
+      }
+    }
+    if (highest_indexed_block_.load(std::memory_order_relaxed) !=
+            kNoBlocksIndexed ||
+        !pending_heights_.empty()) {
+      return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                           "legacy index data requires explicit migration");
+    }
+  }
+
+  const std::string epoch_key =
+      IndexerKeyFormat::make_epoch_history_meta_key(origin.protocol);
+  std::string prior_epoch;
+  const rocksdb::Status epoch_status =
+      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(), epoch_key,
+               &prior_epoch);
+  if (epoch_status.ok()) {
+    return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
+                         "outbox protocol epoch was already used");
+  }
+  if (!epoch_status.IsNotFound()) {
+    error("failed to inspect outbox epoch history: {}",
+          epoch_status.ToString());
+    return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
+                         "failed to inspect outbox epoch history");
+  }
+
+  IndexerInitializedProgress progress{
+      .origin = origin,
+      .contiguous_height = origin.first_height - 1,
+      .last_consensus_hash = origin.first_prev_hash,
+      .last_payload_digest = {},
+  };
+  if (durable_progress_) {
+    progress.contiguous_height = durable_progress_->contiguous_height;
+    progress.last_consensus_hash = durable_progress_->last_consensus_hash;
+    progress.last_payload_digest = durable_progress_->last_payload_digest;
+  }
+
+  const x23::Buf progress_bytes = x23::serialize(progress);
+  const x23::Buf origin_bytes = x23::serialize(origin);
+  const uint64_t encoded_watermark =
+      std::byteswap(static_cast<uint64_t>(progress.contiguous_height));
+  rocksdb::WriteBatch batch;
+  batch.Put(db_->DefaultColumnFamily(),
+            rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
+            rocksdb::Slice(reinterpret_cast<const char *>(
+                               progress_bytes.data()),
+                           progress_bytes.size()));
+  batch.Put(db_->DefaultColumnFamily(),
+            rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
+            rocksdb::Slice(reinterpret_cast<const char *>(&encoded_watermark),
+                           sizeof(encoded_watermark)));
+  batch.Put(db_->DefaultColumnFamily(), epoch_key,
+            rocksdb::Slice(reinterpret_cast<const char *>(origin_bytes.data()),
+                           origin_bytes.size()));
+  rocksdb::WriteOptions options;
+  options.sync = true;
+  const rocksdb::Status status = db_->Write(options, &batch);
+  if (!status.ok()) {
+    error("failed to initialize durable indexer epoch: {}", status.ToString());
+    return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
+                         "failed to persist outbox epoch");
+  }
+
+  durable_progress_ = progress;
+  highest_indexed_block_.store(progress.contiguous_height,
+                               std::memory_order_release);
+  return epoch_success(IndexerEpochOutcome::IndexerEpochInitialized, progress);
+}
+
+IndexerBlockApplyResult
+IndexDB::apply_committed_block(const IndexerOutboxOrigin &origin,
+                               const IndexerCommittedBlock &block)
+{
+  std::lock_guard g(ingest_mutex_);
+  if (!is_open()) {
+    return apply_failure(IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+                         "indexer database is not open");
+  }
+  if (!durable_progress_ || !xdr_equal(durable_progress_->origin, origin)) {
+    return apply_failure(IndexerBlockApplyOutcome::IndexerBlockOriginMismatch,
+                         durable_progress_ ? "outbox origin mismatch"
+                                           : "outbox epoch is uninitialized");
+  }
+
+  try {
+    if (auto valid = validate_indexer_committed_block(block); !valid) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
+    }
+
+    const BlockHeight height =
+        block.payload.consensus_value.proposal_header.block_height;
+    if (height < 0) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block height is negative");
+    }
+    if (height < durable_progress_->origin.first_height) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block predates the current outbox epoch");
+    }
+
+    if (height <= durable_progress_->contiguous_height) {
+      std::string persisted_bytes;
+      const rocksdb::Status status =
+          db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+                   IndexerKeyFormat::make_block_identity_meta_key(height),
+                   &persisted_bytes);
+      if (status.IsNotFound()) {
+        return apply_failure(
+            IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+            "no durable identity exists for the older height");
+      }
+      if (!status.ok()) {
+        error("failed to read durable block identity at {}: {}", height,
+              status.ToString());
+        return apply_failure(
+            IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+            "failed to read durable block identity");
+      }
+      IndexerCommittedBlockIdentity persisted;
+      try {
+        x23::deserialize(&persisted,
+                         x23::BufView(reinterpret_cast<const uint8_t *>(
+                                          persisted_bytes.data()),
+                                      persisted_bytes.size()));
+      } catch (const x23::XdrBadInput &) {
+        return apply_failure(
+            IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+            "stored durable block identity is malformed");
+      }
+      if (xdr_equal(persisted, block.identity)) {
+        return apply_success(IndexerBlockApplyOutcome::IndexerBlockDuplicate,
+                             *durable_progress_);
+      }
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block conflicts with the durable identity at its height");
+    }
+
+    if (durable_progress_->contiguous_height == INT64_MAX) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "durable indexer height is exhausted");
+    }
+    const BlockHeight expected_height =
+        durable_progress_->contiguous_height + 1;
+    if (height != expected_height) {
+      return apply_gap(expected_height);
+    }
+    if (block.payload.consensus_value.prev_hash !=
+        durable_progress_->last_consensus_hash) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block previous hash does not match durable progress");
+    }
+
+    const auto &events = block.payload.event_logs;
+    const auto &bodies = block.payload.tx_bodies;
+    rocksdb::WriteBatch batch;
+    std::string key;
+    for (size_t i = 0; i < events.size(); ++i) {
+      const TxEventLog &event_log = events[i];
+      const ProposedTransaction &body = bodies[i];
+      IndexerKeyFormat::make_tx_key(key, event_log.proposed_tx_hash);
+
+      std::string existing;
+      const rocksdb::Status existing_status =
+          db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key, &existing);
+      if (!existing_status.IsNotFound()) {
+        if (!existing_status.ok()) {
+          error("failed to check existing transaction row: {}",
+                existing_status.ToString());
+          return apply_failure(
+              IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+              "failed to inspect transaction index");
+        }
+        return apply_failure(
+            IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+            "committed transaction hash already exists at another height");
+      }
+
+      batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
+      uint32_t sequence_number = 0;
+      for (const TxEmittedEvent &emitted_event : event_log.events) {
+        IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
+                                            IndexerKeyFormat::kEvent, height,
+                                            event_log.proposed_tx_hash,
+                                            sequence_number++);
+        batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+      }
+      IndexerKeyFormat::make_contract_key(
+          key, body.signed_tx.tx.invocation.invoked_address,
+          IndexerKeyFormat::kRootTx, height, event_log.proposed_tx_hash, 0);
+      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+    }
+
+    IndexerInitializedProgress progress = *durable_progress_;
+    progress.contiguous_height = height;
+    progress.last_consensus_hash = block.identity.consensus_hash;
+    progress.last_payload_digest = block.identity.payload_digest;
+    const x23::Buf identity_bytes = x23::serialize(block.identity);
+    const x23::Buf progress_bytes = x23::serialize(progress);
+    const uint64_t encoded_watermark =
+        std::byteswap(static_cast<uint64_t>(height));
+    batch.Put(db_->DefaultColumnFamily(),
+              IndexerKeyFormat::make_block_identity_meta_key(height),
+              rocksdb::Slice(reinterpret_cast<const char *>(
+                                 identity_bytes.data()),
+                             identity_bytes.size()));
+    batch.Put(db_->DefaultColumnFamily(),
+              rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
+              rocksdb::Slice(reinterpret_cast<const char *>(
+                                 progress_bytes.data()),
+                             progress_bytes.size()));
+    batch.Put(db_->DefaultColumnFamily(),
+              rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
+              rocksdb::Slice(reinterpret_cast<const char *>(&encoded_watermark),
+                             sizeof(encoded_watermark)));
+
+    rocksdb::WriteOptions options;
+    options.sync = true;
+    const rocksdb::Status status = db_->Write(options, &batch);
+    if (!status.ok()) {
+      error("failed to atomically apply committed indexer block {}: {}", height,
+            status.ToString());
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+          "failed to persist committed block");
+    }
+
+    durable_progress_ = progress;
+    highest_indexed_block_.store(height, std::memory_order_release);
+    return apply_success(IndexerBlockApplyOutcome::IndexerBlockApplied,
+                         progress);
+  } catch (const std::exception &e) {
+    error("failed to validate/apply committed indexer block: {}", e.what());
+    return apply_failure(IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+                         "internal committed block failure");
   }
 }
 
@@ -957,7 +1536,13 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
   }
 
   try {
-    return parse_tx_value(value);
+    TxRecord record = parse_tx_value(value);
+    const int64_t watermark =
+        highest_indexed_block_.load(std::memory_order_acquire);
+    if (watermark == kNoBlocksIndexed || record.height > watermark) {
+      return IndexerError(IndexerErrorCode::kDBNotFound);
+    }
+    return record;
   } catch (const x23::XdrBadInput &e) {
     error("Failed to deserialize tx_index value: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
@@ -974,41 +1559,256 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
   return std::make_pair(record->height, std::move(record->events));
 }
 
-void
-IndexDB::initialize_highest_block_from_db()
+IndexerStatus<void>
+IndexDB::initialize_registration_lineage_from_db()
 {
-  // Read the meta key written by consume_events on every advance.
-  // Default-CF Get is O(1) regardless of index size.  A missing key
-  // means either an empty database or one that predates this meta
-  // key; in both cases the default of 0 is correct (the next
-  // consume_events will write the real value).
-  if (!is_open()) {
-    return;
+  std::string bytes;
+  const rocksdb::Status status =
+      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
+               &bytes);
+  if (status.IsNotFound()) {
+    return {};
   }
-  std::string value;
-  rocksdb::Status s =
+  if (!status.ok()) {
+    error("failed to read indexer registration lineage: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  IndexerRegistrationLineage lineage;
+  try {
+    x23::deserialize(&lineage, x23::BufView(reinterpret_cast<const uint8_t *>(
+                                                bytes.data()),
+                                            bytes.size()));
+  } catch (const x23::XdrException &e) {
+    error("malformed indexer registration lineage: {}", e.what());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  if (lineage.format_version != kIndexerRegistrationLineageFormatVersion ||
+      x23::xdr_size(lineage) != bytes.size() ||
+      (lineage.predecessor_generation &&
+       *lineage.predecessor_generation == lineage.generation)) {
+    error("invalid indexer registration lineage metadata");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  registration_lineage_ = std::move(lineage);
+  return {};
+}
+
+IndexerStatus<void>
+IndexDB::initialize_progress_from_db()
+{
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+
+  std::string progress_bytes;
+  rocksdb::Status progress_status =
+      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+               rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
+               &progress_bytes);
+  if (!progress_status.ok() && !progress_status.IsNotFound()) {
+    error("failed to read durable indexer progress: {}",
+          progress_status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  std::string legacy_watermark;
+  rocksdb::Status legacy_status =
       db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
                rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
-               &value);
-  if (s.IsNotFound()) {
-    return;
+               &legacy_watermark);
+  if (!legacy_status.ok() && !legacy_status.IsNotFound()) {
+    error("failed to read legacy indexer watermark: {}",
+          legacy_status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
   }
-  if (!s.ok()) {
-    error("initialize_highest_block_from_db: meta-key Get failed: {}",
-          s.ToString());
-    return;
+
+  if (progress_status.IsNotFound()) {
+    if (legacy_status.ok()) {
+      if (legacy_watermark.size() != sizeof(uint64_t)) {
+        error("legacy indexer watermark is malformed");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+      uint64_t encoded = 0;
+      std::memcpy(&encoded, legacy_watermark.data(), sizeof(encoded));
+      const int64_t watermark = static_cast<int64_t>(std::byteswap(encoded));
+      if (watermark < 0) {
+        error("legacy indexer watermark is negative");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+      auto has_strict_metadata =
+          column_family_has_prefix(db_.get(), db_->DefaultColumnFamily(),
+                                   IndexerKeyFormat::kStrictMetadataPrefix);
+      if (!has_strict_metadata) {
+        return has_strict_metadata.error();
+      }
+      if (*has_strict_metadata) {
+        error("legacy indexer watermark is mixed with strict metadata; "
+              "explicit migration is required");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+      highest_indexed_block_.store(watermark, std::memory_order_release);
+      legacy_v1_mode_ = true;
+      return {};
+    }
+    auto default_has_rows = column_family_has_rows_other_than(
+        db_.get(), db_->DefaultColumnFamily(),
+        IndexerKeyFormat::kRegistrationLineageMetaKey);
+    if (!default_has_rows) {
+      return default_has_rows.error();
+    }
+    if (*default_has_rows) {
+      error("indexer database has metadata but no V2 progress; explicit "
+            "migration is required");
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    for (rocksdb::ColumnFamilyHandle *handle :
+         {tx_cf_handle_, contract_cf_handle_}) {
+      auto has_rows = column_family_has_rows(db_.get(), handle);
+      if (!has_rows) {
+        return has_rows.error();
+      }
+      if (*has_rows) {
+        error("indexer database has rows or metadata but no V2 progress; "
+              "explicit migration is required");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+    return {};
   }
-  if (value.size() != sizeof(uint64_t)) {
-    error("initialize_highest_block_from_db: meta-key value has wrong size "
-          "({} bytes, expected {})",
-          value.size(), sizeof(uint64_t));
-    return;
+
+  IndexerInitializedProgress progress;
+  try {
+    x23::deserialize(&progress, x23::BufView(reinterpret_cast<const uint8_t *>(
+                                                 progress_bytes.data()),
+                                             progress_bytes.size()));
+  } catch (const x23::XdrBadInput &e) {
+    error("malformed durable indexer progress: {}", e.what());
+    return IndexerError(IndexerErrorCode::kInternal);
   }
-  static_assert(std::endian::native == std::endian::little);
+
+  if (progress.origin.protocol.empty() || progress.origin.first_height < 0 ||
+      progress.contiguous_height < progress.origin.first_height - 1) {
+    error("invalid durable indexer progress bounds");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  if (legacy_status.IsNotFound() ||
+      legacy_watermark.size() != sizeof(uint64_t)) {
+    error("durable indexer progress has missing or malformed watermark");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
   uint64_t encoded = 0;
-  std::memcpy(&encoded, value.data(), sizeof(encoded));
-  const auto h = static_cast<int64_t>(std::byteswap(encoded));
-  highest_indexed_block_.store(h, std::memory_order_release);
+  std::memcpy(&encoded, legacy_watermark.data(), sizeof(encoded));
+  const auto watermark = static_cast<int64_t>(std::byteswap(encoded));
+  if (watermark != progress.contiguous_height) {
+    error("durable indexer progress and watermark disagree");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  std::string epoch_bytes;
+  const rocksdb::Status epoch_status =
+      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+               IndexerKeyFormat::make_epoch_history_meta_key(
+                   progress.origin.protocol),
+               &epoch_bytes);
+  if (!epoch_status.ok()) {
+    error("durable current epoch history marker is unavailable: {}",
+          epoch_status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  IndexerOutboxOrigin persisted_origin;
+  try {
+    x23::deserialize(&persisted_origin,
+                     x23::BufView(reinterpret_cast<const uint8_t *>(
+                                      epoch_bytes.data()),
+                                  epoch_bytes.size()));
+  } catch (const x23::XdrBadInput &e) {
+    error("malformed durable current epoch history marker: {}", e.what());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  if (!xdr_equal(persisted_origin, progress.origin)) {
+    error("durable current epoch history marker disagrees with progress");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  if (progress.contiguous_height >= progress.origin.first_height) {
+    std::string identity_bytes;
+    rocksdb::Status identity_status =
+        db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+                 IndexerKeyFormat::make_block_identity_meta_key(
+                     progress.contiguous_height),
+                 &identity_bytes);
+    if (!identity_status.ok()) {
+      error("durable indexer boundary identity is unavailable: {}",
+            identity_status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    IndexerCommittedBlockIdentity identity;
+    try {
+      x23::deserialize(&identity,
+                       x23::BufView(reinterpret_cast<const uint8_t *>(
+                                        identity_bytes.data()),
+                                    identity_bytes.size()));
+    } catch (const x23::XdrBadInput &e) {
+      error("malformed durable indexer boundary identity: {}", e.what());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    if (identity.consensus_hash != progress.last_consensus_hash ||
+        identity.payload_digest != progress.last_payload_digest) {
+      error("durable indexer boundary identity disagrees with progress");
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+  }
+  else {
+    if (progress.contiguous_height != progress.origin.first_height - 1 ||
+        progress.last_consensus_hash != progress.origin.first_prev_hash) {
+      error("unapplied durable indexer epoch has invalid boundary identity");
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    if (progress.contiguous_height == 0) {
+      if (progress.origin.first_height != kFirstOutboxBlockHeight ||
+          progress.origin.first_prev_hash == ConsensusValueHash{} ||
+          progress.last_payload_digest != SHA256Hash{}) {
+        error("fresh durable indexer epoch has invalid genesis boundary");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+    else {
+      std::string identity_bytes;
+      const rocksdb::Status identity_status =
+          db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+                   IndexerKeyFormat::make_block_identity_meta_key(
+                       progress.contiguous_height),
+                   &identity_bytes);
+      if (!identity_status.ok()) {
+        error("prior epoch boundary identity is unavailable: {}",
+              identity_status.ToString());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+      IndexerCommittedBlockIdentity identity;
+      try {
+        x23::deserialize(&identity,
+                         x23::BufView(reinterpret_cast<const uint8_t *>(
+                                          identity_bytes.data()),
+                                      identity_bytes.size()));
+      } catch (const x23::XdrBadInput &e) {
+        error("malformed prior epoch boundary identity: {}", e.what());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+      if (identity.consensus_hash != progress.last_consensus_hash ||
+          identity.payload_digest != progress.last_payload_digest ||
+          progress.last_payload_digest == SHA256Hash{}) {
+        error("prior epoch boundary identity disagrees with progress");
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+  }
+
+  durable_progress_ = std::move(progress);
+  highest_indexed_block_.store(watermark, std::memory_order_release);
+  return {};
 }
 
 BlockHeight
@@ -1193,7 +1993,7 @@ IndexDB::get_events(EventQuery const &query) const
   // The serving bound for this entire query: rows above this height
   // are ingested-but-mutable (a lower gap may still be filling) and
   // must not be observed by the page or its continuation cursor.
-  const BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = latest_block();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
@@ -1234,12 +2034,14 @@ IndexDB::get_events(EventQuery const &query) const
       return page;
     }
     order = decoded->order;
+    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
     cursor_block = decoded->block_height;
     cursor_tx = decoded->tx_hash;
     cursor_seq = decoded->sequence_number;
     have_cursor = true;
     anchor_block = cursor_block;
   }
+
   else {
     order = query.order;
     if (!is_valid_iteration_order(order)) {
@@ -1277,6 +2079,7 @@ IndexDB::get_events(EventQuery const &query) const
       break;
     }
   }
+  page.latest_block = max_serve_block;
 
   // Descending scans seek from the anchor downward; clamp the start
   // to the watermark so pending rows are never visited.  Ascending
@@ -1404,6 +2207,7 @@ IndexDB::get_events(EventQuery const &query) const
       payload.block_height = last_emitted.block;
       payload.tx_hash = last_emitted.tx;
       payload.sequence_number = last_emitted.seq;
+      payload.max_block_height = max_serve_block;
       std::string encoded = cursor::encode(payload);
       page.cursor.append_range(std::span<const uint8_t>(
           reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
@@ -1434,7 +2238,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
   }
 
   TransactionPage page;
-  const BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = latest_block();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
@@ -1453,12 +2257,14 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       return page;
     }
     order = decoded->order;
+    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
     cursor_pos.seq = 0;
     anchor_block = cursor_pos.block;
     have_cursor = true;
   }
+
   else {
     order = query.order;
     if (!is_valid_iteration_order(order)) {
@@ -1488,6 +2294,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       break;
     }
   }
+  page.latest_block = max_serve_block;
 
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
@@ -1593,6 +2400,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     payload.block_height = last_emitted.block;
     payload.tx_hash = last_emitted.tx;
     payload.sequence_number = 0;
+    payload.max_block_height = max_serve_block;
     std::string encoded = cursor::encode(payload);
     page.cursor.append_range(std::span<const uint8_t>(
         reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
@@ -1609,7 +2417,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   }
 
   TransactionRefPage page;
-  const BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = latest_block();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
@@ -1628,6 +2436,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
       return page;
     }
     order = decoded->order;
+    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
     // ROOT_TX rows are always written with seq == 0, so the position we
@@ -1636,6 +2445,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     anchor_block = cursor_pos.block;
     have_cursor = true;
   }
+
   else {
     order = query.order;
     if (!is_valid_iteration_order(order)) {
@@ -1665,6 +2475,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
       break;
     }
   }
+  page.latest_block = max_serve_block;
 
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
@@ -1698,6 +2509,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     payload.block_height = last_emitted.block;
     payload.tx_hash = last_emitted.tx;
     payload.sequence_number = 0;
+    payload.max_block_height = max_serve_block;
     std::string encoded = cursor::encode(payload);
     page.cursor.append_range(std::span<const uint8_t>(
         reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));

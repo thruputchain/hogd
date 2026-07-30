@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -19,7 +20,7 @@ namespace hogd {
 
 class MockSchedEvent {
 public:
-  using rpc_service = SchedEvent1;
+  using rpc_service = SchedEvent2;
 
   MockSchedEvent() = default;
 
@@ -29,12 +30,22 @@ public:
   MockSchedEvent(MockSchedEvent &&) = delete;
   MockSchedEvent &operator=(MockSchedEvent &&) = delete;
 
-  RPCError schedevent_intro_event(const EventCard &card)
+  EventPrepareResult schedevent2_prepare_event(const EventCard &card)
   {
     std::unique_lock lk(mtx_);
     event_card_ = std::move(card);
     cv_.notify_all();
-    return RPCError::kRPCNone;
+    EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+    result.snapshot().tip.block_id = std::numeric_limits<BlockID>::max();
+    result.snapshot().tip.consensus_value.proposal_header.block_height = -1;
+    result.snapshot().token = 1;
+    return result;
+  }
+
+  static EventActivationResult
+  schedevent2_activate_event(const EventRegistrationSnapshot &)
+  {
+    return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
 
   EventCard await_event_card()
@@ -51,7 +62,7 @@ private:
   std::optional<EventCard> event_card_;
 };
 
-static_assert(is_SchedEvent1<MockSchedEvent *, std::type_identity_t>);
+static_assert(is_SchedEvent2<MockSchedEvent *, std::type_identity_t>);
 
 class MockSchedDB {
 public:
