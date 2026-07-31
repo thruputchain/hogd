@@ -234,9 +234,6 @@ private:
   // Serializes origin selection and committed publication. It is released
   // before any indexer network delivery.
   x23::CoroLock outbox_commit_lock_;
-  // Serializes startup registration attempts so an exact-generation retry can
-  // observe and acknowledge a registration whose reply was lost.
-  x23::CoroLock indexer_registration_lock_;
   std::atomic<bool> outbox_reconciled_ = false;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;

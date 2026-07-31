@@ -66,10 +66,12 @@ struct IndexerDeliveryRecord {
 struct RegisteredIndexer {
   UPID generation;
   indexer_event_client_t client;
-  std::shared_ptr<x23::CoroLock> lane;
 };
 
 struct IndexerDeliveryState {
+  // Registration replay and live delivery share one lane for the lifetime of
+  // the event server, so neither can overtake the other.
+  x23::CoroLock lane;
   std::mutex mutex;
   std::condition_variable drained;
   std::optional<RegisteredIndexer> registered;
@@ -264,8 +266,8 @@ drain_indexer_delivery_queue(
               record->block_height, block.error());
       }
 
-      x23::CoroGuard generation_lane;
-      co_await generation_lane(*registered->lane);
+      x23::CoroGuard delivery_guard;
+      co_await delivery_guard(state->lane);
       uint64_t rpc_operation_id = 0;
       {
         std::lock_guard g(state->mutex);
@@ -276,7 +278,7 @@ drain_indexer_delivery_queue(
         if (!registered) {
           continue;
         }
-        // Registration replay owns the same generation lane and may already
+        // Registration replay owns the same delivery lane and may already
         // have acknowledged and erased this queued record while the worker was
         // loading it.
         if (state->queue.empty() ||
@@ -1114,12 +1116,10 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
     co_return EventRegistrationOriginUnavailable;
   }
 
-  x23::CoroGuard registration_guard;
-  co_await registration_guard(indexer_registration_lock_);
-
   auto state = indexer_delivery_state_;
+  x23::CoroGuard delivery_guard;
+  co_await delivery_guard(state->lane);
   uint64_t operation_id = 0;
-  std::shared_ptr<x23::CoroLock> generation_lane;
   {
     std::lock_guard g(state->mutex);
     if (state->stopping) {
@@ -1129,13 +1129,9 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
       if (state->registered->generation != card.generation) {
         co_return EventRegistrationStaleGeneration;
       }
-      generation_lane = state->registered->lane;
     }
     else if (!lineage_admits(state->durable_generation, card)) {
       co_return EventRegistrationStaleGeneration;
-    }
-    else {
-      generation_lane = std::make_shared<x23::CoroLock>();
     }
     operation_id = ++state->next_operation_id;
     ++state->active_operations;
@@ -1150,9 +1146,6 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
     --state->active_operations;
     state->drained.notify_all();
   }};
-  x23::CoroGuard generation_guard;
-  co_await generation_guard(*generation_lane);
-
   IndexerProgress progress;
   try {
     progress = co_await indexer.indexer_event_get_progress();
@@ -1392,7 +1385,6 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
       state->registered = detail::RegisteredIndexer{
           .generation = card.generation,
           .client = indexer,
-          .lane = generation_lane,
       };
       std::erase_if(state->queue, [&](const auto &queued) {
         return queued.block_height <= initialized->contiguous_height;
@@ -1868,8 +1860,7 @@ EventRPCContext::add_indexer(indexer_event_client_t &&indexer)
   std::lock_guard delivery_guard(indexer_delivery_state_->mutex);
   indexer_delivery_state_->registered =
       detail::RegisteredIndexer{.generation = generation,
-                                .client = std::move(delivery_client),
-                                .lane = std::make_shared<x23::CoroLock>()};
+                                .client = std::move(delivery_client)};
   return id;
 }
 
