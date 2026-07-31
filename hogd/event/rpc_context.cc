@@ -82,7 +82,6 @@ struct IndexerDeliveryState {
   size_t active_operations = 0;
   bool worker_running = false;
   bool stopping = false;
-  std::shared_ptr<void> worker_owner;
   std::function<void()> worker_empty_test_hook;
   std::function<void()> delivery_succeeded_test_hook;
   const IndexerOutboxStore *outbox_store = nullptr;
@@ -210,29 +209,24 @@ lineage_admits(const std::optional<UPID> &durable_generation,
 x23::Detached
 // NOLINTNEXTLINE(misc-no-recursion)
 drain_indexer_delivery_queue(
-    std::shared_ptr<detail::IndexerDeliveryState> state,
-    std::shared_ptr<void> worker_owner)
+    std::shared_ptr<detail::IndexerDeliveryState> state)
 {
   co_await default_threadpool().bg();
-  auto replacement_candidate = std::make_shared<char>();
-  std::shared_ptr<void> replacement_owner;
+  bool restart_worker = false;
   {
-    x23::Defer finish_worker{[state, worker_owner, replacement_candidate,
-                              &replacement_owner] {
-      std::lock_guard g(state->mutex);
-      CHECK_GT(state->active_operations, 0UL);
-      --state->active_operations;
-      if (state->worker_owner == worker_owner) {
-        state->worker_running = false;
-        state->worker_owner.reset();
-        if (!state->stopping && state->registered && !state->queue.empty()) {
-          replacement_owner = replacement_candidate;
-          state->worker_owner = replacement_owner;
-          state->worker_running = true;
-          ++state->active_operations;
-        }
+    auto *state_ptr = state.get();
+    x23::Defer finish_worker{[state_ptr, &restart_worker] {
+      std::lock_guard g(state_ptr->mutex);
+      CHECK_GT(state_ptr->active_operations, 0UL);
+      --state_ptr->active_operations;
+      state_ptr->worker_running = false;
+      if (!state_ptr->stopping && state_ptr->registered &&
+          !state_ptr->queue.empty()) {
+        restart_worker = true;
+        state_ptr->worker_running = true;
+        ++state_ptr->active_operations;
       }
-      state->drained.notify_all();
+      state_ptr->drained.notify_all();
     }};
     while (true) {
       std::optional<detail::IndexerDeliveryRecord> record;
@@ -340,8 +334,8 @@ drain_indexer_delivery_queue(
       }
     }
   }
-  if (replacement_owner) {
-    drain_indexer_delivery_queue(state, std::move(replacement_owner));
+  if (restart_worker) {
+    drain_indexer_delivery_queue(std::move(state));
   }
 }
 
@@ -694,11 +688,11 @@ EventRPCContext::confirm_committed_block(ConsensusValue consensus_value)
   }
 
   admissible_indexer_tail_ = block_height;
-  auto delivery_worker_owner =
+  const bool start_delivery_worker =
       enqueue_indexer_delivery((**origin).origin, *committed);
   outbox_guard.reset();
-  if (delivery_worker_owner) {
-    start_indexer_delivery_worker(std::move(delivery_worker_owner));
+  if (start_delivery_worker) {
+    start_indexer_delivery_worker();
   }
   co_return block_height;
 }
@@ -1117,21 +1111,11 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
   }
 
   auto state = indexer_delivery_state_;
-  x23::CoroGuard delivery_guard;
-  co_await delivery_guard(state->lane);
   uint64_t operation_id = 0;
   {
     std::lock_guard g(state->mutex);
     if (state->stopping) {
       co_return EventRegistrationOriginUnavailable;
-    }
-    if (state->registered) {
-      if (state->registered->generation != card.generation) {
-        co_return EventRegistrationStaleGeneration;
-      }
-    }
-    else if (!lineage_admits(state->durable_generation, card)) {
-      co_return EventRegistrationStaleGeneration;
     }
     operation_id = ++state->next_operation_id;
     ++state->active_operations;
@@ -1146,6 +1130,22 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
     --state->active_operations;
     state->drained.notify_all();
   }};
+  x23::CoroGuard delivery_guard;
+  co_await delivery_guard(state->lane);
+  {
+    std::lock_guard g(state->mutex);
+    if (state->stopping) {
+      co_return EventRegistrationOriginUnavailable;
+    }
+    if (state->registered) {
+      if (state->registered->generation != card.generation) {
+        co_return EventRegistrationStaleGeneration;
+      }
+    }
+    else if (!lineage_admits(state->durable_generation, card)) {
+      co_return EventRegistrationStaleGeneration;
+    }
+  }
   IndexerProgress progress;
   try {
     progress = co_await indexer.indexer_event_get_progress();
@@ -1410,37 +1410,34 @@ EventRPCContext::probe_indexer(const UPID &generation) const
   return EventRegistrationAccepted;
 }
 
-std::shared_ptr<void>
+bool
 EventRPCContext::enqueue_indexer_delivery(
     const IndexerOutboxOrigin &origin,
     const IndexerOutboxCommittedPayload &payload)
 {
-  auto state = indexer_delivery_state_;
-  std::shared_ptr<void> worker_owner;
+  auto *state = indexer_delivery_state_.get();
+  bool start_worker = false;
   {
     std::lock_guard g(state->mutex);
     if (!state->registered || state->stopping) {
-      return nullptr;
+      return false;
     }
     state->queue.push_back(detail::IndexerDeliveryRecord{
         .origin = origin,
         .block_height = payload.consensus_value.proposal_header.block_height});
     if (!state->worker_running) {
-      worker_owner = std::make_shared<char>();
-      state->worker_owner = worker_owner;
+      start_worker = true;
       state->worker_running = true;
       ++state->active_operations;
     }
   }
-  return worker_owner;
+  return start_worker;
 }
 
 void
-EventRPCContext::start_indexer_delivery_worker(
-    std::shared_ptr<void> worker_owner)
+EventRPCContext::start_indexer_delivery_worker()
 {
-  drain_indexer_delivery_queue(indexer_delivery_state_,
-                               std::move(worker_owner));
+  drain_indexer_delivery_queue(indexer_delivery_state_);
 }
 
 void

@@ -183,10 +183,9 @@ private:
   remove_resolved_candidates(BlockHeight committed_height);
   x23::Async<IndexerOutboxStatus<std::optional<CandidatePromotion>>>
   find_canonical_candidate(const ConsensusValue &consensus_value) const;
-  std::shared_ptr<void>
-  enqueue_indexer_delivery(const IndexerOutboxOrigin &origin,
-                           const IndexerOutboxCommittedPayload &payload);
-  void start_indexer_delivery_worker(std::shared_ptr<void> worker_owner);
+  bool enqueue_indexer_delivery(const IndexerOutboxOrigin &origin,
+                                const IndexerOutboxCommittedPayload &payload);
+  void start_indexer_delivery_worker();
   void replace_diagnostic_indexer(const indexer_event_client_t &indexer);
   x23::Async<void>
   finish_block_operation(BlockID block_id,
