@@ -46,7 +46,7 @@ combine_block_results(std::vector<DbBlockResult> const &results)
     total += lthash16_from_db_hash(r.block().storage_long_hash);
   }
 
-  DbBlockResult combined = results[kPrimaryShard];
+  DbBlockResult combined = results[kDefaultShard];
   combined.block().storage_long_hash = db_hash_from_lthash16(total);
   combined.block().storage_hash =
       sha256(std::as_bytes(std::span(combined.block().storage_long_hash)));
@@ -56,8 +56,8 @@ combine_block_results(std::vector<DbBlockResult> const &results)
 x23::Async<std::shared_ptr<ShardedDbSched>>
 ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
 {
-  size_t const n = cards.size();
-  CHECK_GT(n, size_t{0});
+  size_t const num_shards = cards.size();
+  CHECK_GT(num_shards, size_t{0});
 
   // Bind clients by declared shard_id (fail-stop on a bad set).
   auto order_result = order_shards_by_id(cards);
@@ -67,8 +67,8 @@ ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
   }
   std::vector<size_t> const &order = *order_result;
 
-  std::vector<std::shared_ptr<db_sched_client_t>> clients(n);
-  for (size_t id = 0; id < n; ++id) {
+  std::vector<std::shared_ptr<db_sched_client_t>> clients(num_shards);
+  for (size_t id = 0; id < num_shards; ++id) {
     ShardCard const &card = cards[order[id]];
     auto client = co_await create_client<DbSched1>(
         server_address_to_sockaddr(card.address_for_sched),
@@ -185,49 +185,50 @@ ShardedDbSched::get_tip()
       co_await shards_.broadcast_collect<DbTipResult>(
           [](auto &client) { return client->dbsched_get_tip(); });
 
-  DbTipResult const &primary = tips[kPrimaryShard];
-  bool const primary_ok = primary.result() == DbSchedResult::DbSchedResultOK;
+  DbTipResult const &default_tip = tips[kDefaultShard];
+  bool const default_ok =
+      default_tip.result() == DbSchedResult::DbSchedResultOK;
   for (size_t i = 1; i < tips.size(); ++i) {
     DbTipResult const &r = tips[i];
     bool const r_ok = r.result() == DbSchedResult::DbSchedResultOK;
 
-    if (r_ok != primary_ok) {
+    if (r_ok != default_ok) {
       error("db shard genesis-presence divergence: shard 0 result {}, shard {} "
             "result {}; refusing to start",
-            primary.result(), i, r.result());
-      CHECK_EQ(r_ok, primary_ok);
+            default_tip.result(), i, r.result());
+      CHECK_EQ(r_ok, default_ok);
     }
-    if (!primary_ok) {
+    if (!default_ok) {
       continue; // both agree "no committed tip"; nothing more to reconcile
     }
 
     ProposalHeader const &r_header = r.db_tip().value.proposal_header;
-    ProposalHeader const &primary_header =
-        primary.db_tip().value.proposal_header;
-    if (r_header.block_height != primary_header.block_height ||
-        r.db_tip().id != primary.db_tip().id ||
-        r_header.txs_hash != primary_header.txs_hash ||
-        r_header.storage_hash != primary_header.storage_hash) {
+    ProposalHeader const &default_header =
+        default_tip.db_tip().value.proposal_header;
+    if (r_header.block_height != default_header.block_height ||
+        r.db_tip().id != default_tip.db_tip().id ||
+        r_header.txs_hash != default_header.txs_hash ||
+        r_header.storage_hash != default_header.storage_hash) {
       error(
           "db shard tip divergence: shard {} at height {} (id {}), shard 0 at "
           "height {} (id {}); refusing to start",
-          i, r_header.block_height, r.db_tip().id, primary_header.block_height,
-          primary.db_tip().id);
+          i, r_header.block_height, r.db_tip().id, default_header.block_height,
+          default_tip.db_tip().id);
     }
-    CHECK_EQ(r_header.block_height, primary_header.block_height);
-    CHECK_EQ(r.db_tip().id, primary.db_tip().id);
-    CHECK_EQ(r_header.txs_hash, primary_header.txs_hash);
-    CHECK_EQ(r_header.storage_hash, primary_header.storage_hash);
+    CHECK_EQ(r_header.block_height, default_header.block_height);
+    CHECK_EQ(r.db_tip().id, default_tip.db_tip().id);
+    CHECK_EQ(r_header.txs_hash, default_header.txs_hash);
+    CHECK_EQ(r_header.storage_hash, default_header.storage_hash);
   }
 
-  if (!primary_ok) {
-    co_return primary;
+  if (!default_ok) {
+    co_return default_tip;
   }
 
   // Hand back the combined db hash: each shard persists (and re-verifies on
   // restart) only its own partial, but everything above the facade wants the
   // whole-db value.
-  DbTipResult combined = primary;
+  DbTipResult combined = default_tip;
   LtHash16 total;
   for (DbTipResult const &r : tips) {
     total += lthash16_from_db_hash(r.db_tip().storage_long_hash);
