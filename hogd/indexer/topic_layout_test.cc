@@ -1,4 +1,4 @@
-#include "hogd/xdr/topic_layout.h"
+#include "hogd/indexer/topic_layout.h"
 
 #include <algorithm>
 #include <gtest/gtest.h>

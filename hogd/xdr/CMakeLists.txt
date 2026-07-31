@@ -69,7 +69,6 @@ target_link_libraries(protocol INTERFACE crypto_interface)
 add_library(
   indexer_payload_validation STATIC
   indexer_payload_validation.cc
-  topic_layout.cc
 )
 target_link_libraries(
   indexer_payload_validation

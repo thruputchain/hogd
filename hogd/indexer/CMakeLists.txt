@@ -4,6 +4,7 @@ add_library(indexer STATIC
     key_format.cc
     registration_controller.cc
     status.cc
+    topic_layout.cc
 )
 
 target_link_libraries(indexer PUBLIC
@@ -22,6 +23,7 @@ add_executable(indexer_test
     key_format_test.cc
     registration_controller_test.cc
     strict_ingest_test.cc
+    topic_layout_test.cc
 )
 
 target_link_libraries(indexer_test

@@ -49,7 +49,6 @@ add_library(event_test_objects OBJECT
   event_block_context_test.cc
   indexer_outbox_test.cc
   event_rpc_test.cc
-  topic_layout_test.cc
 )
 target_link_libraries(
   event_test_objects
