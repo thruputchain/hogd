@@ -684,10 +684,8 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   EXPECT_EQ(db->latest_block(), 42);
 }
 
-// Regression: with the SeekToLast() initializer, a database whose
-// max-block-height entry lives under a contract that is NOT
-// lexicographically last reported the wrong [latest_block] after
-// restart.  The meta-key initializer must return the true max.
+// A legacy watermark remains authoritative even when its index key is not
+// lexicographically last.
 TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
 {
   // Low address, high block.

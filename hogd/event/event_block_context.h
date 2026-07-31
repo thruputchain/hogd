@@ -116,9 +116,8 @@ public:
   // was not called). Events must only be emitted while an executor handle is
   // held.
   //
-  // [body] is the full transaction body, accumulated separately from the event
-  // log (it is not hashed into the consensus event trie) and forwarded to the
-  // indexer at commit.
+  // Keep [body] paired with its event log for the durable indexer outbox. It is
+  // not hashed into the consensus event trie.
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
@@ -203,9 +202,8 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // Event logs and their transaction bodies, kept paired in one container so
-  // the per-index association cannot cross during the commit-time flatten
-  // (#2826).
+  // Keep event logs and transaction bodies paired while per-thread batches are
+  // flattened into the durable candidate snapshot (#2826).
   PerThread<EventWithBodyBatch> events_with_bodies_;
   PerThread<detail::EventContext> buffers_;
 

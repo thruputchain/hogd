@@ -10,6 +10,9 @@
 
 namespace hogd {
 
+// Compatibility behavior for chuckd's proposal hash. This is intentionally not
+// SHA-256 of canonical ProposalTxs XDR; changing it requires a protocol
+// migration.
 inline SHA256Hash
 hash_parallel_batch_compatibility(const ParallelBatch &batch)
 {

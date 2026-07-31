@@ -1257,6 +1257,9 @@ MempoolCoordinatorRpc::abandon_block(const PendingBlock &cache)
 x23::Async<void>
 MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 {
+  // Start both durable commits together and always drain both. Indexer delivery
+  // is confirmed only after both succeed; event-only success is the recoverable
+  // one-block-ahead crash window.
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.value);
   x23::Async<RPCError> event_commit_handle =

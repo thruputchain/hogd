@@ -439,12 +439,15 @@ struct BlockingIndexerRpc : FailureCapturingIndexerRpc {
   indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
                                       const IndexerCommittedBlock &block)
   {
-    apply_started.count_down();
+    if (!apply_started_signaled.exchange(true, std::memory_order_relaxed)) {
+      apply_started.count_down();
+    }
     release_apply.wait();
     co_return co_await FailureCapturingIndexerRpc::
         indexer_event_apply_committed_block(origin, block);
   }
 
+  std::atomic<bool> apply_started_signaled = false;
   std::latch apply_started{1};
   std::latch release_apply{1};
 };
@@ -1288,8 +1291,8 @@ TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommitOrConfirmation)
   genesis.proposal_header.block_height = 0;
   ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
 
-  // The peer remains connected but never reads or replies. Strict delivery may
-  // remain pending, but consensus commit must not wait for it.
+  // Durable commit and scheduler confirmation must not wait for indexer
+  // delivery.
   int fds[2];
   CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
   auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
@@ -1308,7 +1311,6 @@ TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommitOrConfirmation)
       mempool_rpc.eventsched2_close_block(7, 1, proposal_txs)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
 
-  // Commit must succeed without waiting for the dead indexer's delivery RPC.
   ConsensusValue value =
       make_consensus_value(1, close_result.root_hash(), proposal_txs);
   value.prev_hash = sha256(genesis);

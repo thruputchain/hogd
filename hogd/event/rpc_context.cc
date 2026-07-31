@@ -1390,7 +1390,7 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
       std::erase_if(state->queue, [&](const auto &queued) {
         return queued.block_height <= initialized->contiguous_height;
       });
-      replace_diagnostic_indexer_locked(indexer);
+      replace_diagnostic_indexer(indexer);
     }
     co_return EventRegistrationAccepted;
   }
@@ -1459,7 +1459,7 @@ EventRPCContext::set_delivery_succeeded_test_hook(std::function<void()> hook)
 }
 
 void
-EventRPCContext::replace_diagnostic_indexer_locked(
+EventRPCContext::replace_diagnostic_indexer(
     const indexer_event_client_t &indexer)
 {
   std::unique_lock g(indexers_mtx_);

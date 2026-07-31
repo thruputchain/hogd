@@ -1,17 +1,17 @@
 # Indexer Restart Recovery Design
 
 **Date:** 2026-07-27
-**Status:** Proposed
+**Status:** Implemented
 **Issue:** #3149
 
 ## Problem
 
-The event service sends committed transaction logs and bodies directly to each
-connected indexer. Delivery failures are dropped, registrations are in memory,
-and the durable event files omit transaction bodies and block-height ordering.
-An indexer that misses one block therefore keeps ingesting later rows above a
-permanently stalled contiguous watermark. Point lookup can see those rows, but
-paginated event and address-history APIs cannot.
+Before this change, the event service sent committed transaction logs and bodies
+directly to each connected indexer. Delivery failures were dropped,
+registrations were in memory, and durable event files omitted transaction bodies
+and block-height ordering. An indexer that missed one block could ingest later
+rows above a permanently stalled contiguous watermark. Point lookup could see
+those rows, but paginated event and address-history APIs could not.
 
 The contiguous watermark must not be advanced past missing data. It protects
 opaque pagination cursors from rows arriving below a previously served cut.
@@ -120,9 +120,9 @@ progress read from its database. Only connection failures and an event origin
 that is not yet available are retried. Protocol mismatch, progress or content
 conflict, corruption, replay failure, and stale generation are fatal. A later
 indexer generation may advance the durable slot only while a newly started event
-process performs its one startup registration. Once that registration succeeds,
-the event process rejects every second registration. There is no live indexer
-replacement workflow.
+process performs its one startup registration. Once registration succeeds,
+exact-generation retries remain idempotent; a different generation is rejected
+for the process lifetime. There is no live indexer replacement workflow.
 
 The validator node is fail-fast after startup. `SchedEvent2` prepare,
 reconciliation, and activation form a one-shot startup barrier. Once activated,
@@ -140,14 +140,15 @@ reservation or a newly deliverable record. The separate short state mutex only
 protects receiver ownership and queue bookkeeping.
 
 No state mutex is held during RPC. The installed connection has one serialized
-delivery lane. New commits notify the lane without waiting for network delivery,
-preserving the rule that indexer latency cannot block consensus commit. A live
-delivery rejection or transport failure is fatal and lets the validator
-supervisor restart the whole node. Registration repeatedly snapshots and drains
-the scheduler-admissible tail, then resnapshots under the publication lock and
-installs only when no later admissible record remains. There is no window in
-which a durable or in-flight record is omitted from admission. Shutdown closes
-active x23 streams and waits for the owned delivery worker to drain.
+delivery lane. New scheduler confirmations notify the lane without waiting for
+network delivery, preserving the rule that indexer latency cannot block
+consensus commit. A live delivery rejection or transport failure is fatal and
+lets the validator supervisor restart the whole node. Registration repeatedly
+snapshots and drains the scheduler-admissible tail, then resnapshots under the
+publication lock and installs only when no later admissible record remains.
+There is no window in which a durable or in-flight record is omitted from
+admission. Shutdown closes active x23 streams and waits for the owned delivery
+worker to drain.
 
 The indexer stays in its startup state until initial replay succeeds. Missing
 origins, missing records, chain conflicts, and corrupt records are fatal, never
@@ -172,37 +173,13 @@ separate work.
 4. Replay never runs concurrently with live delivery to the same indexer.
 5. The indexer watermark advances only in strict height order.
 6. A restart after any successful delivery can safely replay that delivery.
-7. Readiness is not healthy while durable outbox records remain unapplied.
+7. Readiness is not healthy while scheduler-admissible durable outbox records
+   remain unapplied.
 8. Candidate publication precedes consensus persistence, and committed replay
    includes only records reconciled with canonical consensus identity.
 9. Outbox and indexer origins prove that no retained prefix is missing.
 
-## Slices
-
-### Slice 1: Contract
-
-- Extend the persistent-devnode recovery test across a transaction block and an
-  empty block.
-- Require the full transaction body, root-address row, and height-3 indexer
-  watermark to survive recovery and a second restart.
-- Review this design and the failing test before choosing storage interfaces.
-
-### Slice 2: Durable Records
-
-- Add private XDR candidate/committed envelopes and an atomic file codec.
-- Publish candidates at close and promote only the consensus-selected candidate.
-- Load and validate ordered records after restart.
-- Keep the existing consensus `.events` files unchanged.
-
-### Slice 3: Ordered Replay
-
-- Extend registration with durable indexer progress.
-- Serialize replay and live delivery per indexer.
-- Replay while the whole validator node restarts and both sides start together.
-- Make indexer application, acknowledgement, and duplicate handling crash-safe.
-- Fail startup when progress cannot be reconciled.
-
-### Slice 4: Hosted Validation
+## Hosted Validation
 
 - Exercise process and persistent-volume replacement with a multi-block gap.
 - Exercise a live gap with later rows already present above the watermark.

@@ -149,7 +149,7 @@ public:
 
   // Raw filename enumeration only. It sorts recognized committed identities
   // but intentionally does not assert contiguity or canonical-chain semantics;
-  // slice 2b performs reconciliation. Callers load at most one payload at once.
+  // callers load at most one payload at once.
   IndexerOutboxStatus<std::vector<BlockHeight>>
   enumerate_committed_heights_raw() const;
   IndexerOutboxStatus<std::vector<IndexerOutboxCommittedRecordInfo>>

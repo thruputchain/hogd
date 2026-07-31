@@ -133,12 +133,8 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
                    std::suspend_never>);
   co_await write_event(std::span(*serialize_buf));
 
-  // [events_with_bodies_] is a [PerThread<>] object, so it is safe to insert
-  // into it without holding a lock.  The event log and its body are appended as
-  // a single pair so they stay associated through the commit-time flatten.  The
-  // body is accumulated for forwarding to the indexer at commit; it is
-  // deliberately not added to the trie (it is not part of the consensus event
-  // commitment).
+  // Preserve each event/body pair when the durable candidate is snapshotted at
+  // close. Bodies are not part of the consensus event commitment.
   events_with_bodies_->emplace_back(
       detail::EventWithBody{.event = std::move(event),
                             .body = std::move(body)});

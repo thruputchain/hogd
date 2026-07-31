@@ -600,7 +600,7 @@ make_event_for_body(ProposedTransaction const &body, uint8_t marker)
 }
 } // namespace
 
-TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
+TEST_F(EventBlockContextTest, CandidatePreservesPerThreadEventBodyPairing)
 {
   EventBlockContext context(temp_dir_, 1);
   PerThread<TxEventLogBatch> event_registration_probe;
@@ -681,8 +681,7 @@ TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
   ASSERT_EQ(candidate.event_logs.size(), 2);
   ASSERT_EQ(candidate.tx_bodies.size(), 2);
 
-  // For every forwarded index i, the body must be the one that produced the
-  // event log at the same index.
+  // Event logs and transaction bodies must remain index-aligned.
   for (size_t i = 0; i < candidate.event_logs.size(); i++) {
     EXPECT_EQ(sha256(candidate.tx_bodies[i].signed_tx.tx),
               candidate.event_logs[i].proposed_tx_hash);

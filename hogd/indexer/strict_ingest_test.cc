@@ -820,6 +820,7 @@ TEST_F(StrictIndexerTest,
   ASSERT_EQ(db_->apply_committed_block(origin, block).outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
+  // Indexed rows and durable progress must reopen at the same committed height.
   rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
@@ -833,9 +834,6 @@ TEST_F(StrictIndexerTest,
             block.identity.consensus_hash);
   EXPECT_EQ(progress.initialized().last_payload_digest,
             block.identity.payload_digest);
-  // WriteBatch with WriteOptions::sync=true is RocksDB's atomic durability
-  // boundary. This build exposes no deterministic cross-CF crash sync point;
-  // the reopen assertions above verify the observable contract after success.
 }
 
 } // namespace

@@ -451,9 +451,8 @@ HogDevnodeNode::HogDevnodeNode(
     event_indexer_server_(event_ctx_)
 {
   try {
-    // A composed devnode owns the process-wide registration namespace. Tests
-    // construct a fresh node to model a process restart, so discard any prior
-    // in-process instance before running the startup barrier.
+    // A composed devnode exclusively owns the process-wide registration
+    // namespace, so discard stale in-process state before startup.
     Registration::registration().clear();
     HogDBDAO db = std::move(*opened_db_);
     opened_db_.reset();

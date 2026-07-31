@@ -989,15 +989,9 @@ IndexDB::height_seen(int64_t h,
 void
 IndexDB::record_height(int64_t h, std::unique_lock<std::mutex> const &g)
 {
-  // Re-check under the same lock: the pre-ingest seen() check and
-  // this record are separate critical sections, so a concurrent
-  // ingest of the same height can have recorded it in between.
-  // Without this guard the duplicate would land in pending_heights_
-  // below the watermark and permanently block the drain loop.
-  if (height_seen(h, g)) {
-    warn("consume_events: block {} was recorded concurrently; skipping", h);
-    return;
-  }
+  // consume_events holds this lock from duplicate detection through this
+  // update.
+  CHECK(!height_seen(h, g));
   int64_t latest = highest_indexed_block_.load(std::memory_order_relaxed);
   if (latest != kNoBlocksIndexed && h != latest + 1) {
     // Out-of-order arrival above a gap: ingested, but not servable
