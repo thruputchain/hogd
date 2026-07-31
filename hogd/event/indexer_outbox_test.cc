@@ -38,6 +38,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"

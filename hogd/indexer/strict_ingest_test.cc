@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <future>
 #include <latch>
 #include <memory>
 #include <optional>
@@ -23,6 +24,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/event/event_block_context.h"
 #include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/key_format.h"
@@ -37,6 +39,7 @@
 #include "proposal_hash.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
