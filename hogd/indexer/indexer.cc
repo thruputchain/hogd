@@ -27,8 +27,9 @@
 #include "network.hh"
 
 namespace hogd {
+namespace {
 
-static int
+int
 indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t event_port,
              uint16_t block_explorer_port, uint16_t metrics_port)
@@ -89,6 +90,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   return 0;
 }
 
+} // namespace
 } // namespace hogd
 
 namespace {

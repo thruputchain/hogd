@@ -38,9 +38,10 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
 {
   x23::XdrVec<SignedTransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!parallel_batch_to_t(payload.proposal_txs.hash, canonical_hashes)() ||
-      !parallel_batch_to_t(payload.proposal_txs.nondeterministic_data,
-                           canonical_nondeterministic_data)()) {
+  if (!parallel_batch_to_t_serial(payload.proposal_txs.hash,
+                                  canonical_hashes) ||
+      !parallel_batch_to_t_serial(payload.proposal_txs.nondeterministic_data,
+                                  canonical_nondeterministic_data)) {
     return std::unexpected("malformed canonical ProposalTxs parallel batch");
   }
   if (canonical_hashes.size() != canonical_nondeterministic_data.size()) {
@@ -114,7 +115,7 @@ IndexerPayloadStatus<TxsHash>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs)
 {
   x23::XdrVec<SignedTransactionHash> hashes;
-  if (!parallel_batch_to_t(proposal_txs.hash, hashes)()) {
+  if (!parallel_batch_to_t_serial(proposal_txs.hash, hashes)) {
     return std::unexpected("malformed canonical transaction hash batch");
   }
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);

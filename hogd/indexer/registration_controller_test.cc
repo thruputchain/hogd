@@ -12,7 +12,6 @@
 
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
-#include "hogd/base/types.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/registration_controller.h"
 #include "indexer.hh"

@@ -745,7 +745,9 @@ private:
       auto remaining =
           std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
 
+      // NOLINTNEXTLINE(misc-include-cleaner)
       pollfd poll_fd{.fd = stdout_fd_, .events = POLLIN, .revents = 0};
+      // NOLINTNEXTLINE(misc-include-cleaner)
       int ready = poll(&poll_fd, 1, static_cast<int>(remaining.count()));
       if (ready < 0) {
         if (errno == EINTR) {

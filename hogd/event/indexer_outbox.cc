@@ -17,12 +17,12 @@
 #include <mutex>
 #include <optional>
 #include <span>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <string>
 #include <string_view>
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
 #include <unordered_map>
@@ -203,9 +203,10 @@ validate_canonical_proposal_mapping(const Payload &payload)
 {
   x23::XdrVec<SignedTransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!parallel_batch_to_t(payload.proposal_txs.hash, canonical_hashes)() ||
-      !parallel_batch_to_t(payload.proposal_txs.nondeterministic_data,
-                           canonical_nondeterministic_data)()) {
+  if (!parallel_batch_to_t_serial(payload.proposal_txs.hash,
+                                  canonical_hashes) ||
+      !parallel_batch_to_t_serial(payload.proposal_txs.nondeterministic_data,
+                                  canonical_nondeterministic_data)) {
     return std::unexpected("malformed canonical ProposalTxs parallel batch");
   }
   if (canonical_hashes.size() != canonical_nondeterministic_data.size()) {
@@ -1701,6 +1702,7 @@ IndexerOutboxStore::load_header(std::string_view filename) const
   }
   std::vector<uint8_t> prefix(encoded_header_size);
   size_t offset = 0;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   off_t file_offset = 4;
   while (offset < prefix.size()) {
     const ssize_t read_size = pread(file.get(), prefix.data() + offset,
@@ -1763,6 +1765,7 @@ IndexerOutboxStore::load_payload(std::string_view filename,
   }
   std::vector<uint8_t> payload(static_cast<size_t>(header.payload_byte_length));
   size_t offset = 0;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   off_t file_offset = 4;
   file_offset += static_cast<off_t>(header_size);
   while (offset < payload.size()) {

@@ -11,7 +11,6 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -328,6 +327,7 @@ write_sparse_record(const TmpDir &dir, std::string_view filename,
   ASSERT_TRUE(file.has_value());
   ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(prefix))).has_value());
   ASSERT_EQ(ftruncate(file->get_fd(),
+                      // NOLINTNEXTLINE(misc-include-cleaner)
                       static_cast<off_t>(prefix.size() + payload_size)),
             0);
   ASSERT_TRUE(file->close().has_value());
