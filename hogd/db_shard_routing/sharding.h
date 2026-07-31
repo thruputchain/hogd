@@ -61,9 +61,10 @@ namespace hogd {
 // Routing
 // ---------------------------------------------------------------------------
 
-// Shard 0. Holds the wasm code, and answers the requests that carry no address
-// (db tip, viewing snapshots).
-inline constexpr size_t kPrimaryShard = 0;
+// Shard 0, the default owner for everything shard_of_address does not route:
+// content-addressed wasm code, and the requests that carry no address (db tip,
+// viewing snapshots).
+inline constexpr size_t kDefaultShard = 0;
 
 // Identifies shard_of_address; persisted/declared per shard, mismatch is
 // fail-stop. Bump when shard_of_address changes.
@@ -95,32 +96,32 @@ shard_of_key(AddressAndKey const &key, size_t shard_count)
 
 // Validate shard cards and return the binding order (order[shard_id] == index
 // in `cards`), or an error string the caller fail-stops on. Requires the ids to
-// be exactly {0..n-1} with matching total_shards and shard_function_id. Shared
-// by the mempool facade and executor DatabaseProxy so both agree on shard
-// order.
+// be exactly {0..num_shards-1} with matching total_shards and
+// shard_function_id. Shared by the mempool facade and executor DatabaseProxy so
+// both agree on shard order.
 template<typename Cards>
 inline std::expected<std::vector<size_t>, std::string>
 order_shards_by_id(Cards const &cards)
 {
-  size_t const n = cards.size();
-  assert(n >= 1);
-  std::vector<size_t> order(n, SIZE_MAX);
-  for (size_t i = 0; i < n; ++i) {
+  size_t const num_shards = cards.size();
+  assert(num_shards >= 1);
+  std::vector<size_t> order(num_shards, SIZE_MAX);
+  for (size_t i = 0; i < num_shards; ++i) {
     auto const &card = cards[i];
-    if (card.total_shards != n) {
+    if (card.total_shards != num_shards) {
       return std::unexpected(std::format(
           "db shard {} declares total_shards={} but {} shards present",
-          card.shard_id, card.total_shards, n));
+          card.shard_id, card.total_shards, num_shards));
     }
     if (card.shard_function_id != kShardFunctionId) {
       return std::unexpected(std::format(
           "db shard {} uses routing function {} but this binary uses {}",
           card.shard_id, card.shard_function_id, kShardFunctionId));
     }
-    if (card.shard_id >= n) {
+    if (card.shard_id >= num_shards) {
       return std::unexpected(
           std::format("db shard id {} out of range for {} shards",
-                      card.shard_id, n));
+                      card.shard_id, num_shards));
     }
     if (order[card.shard_id] != SIZE_MAX) {
       return std::unexpected(

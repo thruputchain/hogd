@@ -174,7 +174,7 @@ DatabaseProxy::client_for()
 {
   // Primary shard: global/keyless requests (db tip, viewing snapshots) and
   // content-addressed lookups (contracts) route here for now.
-  return clients_[kPrimaryShard];
+  return clients_[kDefaultShard];
 }
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)

@@ -25,8 +25,8 @@ public:
 
   size_t shard_count() const { return clients_.size(); }
 
-  // The primary shard (global/keyless + content-addressed requests).
-  Client &primary() { return clients_[kPrimaryShard]; }
+  // The default shard (keyless/global + content-addressed requests).
+  Client &default_shard() { return clients_[kDefaultShard]; }
 
   // Shard s's client, for fan-outs that don't reduce through the helpers
   // (genesis load, close/commit snapshot). Precondition: s < shard_count().

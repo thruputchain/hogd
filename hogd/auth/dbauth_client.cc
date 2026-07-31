@@ -63,12 +63,12 @@ DBAuthClient::subscribe_to_auth_data_changes(AuthCard const &card)
 
   // Auth keys one cache off one height, so a divergent set has no height to
   // initialize to -- fail-stop rather than serve reads against a stale shard.
-  BlockHeight const height = heights[kPrimaryShard];
+  BlockHeight const height = heights[kDefaultShard];
   for (size_t shard = 0; shard < heights.size(); ++shard) {
     if (heights[shard] != height) {
       panic("db shard {} reports height {} but shard {} reports {}; shard tips "
             "must agree",
-            shard, heights[shard], kPrimaryShard, height);
+            shard, heights[shard], kDefaultShard, height);
     }
   }
   co_return height;
