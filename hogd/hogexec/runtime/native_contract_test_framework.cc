@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/rpc.h"

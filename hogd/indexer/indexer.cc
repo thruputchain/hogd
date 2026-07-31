@@ -3,6 +3,7 @@
 #include <format>
 #include <future>
 #include <print>
+#include <span>
 #include <string>
 
 #include "hogd/base/cli.h"
@@ -22,14 +23,12 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
-#include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
-#include "indexer.hh"
-#include "x23/sockio.h"
+#include "network.hh"
 
 namespace hogd {
 
-int
+static int
 indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t event_port,
              uint16_t block_explorer_port, uint16_t metrics_port)

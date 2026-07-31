@@ -5,10 +5,12 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <future>
 #include <memory>
+#include <optional>
 #include <rocksdb/version.h>
 #include <span>
 #include <string>
@@ -35,6 +37,7 @@
 #include <thread>
 
 #include "event.hh"
+#include "event_outbox_internal.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -47,6 +50,7 @@
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "hogd/xdr/topic_layout.h"
 #include "indexer.hh"
+#include "network.hh"
 #include "pagination.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -595,7 +599,7 @@ IndexDB::~IndexDB()
   // db_ will be deleted by unique_ptr's deleter
 }
 
-IndexDB::IndexDB(IndexDB &&other) noexcept
+IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
   : db_(std::move(other.db_)), tx_cf_handle_(other.tx_cf_handle_),
     contract_cf_handle_(other.contract_cf_handle_),
     stats_worker_thread_(std::move(other.stats_worker_thread_)),
@@ -613,6 +617,7 @@ IndexDB::IndexDB(IndexDB &&other) noexcept
 }
 
 IndexDB &
+// NOLINTNEXTLINE(bugprone-exception-escape)
 IndexDB::operator=(IndexDB &&other) noexcept
 {
   if (this != &other) {
@@ -1632,7 +1637,7 @@ IndexDB::initialize_progress_from_db()
       }
       uint64_t encoded = 0;
       std::memcpy(&encoded, legacy_watermark.data(), sizeof(encoded));
-      const int64_t watermark = static_cast<int64_t>(std::byteswap(encoded));
+      const auto watermark = static_cast<int64_t>(std::byteswap(encoded));
       if (watermark < 0) {
         error("legacy indexer watermark is negative");
         return IndexerError(IndexerErrorCode::kInternal);

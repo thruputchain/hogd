@@ -1,4 +1,4 @@
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -43,11 +43,13 @@
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
+#include "event_outbox_internal.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
+#include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
@@ -70,7 +72,11 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
+#include "pagination.hh"
+#include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -934,8 +940,12 @@ TEST(HogDevnode, FreshDataDirOutboxOriginLinksCommittedGenesis)
   auto origin = store->load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
-  EXPECT_EQ((*origin)->origin.first_height, 1);
-  EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(tip->value));
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(tip->value));
 }
 
 IndexerOutboxCommittedPayload
@@ -968,9 +978,13 @@ append_next_test_outbox_record(std::filesystem::path const &data_dir)
   auto latest = store->latest_committed_record_raw();
   CHECK(latest.has_value());
   CHECK(latest->has_value());
-  auto previous = store->load_committed((*latest)->block_height);
+  const auto &latest_value = latest.value();
+  const auto *latest_record =
+      latest_value.has_value() ? &latest_value.value() : nullptr;
+  CHECK(latest_record != nullptr);
+  auto previous = store->load_committed(latest_record->block_height);
   CHECK(previous.has_value());
-  auto next = make_empty_outbox_append((*latest)->block_height + 1,
+  auto next = make_empty_outbox_append(latest_record->block_height + 1,
                                        sha256(previous->consensus_value));
   CHECK(store->publish_committed(next).has_value());
   return next;
@@ -2454,8 +2468,8 @@ TEST(HogDevnode, DataDirAcceptsOutboxOneAheadWithoutReplayingIt)
   ASSERT_EQ(readiness.chain_state, "recovered");
 
   auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
-                                                      readiness.indexer.port,
-                                                      /*retry=*/true)()
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
                     .value();
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;

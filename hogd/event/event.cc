@@ -23,7 +23,6 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
-#include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/sockio.h"
 

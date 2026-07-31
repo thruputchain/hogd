@@ -2,8 +2,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "network.hh"
 #include "types.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 #include <bit>
 #include <cstring>

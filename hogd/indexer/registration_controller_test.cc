@@ -2,16 +2,21 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <string>
+#include <thread>
 
-#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/registration_controller.h"
 #include "indexer.hh"
+#include "network.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -21,12 +26,13 @@ struct AcceptingRegistrationRpc {
   using rpc_service = EventIndexer2;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2)
+  event_indexer_register(IndexerCardV2 /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
 
-  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  static x23::Async<EventIndexerRegistrationOutcome>
+  event_indexer_probe(UPID /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
@@ -38,14 +44,15 @@ struct BlockingRegistrationRpc {
   using rpc_service = EventIndexer2;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2)
+  event_indexer_register(IndexerCardV2 /*unused*/)
   {
     std::promise<void> never;
     never.get_future().wait();
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
 
-  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  static x23::Async<EventIndexerRegistrationOutcome>
+  event_indexer_probe(UPID /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
@@ -57,24 +64,24 @@ struct StallingLivenessProbeRpc {
   using rpc_service = EventIndexer2;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2)
+  event_indexer_register(IndexerCardV2 /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
 
-  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  static x23::Async<EventIndexerRegistrationOutcome>
+  event_indexer_probe(UPID /*unused*/)
   {
-    calls.fetch_add(1, std::memory_order_relaxed);
+    calls_.fetch_add(1, std::memory_order_relaxed);
     std::promise<void> never;
     never.get_future().wait();
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
 
-  static inline std::atomic<size_t> calls = 0;
+  static inline std::atomic<std::size_t> calls_ = 0;
 };
 
-static_assert(
-    is_EventIndexer2<StallingLivenessProbeRpc *, x23::MaybeAsync>);
+static_assert(is_EventIndexer2<StallingLivenessProbeRpc *, x23::MaybeAsync>);
 
 TEST(IndexerRegistrationController, WaitsForAcceptedRegistration)
 {
@@ -88,7 +95,7 @@ TEST(IndexerRegistrationController, WaitsForAcceptedRegistration)
   ASSERT_TRUE(lineage.has_value()) << lineage.error();
 
   RpcServer<AcceptingRegistrationRpc> event_server;
-  const uint16_t event_port =
+  const std::uint16_t event_port =
       event_server.start_server(x23::HostPort{"127.0.0.1", 0});
   IndexerRegistrationController controller(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), "127.0.0.1:1",
@@ -97,7 +104,10 @@ TEST(IndexerRegistrationController, WaitsForAcceptedRegistration)
   controller.wait_until_registered();
   auto acknowledged = db->registration_lineage();
   ASSERT_TRUE(acknowledged.has_value());
-  EXPECT_TRUE(acknowledged->acknowledged);
+  const auto *acknowledged_lineage =
+      acknowledged.has_value() ? &acknowledged.value() : nullptr;
+  ASSERT_NE(acknowledged_lineage, nullptr);
+  EXPECT_TRUE(acknowledged_lineage->acknowledged);
 }
 
 TEST(IndexerRegistrationController, StalledRpcCannotExceedStartupDeadline)
@@ -116,7 +126,7 @@ TEST(IndexerRegistrationController, StalledRpcCannotExceedStartupDeadline)
           std::abort();
         }
         RpcServer<BlockingRegistrationRpc> event_server;
-        const uint16_t event_port =
+        const std::uint16_t event_port =
             event_server.start_server(x23::HostPort{"127.0.0.1", 0});
         IndexerRegistrationControllerOptions options;
         options.startup_timeout = std::chrono::milliseconds(100);
@@ -145,7 +155,7 @@ TEST(IndexerRegistrationController, EventDisconnectAfterRegistrationIsFatal)
           std::abort();
         }
         RpcServer<AcceptingRegistrationRpc> event_server;
-        const uint16_t event_port =
+        const std::uint16_t event_port =
             event_server.start_server(x23::HostPort{"127.0.0.1", 0});
         IndexerRegistrationControllerOptions options;
         options.liveness_probe_delay = std::chrono::milliseconds(10);
@@ -175,10 +185,9 @@ TEST(IndexerRegistrationController, StalledLivenessRpcAfterRegistrationIsFatal)
         if (!lineage.has_value()) {
           std::abort();
         }
-        StallingLivenessProbeRpc::calls.store(
-            0, std::memory_order_relaxed);
+        StallingLivenessProbeRpc::calls_.store(0, std::memory_order_relaxed);
         RpcServer<StallingLivenessProbeRpc> event_server;
-        const uint16_t event_port =
+        const std::uint16_t event_port =
             event_server.start_server(x23::HostPort{"127.0.0.1", 0});
         IndexerRegistrationControllerOptions options;
         options.liveness_probe_delay = std::chrono::milliseconds(10);

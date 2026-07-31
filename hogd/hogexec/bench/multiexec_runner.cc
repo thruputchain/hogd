@@ -36,10 +36,10 @@
 #include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/shared.h"
 #include "loadgen.hh"
 #include "network.hh"
 #include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -54,6 +54,8 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
 
 class SchedExecTest {
 public:
@@ -131,7 +133,6 @@ private:
 
 static_assert(is_SchedExec1<SchedExecTest *, x23::MaybeAsync>);
 
-namespace {
 auto
 connect_to_event_sched_server(const ServerAddress &address)
 {
@@ -170,8 +171,6 @@ connect_to_exec_server(const ExecCard &card)
   return std::move(*client);
 }
 
-} // namespace
-
 struct BlockValidationQueue {
   struct Batch {
     size_t start;
@@ -199,8 +198,6 @@ struct BlockValidationQueue {
                         std::min<size_t>(start + batch_size, txs_.size())}};
   }
 };
-
-namespace {
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -594,7 +591,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 } // namespace hogd
 
 namespace {
-void
+[[noreturn]] void
 usage(char *argv[])
 {
   std::println("Usage: {} -s <server_addr, repeated> -a "
@@ -632,13 +629,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 5, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10,
+  const int account_count = num_accounts.value();
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
                             1'000'000);
-
-  // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
   return 0;

@@ -31,6 +31,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -48,7 +49,7 @@ namespace hogd {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcNegativeTest : public ::testing::Test {
-public:
+protected:
   void SetUp() override
   {
     server_port_ = rpc_server_.start_server(0);
@@ -71,7 +72,6 @@ public:
         << "Failed to load genesis configuration";
   }
 
-protected:
   struct StalledSyscallMiscSnapshotSetup {
     ContractAddress contract_address;
     AddressAndKey stalled_addrkey;

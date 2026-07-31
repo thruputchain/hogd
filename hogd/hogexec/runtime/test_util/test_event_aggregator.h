@@ -191,13 +191,14 @@ struct TestEventAggregatorSchedRpc {
   }
 
   x23::Async<RPCError> eventsched2_commit_block(BlockID block_id,
-                                                 ConsensusValue value)
+                                                ConsensusValue value)
   {
     return event_aggregator_.commit_block(block_id, std::move(value));
   }
 
-  static RPCError
-  eventsched2_confirm_committed_block(ConsensusValue /*value*/)
+  // Keep the by-value parameter required by the generated EventSched2 service.
+  static RPCError eventsched2_confirm_committed_block(
+      ConsensusValue /*value*/) // NOLINT(performance-unnecessary-value-param)
   {
     return RPCError::kRPCNone;
   }

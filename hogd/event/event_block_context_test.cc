@@ -14,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -27,6 +26,7 @@
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "proposal.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

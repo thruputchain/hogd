@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cerrno>
 #include <charconv>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -13,29 +14,36 @@
 #include <fcntl.h>
 #include <format>
 #include <limits>
+#include <mutex>
 #include <optional>
-#include <ranges>
 #include <span>
+#include <stdio.h>
 #include <string>
 #include <string_view>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <system_error>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "event_outbox_internal.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
 #include "proposal.hh"
+#include "proposal_hash.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/rpc_common.h"
@@ -750,10 +758,9 @@ IndexerOutboxStore::enumerate_candidate_records_raw() const
                        .event_root = header->event_root,
                        .proposal_txs_hash = header->proposal_txs_hash});
   }
-  std::sort(records.begin(), records.end(),
-            [](const auto &lhs, const auto &rhs) {
-              return lhs.block_id < rhs.block_id;
-            });
+  std::ranges::sort(records, [](const auto &lhs, const auto &rhs) {
+    return lhs.block_id < rhs.block_id;
+  });
   return records;
 }
 
@@ -820,8 +827,10 @@ IndexerOutboxStore::publish_committed(
       !initialized) {
     return initialized;
   }
-  CHECK(committed_append_cache_.has_value());
-  CommittedAppendCache &cache = *committed_append_cache_;
+  if (!committed_append_cache_) {
+    return std::unexpected("committed append cache was not initialized");
+  }
+  CommittedAppendCache &cache = committed_append_cache_.value();
   const std::string_view current_protocol = version::kHogdProtocol();
   const bool current_epoch_started =
       cache.latest && cache.latest->protocol == current_protocol;
@@ -1033,16 +1042,17 @@ IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
   if (!origins) {
     return std::unexpected(origins.error());
   }
-  CHECK(committed_append_cache_.has_value());
-  if (committed_append_cache_->canonical_boundary &&
-      (first_height != committed_append_cache_->canonical_boundary->height ||
-       first_prev_hash !=
-           committed_append_cache_->canonical_boundary->consensus_hash)) {
+  if (!committed_append_cache_) {
+    return std::unexpected("committed append cache was not initialized");
+  }
+  const CommittedAppendCache &cache = committed_append_cache_.value();
+  if (cache.canonical_boundary &&
+      (first_height != cache.canonical_boundary->height ||
+       first_prev_hash != cache.canonical_boundary->consensus_hash)) {
     return std::unexpected("current indexer outbox epoch origin does not match "
                            "canonical boundary");
   }
-  if (!committed_append_cache_->canonical_boundary &&
-      (committed_append_cache_->latest || !origins->empty())) {
+  if (!cache.canonical_boundary && (cache.latest || !origins->empty())) {
     return std::unexpected("indexer outbox canonical boundary is exhausted");
   }
   uint64_t epoch_sequence = 0;
@@ -1200,9 +1210,7 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
 
   committed_append_cache_ = CommittedAppendCache{
       .latest = std::move(previous),
-      .current_origin = *current_origin
-                            ? std::optional(std::move(**current_origin))
-                            : std::nullopt,
+      .current_origin = std::move(*current_origin),
       .canonical_boundary = std::move(canonical_boundary),
   };
   return {};
@@ -1300,10 +1308,9 @@ IndexerOutboxStore::enumerate_committed_records_raw() const
                        .consensus_hash = header->consensus_hash,
                        .prev_hash = header->prev_hash});
   }
-  std::sort(records.begin(), records.end(),
-            [](const auto &lhs, const auto &rhs) {
-              return lhs.block_height < rhs.block_height;
-            });
+  std::ranges::sort(records, [](const auto &lhs, const auto &rhs) {
+    return lhs.block_height < rhs.block_height;
+  });
   return records;
 }
 
@@ -1339,11 +1346,10 @@ IndexerOutboxStore::enumerate_epoch_origins_raw() const
                        .payload_byte_length = header->payload_byte_length,
                        .payload_digest = header->payload_digest});
   }
-  std::sort(origins.begin(), origins.end(),
-            [](const auto &lhs, const auto &rhs) {
-              return std::tie(lhs.epoch_sequence, lhs.protocol) <
-                     std::tie(rhs.epoch_sequence, rhs.protocol);
-            });
+  std::ranges::sort(origins, [](const auto &lhs, const auto &rhs) {
+    return std::tie(lhs.epoch_sequence, lhs.protocol) <
+           std::tie(rhs.epoch_sequence, rhs.protocol);
+  });
   return origins;
 }
 
@@ -1674,7 +1680,7 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       !same_inode(file_stat, path_stat) || file_stat.st_size < 0) {
     return std::unexpected("indexer outbox header path is not stable");
   }
-  const uint64_t file_size = static_cast<uint64_t>(file_stat.st_size);
+  const auto file_size = static_cast<uint64_t>(file_stat.st_size);
   if (file_size < 4) {
     return std::unexpected("truncated indexer outbox header length");
   }
@@ -1695,10 +1701,10 @@ IndexerOutboxStore::load_header(std::string_view filename) const
   }
   std::vector<uint8_t> prefix(encoded_header_size);
   size_t offset = 0;
+  off_t file_offset = 4;
   while (offset < prefix.size()) {
-    const ssize_t read_size =
-        pread(file.get(), prefix.data() + offset, prefix.size() - offset,
-              static_cast<off_t>(4 + offset));
+    const ssize_t read_size = pread(file.get(), prefix.data() + offset,
+                                    prefix.size() - offset, file_offset);
     if (read_size < 0) {
       if (errno == EINTR) {
         continue;
@@ -1709,6 +1715,7 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       return std::unexpected("truncated indexer outbox header");
     }
     offset += static_cast<size_t>(read_size);
+    file_offset += read_size;
   }
 
   IndexerOutboxRecordHeader header;
@@ -1751,15 +1758,16 @@ IndexerOutboxStore::load_payload(std::string_view filename,
   }
   const size_t header_size = x23::xdr_size(header);
   const uint64_t expected_size = 4 + header_size + header.payload_byte_length;
-  if (static_cast<uint64_t>(file_stat.st_size) != expected_size) {
+  if (std::cmp_not_equal(file_stat.st_size, expected_size)) {
     return std::unexpected("indexer outbox file changed after header read");
   }
   std::vector<uint8_t> payload(static_cast<size_t>(header.payload_byte_length));
   size_t offset = 0;
+  off_t file_offset = 4;
+  file_offset += static_cast<off_t>(header_size);
   while (offset < payload.size()) {
-    const ssize_t read_size =
-        pread(file.get(), payload.data() + offset, payload.size() - offset,
-              static_cast<off_t>(4 + header_size + offset));
+    const ssize_t read_size = pread(file.get(), payload.data() + offset,
+                                    payload.size() - offset, file_offset);
     if (read_size < 0) {
       if (errno == EINTR) {
         continue;
@@ -1771,6 +1779,7 @@ IndexerOutboxStore::load_payload(std::string_view filename,
       return std::unexpected("truncated indexer outbox payload");
     }
     offset += static_cast<size_t>(read_size);
+    file_offset += read_size;
   }
   if (sha256(x23::BufView(payload)) != header.payload_digest) {
     return std::unexpected("indexer outbox payload digest mismatch");
@@ -1800,7 +1809,7 @@ IndexerOutboxStore::validate_payload_digest(
   const uint64_t expected_size = 4 + header_size + header.payload_byte_length;
   if (!S_ISREG(file_stat.st_mode) || !S_ISREG(path_stat.st_mode) ||
       !same_inode(file_stat, path_stat) || file_stat.st_size < 0 ||
-      static_cast<uint64_t>(file_stat.st_size) != expected_size) {
+      std::cmp_not_equal(file_stat.st_size, expected_size)) {
     return std::unexpected("indexer outbox payload path is not stable");
   }
 

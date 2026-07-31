@@ -5,8 +5,10 @@
 #include <latch>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -20,6 +22,7 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -29,31 +32,32 @@
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
 #include "hogd/init.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
-#include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
 #include "parallel.hh"
 #include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
 
 namespace {
-
-using namespace std::chrono_literals;
 
 constexpr size_t kNumTxs = 100;
 
@@ -158,7 +162,8 @@ TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(20ms),
+  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
+                   std::chrono::milliseconds(20)),
                "event startup timed out waiting for canonical tip");
 }
 
@@ -172,7 +177,8 @@ TEST(Mempool, EventStartupTimesOutWithoutActivation)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 70, .consensus_value = value});
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(20ms),
+  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
+                   std::chrono::milliseconds(20)),
                "event startup timed out waiting for activation");
 }
 
@@ -1577,8 +1583,12 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
 
   auto forwarded_proposal_txs =
       server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  ASSERT_TRUE(forwarded_proposal_txs.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_proposal_txs),
+  if (!forwarded_proposal_txs.has_value()) {
+    ADD_FAILURE() << "Proposal transactions were not forwarded";
+    return;
+  }
+  const ProposalTxs &forwarded_txs = forwarded_proposal_txs.value();
+  EXPECT_EQ(x23::serialize(forwarded_txs),
             x23::serialize(proposed.proposal.transactions));
 
   EXPECT_EQ(proposed.proposal.header.proposer, context.proposer);
@@ -1593,8 +1603,11 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
   auto forwarded_consensus =
       server.event_sched_rpc().get_committed_consensus_value(
           proposed.block_id)();
-  ASSERT_TRUE(forwarded_consensus.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_consensus), x23::serialize(value));
+  if (!forwarded_consensus.has_value()) {
+    ADD_FAILURE() << "Consensus value was not forwarded";
+    return;
+  }
+  EXPECT_EQ(x23::serialize(forwarded_consensus.value()), x23::serialize(value));
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1620,8 +1633,11 @@ TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
 
   auto forwarded_proposal_txs =
       server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  ASSERT_TRUE(forwarded_proposal_txs.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_proposal_txs),
+  if (!forwarded_proposal_txs.has_value()) {
+    ADD_FAILURE() << "Proposal transactions were not forwarded";
+    return;
+  }
+  EXPECT_EQ(x23::serialize(forwarded_proposal_txs.value()),
             x23::serialize(proposed.proposal.transactions));
 
   ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
@@ -1631,8 +1647,11 @@ TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
   auto forwarded_consensus =
       server.event_sched_rpc().get_committed_consensus_value(
           proposed.block_id)();
-  ASSERT_TRUE(forwarded_consensus.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_consensus), x23::serialize(value));
+  if (!forwarded_consensus.has_value()) {
+    ADD_FAILURE() << "Consensus value was not forwarded";
+    return;
+  }
+  EXPECT_EQ(x23::serialize(forwarded_consensus.value()), x23::serialize(value));
 }
 
 TEST(Mempool, CommitBlockRejectsMismatchedConsensusValue)
@@ -1769,8 +1788,11 @@ TEST(Mempool, ValidateTwo)
   auto forwarded_proposal_txs =
       server.event_sched_rpc().get_closed_proposal_txs(
           res_validate.block().block_id)();
-  ASSERT_TRUE(forwarded_proposal_txs.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_proposal_txs),
+  if (!forwarded_proposal_txs.has_value()) {
+    ADD_FAILURE() << "Proposal transactions were not forwarded";
+    return;
+  }
+  EXPECT_EQ(x23::serialize(forwarded_proposal_txs.value()),
             x23::serialize(proposal.transactions));
 
   auto res_commit =
@@ -1779,8 +1801,11 @@ TEST(Mempool, ValidateTwo)
   auto forwarded_consensus =
       server.event_sched_rpc().get_committed_consensus_value(
           res_validate.block().block_id)();
-  ASSERT_TRUE(forwarded_consensus.has_value());
-  EXPECT_EQ(x23::serialize(*forwarded_consensus),
+  if (!forwarded_consensus.has_value()) {
+    ADD_FAILURE() << "Consensus value was not forwarded";
+    return;
+  }
+  EXPECT_EQ(x23::serialize(forwarded_consensus.value()),
             x23::serialize(consensus_value(db_tip, proposal)));
 
   // Now propose another block.
@@ -1835,9 +1860,13 @@ TEST(Mempool, GetTip)
   DbTip db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
   auto event_tip = Registration::registration().event_canonical_tip();
-  ASSERT_TRUE(event_tip.has_value());
-  EXPECT_EQ(event_tip->block_id, db_tip.id);
-  EXPECT_EQ(x23::serialize(event_tip->consensus_value),
+  if (!event_tip.has_value()) {
+    ADD_FAILURE() << "Event canonical tip was not published";
+    return;
+  }
+  const EventCanonicalTip &initial_event_tip = event_tip.value();
+  EXPECT_EQ(initial_event_tip.block_id, db_tip.id);
+  EXPECT_EQ(x23::serialize(initial_event_tip.consensus_value),
             x23::serialize(db_tip.value));
 
   ValidatorID validator_id{};
@@ -1884,9 +1913,13 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   event_tip = Registration::registration().event_canonical_tip();
-  ASSERT_TRUE(event_tip.has_value());
-  EXPECT_EQ(event_tip->block_id, db_tip.id);
-  EXPECT_EQ(x23::serialize(event_tip->consensus_value),
+  if (!event_tip.has_value()) {
+    ADD_FAILURE() << "Event canonical tip was not updated";
+    return;
+  }
+  const EventCanonicalTip &committed_event_tip = event_tip.value();
+  EXPECT_EQ(committed_event_tip.block_id, db_tip.id);
+  EXPECT_EQ(x23::serialize(committed_event_tip.consensus_value),
             x23::serialize(db_tip.value));
 }
 
@@ -2110,7 +2143,8 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   auto runtime_init = std::async(std::launch::async, [&] {
     server.mempool_coord_rpc().finish_runtime_init()();
   });
-  EXPECT_EQ(runtime_init.wait_for(100ms), std::future_status::timeout);
+  EXPECT_EQ(runtime_init.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
   EXPECT_FALSE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
   auto premature_work = std::async(std::launch::async, [&] {
@@ -2120,19 +2154,22 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
         server.mempool_coord_rpc().schedulercoord_validate_block(0, {})();
     return std::pair{proposal.outcome(), validation.outcome()};
   });
-  ASSERT_EQ(premature_work.wait_for(1s), std::future_status::ready);
+  ASSERT_EQ(premature_work.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
   const auto [proposal_outcome, validation_outcome] = premature_work.get();
   EXPECT_EQ(proposal_outcome, SchedulerProposalOutcome::SchedulerProposalError);
   EXPECT_EQ(validation_outcome,
             SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
 
   server.register_event_only_after_genesis();
-  EXPECT_EQ(runtime_init.wait_for(100ms), std::future_status::timeout);
+  EXPECT_EQ(runtime_init.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
   EXPECT_FALSE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
 
   server.register_executor_only_after_event();
-  ASSERT_EQ(runtime_init.wait_for(5s), std::future_status::ready);
+  ASSERT_EQ(runtime_init.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
   runtime_init.get();
   EXPECT_TRUE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"ok\""), std::string::npos);

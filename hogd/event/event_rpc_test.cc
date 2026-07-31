@@ -9,7 +9,9 @@
 #include <latch>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
@@ -39,16 +41,22 @@
 #include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_event.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/version.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
 #include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
+#include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/fileio.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -377,13 +385,13 @@ static_assert(is_IndexerEvent2<FailureCapturingIndexerRpc *, x23::Async>);
 struct CountingIndexerRpc {
   using rpc_service = IndexerEvent2;
 
-  x23::Async<IndexerProgress> indexer_event_get_progress()
+  static x23::Async<IndexerProgress> indexer_event_get_progress()
   {
     co_return IndexerProgress(
         IndexerProgressState::IndexerProgressUninitialized);
   }
 
-  x23::Async<IndexerEpochResult>
+  static x23::Async<IndexerEpochResult>
   indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
   {
     IndexerEpochResult result(IndexerEpochOutcome::IndexerEpochInitialized);
@@ -443,7 +451,7 @@ struct BlockingIndexerRpc : FailureCapturingIndexerRpc {
 static_assert(is_IndexerEvent2<BlockingIndexerRpc *, x23::Async>);
 
 struct ForgedEpochProgressIndexerRpc : FailureCapturingIndexerRpc {
-  x23::Async<IndexerEpochResult>
+  static x23::Async<IndexerEpochResult>
   indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
   {
     IndexerEpochResult result(IndexerEpochOutcome::IndexerEpochInitialized);
@@ -573,6 +581,10 @@ TEST_F(EventRpcTest, IndexerRegistrationUsesCurrentCallbackProgress)
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value());
   ASSERT_TRUE(origin->has_value());
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
 
   FailureCapturingIndexerRpc indexer;
   IndexerCardV2 card{.protocol = version::kHogdProtocol(),
@@ -581,7 +593,7 @@ TEST_F(EventRpcTest, IndexerRegistrationUsesCurrentCallbackProgress)
                      .progress = indexer.progress};
   indexer.progress.state(IndexerProgressState::IndexerProgressInitialized);
   indexer.progress.initialized() = {
-      .origin = (**origin).origin,
+      .origin = current_origin->origin,
       .contiguous_height = 0,
       .last_consensus_hash = sha256(genesis),
       .last_payload_digest = {},
@@ -601,11 +613,15 @@ TEST_F(EventRpcTest, IndexerRegistrationRejectsBoundaryIdentityMismatch)
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value());
   ASSERT_TRUE(origin->has_value());
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
 
   FailureCapturingIndexerRpc indexer;
   indexer.progress.state(IndexerProgressState::IndexerProgressInitialized);
   indexer.progress.initialized() = {
-      .origin = (**origin).origin,
+      .origin = current_origin->origin,
       .contiguous_height = 0,
       .last_consensus_hash = ConsensusValueHash{},
       .last_payload_digest = {},
@@ -721,7 +737,7 @@ TEST_F(EventRpcTest, DurableGenerationAllowsIdempotentRetryButNoLiveReplacement)
         EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
     ASSERT_EQ(restarted.register_indexer(
                   make_socketpair_indexer_client(&indexer_b), card_b)(),
-               EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+              EventIndexerRegistrationOutcome::EventRegistrationAccepted);
     card_b.progress = retry_indexer.progress;
     EXPECT_EQ(restarted.register_indexer(
                   make_socketpair_indexer_client(&retry_indexer), card_b)(),
@@ -1670,7 +1686,7 @@ TEST_F(EventRpcTest, MultipleExecutors)
   std::atomic<bool> close_completed = false;
   std::latch close_reserved(1);
   ctx.set_close_reserved_test_hook(
-      [&](BlockID block_id) { close_reserved.count_down(); });
+      [&](BlockID /*block_id*/) { close_reserved.count_down(); });
   auto async = [&](this auto) -> x23::Async<void> {
     co_await default_threadpool().bg();
     close_started.store(true, std::memory_order_release);
@@ -1712,7 +1728,7 @@ TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
   std::atomic<bool> close_completed = false;
   std::latch close_reserved(1);
   ctx.set_close_reserved_test_hook(
-      [&](BlockID block_id) { close_reserved.count_down(); });
+      [&](BlockID /*block_id*/) { close_reserved.count_down(); });
   auto async = [&](this auto) -> x23::Async<void> {
     co_await default_threadpool().bg();
     auto result =
@@ -1764,7 +1780,7 @@ TEST_F(EventRpcTest, AbandonIsRejectedWhileCloseBlockIsReserved)
   std::atomic<bool> close_completed = false;
   std::latch close_reserved(1);
   ctx.set_close_reserved_test_hook(
-      [&](BlockID block_id) { close_reserved.count_down(); });
+      [&](BlockID /*block_id*/) { close_reserved.count_down(); });
   auto async = [&](this auto) -> x23::Async<void> {
     co_await default_threadpool().bg();
     auto result =
@@ -1798,7 +1814,7 @@ TEST_F(EventRpcTest, CommitIsRejectedWhileCloseBlockIsReserved)
 
   std::latch close_reserved(1);
   ctx.set_close_reserved_test_hook(
-      [&](BlockID block_id) { close_reserved.count_down(); });
+      [&](BlockID /*block_id*/) { close_reserved.count_down(); });
   auto close_async = mempool_rpc.eventsched2_close_block(2, 2, proposal_txs);
 
   close_reserved.wait();
@@ -1870,7 +1886,7 @@ TEST_F(EventRpcTest, AbandonRacingCloseAfterExecutorsClosedIsClean)
     std::atomic<RPCError> close_err = RPCError::kRPCNone;
     std::latch close_reserved(1);
     ctx.set_close_reserved_test_hook(
-        [&](BlockID reserved_id) { close_reserved.count_down(); });
+        [&](BlockID /*reserved_id*/) { close_reserved.count_down(); });
     auto close_task = [&](this auto) -> x23::Async<void> {
       co_await default_threadpool().bg();
       auto result = co_await mempool_rpc.eventsched2_close_block(block_id, 1,
@@ -2327,8 +2343,12 @@ TEST_F(EventRpcTest, CompetingFirstCommitsPublishOneOriginAndRecord)
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
-  EXPECT_EQ((*origin)->origin.first_height, 1);
-  EXPECT_EQ((*origin)->origin.first_prev_hash,
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash,
             committed->consensus_value.prev_hash);
   if (first_result == RPCError::kRPCNone) {
     expect_xdr_equal(committed->consensus_value, first);
@@ -2538,8 +2558,12 @@ TEST_F(EventRpcTest, ReconciliationInitializesOriginOnlyAtEmptyGenesis)
     auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
     ASSERT_TRUE(origin.has_value()) << origin.error();
     ASSERT_TRUE(origin->has_value());
-    EXPECT_EQ((*origin)->origin.first_height, 1);
-    EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(genesis));
+    const auto &origin_value = origin.value();
+    const auto *current_origin =
+        origin_value.has_value() ? &origin_value.value() : nullptr;
+    ASSERT_NE(current_origin, nullptr);
+    EXPECT_EQ(current_origin->origin.first_height, 1);
+    EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
   }
 
   EventRPCContext restarted(temp_dir());
@@ -2547,8 +2571,12 @@ TEST_F(EventRpcTest, ReconciliationInitializesOriginOnlyAtEmptyGenesis)
   auto origin = restarted.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
-  EXPECT_EQ((*origin)->origin.first_height, 1);
-  EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(genesis));
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
 }
 
 TEST_F(EventRpcTest, EmptyChainReconciliationDoesNotInferOrigin)
@@ -2587,7 +2615,7 @@ TEST_F(EventRpcTest,
   constexpr BlockID kMidchainBlock = 781;
   ConsensusValue height_one;
   ConsensusValue midchain;
-  for (const auto [block_id, height] :
+  for (const auto &[block_id, height] :
        {std::pair{kHeightOneBlock, BlockHeight{1}},
         std::pair{kMidchainBlock, BlockHeight{37}}}) {
     ASSERT_EQ(mempool_rpc.eventsched2_open_block(block_id)(),
@@ -2626,8 +2654,12 @@ TEST_F(EventRpcTest,
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
-  EXPECT_EQ((*origin)->origin.first_height, 1);
-  EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(genesis));
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
   EXPECT_TRUE(
       ctx.indexer_outbox_store().has_candidate(kHeightOneBlock).value());
   EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(kMidchainBlock).value());
@@ -2668,8 +2700,12 @@ TEST_F(EventRpcTest, GenesisReconciliationAllowsNoncanonicalCandidateResidue)
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
-  EXPECT_EQ((*origin)->origin.first_height, 1);
-  EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(genesis));
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
   EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(0).value());
 }
 
@@ -2708,9 +2744,13 @@ TEST_F(EventRpcTest, GenesisReconciliationContinuesEmptyArchivalOrigin)
   auto current = restarted.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(current.has_value()) << current.error();
   ASSERT_TRUE(current->has_value());
-  EXPECT_EQ((*current)->epoch_sequence, 1UL);
-  EXPECT_EQ((*current)->origin.first_height, 1);
-  EXPECT_EQ((*current)->origin.first_prev_hash, sha256(genesis));
+  const auto &current_value = current.value();
+  const auto *current_origin =
+      current_value.has_value() ? &current_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->epoch_sequence, 1UL);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
   auto origins = restarted.indexer_outbox_store().enumerate_epoch_origins_raw();
   ASSERT_TRUE(origins.has_value()) << origins.error();
   ASSERT_EQ(origins->size(), 2UL);
@@ -2765,8 +2805,12 @@ TEST_F(EventRpcTest,
     origin = ctx.indexer_outbox_store().load_current_epoch_origin();
     ASSERT_TRUE(origin.has_value()) << origin.error();
     ASSERT_TRUE(origin->has_value());
-    EXPECT_EQ((*origin)->origin.first_height, 1);
-    EXPECT_EQ((*origin)->origin.first_prev_hash, sha256(genesis));
+    const auto &origin_value = origin.value();
+    const auto *current_origin =
+        origin_value.has_value() ? &origin_value.value() : nullptr;
+    ASSERT_NE(current_origin, nullptr);
+    EXPECT_EQ(current_origin->origin.first_height, 1);
+    EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
     ASSERT_EQ(MempoolEventRpc::schedevent2_activate_event(prepared.snapshot())
                   .outcome(),
               EventActivationOutcome::EventActivationOK);
@@ -2971,7 +3015,7 @@ TEST_F(EventRpcTest, ContiguousGenesisOutboxReopensAndReconciles)
     EventRPCContext ctx(temp_dir());
     EventMempoolRpc mempool_rpc(ctx);
     ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-    for (const auto [block_id, height] :
+    for (const auto &[block_id, height] :
          {std::pair{kFirstBlock, BlockHeight{1}},
           std::pair{kSecondBlock, BlockHeight{2}}}) {
       ASSERT_EQ(mempool_rpc.eventsched2_open_block(block_id)(),
@@ -3095,8 +3139,12 @@ TEST_F(EventRpcTest,
     auto origin = restarted.indexer_outbox_store().load_current_epoch_origin();
     ASSERT_TRUE(origin.has_value()) << origin.error();
     ASSERT_TRUE(origin->has_value());
-    EXPECT_EQ((*origin)->origin.first_height, 22);
-    EXPECT_EQ((*origin)->origin.first_prev_hash,
+    const auto &origin_value = origin.value();
+    const auto *current_origin =
+        origin_value.has_value() ? &origin_value.value() : nullptr;
+    ASSERT_NE(current_origin, nullptr);
+    EXPECT_EQ(current_origin->origin.first_height, 22);
+    EXPECT_EQ(current_origin->origin.first_prev_hash,
               sha256(archival_tip.consensus_value));
     ASSERT_EQ(MempoolEventRpc::schedevent2_activate_event(prepared.snapshot())
                   .outcome(),
@@ -3196,10 +3244,14 @@ TEST_F(EventRpcTest,
       auto origin = current.indexer_outbox_store().load_current_epoch_origin();
       ASSERT_TRUE(origin.has_value()) << origin.error();
       ASSERT_TRUE(origin->has_value());
-      EXPECT_EQ((*origin)->epoch_sequence, archival_epoch_count);
-      EXPECT_EQ((*origin)->origin.epoch_sequence, archival_epoch_count);
-      EXPECT_EQ((*origin)->origin.first_height, 1);
-      EXPECT_EQ((*origin)->origin.first_prev_hash, boundary_hash);
+      const auto &origin_value = origin.value();
+      const auto *current_origin =
+          origin_value.has_value() ? &origin_value.value() : nullptr;
+      ASSERT_NE(current_origin, nullptr);
+      EXPECT_EQ(current_origin->epoch_sequence, archival_epoch_count);
+      EXPECT_EQ(current_origin->origin.epoch_sequence, archival_epoch_count);
+      EXPECT_EQ(current_origin->origin.first_height, 1);
+      EXPECT_EQ(current_origin->origin.first_prev_hash, boundary_hash);
 
       EventMempoolRpc mempool_rpc(current);
       ASSERT_EQ(mempool_rpc.eventsched2_open_block(kBlock)(),

@@ -75,8 +75,9 @@ public:
   // Delete copy, allow move
   IndexDB(const IndexDB &) = delete;
   IndexDB &operator=(const IndexDB &) = delete;
-  IndexDB(IndexDB &&other) noexcept;
-  IndexDB &operator=(IndexDB &&other) noexcept;
+  IndexDB(IndexDB &&other) noexcept; // NOLINT(bugprone-exception-escape)
+  IndexDB &
+  operator=(IndexDB &&other) noexcept; // NOLINT(bugprone-exception-escape)
 
   static std::string get_build_config();
 

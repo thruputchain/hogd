@@ -9,11 +9,14 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <ios>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -43,8 +46,10 @@
 #include "hogd/mempool/shared.h"
 #include "parallel.hh"
 #include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
@@ -539,7 +544,7 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
-                                                const ConsensusValue &value)
+                                               const ConsensusValue &value)
 {
   co_return co_await event_sched_client_->eventsched2_commit_block(block_id,
                                                                    value);
@@ -549,8 +554,8 @@ x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_confirm_committed_block(
     const ConsensusValue &value)
 {
-  co_return co_await
-      event_sched_client_->eventsched2_confirm_committed_block(value);
+  co_return co_await event_sched_client_->eventsched2_confirm_committed_block(
+      value);
 }
 
 x23::Async<EventBlockResult>
@@ -671,7 +676,8 @@ MempoolCoordinatorRpc::propose_batch(
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
     if (result.result() == ExecResult::ExecResultUnrecoverable) {
-      throw std::runtime_error("executor returned unrecoverable proposal result");
+      throw std::runtime_error(
+          "executor returned unrecoverable proposal result");
     }
     ret_chunk[i] = tx_succeeded(result.result());
     if (ret_chunk[i]) {
@@ -1629,7 +1635,9 @@ MempoolCoordinatorRpc::prepare_and_validate_chunks(
   x23::Vec<PreparedAndValidatedChunk> results;
   results.reserve(settled.size());
   for (auto &result : settled) {
-    CHECK(result.has_value());
+    if (!result) {
+      panic("validation result missing without a captured exception");
+    }
     results.push_back(std::move(*result));
   }
   co_return results;

@@ -4,20 +4,26 @@
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <expected>
 #include <format>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "db_conflict.hh"
+#include "event_outbox_internal.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -27,14 +33,19 @@
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/indexer_outbox.h"
 #include "hogd/event/status.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
+#include "indexer.hh"
+#include "indexer_payload_validation.h"
+#include "network.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc_common.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -42,11 +53,16 @@ namespace hogd {
 
 namespace detail {
 
+// Generated XDR strings make clang-tidy infer an infeasible throwing copy from
+// the implicit move operations used by the delivery queue.
+// NOLINTNEXTLINE(bugprone-exception-escape,misc-use-internal-linkage)
 struct IndexerDeliveryRecord {
   IndexerOutboxOrigin origin;
   BlockHeight block_height;
 };
 
+// This type is part of IndexerDeliveryState, whose declaration is in the
+// header. NOLINTNEXTLINE(misc-use-internal-linkage)
 struct RegisteredIndexer {
   UPID generation;
   indexer_event_client_t client;
@@ -187,136 +203,142 @@ lineage_admits(const std::optional<UPID> &durable_generation,
           *card.predecessor_generation == *durable_generation);
 }
 
+// Relaunching creates a detached coroutine that immediately suspends on bg(),
+// so this does not grow the current coroutine's stack.
 x23::Detached
+// NOLINTNEXTLINE(misc-no-recursion)
 drain_indexer_delivery_queue(
     std::shared_ptr<detail::IndexerDeliveryState> state,
     std::shared_ptr<void> worker_owner)
 {
   co_await default_threadpool().bg();
-  x23::Defer finish_worker{[state, worker_owner] {
-    std::shared_ptr<void> replacement_owner;
-    {
+  auto replacement_candidate = std::make_shared<char>();
+  std::shared_ptr<void> replacement_owner;
+  {
+    x23::Defer finish_worker{[state, worker_owner, replacement_candidate,
+                              &replacement_owner] {
       std::lock_guard g(state->mutex);
       CHECK_GT(state->active_operations, 0UL);
       --state->active_operations;
       if (state->worker_owner == worker_owner) {
         state->worker_running = false;
         state->worker_owner.reset();
-        if (!state->stopping && !state->queue.empty()) {
-          replacement_owner = std::make_shared<char>();
+        if (!state->stopping && state->registered && !state->queue.empty()) {
+          replacement_owner = replacement_candidate;
           state->worker_owner = replacement_owner;
           state->worker_running = true;
           ++state->active_operations;
         }
       }
       state->drained.notify_all();
-    }
-    if (replacement_owner) {
-      drain_indexer_delivery_queue(state, std::move(replacement_owner));
-    }
-  }};
-  while (true) {
-    std::optional<detail::IndexerDeliveryRecord> record;
-    std::optional<detail::RegisteredIndexer> registered;
-    {
-      std::lock_guard g(state->mutex);
-      if (state->stopping || state->queue.empty()) {
-        if (!state->stopping && state->worker_empty_test_hook) {
-          auto hook = std::move(state->worker_empty_test_hook);
-          hook();
-        }
-        co_return;
-      }
-      record = state->queue.front();
-      registered = state->registered;
-    }
-    if (!registered) {
-      co_return;
-    }
-
-    CHECK_PTR(state->outbox_store);
-    auto payload = state->outbox_store->load_committed(record->block_height);
-    if (!payload) {
-      panic("failed to reload committed indexer delivery {}: {}",
-            record->block_height, payload.error());
-    }
-    auto block = make_indexer_committed_block(*payload);
-    if (!block) {
-      panic("failed to rebuild committed indexer delivery {}: {}",
-            record->block_height, block.error());
-    }
-
-    x23::CoroGuard generation_lane;
-    co_await generation_lane(*registered->lane);
-    uint64_t rpc_operation_id = 0;
-    {
-      std::lock_guard g(state->mutex);
-      if (state->stopping) {
-        co_return;
-      }
-      registered = state->registered;
-      if (!registered) {
-        continue;
-      }
-      // Registration replay owns the same generation lane and may already
-      // have acknowledged and erased this queued record while the worker was
-      // loading it.
-      if (state->queue.empty() ||
-          state->queue.front().block_height != record->block_height) {
-        continue;
-      }
-      rpc_operation_id = ++state->next_operation_id;
-      state->active_clients.emplace_back(rpc_operation_id, registered->client);
-    }
-    x23::Defer finish_rpc{[state, rpc_operation_id] {
-      std::lock_guard g(state->mutex);
-      std::erase_if(state->active_clients, [&](const auto &entry) {
-        return entry.first == rpc_operation_id;
-      });
     }};
-    try {
-      IndexerBlockApplyResult result =
-          co_await registered->client.indexer_event_apply_committed_block(
-              record->origin, *block);
-      if (!apply_succeeded(result) ||
-          result.progress().origin != record->origin ||
-          result.progress().contiguous_height != record->block_height ||
-          result.progress().last_consensus_hash !=
-              block->identity.consensus_hash ||
-          result.progress().last_payload_digest !=
-              block->identity.payload_digest) {
-        warn("indexer rejected committed block {} with outcome {}",
-              record->block_height, result.outcome());
-        panic("fatal committed indexer delivery rejection");
-      }
-      std::function<void()> delivery_succeeded_test_hook;
+    while (true) {
+      std::optional<detail::IndexerDeliveryRecord> record;
+      std::optional<detail::RegisteredIndexer> registered;
       {
         std::lock_guard g(state->mutex);
-        delivery_succeeded_test_hook =
-            std::move(state->delivery_succeeded_test_hook);
+        if (state->stopping || state->queue.empty()) {
+          if (!state->stopping && state->worker_empty_test_hook) {
+            auto hook = std::move(state->worker_empty_test_hook);
+            hook();
+          }
+          break;
+        }
+        record = state->queue.front();
+        registered = state->registered;
       }
-      if (delivery_succeeded_test_hook) {
-        delivery_succeeded_test_hook();
+      if (!registered) {
+        break;
       }
+
+      CHECK_PTR(state->outbox_store);
+      auto payload = state->outbox_store->load_committed(record->block_height);
+      if (!payload) {
+        panic("failed to reload committed indexer delivery {}: {}",
+              record->block_height, payload.error());
+      }
+      auto block = make_indexer_committed_block(*payload);
+      if (!block) {
+        panic("failed to rebuild committed indexer delivery {}: {}",
+              record->block_height, block.error());
+      }
+
+      x23::CoroGuard generation_lane;
+      co_await generation_lane(*registered->lane);
+      uint64_t rpc_operation_id = 0;
       {
         std::lock_guard g(state->mutex);
         if (state->stopping) {
-          co_return;
+          break;
         }
-        CHECK(!state->queue.empty());
-        CHECK_EQ(state->queue.front().block_height, record->block_height);
-        state->queue.pop_front();
+        registered = state->registered;
+        if (!registered) {
+          continue;
+        }
+        // Registration replay owns the same generation lane and may already
+        // have acknowledged and erased this queued record while the worker was
+        // loading it.
+        if (state->queue.empty() ||
+            state->queue.front().block_height != record->block_height) {
+          continue;
+        }
+        rpc_operation_id = ++state->next_operation_id;
+        state->active_clients.emplace_back(rpc_operation_id,
+                                           registered->client);
       }
-    } catch (const x23::XdrException &e) {
-      {
+      x23::Defer finish_rpc{[state, rpc_operation_id] {
         std::lock_guard g(state->mutex);
-        if (state->stopping) {
-          co_return;
+        std::erase_if(state->active_clients, [&](const auto &entry) {
+          return entry.first == rpc_operation_id;
+        });
+      }};
+      try {
+        IndexerBlockApplyResult result =
+            co_await registered->client.indexer_event_apply_committed_block(
+                record->origin, *block);
+        if (!apply_succeeded(result) ||
+            result.progress().origin != record->origin ||
+            result.progress().contiguous_height != record->block_height ||
+            result.progress().last_consensus_hash !=
+                block->identity.consensus_hash ||
+            result.progress().last_payload_digest !=
+                block->identity.payload_digest) {
+          warn("indexer rejected committed block {} with outcome {}",
+               record->block_height, result.outcome());
+          panic("fatal committed indexer delivery rejection");
         }
+        std::function<void()> delivery_succeeded_test_hook;
+        {
+          std::lock_guard g(state->mutex);
+          delivery_succeeded_test_hook =
+              std::move(state->delivery_succeeded_test_hook);
+        }
+        if (delivery_succeeded_test_hook) {
+          delivery_succeeded_test_hook();
+        }
+        {
+          std::lock_guard g(state->mutex);
+          if (state->stopping) {
+            break;
+          }
+          CHECK(!state->queue.empty());
+          CHECK_EQ(state->queue.front().block_height, record->block_height);
+          state->queue.pop_front();
+        }
+      } catch (const x23::XdrException &e) {
+        {
+          std::lock_guard g(state->mutex);
+          if (state->stopping) {
+            break;
+          }
+        }
+        panic("fatal committed indexer delivery failure at height {}: {}",
+              record->block_height, e.what());
       }
-      panic("fatal committed indexer delivery failure at height {}: {}",
-            record->block_height, e.what());
     }
+  }
+  if (replacement_owner) {
+    drain_indexer_delivery_queue(state, std::move(replacement_owner));
   }
 }
 
@@ -341,23 +363,25 @@ EventRPCContext::EventRPCContext(std::string_view work_directory)
 EventRPCContext::~EventRPCContext()
 {
   auto state = indexer_delivery_state_;
-  std::vector<indexer_event_client_t> clients;
+  std::optional<indexer_event_client_t> registered_client;
+  std::vector<std::pair<uint64_t, indexer_event_client_t>> active_clients;
   {
     std::lock_guard g(state->mutex);
     state->stopping = true;
     if (state->registered) {
-      clients.push_back(state->registered->client);
+      registered_client.emplace(std::move(state->registered->client));
       state->registered.reset();
     }
-    for (const auto &[operation_id, client] : state->active_clients) {
-      std::ignore = operation_id;
-      clients.push_back(client);
-    }
+    active_clients.swap(state->active_clients);
     state->queue.clear();
   }
   // RpcStream::fail closes the socket and resolves every pending call. This is
   // the available x23 cancellation primitive; no deadline API exists.
-  for (auto &client : clients) {
+  if (registered_client) {
+    registered_client->__send_call.get()->fail();
+  }
+  for (auto &[operation_id, client] : active_clients) {
+    std::ignore = operation_id;
     client.__send_call.get()->fail();
   }
   {
@@ -495,11 +519,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
 
   SHA256Hash out_hash;
   try {
-    auto *pool = x23::ThreadPool::get_thread_pool();
-    if (!pool) {
-      pool = &default_threadpool();
-    }
-    co_await pool->bg();
     co_await context->get().finish_file_write();
     out_hash = context->get().get_root_hash();
     IndexerOutboxCandidatePayload candidate =
@@ -1064,9 +1083,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   }
 
   indexer_outbox_store_.cache_validated_committed_append_tip(
-      previous_record,
-      *current_origin ? std::optional(**current_origin) : std::nullopt,
-      canonical_boundary);
+      previous_record, *current_origin, canonical_boundary);
 
   if (previous_record) {
     auto removed = remove_resolved_candidates(previous_record->block_height);
@@ -1084,7 +1101,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
 x23::Async<EventIndexerRegistrationOutcome>
 EventRPCContext::register_indexer(indexer_event_client_t indexer,
-                                   const IndexerCardV2 &card)
+                                  const IndexerCardV2 &card)
 {
   using enum EventIndexerRegistrationOutcome;
   if (!outbox_reconciled_.load(std::memory_order_acquire)) {
@@ -1785,6 +1802,7 @@ void
 EventRPCContext::publish_indexer_snapshot(
     const std::unique_lock<std::mutex> &indexers_ul)
 {
+  static_cast<void>(indexers_ul);
   assert(indexers_ul.owns_lock() && indexers_ul.mutex() == &indexers_mtx_);
   indexer_snapshot_t *old = indexers_snapshot_;
   // An empty indexer list publishes an empty-vector snapshot rather than

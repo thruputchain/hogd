@@ -46,7 +46,7 @@ public:
   void disconnect_event_for_test() { fail_event_client(); }
 
 private:
-  void run(std::stop_token stop);
+  void run(const std::stop_token &stop);
   bool wait(std::stop_token stop, std::chrono::milliseconds delay);
   void fail_event_client();
 

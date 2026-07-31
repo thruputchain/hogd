@@ -43,7 +43,7 @@ public:
   }
 
   static EventActivationResult
-  schedevent2_activate_event(const EventRegistrationSnapshot &)
+  schedevent2_activate_event(const EventRegistrationSnapshot & /*unused*/)
   {
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }

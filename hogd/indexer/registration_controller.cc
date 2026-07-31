@@ -1,16 +1,24 @@
 #include "hogd/indexer/registration_controller.h"
 
+#include <atomic>
 #include <chrono>
+#include <mutex>
+#include <optional>
+#include <stop_token>
+#include <string>
 #include <utility>
 
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/indexer/db.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
+#include "indexer.hh"
 #include "x23/cleanup.h"
+#include "x23/rpc_common.h"
+#include "x23/serialize.h"
+#include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -22,7 +30,8 @@ IndexerRegistrationController::IndexerRegistrationController(
     indexer_server_addr_(std::move(indexer_server_addr)),
     generation_(lineage.generation),
     predecessor_generation_(lineage.predecessor_generation), db_(db),
-    options_(options), thread_([this](std::stop_token stop) { run(stop); })
+    options_(options),
+    thread_([this](const std::stop_token &stop) { run(stop); })
 {}
 
 IndexerRegistrationController::~IndexerRegistrationController()
@@ -77,10 +86,11 @@ IndexerRegistrationController::register_once()
       rpc_deadline_guard.emplace(
           [client = *event_client, timeout = options_.liveness_rpc_timeout,
            &rpc_wait_mutex, &rpc_wake,
-           &rpc_completed](std::stop_token stop) mutable {
+           &rpc_completed](const std::stop_token &stop) mutable {
             std::unique_lock lock(rpc_wait_mutex);
-            const bool completed = rpc_wake.wait_for(
-                lock, stop, timeout, [&] { return rpc_completed; });
+            const bool completed = rpc_wake.wait_for(lock, stop, timeout, [&] {
+              return rpc_completed;
+            });
             if (!completed && !stop.stop_requested()) {
               warn("indexer liveness probe RPC timed out");
               client.__send_call.get()->fail();
@@ -128,12 +138,12 @@ IndexerRegistrationController::wait_until_registered()
 }
 
 void
-IndexerRegistrationController::run(std::stop_token stop)
+IndexerRegistrationController::run(const std::stop_token &stop)
 {
   using enum EventIndexerRegistrationOutcome;
   const auto deadline =
       std::chrono::steady_clock::now() + options_.startup_timeout;
-  std::jthread deadline_guard([this, deadline](std::stop_token stop) {
+  std::jthread deadline_guard([this, deadline](const std::stop_token &stop) {
     std::unique_lock lock(wait_mutex_);
     const bool completed =
         wake_.wait_until(lock, stop, deadline, [this] { return registered_; });
@@ -193,7 +203,7 @@ IndexerRegistrationController::wait(std::stop_token stop,
                                     std::chrono::milliseconds delay)
 {
   std::unique_lock lock(wait_mutex_);
-  return !wake_.wait_for(lock, stop, delay, [] { return false; });
+  return !wake_.wait_for(lock, std::move(stop), delay, [] { return false; });
 }
 
 } // namespace hogd

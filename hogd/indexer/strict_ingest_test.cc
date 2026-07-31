@@ -1,13 +1,14 @@
+#include <expected>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <atomic>
-#include <cstdint>
 #include <filesystem>
 #include <latch>
 #include <memory>
 #include <optional>
-#include <rocksdb/db.h>
+#include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/options.h>
 #include <string>
 #include <string_view>
@@ -15,18 +16,27 @@
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
+#include "event.hh"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
-#include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
+#include "network.hh"
+#include "pagination.hh"
+#include "proposal.hh"
+#include "proposal_hash.h"
+#include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -147,6 +157,7 @@ overwrite_column_family(const std::filesystem::path &path,
   ASSERT_TRUE(
       rocksdb::DB::ListColumnFamilies(options, path.string(), &names).ok());
   std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+  descriptors.reserve(names.size());
   for (const std::string &name : names) {
     descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions(options));
   }
@@ -469,7 +480,7 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   const IndexerCommittedBlock valid =
       make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
 
-  auto expect_conflict = [&](IndexerCommittedBlock block) {
+  auto expect_conflict = [&](const IndexerCommittedBlock &block) {
     EXPECT_EQ(db_->apply_committed_block(origin, block).outcome(),
               IndexerBlockApplyOutcome::IndexerBlockContentConflict);
     EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
@@ -478,50 +489,50 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   IndexerCommittedBlock prev = valid;
   prev.payload.consensus_value.prev_hash[0] ^= 1;
   refresh_identity(prev);
-  expect_conflict(std::move(prev));
+  expect_conflict(prev);
 
   IndexerCommittedBlock negative = valid;
   negative.payload.consensus_value.proposal_header.block_height = -1;
   refresh_identity(negative);
-  expect_conflict(std::move(negative));
+  expect_conflict(negative);
 
   IndexerCommittedBlock proposal = valid;
   proposal.payload.consensus_value.proposal_txs_hash[0] ^= 1;
   refresh_identity(proposal);
-  expect_conflict(std::move(proposal));
+  expect_conflict(proposal);
 
   IndexerCommittedBlock body_conflict = valid;
   body_conflict.payload.tx_bodies[0].signed_tx.tx.uniquifier.nonce++;
   refresh_identity(body_conflict);
-  expect_conflict(std::move(body_conflict));
+  expect_conflict(body_conflict);
 
   IndexerCommittedBlock event_conflict = valid;
   event_conflict.payload.event_logs[0].proposed_tx_hash[0] ^= 1;
   event_conflict.payload.consensus_value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(event_conflict.payload.event_logs);
   refresh_identity(event_conflict);
-  expect_conflict(std::move(event_conflict));
+  expect_conflict(event_conflict);
 
   IndexerCommittedBlock root = valid;
   root.payload.consensus_value.proposal_header.events_hash[0] ^= 1;
   refresh_identity(root);
-  expect_conflict(std::move(root));
+  expect_conflict(root);
 
   IndexerCommittedBlock txs_root = valid;
   txs_root.payload.consensus_value.proposal_header.txs_hash[0] ^= 1;
   refresh_identity(txs_root);
-  expect_conflict(std::move(txs_root));
+  expect_conflict(txs_root);
 
   IndexerCommittedBlock digest = valid;
   digest.identity.payload_digest[0] ^= 1;
-  expect_conflict(std::move(digest));
+  expect_conflict(digest);
 
   IndexerCommittedBlock missing_proposal = valid;
   missing_proposal.payload.proposal_txs = {};
   missing_proposal.payload.consensus_value.proposal_txs_hash =
       proposal_txs_compatibility_hash(missing_proposal.payload.proposal_txs);
   refresh_identity(missing_proposal);
-  expect_conflict(std::move(missing_proposal));
+  expect_conflict(missing_proposal);
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)

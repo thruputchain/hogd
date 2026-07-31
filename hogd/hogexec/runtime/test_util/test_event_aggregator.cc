@@ -4,12 +4,14 @@
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "db_conflict.hh"
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"

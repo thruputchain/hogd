@@ -2,10 +2,12 @@
 
 #include <utility>
 
+#include "consensus.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/event/status.h"
 #include "hogd/metrics/health.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"

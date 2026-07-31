@@ -1,6 +1,7 @@
 #include "hogd/devnode/hog_devnode_node.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +19,7 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #include "address_auth.hh"
@@ -25,7 +27,6 @@
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
-#include "event.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/auth/auth_server.h"
@@ -45,7 +46,6 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/event/event_block_context.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -67,6 +67,8 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "network.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
@@ -74,10 +76,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/err.h"
-#include "x23/fileio.h"
-#include "x23/serialize.h"
-#include "x23/vec.h"
 
 namespace hogd {
 

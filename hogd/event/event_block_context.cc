@@ -1,5 +1,5 @@
 #include "hogd/event/event_block_context.h"
-#include "hogd/event/indexer_outbox.h"
+#include "event_outbox_internal.hh"
 
 #include <atomic>
 #include <cassert>
@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <exception>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -30,6 +29,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"

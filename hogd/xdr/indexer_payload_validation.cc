@@ -1,10 +1,14 @@
 #include "hogd/xdr/indexer_payload_validation.h"
 
+#include <cstddef>
+#include <expected>
 #include <format>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
@@ -12,7 +16,10 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/xdr/proposal_hash.h"
+#include "indexer.hh"
+#include "proposal.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 

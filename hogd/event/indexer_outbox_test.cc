@@ -1,8 +1,8 @@
+#include <array>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
 #include <future>
@@ -10,24 +10,32 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "event.hh"
 #include "event_outbox_internal.hh"
+#include "exec_result.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/indexer_outbox.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
+#include "parallel.hh"
 #include "proposal.hh"
+#include "proposal_hash.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/fileio.h"
@@ -439,7 +447,11 @@ TEST_F(IndexerOutboxTest, DurableIndexerSlotReplacesAtomicallyAndReopens)
   auto loaded = reopened->load_indexer_slot();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
   ASSERT_TRUE(*loaded);
-  EXPECT_EQ((**loaded).generation, second.generation);
+  const auto &loaded_value = loaded.value();
+  const auto *loaded_slot =
+      loaded_value.has_value() ? &loaded_value.value() : nullptr;
+  ASSERT_NE(loaded_slot, nullptr);
+  EXPECT_EQ(loaded_slot->generation, second.generation);
 }
 
 TEST_F(IndexerOutboxTest, DurableIndexerSlotCorruptionFailsClosed)
@@ -592,7 +604,7 @@ TEST_F(IndexerOutboxTest,
                                  std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::replace);
     IndexerOutboxStore store = open_store(dir);
-    const BlockID block_id = static_cast<BlockID>(800 + height);
+    const auto block_id = static_cast<BlockID>(800 + height);
     ASSERT_TRUE(
         store.publish_candidate(make_candidate(block_id, height, {}, {}))
             .has_value());
@@ -751,8 +763,12 @@ TEST_F(IndexerOutboxTest, ExistingOriginRetryRepairsDirectoryDurability)
     auto origin = reopened.load_current_epoch_origin();
     ASSERT_TRUE(origin.has_value()) << origin.error();
     ASSERT_TRUE(origin->has_value());
-    EXPECT_EQ((*origin)->origin.first_height, 1);
-    EXPECT_EQ((*origin)->origin.first_prev_hash, boundary);
+    const auto &origin_value = origin.value();
+    const auto *current_origin =
+        origin_value.has_value() ? &origin_value.value() : nullptr;
+    ASSERT_NE(current_origin, nullptr);
+    EXPECT_EQ(current_origin->origin.first_height, 1);
+    EXPECT_EQ(current_origin->origin.first_prev_hash, boundary);
   }
 }
 
@@ -905,10 +921,14 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   expect_xdr_equal(*loaded_committed, committed);
   ASSERT_TRUE(epoch_origin.has_value()) << epoch_origin.error();
   ASSERT_TRUE(epoch_origin->has_value());
-  EXPECT_EQ((*epoch_origin)->origin.first_height, 7);
-  EXPECT_EQ((*epoch_origin)->origin.first_prev_hash,
+  const auto &origin_value = epoch_origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 7);
+  EXPECT_EQ(current_origin->origin.first_prev_hash,
             committed.consensus_value.prev_hash);
-  EXPECT_EQ(std::string_view((*epoch_origin)->origin.protocol),
+  EXPECT_EQ(std::string_view(current_origin->origin.protocol),
             version::kHogdProtocol());
   EXPECT_TRUE(
       store

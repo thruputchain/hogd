@@ -109,8 +109,11 @@ public:
   static IndexerOutboxStatus<IndexerOutboxStore>
   open_or_create_in(std::string_view parent_directory);
 
+  // Generated XDR members confuse clang-tidy's exception propagation.
+  // NOLINTBEGIN(bugprone-exception-escape)
   IndexerOutboxStore(IndexerOutboxStore &&) noexcept = default;
   IndexerOutboxStore &operator=(IndexerOutboxStore &&) noexcept = default;
+  // NOLINTEND(bugprone-exception-escape)
   IndexerOutboxStore(const IndexerOutboxStore &) = delete;
   IndexerOutboxStore &operator=(const IndexerOutboxStore &) = delete;
 
@@ -208,7 +211,9 @@ private:
 
   UniqueFd directory_fd_;
   bool recognized_residue_on_open_ = false;
-  struct CommittedAppendCache {
+  // The generated XDR members are movable without allocation, but clang-tidy
+  // follows an infeasible copying path through their implicit move functions.
+  struct CommittedAppendCache { // NOLINT(bugprone-exception-escape)
     std::optional<IndexerOutboxCommittedRecordInfo> latest;
     std::optional<IndexerOutboxEpochOrigin> current_origin;
     std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary;
