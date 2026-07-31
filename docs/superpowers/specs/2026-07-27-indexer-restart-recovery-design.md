@@ -37,7 +37,7 @@ byte-identical record is idempotent, while an identity or payload conflict is
 fatal.
 
 Before either candidate or committed publication, event computes the complete
-`IndexerEvent2.indexer_event_apply_committed_block` XDR record size: RPC call
+`IndexerEvent1.indexer_event_apply_committed_block` XDR record size: RPC call
 header, origin, full `ConsensusValue`, every `ProposalTxs` segment and hash,
 event/body vectors, block identity, and record marker. Anything above x23's
 unchunked 31-bit record-body limit is rejected before a durable write.
@@ -102,17 +102,17 @@ durable H+1 record found while the scheduler reports H remains withheld from
 replay and live delivery. A later catchup commit must supply the exact retained
 `ConsensusValue` before H+1 becomes admissible.
 
-There is no legacy mid-chain migration. A recovered devnode chain without a V2
-outbox origin fails closed even when the outbox directory is empty. The hosted
-rollout and persistent devnode adoption both require a clean chain so event and
-indexer establish height-1 V2 origins together; strict V2 never reconstructs an
-origin from a later canonical tip.
+There is no legacy mid-chain migration. A recovered devnode chain without a
+durable outbox origin fails closed even when the outbox directory is empty. The
+hosted rollout and persistent devnode adoption both require a clean chain so
+event and indexer establish height-1 durable origins together; strict ingestion
+never reconstructs an origin from a later canonical tip.
 
-Wire evolution follows the same rule. Existing RPC versions and signatures stay
-unchanged; payload additions use a new RPC version with distinct procedure
-identifiers so C++, Go, and other generators can retain both contracts. Protocol
-schema changes are mirrored into `groundhog-go/protocol-go` and bindings are
-regenerated, but `hogp.go` advances only after the protocol commit exists.
+This clean rollout folds the durable methods into the in-place V1 RPC contracts.
+It is intentionally not wire-compatible with the old runtime, and no V2 aliases
+or compatibility services are retained. Protocol schema changes are mirrored
+into `groundhog-go/protocol-go` and bindings are regenerated, but `hogp.go`
+advances only after the protocol commit exists.
 
 The first implementation supports the current topology of one event service and
 one indexer. The indexer registers once during a bounded startup window, with
@@ -124,7 +124,7 @@ process performs its one startup registration. Once registration succeeds,
 exact-generation retries remain idempotent; a different generation is rejected
 for the process lifetime. There is no live indexer replacement workflow.
 
-The validator node is fail-fast after startup. `SchedEvent2` prepare,
+The validator node is fail-fast after startup. `SchedEvent1` prepare,
 reconciliation, and activation form a one-shot startup barrier. Once activated,
 the mempool and executors retain their original event endpoints for the process
 lifetime; a second prepare or activation is an error. There are no per-block

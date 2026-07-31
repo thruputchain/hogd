@@ -34,7 +34,7 @@ struct IndexerDeliveryState;
 } // namespace detail
 
 // Immutable, refcounted snapshot used only by the best-effort tx-failure
-// relay. Durable block delivery uses the single serialized V2 lane below.
+// relay. Durable block delivery uses the single serialized lane below.
 // [clients] and [tx_failure_in_flight] are index-aligned and immutable for the
 // snapshot's life.
 //
@@ -108,7 +108,7 @@ public:
   x23::Async<void> gc_context(BlockID block_id);
 
   // Test-only multi-receiver helpers for the best-effort diagnostic relay.
-  // Production registration uses register_indexer()'s single startup-only V2
+  // Production registration uses register_indexer()'s single startup-only
   // slot and serialized block-delivery lane.
   uint64_t add_indexer(indexer_event_client_t &&indexer);
 
@@ -119,7 +119,7 @@ public:
   bool remove_indexer(uint64_t indexer_id);
 
   x23::Async<EventIndexerRegistrationOutcome>
-  register_indexer(indexer_event_client_t indexer, const IndexerCardV2 &card);
+  register_indexer(indexer_event_client_t indexer, const IndexerCard &card);
   EventIndexerRegistrationOutcome probe_indexer(const UPID &generation) const;
 
   const IndexerOutboxStore &indexer_outbox_store() const

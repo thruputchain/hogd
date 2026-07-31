@@ -471,7 +471,7 @@ indexer_event_apply_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
                                               size_t event_logs_xdr_size,
                                               size_t tx_bodies_xdr_size)
 {
-  const auto call = x23::call_msg<IndexerEvent2::proc_meta<12>>();
+  const auto call = x23::call_msg<IndexerEvent1::proc_meta<12>>();
   IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol()};
   // Record marker + RPC call header + apply arguments. The committed block is
   // its payload fields followed by the two 32-byte identity hashes.
@@ -493,7 +493,7 @@ indexer_event_apply_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   });
   if (!size || *size > kMaxIndexerEventApplyRpcRecordBytes) {
     return std::unexpected(
-        "IndexerEvent2 apply RPC record exceeds x23 31-bit limit");
+        "IndexerEvent1 apply RPC record exceeds x23 31-bit limit");
   }
   return *size;
 }

@@ -16,12 +16,12 @@ namespace hogd {
 
 class EventIndexerRpc {
 public:
-  using rpc_service = EventIndexer2;
+  using rpc_service = EventIndexer1;
 
   EventIndexerRpc(EventRPCContext &ctx) : ctx_(ctx) {}
 
   x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2 card)
+  event_indexer_register(IndexerCard card)
   {
     // The protocol string is remote RPC input, not an internal invariant: a
     // peer speaking a different protocol must be rejected without aborting the
@@ -48,7 +48,7 @@ public:
            resolved.error().error_code().message());
       co_return EventIndexerRegistrationOutcome::EventRegistrationConnectFailed;
     }
-    auto client = co_await make_rpc_client<IndexerEvent2>(
+    auto client = co_await make_rpc_client<IndexerEvent1>(
         *resolved, /*retry=*/false,
         /*max_message_size=*/kIndexerRpcMaxMessageSize);
     if (!client) {
@@ -72,7 +72,7 @@ public:
 private:
   EventRPCContext &ctx_;
 };
-static_assert(is_EventIndexer2<EventIndexerRpc *, x23::MaybeAsync>);
+static_assert(is_EventIndexer1<EventIndexerRpc *, x23::MaybeAsync>);
 
 class EventIndexerServer : public RpcServer<EventIndexerRpc> {
 public:

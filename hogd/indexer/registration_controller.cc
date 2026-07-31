@@ -64,7 +64,7 @@ IndexerRegistrationController::register_once()
              resolved.error().error_code().message());
         return EventRegistrationConnectFailed;
       }
-      auto client = make_rpc_client<EventIndexer2>(*resolved, /*retry=*/false,
+      auto client = make_rpc_client<EventIndexer1>(*resolved, /*retry=*/false,
                                                    kIndexerRpcMaxMessageSize)();
       if (!client) {
         return EventRegistrationConnectFailed;
@@ -107,11 +107,11 @@ IndexerRegistrationController::register_once()
     if (registered_) {
       return event_client->event_indexer_probe(generation_)();
     }
-    IndexerCardV2 card{.protocol = version::kHogdProtocol(),
-                       .generation = generation_,
-                       .predecessor_generation = predecessor_generation_,
-                       .address_for_event = indexer_server_addr_.c_str(),
-                       .progress = db_.durable_progress()};
+    IndexerCard card{.protocol = version::kHogdProtocol(),
+                     .generation = generation_,
+                     .predecessor_generation = predecessor_generation_,
+                     .address_for_event = indexer_server_addr_.c_str(),
+                     .progress = db_.durable_progress()};
     return event_client->event_indexer_register(card)();
   } catch (const x23::XdrCallFailed &e) {
     if (stopping_.load(std::memory_order_acquire)) {

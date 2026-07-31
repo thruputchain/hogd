@@ -144,7 +144,7 @@ relay_one_tx_failure(indexer_event_client_t &client,
   // keeps alive (via its snapshot reference) for longer than this coroutine.
   x23::Defer dec{[&in_flight] { in_flight.fetch_sub(1, relaxed); }};
   try {
-    co_await client.indexer_event_report_tx_failure_v2(tx_hash, diag);
+    co_await client.indexer_event_report_tx_failure(tx_hash, diag);
   } catch (x23::XdrException const &e) {
     warn("dropping tx-failure report to an indexer: {}", e.what());
   }
@@ -193,7 +193,7 @@ apply_succeeded(const IndexerBlockApplyResult &result)
 
 bool
 lineage_admits(const std::optional<UPID> &durable_generation,
-               const IndexerCardV2 &card)
+               const IndexerCard &card)
 {
   if (!durable_generation) {
     return !card.predecessor_generation;
@@ -1107,7 +1107,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
 x23::Async<EventIndexerRegistrationOutcome>
 EventRPCContext::register_indexer(indexer_event_client_t indexer,
-                                  const IndexerCardV2 &card)
+                                  const IndexerCard &card)
 {
   using enum EventIndexerRegistrationOutcome;
   if (!outbox_reconciled_.load(std::memory_order_acquire)) {

@@ -347,7 +347,7 @@ private:
 
   void register_event_with_mempool()
   {
-    auto client = create_client<SchedEvent2>(MempoolTestInfra::kAddress,
+    auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
                                              sched_event_server_.port())()
                       .value();
     std::string exec_address =
@@ -359,13 +359,13 @@ private:
                    .address_for_exec = exec_address.c_str(),
                    .address_for_sched = sched_address.c_str()};
     while (true) {
-      auto prepared = client.schedevent2_prepare_event(card)();
+      auto prepared = client.schedevent_prepare_event(card)();
       if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         continue;
       }
       CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-      auto activated = client.schedevent2_activate_event(prepared.snapshot())();
+      auto activated = client.schedevent_activate_event(prepared.snapshot())();
       CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationOK);
       break;
     }

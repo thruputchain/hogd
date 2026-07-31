@@ -263,7 +263,7 @@ void
 NativeContractTestFramework::open_event_block(BlockID block_id)
 {
   // rpc is infallible
-  event_sched_wrapper_->client().eventsched2_open_block(block_id);
+  event_sched_wrapper_->client().eventsched_open_block(block_id);
 }
 
 void
@@ -271,8 +271,8 @@ NativeContractTestFramework::close_event_block(BlockID block_id)
 {
   // We use [block_id] as the height as well.
   auto r =
-      event_sched_wrapper_->client().eventsched2_close_block(block_id, block_id,
-                                                             ProposalTxs{});
+      event_sched_wrapper_->client().eventsched_close_block(block_id, block_id,
+                                                            ProposalTxs{});
   if (r.error() != RPCError::kRPCNone) {
     panic("close_event_block: eventsched_close_block failed: {}", r.error());
   }

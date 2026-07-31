@@ -173,37 +173,37 @@ struct TestEventAggregatorSchedRpc {
     : event_aggregator_(event_aggregator)
   {}
 
-  using rpc_service = EventSched2;
+  using rpc_service = EventSched1;
 
-  static void eventsched2_null() {}
+  static void eventsched_null() {}
 
-  x23::Async<RPCError> eventsched2_open_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_open_block(BlockID block_id)
   {
     return event_aggregator_.open_block(block_id);
   }
 
-  x23::Async<EventBlockResult> eventsched2_close_block(BlockID block_id,
-                                                       BlockHeight block_height,
-                                                       ProposalTxs txs)
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
+                                                      BlockHeight block_height,
+                                                      ProposalTxs txs)
   {
     return event_aggregator_.close_block(block_id, block_height,
                                          std::move(txs));
   }
 
-  x23::Async<RPCError> eventsched2_commit_block(BlockID block_id,
-                                                ConsensusValue value)
+  x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
+                                               ConsensusValue value)
   {
     return event_aggregator_.commit_block(block_id, std::move(value));
   }
 
-  // Keep the by-value parameter required by the generated EventSched2 service.
-  static RPCError eventsched2_confirm_committed_block(
+  // Keep the by-value parameter required by the generated EventSched1 service.
+  static RPCError eventsched_confirm_committed_block(
       ConsensusValue /*value*/) // NOLINT(performance-unnecessary-value-param)
   {
     return RPCError::kRPCNone;
   }
 
-  x23::Async<RPCError> eventsched2_abandon_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)
   {
     return event_aggregator_.abandon_block(block_id);
   }
@@ -223,7 +223,7 @@ struct TestEventAggregatorSchedRpc {
 private:
   TestEventAggregator &event_aggregator_;
 };
-static_assert(is_EventSched2<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
+static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
 
 class TestEventAggregatorSchedServer
   : public RpcServer<TestEventAggregatorSchedRpc> {

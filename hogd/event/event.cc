@@ -37,7 +37,7 @@ connect_to_event_sched_server(std::string const &address)
   if (!host_port.parse(address)) {
     panic("Invalid mempool address: {}", address);
   }
-  return make_srpc_client<SchedEvent2>(host_port, true);
+  return make_srpc_client<SchedEvent1>(host_port, true);
 }
 
 int
@@ -90,7 +90,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     retry_delay = std::min(retry_delay * 2, kMaxRegistrationRetryDelay);
   };
   while (true) {
-    auto prepared = client.schedevent2_prepare_event(card);
+    auto prepared = client.schedevent_prepare_event(card);
     if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
       wait_to_retry();
       continue;
@@ -106,7 +106,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     }
     Health::instance().set_current_block_height(
         snapshot.tip.consensus_value.proposal_header.block_height)();
-    auto activated = client.schedevent2_activate_event(snapshot);
+    auto activated = client.schedevent_activate_event(snapshot);
     if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
       break;
     }

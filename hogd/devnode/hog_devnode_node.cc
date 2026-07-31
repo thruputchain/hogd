@@ -542,7 +542,7 @@ HogDevnodeNode::HogDevnodeNode(
       }
       if (!*origin) {
         throw std::runtime_error(
-            "recovered devnode chain has no V2 outbox origin; clean chain "
+            "recovered devnode chain has no durable outbox origin; clean chain "
             "rollout required");
       }
       reconcile_event_outbox_with_recovered_tip();
@@ -702,8 +702,8 @@ void
 HogDevnodeNode::start_indexer_servers()
 {
   indexer_event_server_ =
-      std::make_unique<RpcServer<IndexerEventRpcV2>>(*indexer_db_,
-                                                     indexer_failure_cache_);
+      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_,
+                                                   indexer_failure_cache_);
   indexer_event_server_->max_message_size_ = kDevRpcMaxMessageSize;
   indexer_event_server_->start_server(make_bind_host_port(bind_host_,
                                                           /*port=*/0));
@@ -794,7 +794,7 @@ void
 HogDevnodeNode::register_indexer_with_event_service()
 {
   auto client_res =
-      create_client<EventIndexer2>(bind_host_, event_indexer_server_.port())();
+      create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
   if (!client_res)
     panic("devnode register_indexer_with_event_service connect failed: {}",
           client_res.error().error_code().message());
@@ -808,10 +808,10 @@ HogDevnodeNode::register_indexer_with_event_service()
     panic("devnode: failed to prepare indexer registration lineage: {}",
           lineage.error());
   }
-  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
-                     .generation = lineage->generation,
-                     .address_for_event = indexer_event_address.c_str(),
-                     .progress = indexer_db_->durable_progress()};
+  IndexerCard card{.protocol = version::kHogdProtocol(),
+                   .generation = lineage->generation,
+                   .address_for_event = indexer_event_address.c_str(),
+                   .progress = indexer_db_->durable_progress()};
   if (lineage->predecessor_generation) {
     card.predecessor_generation = *lineage->predecessor_generation;
   }
@@ -1152,7 +1152,7 @@ void
 HogDevnodeNode::register_event_with_mempool()
 {
   auto client_res =
-      create_client<SchedEvent2>(bind_host_, sched_event_server_.port())();
+      create_client<SchedEvent1>(bind_host_, sched_event_server_.port())();
   if (!client_res)
     panic("devnode register_event_with_mempool connect failed: {}",
           client_res.error().error_code().message());
@@ -1166,7 +1166,7 @@ HogDevnodeNode::register_event_with_mempool()
                  .address_for_exec = exec_address.c_str(),
                  .address_for_sched = sched_address.c_str()};
   while (true) {
-    EventPrepareResult prepared = client.schedevent2_prepare_event(card)();
+    EventPrepareResult prepared = client.schedevent_prepare_event(card)();
     if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
@@ -1178,7 +1178,7 @@ HogDevnodeNode::register_event_with_mempool()
                                     snapshot.tip.consensus_value)()
               .has_value());
     EventActivationResult activated =
-        client.schedevent2_activate_event(snapshot)();
+        client.schedevent_activate_event(snapshot)();
     if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
       break;
     }

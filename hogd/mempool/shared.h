@@ -45,7 +45,7 @@ using db_sched_client_t =
     DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using event_sched_client_t =
-    EventSched2::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+    EventSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using exec_sched_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

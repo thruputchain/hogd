@@ -518,7 +518,7 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
 {
-  co_return co_await event_sched_client_->eventsched2_open_block(block_id);
+  co_return co_await event_sched_client_->eventsched_open_block(block_id);
 }
 
 x23::Async<DbSchedResult>
@@ -530,7 +530,7 @@ MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
 {
-  co_return co_await event_sched_client_->eventsched2_abandon_block(block_id);
+  co_return co_await event_sched_client_->eventsched_abandon_block(block_id);
 }
 
 x23::Async<DbBlockResult>
@@ -546,15 +546,15 @@ x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
                                                const ConsensusValue &value)
 {
-  co_return co_await event_sched_client_->eventsched2_commit_block(block_id,
-                                                                   value);
+  co_return co_await event_sched_client_->eventsched_commit_block(block_id,
+                                                                  value);
 }
 
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_confirm_committed_block(
     const ConsensusValue &value)
 {
-  co_return co_await event_sched_client_->eventsched2_confirm_committed_block(
+  co_return co_await event_sched_client_->eventsched_confirm_committed_block(
       value);
 }
 
@@ -563,9 +563,9 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height,
                                               const ProposalTxs &txs)
 {
-  co_return co_await event_sched_client_->eventsched2_close_block(block_id,
-                                                                  block_height,
-                                                                  txs);
+  co_return co_await event_sched_client_->eventsched_close_block(block_id,
+                                                                 block_height,
+                                                                 txs);
 }
 
 x23::Async<DbBlockResult>

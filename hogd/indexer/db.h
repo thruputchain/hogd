@@ -97,7 +97,7 @@ public:
   consume_events(BlockHeight block_height, std::span<const TxEventLog> events,
                  std::span<const ProposedTransaction> bodies);
 
-  // V2 strict ingestion. Epoch changes and committed blocks each have one
+  // Durable strict ingestion. Epoch changes and committed blocks each have one
   // synchronous RocksDB WriteBatch durability point.
   IndexerProgress durable_progress() const;
   // Reuse an unacknowledged session after a crash. Once its acceptance is
@@ -175,9 +175,9 @@ public:
   // stream begins with the first post-genesis block.
   static constexpr BlockHeight kFirstOutboxBlockHeight = 1;
 
-  void set_v1_ingest_test_hook(std::function<void()> hook)
+  void set_legacy_ingest_test_hook(std::function<void()> hook)
   {
-    v1_ingest_test_hook_ = std::move(hook);
+    legacy_ingest_test_hook_ = std::move(hook);
   }
   void set_initialize_epoch_test_hook(std::function<void()> hook)
   {
@@ -258,14 +258,15 @@ private:
   // stalls serving until upstream resends.  Guarded by ingest_mutex_.
   std::set<int64_t> pending_heights_;
 
-  // Present only after V2 epoch initialization. Guarded by ingest_mutex_.
+  // Present only after durable epoch initialization. Guarded by ingest_mutex_.
   std::optional<IndexerInitializedProgress> durable_progress_;
   std::optional<IndexerRegistrationLineage> registration_lineage_;
-  // Set when a recognized V1 watermark is loaded or V1 first ingests. This is
-  // distinct from a fresh empty database: V2 initialization must fail with an
-  // explicit migration-required outcome while V1 remains restart-compatible.
-  bool legacy_v1_mode_ = false;
-  std::function<void()> v1_ingest_test_hook_;
+  // Set when a recognized legacy watermark is loaded or legacy ingestion first
+  // runs. This is distinct from a fresh empty database: durable initialization
+  // must fail with an explicit migration-required outcome while legacy storage
+  // remains restart-compatible.
+  bool legacy_mode_ = false;
+  std::function<void()> legacy_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
   std::function<void()> apply_validation_test_hook_;
 

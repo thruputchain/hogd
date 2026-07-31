@@ -187,7 +187,7 @@ private:
     x23::HostPort host_port;
     CHECK(host_port.parse(event_card_.address_for_sched));
     event_sched_client_ = std::make_unique<event_sched_client_t>(
-        make_srpc_client<EventSched2>(host_port, true));
+        make_srpc_client<EventSched1>(host_port, true));
 
     x23::HostPort exec_host_port;
     CHECK(exec_host_port.parse(event_card_.address_for_exec));
@@ -239,7 +239,7 @@ private:
 
   void open_event_block(BlockID block_number)
   {
-    auto r = event_sched_client_->eventsched2_open_block(block_number);
+    auto r = event_sched_client_->eventsched_open_block(block_number);
     if (r != RPCError::kRPCNone) {
       panic("Failed to open event block");
     }
@@ -258,8 +258,8 @@ private:
     }
     // We use [block_number] as the height as well.
     auto r =
-        event_sched_client_->eventsched2_close_block(block_number, block_number,
-                                                     event_proposal_txs_);
+        event_sched_client_->eventsched_close_block(block_number, block_number,
+                                                    event_proposal_txs_);
     if (r.error() != RPCError::kRPCNone) {
       panic("Failed to close event block");
     }
@@ -291,7 +291,7 @@ private:
   using coord_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
   using event_sched_client_t =
-      EventSched2::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+      EventSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
   using event_exec_client_t =
       EventExecutor1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 

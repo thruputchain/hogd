@@ -20,7 +20,7 @@ namespace hogd {
 
 class MockSchedEvent {
 public:
-  using rpc_service = SchedEvent2;
+  using rpc_service = SchedEvent1;
 
   MockSchedEvent() = default;
 
@@ -30,7 +30,7 @@ public:
   MockSchedEvent(MockSchedEvent &&) = delete;
   MockSchedEvent &operator=(MockSchedEvent &&) = delete;
 
-  EventPrepareResult schedevent2_prepare_event(const EventCard &card)
+  EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     std::unique_lock lk(mtx_);
     event_card_ = std::move(card);
@@ -43,7 +43,7 @@ public:
   }
 
   static EventActivationResult
-  schedevent2_activate_event(const EventRegistrationSnapshot & /*unused*/)
+  schedevent_activate_event(const EventRegistrationSnapshot & /*unused*/)
   {
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
@@ -62,7 +62,7 @@ private:
   std::optional<EventCard> event_card_;
 };
 
-static_assert(is_SchedEvent2<MockSchedEvent *, std::type_identity_t>);
+static_assert(is_SchedEvent1<MockSchedEvent *, std::type_identity_t>);
 
 class MockSchedDB {
 public:

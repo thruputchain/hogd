@@ -36,7 +36,7 @@
 namespace hogd {
 
 using indexer_event_client_t =
-    IndexerEvent2::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 namespace detail {
 struct EventContext {

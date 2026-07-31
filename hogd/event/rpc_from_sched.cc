@@ -34,7 +34,7 @@ to_rpc_error(EventErrorCode error_code)
 } // namespace
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched2_open_block(BlockID block_id)
+EventMempoolRpc::eventsched_open_block(BlockID block_id)
 {
   info("eventsched_open_block: block_id={}", block_id);
   auto r = co_await ctx_.open_block(block_id);
@@ -48,7 +48,7 @@ EventMempoolRpc::eventsched2_open_block(BlockID block_id)
 }
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched2_abandon_block(BlockID block_id)
+EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
 {
   info("eventsched_abandon_block: block_id={}", block_id);
   auto r = co_await ctx_.abandon_block(block_id);
@@ -62,8 +62,8 @@ EventMempoolRpc::eventsched2_abandon_block(BlockID block_id)
 }
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched2_commit_block(BlockID block_id,
-                                          ConsensusValue consensus_value)
+EventMempoolRpc::eventsched_commit_block(BlockID block_id,
+                                         ConsensusValue consensus_value)
 {
   info("eventsched_commit_block: block_id={}", block_id);
   auto r = co_await ctx_.commit_block(block_id, std::move(consensus_value));
@@ -77,7 +77,7 @@ EventMempoolRpc::eventsched2_commit_block(BlockID block_id,
 }
 
 x23::Async<RPCError>
-EventMempoolRpc::eventsched2_confirm_committed_block(
+EventMempoolRpc::eventsched_confirm_committed_block(
     ConsensusValue consensus_value)
 {
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
@@ -93,9 +93,9 @@ EventMempoolRpc::eventsched2_confirm_committed_block(
 }
 
 x23::Async<EventBlockResult>
-EventMempoolRpc::eventsched2_close_block(BlockID block_id,
-                                         BlockHeight block_height,
-                                         ProposalTxs proposal_txs)
+EventMempoolRpc::eventsched_close_block(BlockID block_id,
+                                        BlockHeight block_height,
+                                        ProposalTxs proposal_txs)
 {
   info("eventsched_close_block: block_id={} block_height={}", block_id,
        block_height);

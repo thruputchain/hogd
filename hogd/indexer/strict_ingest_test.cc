@@ -199,14 +199,14 @@ protected:
     auto opened = IndexDB::make_new(path_);
     ASSERT_TRUE(opened.has_value());
     db_ = std::make_unique<IndexDB>(std::move(*opened));
-    rpc_ = std::make_unique<IndexerEventRpcV2>(*db_, failures_);
+    rpc_ = std::make_unique<IndexerEventRpc>(*db_, failures_);
   }
 
   TmpDir dir_;
   std::filesystem::path path_;
   std::unique_ptr<IndexDB> db_;
   RecentTxFailureCache failures_;
-  std::unique_ptr<IndexerEventRpcV2> rpc_;
+  std::unique_ptr<IndexerEventRpc> rpc_;
 };
 
 TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
@@ -686,7 +686,7 @@ TEST_F(StrictIndexerTest, MalformedLegacyWatermarkFailsClosed)
   EXPECT_FALSE(IndexDB::open_or_make_new(path_).has_value());
 }
 
-TEST_F(StrictIndexerTest, RecognizedLegacyV1ReopensAndRefusesStrictMigration)
+TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
 {
   ProposedTransaction first_body = make_body(70, 0x70);
   TxEventLog first_log = make_log(first_body, 0x71);
@@ -745,12 +745,12 @@ TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)
   }
 }
 
-TEST_F(StrictIndexerTest, V1IngestExcludesEpochInitializationUntilComplete)
+TEST_F(StrictIndexerTest, LegacyIngestExcludesEpochInitializationUntilComplete)
 {
   std::latch ingest_reserved(1);
   std::latch allow_ingest(1);
   std::latch initialize_started(1);
-  db_->set_v1_ingest_test_hook([&] {
+  db_->set_legacy_ingest_test_hook([&] {
     ingest_reserved.count_down();
     allow_ingest.wait();
   });
@@ -778,7 +778,7 @@ TEST_F(StrictIndexerTest, V1IngestExcludesEpochInitializationUntilComplete)
             IndexerProgressState::IndexerProgressUninitialized);
 }
 
-TEST_F(StrictIndexerTest, V2InitializationExcludesV1Ingest)
+TEST_F(StrictIndexerTest, DurableInitializationExcludesLegacyIngest)
 {
   std::latch initialize_reserved(1);
   std::latch allow_initialize(1);

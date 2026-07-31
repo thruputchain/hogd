@@ -67,7 +67,7 @@ protected:
                                           LoadgenRpc::kRpcMaxMessageSize)()
             .value());
 
-    event_client_ = make_srpc_multiclient<EventSched2>(
+    event_client_ = make_srpc_multiclient<EventSched1>(
         x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
   }
 
@@ -86,7 +86,7 @@ protected:
       db_client_;
   std::unique_ptr<loadgen_client_t> loadgen_client_;
 
-  EventSched2::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
+  EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
       event_client_;
 
   x23::Defer<> force_syscallhandler_commit_ =
@@ -115,7 +115,7 @@ protected:
         BlockExecutionMode::kBlockExecutionModeProposal);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
-    auto event_open_res = event_client_.eventsched2_open_block(block_id);
+    auto event_open_res = event_client_.eventsched_open_block(block_id);
     ASSERT_EQ(event_open_res, RPCError::kRPCNone);
   }
 
@@ -126,8 +126,7 @@ protected:
 
     // We use [block_id] as the height as well.
     auto event_close_res =
-        event_client_.eventsched2_close_block(block_id, block_id,
-                                              ProposalTxs{});
+        event_client_.eventsched_close_block(block_id, block_id, ProposalTxs{});
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);

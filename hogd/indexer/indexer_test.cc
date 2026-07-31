@@ -32,6 +32,18 @@ public:
   IndexerBlockExplorerRpc &block_explorer() { return *block_explorer_; }
   RecentTxFailureCache &failure_cache() { return failure_cache_; }
 
+  x23::Async<void>
+  ingest_legacy_events(BlockHeight block_height,
+                       const TxEventLogBatch &tx_events,
+                       const ProposedTransactionBatch &tx_bodies)
+  {
+    CHECK(tx_events.size() == tx_bodies.size());
+    CHECK(db_->consume_events(block_height, tx_events, tx_bodies).has_value());
+    failure_cache_.prune(db_->latest_block());
+    co_await Health::instance().set_current_block_height(block_height);
+    co_return;
+  }
+
 protected:
   void SetUp() override
   {
@@ -129,7 +141,7 @@ TEST_F(IndexerTest, FindTx)
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
 
   // Consume events.
-  event_->indexer_event_process_events(block_height, events, bodies)();
+  ingest_legacy_events(block_height, events, bodies)();
 
   // Look up the first tx.
   TxInfoResult result0 =
@@ -160,7 +172,7 @@ TEST_F(IndexerTest, FindNonExistentTx)
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
 
   // Consume events.
-  event_->indexer_event_process_events(block_height, events, bodies)();
+  ingest_legacy_events(block_height, events, bodies)();
 
   // Look up a non-existent tx.
   SHA256Hash tx_hash;
@@ -179,7 +191,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   ProposedTransactionBatch bodies =
       create_tx_bodies(events.size()); // nonces 0, 1
 
-  event_->indexer_event_process_events(block_height, events, bodies)();
+  ingest_legacy_events(block_height, events, bodies)();
 
   TransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
@@ -207,7 +219,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
   BlockHeight block_height = 100;
   TxEventLogBatch events = create_event_logs(); // 2 txs, addrs 0xAA/0xBB
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
-  event_->indexer_event_process_events(block_height, events, bodies)();
+  ingest_legacy_events(block_height, events, bodies)();
 
   TransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
@@ -236,8 +248,8 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   event_log.proposed_tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
-  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
-                                       ProposedTransactionBatch{body})();
+  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
+                       ProposedTransactionBatch{body})();
 
   AddressTransactionQuery query{};
   query.address = root_addr;
@@ -279,8 +291,8 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   ev.serialized_event.resize(4);
   event_log.events.push_back(ev);
 
-  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
-                                       ProposedTransactionBatch{body})();
+  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
+                       ProposedTransactionBatch{body})();
 
   auto query_for = [&](ContractAddress const &addr) {
     AddressTransactionQuery q{};
@@ -327,9 +339,9 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     hashes.push_back(h);
     TxEventLog log;
     log.proposed_tx_hash = h;
-    event_->indexer_event_process_events(static_cast<BlockHeight>(300 + i),
-                                         TxEventLogBatch{log},
-                                         ProposedTransactionBatch{body})();
+    ingest_legacy_events(static_cast<BlockHeight>(300 + i),
+                         TxEventLogBatch{log},
+                         ProposedTransactionBatch{body})();
   }
 
   AddressTransactionQuery q{};
@@ -370,8 +382,8 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     TxEmittedEvent event;
     event.contract_address = addr;
     log.events.push_back(event);
-    event_->indexer_event_process_events(height, TxEventLogBatch{log},
-                                         ProposedTransactionBatch{body})();
+    ingest_legacy_events(height, TxEventLogBatch{log},
+                         ProposedTransactionBatch{body})();
   };
 
   ingest(300, 0x60);
@@ -461,7 +473,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
 
   // Whole batch ingested in a single call: events.size() == 4, but the total
   // number of emitted events across the batch is 0.
-  event_->indexer_event_process_events(block_height, logs, bodies)();
+  ingest_legacy_events(block_height, logs, bodies)();
 
   for (uint8_t i = 0; i < 4; i++) {
     AddressTransactionQuery q{};
@@ -493,7 +505,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
             DbConflictCode::kDbConflictValueMismatch);
 
   // The retried tx commits at height 101: the committed record wins.
-  event_->indexer_event_process_events(101, events, bodies)();
+  ingest_legacy_events(101, events, bodies)();
   result = block_explorer_->get_transaction_info(tx_hash)();
   ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result.info().height, 101);
@@ -513,8 +525,8 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
     std::ranges::fill(log.proposed_tx_hash, static_cast<uint8_t>(h));
     ProposedTransaction body;
     body.signed_tx.tx.uniquifier.nonce = h;
-    event_->indexer_event_process_events(h, TxEventLogBatch{log},
-                                         ProposedTransactionBatch{body})();
+    ingest_legacy_events(h, TxEventLogBatch{log},
+                         ProposedTransactionBatch{body})();
     TxInfoResult result = block_explorer_->get_transaction_info(failed_hash)();
     if (h < 105) {
       // attempt 100 + delta 5 > watermark h -> still visible.
@@ -561,8 +573,8 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
     ProposedTransaction body;
     body.signed_tx.tx.invocation.invoked_address = addr;
 
-    event_->indexer_event_process_events(height, TxEventLogBatch{log},
-                                         ProposedTransactionBatch{body})();
+    ingest_legacy_events(height, TxEventLogBatch{log},
+                         ProposedTransactionBatch{body})();
   };
 
   // Block 10 is contiguous; block 12 arrives before block 11, so it is

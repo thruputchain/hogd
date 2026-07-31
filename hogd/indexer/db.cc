@@ -606,8 +606,8 @@ IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
     pending_heights_(std::move(other.pending_heights_)),
     durable_progress_(std::move(other.durable_progress_)),
     registration_lineage_(std::move(other.registration_lineage_)),
-    legacy_v1_mode_(other.legacy_v1_mode_),
-    v1_ingest_test_hook_(std::move(other.v1_ingest_test_hook_)),
+    legacy_mode_(other.legacy_mode_),
+    legacy_ingest_test_hook_(std::move(other.legacy_ingest_test_hook_)),
     initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
     apply_validation_test_hook_(std::move(other.apply_validation_test_hook_)),
     highest_indexed_block_(
@@ -645,8 +645,8 @@ IndexDB::operator=(IndexDB &&other) noexcept
     pending_heights_ = std::move(other.pending_heights_);
     durable_progress_ = std::move(other.durable_progress_);
     registration_lineage_ = std::move(other.registration_lineage_);
-    legacy_v1_mode_ = other.legacy_v1_mode_;
-    v1_ingest_test_hook_ = std::move(other.v1_ingest_test_hook_);
+    legacy_mode_ = other.legacy_mode_;
+    legacy_ingest_test_hook_ = std::move(other.legacy_ingest_test_hook_);
     initialize_epoch_test_hook_ = std::move(other.initialize_epoch_test_hook_);
     apply_validation_test_hook_ = std::move(other.apply_validation_test_hook_);
     highest_indexed_block_.store(other.highest_indexed_block_.load(
@@ -705,12 +705,12 @@ IndexDB::consume_events(BlockHeight block_height,
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  // Compatibility-only V1 ingest must reserve the state through both
-  // external-SST ingests and the watermark write. Production uses V2; there is
-  // intentionally no supported mixed V1/V2 deployment.
+  // Legacy ingest must reserve the state through both external-SST ingests and
+  // the watermark write. Production uses durable strict ingestion; there is
+  // intentionally no supported mixed legacy/strict deployment.
   std::unique_lock ingest_guard(ingest_mutex_);
   if (durable_progress_) {
-    error("consume_events is disabled after V2 epoch initialization");
+    error("consume_events is disabled after durable epoch initialization");
     return IndexerError(IndexerErrorCode::kInternal);
   }
   if (height_seen(static_cast<int64_t>(block_height), ingest_guard)) {
@@ -718,8 +718,8 @@ IndexDB::consume_events(BlockHeight block_height,
          static_cast<int64_t>(block_height));
     return {};
   }
-  if (v1_ingest_test_hook_) {
-    v1_ingest_test_hook_();
+  if (legacy_ingest_test_hook_) {
+    legacy_ingest_test_hook_();
   }
 
   auto start_ts = x23::fastclock::get_ns();
@@ -970,7 +970,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // may lag the data (one-block window if we crash here) but can
   // never lead it.
   record_height(static_cast<int64_t>(block_height), ingest_guard);
-  legacy_v1_mode_ = true;
+  legacy_mode_ = true;
 
   auto end_ts = x23::fastclock::get_ns();
   info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
@@ -1171,7 +1171,7 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
     }
   }
   else {
-    if (legacy_v1_mode_) {
+    if (legacy_mode_) {
       return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
                            "legacy index data requires explicit migration");
     }
@@ -1680,7 +1680,7 @@ IndexDB::initialize_progress_from_db()
         return IndexerError(IndexerErrorCode::kInternal);
       }
       highest_indexed_block_.store(watermark, std::memory_order_release);
-      legacy_v1_mode_ = true;
+      legacy_mode_ = true;
       return {};
     }
     auto default_has_rows = column_family_has_rows_other_than(
@@ -1690,7 +1690,7 @@ IndexDB::initialize_progress_from_db()
       return default_has_rows.error();
     }
     if (*default_has_rows) {
-      error("indexer database has metadata but no V2 progress; explicit "
+      error("indexer database has metadata but no durable progress; explicit "
             "migration is required");
       return IndexerError(IndexerErrorCode::kInternal);
     }
@@ -1701,7 +1701,7 @@ IndexDB::initialize_progress_from_db()
         return has_rows.error();
       }
       if (*has_rows) {
-        error("indexer database has rows or metadata but no V2 progress; "
+        error("indexer database has rows or metadata but no durable progress; "
               "explicit migration is required");
         return IndexerError(IndexerErrorCode::kInternal);
       }

@@ -22,10 +22,10 @@ namespace hogd {
 namespace {
 
 struct AcceptingRegistrationRpc {
-  using rpc_service = EventIndexer2;
+  using rpc_service = EventIndexer1;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2 /*unused*/)
+  event_indexer_register(IndexerCard /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
@@ -37,13 +37,13 @@ struct AcceptingRegistrationRpc {
   }
 };
 
-static_assert(is_EventIndexer2<AcceptingRegistrationRpc *, x23::MaybeAsync>);
+static_assert(is_EventIndexer1<AcceptingRegistrationRpc *, x23::MaybeAsync>);
 
 struct BlockingRegistrationRpc {
-  using rpc_service = EventIndexer2;
+  using rpc_service = EventIndexer1;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2 /*unused*/)
+  event_indexer_register(IndexerCard /*unused*/)
   {
     std::promise<void> never;
     never.get_future().wait();
@@ -57,13 +57,13 @@ struct BlockingRegistrationRpc {
   }
 };
 
-static_assert(is_EventIndexer2<BlockingRegistrationRpc *, x23::MaybeAsync>);
+static_assert(is_EventIndexer1<BlockingRegistrationRpc *, x23::MaybeAsync>);
 
 struct StallingLivenessProbeRpc {
-  using rpc_service = EventIndexer2;
+  using rpc_service = EventIndexer1;
 
   static x23::Async<EventIndexerRegistrationOutcome>
-  event_indexer_register(IndexerCardV2 /*unused*/)
+  event_indexer_register(IndexerCard /*unused*/)
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
@@ -80,7 +80,7 @@ struct StallingLivenessProbeRpc {
   static inline std::atomic<std::size_t> calls_ = 0;
 };
 
-static_assert(is_EventIndexer2<StallingLivenessProbeRpc *, x23::MaybeAsync>);
+static_assert(is_EventIndexer1<StallingLivenessProbeRpc *, x23::MaybeAsync>);
 
 TEST(IndexerRegistrationController, WaitsForAcceptedRegistration)
 {

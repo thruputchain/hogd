@@ -1062,11 +1062,11 @@ TEST_F(IndexerOutboxTest, StableEnvelopeHeaderMatchesGolden)
   const x23::Buf encoded = x23::serialize(header);
 
   constexpr size_t kExpectedByteLength = 212;
-  const SHA256Hash kExpectedDigest{0x63, 0x88, 0x68, 0xe9, 0x99, 0x4d, 0x17,
-                                   0x98, 0xb2, 0x18, 0xc8, 0x79, 0xb7, 0xa8,
-                                   0x2a, 0x04, 0x35, 0xbf, 0xf8, 0x19, 0x1b,
-                                   0xa7, 0x2c, 0xa2, 0x25, 0x5d, 0xdf, 0xb0,
-                                   0xee, 0xa7, 0x38, 0x83};
+  const SHA256Hash kExpectedDigest{0x34, 0x06, 0x07, 0xe7, 0x3b, 0xd3, 0xa4,
+                                   0xcf, 0xb0, 0x2f, 0x43, 0xc3, 0x80, 0x3c,
+                                   0xa0, 0x44, 0x96, 0x2f, 0xd2, 0xa8, 0xd4,
+                                   0x53, 0x12, 0x07, 0x56, 0xc5, 0x67, 0x82,
+                                   0xf6, 0x24, 0xd8, 0x68};
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
 }
@@ -1425,7 +1425,7 @@ TEST_F(IndexerOutboxTest,
   IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol(),
                              .first_height = 1};
   const x23::Buf actual_record =
-      x23::make_record(x23::call_msg<IndexerEvent2::proc_meta<12>>(), origin,
+      x23::make_record(x23::call_msg<IndexerEvent1::proc_meta<12>>(), origin,
                        block);
   auto measured = indexer_event_apply_rpc_record_size_for_parts(
       x23::xdr_size(payload.consensus_value),

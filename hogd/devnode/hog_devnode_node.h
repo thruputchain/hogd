@@ -143,9 +143,9 @@ private:
   // indexer_failure_cache_ by reference, so it must be declared before (and
   // thus outlive) them.
   RecentTxFailureCache indexer_failure_cache_;
-  // IndexerEventRpcV2 is exposed by the indexer; EventIndexerServer below is
+  // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
   // exposed by the event service.
-  std::unique_ptr<RpcServer<IndexerEventRpcV2>> indexer_event_server_;
+  std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
   std::unique_ptr<RPCContext> ctx_;

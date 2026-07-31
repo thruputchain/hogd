@@ -23,7 +23,7 @@
 
 namespace hogd {
 
-inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 2;
+inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 1;
 inline constexpr uint32_t kEventIndexerSlotFormatVersion = 1;
 inline constexpr size_t kMaxIndexerOutboxProtocolCommitBytes = 64;
 inline constexpr size_t kIndexerRpcRecordMarkerBytes = sizeof(uint32_t);

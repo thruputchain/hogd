@@ -195,7 +195,7 @@ TEST(Mempool, EventPreparedCardIsUnavailableBeforeActivation)
   EventCard card{.protocol = version::kHogdProtocol(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent2_prepare_event(card);
+  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
   ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
@@ -209,7 +209,7 @@ TEST(Mempool, EventPrepareUsesTypedPreGenesisAndInvalidTipOutcomes)
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
 
-  EXPECT_EQ(MempoolEventRpc::schedevent2_prepare_event(card).outcome(),
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
             EventPrepareOutcome::EventPrepareNotReady);
   ConsensusValue pregenesis{};
   pregenesis.proposal_header.block_height = -1;
@@ -217,7 +217,7 @@ TEST(Mempool, EventPrepareUsesTypedPreGenesisAndInvalidTipOutcomes)
       EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
                         .consensus_value = pregenesis});
   for (size_t retry = 0; retry < 3; ++retry) {
-    EXPECT_EQ(MempoolEventRpc::schedevent2_prepare_event(card).outcome(),
+    EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
               EventPrepareOutcome::EventPrepareNotReady);
     EXPECT_FALSE(registration.event_registered(nullptr));
   }
@@ -226,7 +226,7 @@ TEST(Mempool, EventPrepareUsesTypedPreGenesisAndInvalidTipOutcomes)
   invalid.proposal_header.block_height = -2;
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = invalid});
-  EXPECT_EQ(MempoolEventRpc::schedevent2_prepare_event(card).outcome(),
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
             EventPrepareOutcome::EventPrepareError);
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
@@ -243,7 +243,7 @@ TEST(Mempool, EventPrepareRejectsMismatchedProtocol)
   EventCard card{.protocol = "hogp/not-this-binary",
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
-  EXPECT_EQ(MempoolEventRpc::schedevent2_prepare_event(card).outcome(),
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
             EventPrepareOutcome::EventPrepareError);
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
@@ -261,9 +261,9 @@ TEST(Mempool, ActivatedEventRejectsFurtherPrepareAndActivate)
   EventCard first{.protocol = version::kHogdProtocol(),
                   .address_for_exec = "127.0.0.1:1",
                   .address_for_sched = "127.0.0.1:2"};
-  auto first_prepared = MempoolEventRpc::schedevent2_prepare_event(first);
+  auto first_prepared = MempoolEventRpc::schedevent_prepare_event(first);
   ASSERT_EQ(first_prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-  ASSERT_EQ(MempoolEventRpc::schedevent2_activate_event(
+  ASSERT_EQ(MempoolEventRpc::schedevent_activate_event(
                 first_prepared.snapshot())
                 .outcome(),
             EventActivationOutcome::EventActivationOK);
@@ -273,10 +273,10 @@ TEST(Mempool, ActivatedEventRejectsFurtherPrepareAndActivate)
                         .address_for_exec = "127.0.0.1:3",
                         .address_for_sched = "127.0.0.1:4"};
   auto replacement_prepared =
-      MempoolEventRpc::schedevent2_prepare_event(replacement);
+      MempoolEventRpc::schedevent_prepare_event(replacement);
   EXPECT_EQ(replacement_prepared.outcome(),
             EventPrepareOutcome::EventPrepareError);
-  EXPECT_EQ(MempoolEventRpc::schedevent2_activate_event(
+  EXPECT_EQ(MempoolEventRpc::schedevent_activate_event(
                 first_prepared.snapshot())
                 .outcome(),
             EventActivationOutcome::EventActivationError);
@@ -297,7 +297,7 @@ TEST(Mempool, EventActivationRejectsChangedCanonicalTip)
   EventCard card{.protocol = version::kHogdProtocol(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent2_prepare_event(card);
+  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
   ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
 
   ConsensusValue changed_value = first_value;
@@ -305,7 +305,7 @@ TEST(Mempool, EventActivationRejectsChangedCanonicalTip)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 80, .consensus_value = changed_value});
   auto activated =
-      MempoolEventRpc::schedevent2_activate_event(prepared.snapshot());
+      MempoolEventRpc::schedevent_activate_event(prepared.snapshot());
   ASSERT_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
   EXPECT_EQ(activated.current_tip().block_id, 80);
   EXPECT_FALSE(registration.event_registered(nullptr));
@@ -323,12 +323,12 @@ TEST(Mempool, EventActivationRejectsModifiedPreparedSnapshot)
   EventCard card{.protocol = version::kHogdProtocol(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent2_prepare_event(card);
+  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
   ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
 
   EventRegistrationSnapshot modified = prepared.snapshot();
   modified.tip.block_id = 71;
-  auto activated = MempoolEventRpc::schedevent2_activate_event(modified);
+  auto activated = MempoolEventRpc::schedevent_activate_event(modified);
   EXPECT_EQ(activated.outcome(), EventActivationOutcome::EventActivationError);
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
@@ -345,10 +345,10 @@ TEST(Mempool, ExactTipActivationPublishesPreparedCard)
   EventCard card{.protocol = version::kHogdProtocol(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent2_prepare_event(card);
+  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
   ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
   auto activated =
-      MempoolEventRpc::schedevent2_activate_event(prepared.snapshot());
+      MempoolEventRpc::schedevent_activate_event(prepared.snapshot());
   ASSERT_EQ(activated.outcome(), EventActivationOutcome::EventActivationOK);
   EventCard registered;
   ASSERT_TRUE(registration.event_registered(&registered));
@@ -2063,7 +2063,7 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   EventCard event_card{.protocol = version::kHogdProtocol(),
                        .address_for_exec = "127.0.0.1:1",
                        .address_for_sched = "127.0.0.1:2"};
-  EXPECT_EQ(MempoolEventRpc::schedevent2_prepare_event(event_card).outcome(),
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(event_card).outcome(),
             EventPrepareOutcome::EventPrepareNotReady);
 
   GenesisConfigurationBuilder builder;

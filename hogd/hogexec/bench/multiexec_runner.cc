@@ -140,7 +140,7 @@ connect_to_event_sched_server(const ServerAddress &address)
   if (!host_port.parse(address)) {
     panic("Failed to parse event sched server address");
   }
-  auto client = make_rpc_client<EventSched2>(host_port, false)();
+  auto client = make_rpc_client<EventSched1>(host_port, false)();
   if (!client)
     panic("connect_to_event_sched_server failed: {}",
           client.error().error_code().message());
@@ -226,7 +226,7 @@ open_block(db_sched_client_t &db_sched_client,
     }(exec_client, block_number, n_remaining_execs, cb);
   }
 
-  auto event_async = event_sched_client.eventsched2_open_block(block_number);
+  auto event_async = event_sched_client.eventsched_open_block(block_number);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
@@ -266,8 +266,8 @@ close_block(db_sched_client_t &db_sched_client,
   }
   // We use [block_number] as the height as well.
   auto event_async =
-      event_sched_client.eventsched2_close_block(block_number, block_number,
-                                                 proposal_txs);
+      event_sched_client.eventsched_close_block(block_number, block_number,
+                                                proposal_txs);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {

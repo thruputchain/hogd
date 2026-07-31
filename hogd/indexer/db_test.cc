@@ -714,8 +714,8 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
     EXPECT_EQ(db->latest_block(), 101);
   }
 
-  // Recognized V1 metadata reopens for reads and continued V1 ingest. Strict
-  // epoch initialization remains blocked until an explicit migration.
+  // Recognized legacy metadata reopens for reads and continued legacy ingest.
+  // Strict epoch initialization remains blocked until an explicit migration.
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_EQ(db->latest_block(), 101);

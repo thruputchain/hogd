@@ -50,7 +50,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   RecentTxFailureCache failure_cache;
 
   // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpcV2> event(db, failure_cache);
+  RpcServer<IndexerEventRpc> event(db, failure_cache);
   event->max_message_size_ = kIndexerRpcMaxMessageSize;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));

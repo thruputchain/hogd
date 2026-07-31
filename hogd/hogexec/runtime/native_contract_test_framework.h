@@ -173,7 +173,7 @@ public:
 
 private:
   using client_t =
-      EventSched2::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+      EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
 
   static client_t connect_to_event_sched_server(uint16_t port)
   {
@@ -182,7 +182,7 @@ private:
       panic("Failed to connect to event server");
     }
     return x23::SRpcMulticlient<x23::RpcLogger>::make(*server_addr)
-        ->client(EventSched2{});
+        ->client(EventSched1{});
   }
   client_t event_sched_client_;
 };

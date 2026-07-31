@@ -20,7 +20,7 @@ namespace hogd {
 
 class MempoolEventRpc {
 public:
-  using rpc_service = SchedEvent2;
+  using rpc_service = SchedEvent1;
 
   MempoolEventRpc() = default;
 
@@ -30,7 +30,7 @@ public:
   MempoolEventRpc(MempoolEventRpc &&) = delete;
   MempoolEventRpc &operator=(MempoolEventRpc &&) = delete;
 
-  static EventPrepareResult schedevent2_prepare_event(const EventCard &card)
+  static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     info("event server preparing registration");
     if (std::string_view(card.protocol) != version::kHogdProtocol()) {
@@ -40,7 +40,7 @@ public:
   }
 
   static EventActivationResult
-  schedevent2_activate_event(const EventRegistrationSnapshot &snapshot)
+  schedevent_activate_event(const EventRegistrationSnapshot &snapshot)
   {
     return Registration::registration().activate_event(snapshot);
   }
@@ -50,7 +50,7 @@ public:
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));
 
-    auto ret = co_await create_client<EventSched2>(
+    auto ret = co_await create_client<EventSched1>(
         server_address_to_sockaddr(card.address_for_sched), /*retry=*/false,
         kEventSchedulerRpcMaxMessageSize);
     if (!ret)
@@ -91,6 +91,6 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_SchedEvent2<MempoolEventRpc *, x23::MaybeAsync>);
+static_assert(is_SchedEvent1<MempoolEventRpc *, x23::MaybeAsync>);
 
 } // namespace hogd

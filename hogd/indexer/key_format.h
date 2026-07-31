@@ -49,16 +49,17 @@ public:
   static constexpr const char *kHighestIndexedBlockMetaKey =
       "meta:highest_indexed_block";
 
-  // V2 strict-ingestion metadata lives in the default column family. The
+  // Durable strict-ingestion metadata lives in the default column family. The
   // progress value is XDR IndexerInitializedProgress; each identity value is
   // XDR IndexerCommittedBlockIdentity.
   static constexpr const char *kDurableProgressMetaKey =
-      "meta:indexer_v2:progress";
-  static constexpr std::string_view kStrictMetadataPrefix = "meta:indexer_v2:";
+      "meta:indexer_durable:progress";
+  static constexpr std::string_view kStrictMetadataPrefix =
+      "meta:indexer_durable:";
   static constexpr std::string_view kBlockIdentityMetaKeyPrefix =
-      "meta:indexer_v2:block:";
+      "meta:indexer_durable:block:";
   static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
-      "meta:indexer_v2:epoch:";
+      "meta:indexer_durable:epoch:";
   static constexpr const char *kRegistrationLineageMetaKey =
       "meta:indexer_registration:lineage";
 

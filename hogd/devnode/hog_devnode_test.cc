@@ -2077,7 +2077,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, Slice3bMultiHeightIndexerGapReplaysThroughStrictIndexerEvent2)
+TEST(HogDevnode, Slice3bMultiHeightIndexerGapReplaysThroughStrictIndexerRpc)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2381,12 +2381,12 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
       data_dir / "events" / "indexer-outbox" /
       IndexerOutboxStore::current_epoch_origin_filename()));
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "0",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered devnode chain has no V2 outbox origin; clean chain rollout "
-      "required");
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "0", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
 }
 
 TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
@@ -2401,15 +2401,15 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
       outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "0",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered devnode chain has no V2 outbox origin; clean chain rollout "
-      "required");
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "0", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
 }
 
-TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyV2Outbox)
+TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2417,12 +2417,12 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyV2Outbox)
   ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
             0UL);
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered devnode chain has no V2 outbox origin; clean chain rollout "
-      "required");
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "1", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
 }
 
 TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)

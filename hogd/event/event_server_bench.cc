@@ -43,9 +43,9 @@ namespace hogd {
 namespace {
 
 struct TestSchedEvent {
-  using rpc_service = SchedEvent2;
+  using rpc_service = SchedEvent1;
 
-  static EventPrepareResult schedevent2_prepare_event(const EventCard &card)
+  static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     std::println("Intro event server: {}", x23::show(card));
     EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
@@ -56,13 +56,13 @@ struct TestSchedEvent {
   }
 
   static EventActivationResult
-  schedevent2_activate_event(const EventRegistrationSnapshot & /*unused*/)
+  schedevent_activate_event(const EventRegistrationSnapshot & /*unused*/)
   {
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
 };
 
-static_assert(is_SchedEvent2<TestSchedEvent *, std::type_identity_t>);
+static_assert(is_SchedEvent1<TestSchedEvent *, std::type_identity_t>);
 
 auto
 connect_to_event_exec_server(const std::string &address)
@@ -87,7 +87,7 @@ connect_to_event_sched_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event sched server address: {}", address));
   }
-  auto client = make_rpc_client<EventSched2>(host_port, false)();
+  auto client = make_rpc_client<EventSched1>(host_port, false)();
   if (!client)
     panic("connect_to_event_sched_server failed: {}",
           client.error().error_code().message());
@@ -205,7 +205,7 @@ run_event_bench(const std::string &exec_server_addr,
 
   // Open block
   auto open_start = x23::fastclock::get_ns();
-  auto res = event_sched_client.eventsched2_open_block(block_number)();
+  auto res = event_sched_client.eventsched_open_block(block_number)();
   if (res != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to open block");
   }
@@ -258,8 +258,8 @@ run_event_bench(const std::string &exec_server_addr,
       .nondeterministic_data = t_to_parallel_batch(nondeterministic_data)(),
   };
   auto close_res =
-      event_sched_client.eventsched2_close_block(block_number, block_number,
-                                                 proposal_txs)();
+      event_sched_client.eventsched_close_block(block_number, block_number,
+                                                proposal_txs)();
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }
