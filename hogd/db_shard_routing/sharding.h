@@ -53,8 +53,9 @@ namespace hogd {
 // it holds (is_state_item in hogdb_dao.h decides which prefixes count). Those
 // hashes are LtHash16 multiset values, so the shards' sum to the hash an
 // unsharded db would produce, as long as each item is hashed on exactly one
-// shard. Genesis breaks that today by writing every item to every shard, and
-// the block header carries shard 0's hash alone.
+// shard -- which is why genesis writes only the items a shard owns. The block
+// header carries that sum, so it does not depend on how many shards a validator
+// runs; ShardedDbSched adds the partials up.
 
 // ---------------------------------------------------------------------------
 // Routing
