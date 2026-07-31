@@ -10,6 +10,7 @@
 #include "hogd/indexer/db.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -68,14 +69,40 @@ IndexerRegistrationController::register_once()
         event_client = event_client_;
       }
     }
+    std::mutex rpc_wait_mutex;
+    std::condition_variable_any rpc_wake;
+    bool rpc_completed = false;
+    std::optional<std::jthread> rpc_deadline_guard;
+    if (registered_) {
+      rpc_deadline_guard.emplace(
+          [client = *event_client, timeout = options_.liveness_rpc_timeout,
+           &rpc_wait_mutex, &rpc_wake,
+           &rpc_completed](std::stop_token stop) mutable {
+            std::unique_lock lock(rpc_wait_mutex);
+            const bool completed = rpc_wake.wait_for(
+                lock, stop, timeout, [&] { return rpc_completed; });
+            if (!completed && !stop.stop_requested()) {
+              warn("indexer liveness probe RPC timed out");
+              client.__send_call.get()->fail();
+            }
+          });
+    }
+    x23::Defer complete_rpc([&]() noexcept {
+      {
+        std::lock_guard lock(rpc_wait_mutex);
+        rpc_completed = true;
+      }
+      rpc_wake.notify_all();
+    });
+    if (registered_) {
+      return event_client->event_indexer_probe(generation_)();
+    }
     IndexerCardV2 card{.protocol = version::kHogdProtocol(),
                        .generation = generation_,
                        .predecessor_generation = predecessor_generation_,
                        .address_for_event = indexer_server_addr_.c_str(),
                        .progress = db_.durable_progress()};
-    const EventIndexerRegistrationOutcome outcome =
-        event_client->event_indexer_register(card)();
-    return outcome;
+    return event_client->event_indexer_register(card)();
   } catch (const x23::XdrCallFailed &e) {
     if (stopping_.load(std::memory_order_acquire)) {
       return EventRegistrationConnectFailed;

@@ -356,7 +356,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
   EXPECT_EQ(seen[2], hashes[2]); // block 302
 }
 
-TEST_F(IndexerTest, PaginationKeepsOriginalServingWatermark)
+TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
 {
   ContractAddress addr;
   std::ranges::fill(addr, 0xD5);
@@ -412,21 +412,21 @@ TEST_F(IndexerTest, PaginationKeepsOriginalServingWatermark)
   event_page = block_explorer_->get_events(event_query)();
   ASSERT_EQ(event_page.events.size(), 1UL);
   EXPECT_EQ(event_page.events[0].block_height, 301);
-  EXPECT_EQ(event_page.latest_block, 301);
+  EXPECT_EQ(event_page.latest_block, 302);
   EXPECT_TRUE(event_page.cursor.empty());
 
   transaction_query.cursor = transaction_page.cursor;
   transaction_page = block_explorer_->get_transactions(transaction_query)();
   ASSERT_EQ(transaction_page.transactions.size(), 1UL);
   EXPECT_EQ(transaction_page.transactions[0].height, 301);
-  EXPECT_EQ(transaction_page.latest_block, 301);
+  EXPECT_EQ(transaction_page.latest_block, 302);
   EXPECT_TRUE(transaction_page.cursor.empty());
 
   address_query.cursor = address_page.cursor;
   address_page = block_explorer_->get_transactions_by_address(address_query)();
   ASSERT_EQ(address_page.refs.size(), 1UL);
   EXPECT_EQ(address_page.refs[0].height, 301);
-  EXPECT_EQ(address_page.latest_block, 301);
+  EXPECT_EQ(address_page.latest_block, 302);
   EXPECT_TRUE(address_page.cursor.empty());
 }
 

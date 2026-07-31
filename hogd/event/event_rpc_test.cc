@@ -769,7 +769,7 @@ TEST_F(EventRpcTest, RegistrationRejectsForgedInitializedEpochProgress)
             EventIndexerRegistrationOutcome::EventRegistrationProgressConflict);
 }
 
-TEST_F(EventRpcTest, RegistrationDrainsCommitThatRacesInitialReplay)
+TEST_F(EventRpcTest, RegistrationDrainsConfirmationThatRacesInitialReplay)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc event_rpc(ctx);
@@ -785,6 +785,8 @@ TEST_F(EventRpcTest, RegistrationDrainsCommitThatRacesInitialReplay)
       make_consensus_value(1, first_closed.root_hash(), ProposalTxs{});
   block_one.prev_hash = sha256(genesis);
   ASSERT_EQ(event_rpc.eventsched2_commit_block(82, block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
             RPCError::kRPCNone);
 
   BlockingIndexerRpc indexer;
@@ -807,6 +809,8 @@ TEST_F(EventRpcTest, RegistrationDrainsCommitThatRacesInitialReplay)
   block_two.prev_hash = sha256(block_one);
   ASSERT_EQ(event_rpc.eventsched2_commit_block(83, block_two)(),
             RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_two)(),
+            RPCError::kRPCNone);
 
   EXPECT_EQ(registration.wait_for(std::chrono::milliseconds(50)),
             std::future_status::timeout);
@@ -818,6 +822,49 @@ TEST_F(EventRpcTest, RegistrationDrainsCommitThatRacesInitialReplay)
   ASSERT_EQ(indexer.event_batches.size(), 2UL);
   EXPECT_EQ(indexer.event_batches[0].first, 1);
   EXPECT_EQ(indexer.event_batches[1].first, 2);
+}
+
+TEST_F(EventRpcTest, LivenessProbeDoesNotWaitForDeliveryLane)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc event_rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  BlockingIndexerRpc indexer;
+  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
+                     .generation = {},
+                     .address_for_event = {},
+                     .progress = indexer.progress};
+  card.generation[0] = 0x51;
+  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
+                                 card)(),
+            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(821)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      event_rpc.eventsched2_close_block(821, 1, ProposalTxs{})();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(821, block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  indexer.apply_started.wait();
+
+  auto probe = std::async(std::launch::async,
+                          [&] { return ctx.probe_indexer(card.generation); });
+  ASSERT_EQ(probe.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::ready);
+  EXPECT_EQ(probe.get(),
+            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+  UPID stale_generation = card.generation;
+  stale_generation[0] ^= 1;
+  EXPECT_EQ(ctx.probe_indexer(stale_generation),
+            EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
+  indexer.release_apply.count_down();
 }
 
 TEST_F(EventRpcTest, EnqueueAtWorkerEmptyExitStartsAReplacementWorker)
@@ -861,17 +908,21 @@ TEST_F(EventRpcTest, EnqueueAtWorkerEmptyExitStartsAReplacementWorker)
   });
   ASSERT_EQ(event_rpc.eventsched2_commit_block(861, block_one)(),
             RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
   worker_at_empty_exit.wait();
 
-  auto second_commit = std::async(std::launch::async, [&] {
-    return event_rpc.eventsched2_commit_block(862, block_two)();
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(862, block_two)(),
+            RPCError::kRPCNone);
+  auto second_confirmation = std::async(std::launch::async, [&] {
+    return event_rpc.eventsched2_confirm_committed_block(block_two)();
   });
-  EXPECT_EQ(second_commit.wait_for(std::chrono::milliseconds(50)),
+  EXPECT_EQ(second_confirmation.wait_for(std::chrono::milliseconds(50)),
             std::future_status::timeout);
   release_worker.count_down();
-  ASSERT_EQ(second_commit.wait_for(std::chrono::seconds(5)),
+  ASSERT_EQ(second_confirmation.wait_for(std::chrono::seconds(5)),
             std::future_status::ready);
-  EXPECT_EQ(second_commit.get(), RPCError::kRPCNone);
+  EXPECT_EQ(second_confirmation.get(), RPCError::kRPCNone);
 
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -923,6 +974,8 @@ TEST_F(EventRpcTest,
   EXPECT_TRUE(indexer.event_batches.empty());
 
   ASSERT_TRUE(restarted.commit_block(84, block_one)().has_value());
+  EXPECT_TRUE(indexer.event_batches.empty());
+  ASSERT_TRUE(restarted.confirm_committed_block(block_one)().has_value());
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (indexer.event_batches.empty()) {
@@ -931,6 +984,143 @@ TEST_F(EventRpcTest,
   }
   ASSERT_EQ(indexer.event_batches.size(), 1UL);
   EXPECT_EQ(indexer.event_batches.front().first, 1);
+}
+
+TEST_F(EventRpcTest, CommitPublishesWithoutIndexerDeliveryUntilConfirmed)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc event_rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  CountingIndexerRpc indexer;
+  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
+                     .generation = {},
+                     .address_for_event = {},
+                     .progress = {}};
+  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
+                                 card)(),
+            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(841)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      event_rpc.eventsched2_close_block(841, 1, ProposalTxs{})();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(841, block_one)(),
+            RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value_or(false));
+  EXPECT_EQ(indexer.events.load(std::memory_order_relaxed), 0UL);
+
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (indexer.events.load(std::memory_order_relaxed) != 1) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
+
+TEST_F(EventRpcTest, ExactConfirmationIsIdempotentAndEnqueuesOnce)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc event_rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  CountingIndexerRpc indexer;
+  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
+                     .generation = {},
+                     .address_for_event = {},
+                     .progress = {}};
+  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
+                                 card)(),
+            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(842)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      event_rpc.eventsched2_close_block(842, 1, ProposalTxs{})();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(842, block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (indexer.events.load(std::memory_order_relaxed) != 1) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(indexer.events.load(std::memory_order_relaxed), 1UL);
+}
+
+TEST_F(EventRpcTest, ConfirmationRejectsConflictingAndOutOfOrderValues)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc event_rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  CountingIndexerRpc indexer;
+  IndexerCardV2 card{.protocol = version::kHogdProtocol(),
+                     .generation = {},
+                     .address_for_event = {},
+                     .progress = {}};
+  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
+                                 card)(),
+            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(843)(), RPCError::kRPCNone);
+  EventBlockResult first_closed =
+      event_rpc.eventsched2_close_block(843, 1, ProposalTxs{})();
+  ASSERT_EQ(first_closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, first_closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(843, block_one)(),
+            RPCError::kRPCNone);
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(844)(), RPCError::kRPCNone);
+  EventBlockResult second_closed =
+      event_rpc.eventsched2_close_block(844, 2, ProposalTxs{})();
+  ASSERT_EQ(second_closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_two =
+      make_consensus_value(2, second_closed.root_hash(), ProposalTxs{});
+  block_two.prev_hash = sha256(block_one);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(844, block_two)(),
+            RPCError::kRPCNone);
+
+  ConsensusValue conflicting = block_one;
+  conflicting.prev_hash[0] ^= 1;
+  EXPECT_EQ(event_rpc.eventsched2_confirm_committed_block(conflicting)(),
+            RPCError::kRPCBadBlockID);
+  EXPECT_EQ(event_rpc.eventsched2_confirm_committed_block(block_two)(),
+            RPCError::kRPCUnrecoverable);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_two)(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCUnrecoverable);
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (indexer.events.load(std::memory_order_relaxed) != 2) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 }
 
 TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)
@@ -1073,18 +1263,21 @@ TEST_F(EventRpcTest, TxFailureRelayCapIsPerIndexer)
   ::shutdown(fds[1], SHUT_RDWR);
 }
 
-TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommit)
+TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommitOrConfirmation)
 {
-  EventRPCContext ctx(temp_dir());
-  EventExecRpc exec_rpc(ctx);
-  EventMempoolRpc mempool_rpc(ctx);
+  auto ctx = std::make_unique<EventRPCContext>(temp_dir());
+  EventExecRpc exec_rpc(*ctx);
+  EventMempoolRpc mempool_rpc(*ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
 
   // The peer remains connected but never reads or replies. Strict delivery may
   // remain pending, but consensus commit must not wait for it.
   int fds[2];
   CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
   auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx.add_indexer(dead_stream->client<IndexerEvent2>());
+  ctx->add_indexer(dead_stream->client<IndexerEvent2>());
 
   ProposedTransaction body = make_body(7);
   TxEventLog event = make_event(body, 0x07);
@@ -1096,14 +1289,16 @@ TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommit)
             RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(7)(), RPCError::kRPCNone);
   EventBlockResult close_result =
-      mempool_rpc.eventsched2_close_block(7, 42, proposal_txs)();
+      mempool_rpc.eventsched2_close_block(7, 1, proposal_txs)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
 
   // Commit must succeed without waiting for the dead indexer's delivery RPC.
   ConsensusValue value =
-      make_consensus_value(42, close_result.root_hash(), proposal_txs);
-  initialize_test_origin(ctx, value);
+      make_consensus_value(1, close_result.root_hash(), proposal_txs);
+  value.prev_hash = sha256(genesis);
   EXPECT_EQ(mempool_rpc.eventsched2_commit_block(7, value)(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched2_confirm_committed_block(value)(),
             RPCError::kRPCNone);
 
   // Commit releases the block id, but removal of the context from the map
@@ -1113,7 +1308,7 @@ TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommit)
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(30);
   while (true) {
-    auto reopen = ctx.open_block(7)();
+    auto reopen = ctx->open_block(7)();
     if (reopen.has_value()) {
       break;
     }
@@ -1123,7 +1318,10 @@ TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommit)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   EXPECT_EQ(mempool_rpc.eventsched2_abandon_block(7)(), RPCError::kRPCNone);
-  dead_stream->fail();
+  auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
+  ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  shutdown.get();
   CHECK_EQ(close(fds[1]), 0);
 }
 
@@ -1152,6 +1350,8 @@ TEST_F(EventRpcTest, ContextShutdownCancelsPendingDeliveryAndDrainsWorker)
   block_one.prev_hash = sha256(genesis);
   ASSERT_EQ(event_rpc.eventsched2_commit_block(85, block_one)(),
             RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
 
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -1160,6 +1360,47 @@ TEST_F(EventRpcTest, ContextShutdownCancelsPendingDeliveryAndDrainsWorker)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
+  ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  shutdown.get();
+}
+
+TEST_F(EventRpcTest, ContextShutdownToleratesSuccessfulDeliveryReply)
+{
+  auto ctx = std::make_unique<EventRPCContext>(temp_dir());
+  EventMempoolRpc event_rpc(*ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
+  BlockingIndexerRpc indexer;
+  ctx->add_indexer(make_socketpair_indexer_client(&indexer));
+
+  std::latch delivery_succeeded{1};
+  std::latch release_delivery{1};
+  ctx->set_delivery_succeeded_test_hook([&] {
+    delivery_succeeded.count_down();
+    release_delivery.wait();
+  });
+
+  ASSERT_EQ(event_rpc.eventsched2_open_block(86)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      event_rpc.eventsched2_close_block(86, 1, ProposalTxs{})();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched2_commit_block(86, block_one)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(event_rpc.eventsched2_confirm_committed_block(block_one)(),
+            RPCError::kRPCNone);
+  indexer.apply_started.wait();
+  indexer.release_apply.count_down();
+  delivery_succeeded.wait();
+
+  auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
+  EXPECT_EQ(shutdown.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::timeout);
+  release_delivery.count_down();
   ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
             std::future_status::ready);
   shutdown.get();

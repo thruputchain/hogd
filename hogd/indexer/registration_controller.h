@@ -23,6 +23,7 @@ struct IndexerRegistrationControllerOptions {
   std::chrono::milliseconds startup_timeout = std::chrono::seconds(30);
   std::chrono::milliseconds retry_delay = std::chrono::milliseconds(100);
   std::chrono::milliseconds liveness_probe_delay = std::chrono::seconds(1);
+  std::chrono::milliseconds liveness_rpc_timeout = std::chrono::seconds(30);
 };
 
 // Registers the standalone indexer during startup. Once replay and activation

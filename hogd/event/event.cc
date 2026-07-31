@@ -105,6 +105,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     if (!reconciled) {
       panic("event outbox reconciliation failed");
     }
+    Health::instance().set_current_block_height(
+        snapshot.tip.consensus_value.proposal_header.block_height)();
     auto activated = client.schedevent2_activate_event(snapshot);
     if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
       break;

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -24,6 +25,11 @@ struct AcceptingRegistrationRpc {
   {
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
+
+  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  {
+    co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
+  }
 };
 
 static_assert(is_EventIndexer2<AcceptingRegistrationRpc *, x23::MaybeAsync>);
@@ -38,9 +44,37 @@ struct BlockingRegistrationRpc {
     never.get_future().wait();
     co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
   }
+
+  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  {
+    co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
+  }
 };
 
 static_assert(is_EventIndexer2<BlockingRegistrationRpc *, x23::MaybeAsync>);
+
+struct StallingLivenessProbeRpc {
+  using rpc_service = EventIndexer2;
+
+  static x23::Async<EventIndexerRegistrationOutcome>
+  event_indexer_register(IndexerCardV2)
+  {
+    co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
+  }
+
+  static x23::Async<EventIndexerRegistrationOutcome> event_indexer_probe(UPID)
+  {
+    calls.fetch_add(1, std::memory_order_relaxed);
+    std::promise<void> never;
+    never.get_future().wait();
+    co_return EventIndexerRegistrationOutcome::EventRegistrationAccepted;
+  }
+
+  static inline std::atomic<size_t> calls = 0;
+};
+
+static_assert(
+    is_EventIndexer2<StallingLivenessProbeRpc *, x23::MaybeAsync>);
 
 TEST(IndexerRegistrationController, WaitsForAcceptedRegistration)
 {
@@ -120,6 +154,39 @@ TEST(IndexerRegistrationController, EventDisconnectAfterRegistrationIsFatal)
             "127.0.0.1:1", *lineage, *db, options);
         controller.wait_until_registered();
         controller.disconnect_event_for_test();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+      },
+      "fatal indexer event connection failure after registration");
+}
+
+TEST(IndexerRegistrationController, StalledLivenessRpcAfterRegistrationIsFatal)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_DEATH(
+      {
+        TmpDir indexer_dir;
+        auto db = IndexDB::make_new(
+            std::filesystem::path(indexer_dir.directory()) / "indexer-db");
+        if (!db.has_value()) {
+          std::abort();
+        }
+        UPID generation{};
+        auto lineage = db->prepare_registration_lineage(generation);
+        if (!lineage.has_value()) {
+          std::abort();
+        }
+        StallingLivenessProbeRpc::calls.store(
+            0, std::memory_order_relaxed);
+        RpcServer<StallingLivenessProbeRpc> event_server;
+        const uint16_t event_port =
+            event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+        IndexerRegistrationControllerOptions options;
+        options.liveness_probe_delay = std::chrono::milliseconds(10);
+        options.liveness_rpc_timeout = std::chrono::milliseconds(100);
+        IndexerRegistrationController controller(
+            std::string(x23::HostPort{"127.0.0.1", event_port}.show()),
+            "127.0.0.1:1", *lineage, *db, options);
+        controller.wait_until_registered();
         std::this_thread::sleep_for(std::chrono::seconds(2));
       },
       "fatal indexer event connection failure after registration");

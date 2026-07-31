@@ -191,9 +191,15 @@ struct TestEventAggregatorSchedRpc {
   }
 
   x23::Async<RPCError> eventsched2_commit_block(BlockID block_id,
-                                                ConsensusValue value)
+                                                 ConsensusValue value)
   {
     return event_aggregator_.commit_block(block_id, std::move(value));
+  }
+
+  static RPCError
+  eventsched2_confirm_committed_block(ConsensusValue /*value*/)
+  {
+    return RPCError::kRPCNone;
   }
 
   x23::Async<RPCError> eventsched2_abandon_block(BlockID block_id)

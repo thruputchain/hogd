@@ -71,6 +71,21 @@ EventMempoolRpc::eventsched2_commit_block(BlockID block_id,
     co_return to_rpc_error(r.error().code());
   }
   info("eventsched_commit_block: block_id={} done", block_id);
+  co_return RPCError::kRPCNone;
+}
+
+x23::Async<RPCError>
+EventMempoolRpc::eventsched2_confirm_committed_block(
+    ConsensusValue consensus_value)
+{
+  const BlockHeight block_height = consensus_value.proposal_header.block_height;
+  info("eventsched_confirm_committed_block: block_height={}", block_height);
+  auto r = co_await ctx_.confirm_committed_block(std::move(consensus_value));
+  if (!r) {
+    info("eventsched_confirm_committed_block: block_height={} error={}",
+         block_height, static_cast<int>(r.error().code()));
+    co_return to_rpc_error(r.error().code());
+  }
   co_await Health::instance().set_current_block_height(r.value());
   co_return RPCError::kRPCNone;
 }

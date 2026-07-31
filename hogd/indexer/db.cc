@@ -2079,8 +2079,6 @@ IndexDB::get_events(EventQuery const &query) const
       break;
     }
   }
-  page.latest_block = max_serve_block;
-
   // Descending scans seek from the anchor downward; clamp the start
   // to the watermark so pending rows are never visited.  Ascending
   // scans are bounded inside ContractIter instead.
@@ -2294,8 +2292,6 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       break;
     }
   }
-  page.latest_block = max_serve_block;
-
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
     anchor_block = max_serve_block;
@@ -2475,8 +2471,6 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
       break;
     }
   }
-  page.latest_block = max_serve_block;
-
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
     anchor_block = max_serve_block;

@@ -83,11 +83,16 @@ public:
                                                   BlockHeight block_height,
                                                   ProposalTxs proposal_txs);
 
-  // Commits a closed block.
-  // Sends events to indexers and GCs the block context.
+  // Durably publishes a closed block and GCs the block context.
+  // Indexer delivery begins only after confirm_committed_block().
   // Returns the block height on success.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
+
+  // Releases a durably published block for indexer delivery only after the
+  // scheduler has also completed its durable commit.
+  x23::Async<EventStatus<BlockHeight>>
+  confirm_committed_block(ConsensusValue consensus_value);
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -115,6 +120,7 @@ public:
 
   x23::Async<EventIndexerRegistrationOutcome>
   register_indexer(indexer_event_client_t indexer, const IndexerCardV2 &card);
+  EventIndexerRegistrationOutcome probe_indexer(const UPID &generation) const;
 
   const IndexerOutboxStore &indexer_outbox_store() const
   {
@@ -126,6 +132,7 @@ public:
     close_reserved_test_hook_ = std::move(hook);
   }
   void set_delivery_worker_empty_test_hook(std::function<void()> hook);
+  void set_delivery_succeeded_test_hook(std::function<void()> hook);
 
   // Best-effort relay of a nondeterministic tx-failure diagnostic to every
   // registered indexer. Bypasses the per-block commit pipeline entirely --

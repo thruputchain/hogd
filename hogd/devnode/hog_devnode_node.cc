@@ -740,6 +740,14 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
     throw std::runtime_error(
         "failed to inspect recovered event outbox latest record");
   }
+  if (*latest && tip_height != std::numeric_limits<BlockHeight>::max() &&
+      (*latest)->block_height == tip_height + 1 &&
+      (*latest)->prev_hash == sha256(tip.value)) {
+    // Event publication and HogDB commit are concurrent. Preserve the expected
+    // crash window, but reconciliation keeps this record above the admissible
+    // delivery tail until the scheduler catches up with the exact value.
+    return;
+  }
   if (*latest && (*latest)->block_height > tip_height) {
     throw std::runtime_error(std::format(
         "recovered event outbox latest height {} is ahead of HogDB tip {}",

@@ -63,6 +63,12 @@ public:
     co_return co_await ctx_.register_indexer(std::move(*client), card);
   }
 
+  x23::Async<EventIndexerRegistrationOutcome>
+  event_indexer_probe(UPID generation)
+  {
+    co_return ctx_.probe_indexer(generation);
+  }
+
 private:
   EventRPCContext &ctx_;
 };

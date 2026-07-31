@@ -2435,21 +2435,33 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
        "1000000000"},
-      "recovered event outbox latest height 2 is ahead of HogDB tip 1");
+      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
+      "chain tip 1");
 }
 
-TEST(HogDevnode, DataDirRejectsOutboxAheadOfHogDb)
+TEST(HogDevnode, DataDirAcceptsOutboxOneAheadWithoutReplayingIt)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   initialize_persistent_data_dir(data_dir);
   std::ignore = append_next_test_outbox_record(data_dir);
 
-  expect_startup_failure(
+  HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered event outbox latest height 2 is ahead of HogDB tip 1");
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                      readiness.indexer.port,
+                                                      /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 1);
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)

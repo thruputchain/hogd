@@ -66,6 +66,7 @@ struct IndexerDeliveryState {
   bool stopping = false;
   std::shared_ptr<void> worker_owner;
   std::function<void()> worker_empty_test_hook;
+  std::function<void()> delivery_succeeded_test_hook;
   const IndexerOutboxStore *outbox_store = nullptr;
 };
 
@@ -226,12 +227,11 @@ drain_indexer_delivery_queue(
         }
         co_return;
       }
-      record = std::move(state->queue.front());
-      state->queue.pop_front();
+      record = state->queue.front();
       registered = state->registered;
     }
     if (!registered) {
-      continue;
+      co_return;
     }
 
     CHECK_PTR(state->outbox_store);
@@ -258,6 +258,13 @@ drain_indexer_delivery_queue(
       if (!registered) {
         continue;
       }
+      // Registration replay owns the same generation lane and may already
+      // have acknowledged and erased this queued record while the worker was
+      // loading it.
+      if (state->queue.empty() ||
+          state->queue.front().block_height != record->block_height) {
+        continue;
+      }
       rpc_operation_id = ++state->next_operation_id;
       state->active_clients.emplace_back(rpc_operation_id, registered->client);
     }
@@ -279,8 +286,26 @@ drain_indexer_delivery_queue(
           result.progress().last_payload_digest !=
               block->identity.payload_digest) {
         warn("indexer rejected committed block {} with outcome {}",
-             record->block_height, result.outcome());
+              record->block_height, result.outcome());
         panic("fatal committed indexer delivery rejection");
+      }
+      std::function<void()> delivery_succeeded_test_hook;
+      {
+        std::lock_guard g(state->mutex);
+        delivery_succeeded_test_hook =
+            std::move(state->delivery_succeeded_test_hook);
+      }
+      if (delivery_succeeded_test_hook) {
+        delivery_succeeded_test_hook();
+      }
+      {
+        std::lock_guard g(state->mutex);
+        if (state->stopping) {
+          co_return;
+        }
+        CHECK(!state->queue.empty());
+        CHECK_EQ(state->queue.front().block_height, record->block_height);
+        state->queue.pop_front();
       }
     } catch (const x23::XdrException &e) {
       {
@@ -592,27 +617,64 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
-  auto origin = indexer_outbox_store_.load_current_epoch_origin();
-  if (!origin || !*origin) {
-    error("committed indexer outbox has no current epoch origin");
-    co_await finish_block_operation(block_id, context_ptr, false);
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  std::shared_ptr<void> delivery_worker_owner;
-  if (outbox_reconciled_.load(std::memory_order_acquire) &&
-      (!admissible_indexer_tail_ || block_height > *admissible_indexer_tail_)) {
-    admissible_indexer_tail_ = block_height;
-    delivery_worker_owner =
-        enqueue_indexer_delivery((**origin).origin, committed);
-  }
   outbox_guard.reset();
-  if (delivery_worker_owner) {
-    start_indexer_delivery_worker(std::move(delivery_worker_owner));
-  }
 
   info("EventRPCContext::commit_block: block_id={} done, gc", block_id);
   co_await finish_block_operation(block_id, context_ptr,
                                   context_ptr != nullptr);
+  co_return block_height;
+}
+
+x23::Async<EventStatus<BlockHeight>>
+EventRPCContext::confirm_committed_block(ConsensusValue consensus_value)
+{
+  if (!outbox_reconciled_.load(std::memory_order_acquire)) {
+    co_return EventError{EventErrorCode::kInternal};
+  }
+
+  const BlockHeight block_height = consensus_value.proposal_header.block_height;
+  x23::CoroGuard outbox_guard;
+  co_await outbox_guard(outbox_commit_lock_);
+  if (!admissible_indexer_tail_) {
+    error("cannot confirm indexer delivery without a reconciled tail");
+    co_return EventError{EventErrorCode::kInternal};
+  }
+  auto committed = indexer_outbox_store_.load_committed(block_height);
+  if (!committed) {
+    error("cannot confirm missing committed indexer outbox height {}: {}",
+          block_height, committed.error());
+    co_return EventError{EventErrorCode::kInternal};
+  }
+  if (!xdr_equal(committed->consensus_value, consensus_value)) {
+    co_return EventError{EventErrorCode::kBadBlockID};
+  }
+  if (block_height < *admissible_indexer_tail_) {
+    error("stale indexer delivery confirmation at height {} below tail {}",
+          block_height, *admissible_indexer_tail_);
+    co_return EventError{EventErrorCode::kInternal};
+  }
+  if (block_height == *admissible_indexer_tail_) {
+    co_return block_height;
+  }
+  if (*admissible_indexer_tail_ == INT64_MAX ||
+      block_height != *admissible_indexer_tail_ + 1) {
+    error("indexer delivery confirmation skipped from height {} to {}",
+          *admissible_indexer_tail_, block_height);
+    co_return EventError{EventErrorCode::kInternal};
+  }
+  auto origin = indexer_outbox_store_.load_current_epoch_origin();
+  if (!origin || !*origin) {
+    error("committed indexer outbox has no current epoch origin");
+    co_return EventError{EventErrorCode::kInternal};
+  }
+
+  admissible_indexer_tail_ = block_height;
+  auto delivery_worker_owner =
+      enqueue_indexer_delivery((**origin).origin, *committed);
+  outbox_guard.reset();
+  if (delivery_worker_owner) {
+    start_indexer_delivery_worker(std::move(delivery_worker_owner));
+  }
   co_return block_height;
 }
 
@@ -1022,7 +1084,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
 x23::Async<EventIndexerRegistrationOutcome>
 EventRPCContext::register_indexer(indexer_event_client_t indexer,
-                                  const IndexerCardV2 &card)
+                                   const IndexerCardV2 &card)
 {
   using enum EventIndexerRegistrationOutcome;
   if (!outbox_reconciled_.load(std::memory_order_acquire)) {
@@ -1317,6 +1379,21 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
   }
 }
 
+EventIndexerRegistrationOutcome
+EventRPCContext::probe_indexer(const UPID &generation) const
+{
+  using enum EventIndexerRegistrationOutcome;
+  auto state = indexer_delivery_state_;
+  std::lock_guard g(state->mutex);
+  if (state->stopping || !state->registered) {
+    return EventRegistrationOriginUnavailable;
+  }
+  if (state->registered->generation != generation) {
+    return EventRegistrationStaleGeneration;
+  }
+  return EventRegistrationAccepted;
+}
+
 std::shared_ptr<void>
 EventRPCContext::enqueue_indexer_delivery(
     const IndexerOutboxOrigin &origin,
@@ -1355,6 +1432,13 @@ EventRPCContext::set_delivery_worker_empty_test_hook(std::function<void()> hook)
 {
   std::lock_guard g(indexer_delivery_state_->mutex);
   indexer_delivery_state_->worker_empty_test_hook = std::move(hook);
+}
+
+void
+EventRPCContext::set_delivery_succeeded_test_hook(std::function<void()> hook)
+{
+  std::lock_guard g(indexer_delivery_state_->mutex);
+  indexer_delivery_state_->delivery_succeeded_test_hook = std::move(hook);
 }
 
 void

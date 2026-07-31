@@ -23,6 +23,7 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
+#include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
 #include "x23/sockio.h"
 
