@@ -1,6 +1,7 @@
 #include "hogd/mempool/sharded_db_sched.h"
 
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -12,7 +13,10 @@
 #include "hogd/base/rpc_message_size.h" // kBulkRpcMaxMessageSize
 #include "hogd/base/rpc_server.h" // create_client, server_address_to_sockaddr
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"             // sha256
+#include "hogd/crypto/lthash16.h"           // LtHash16
 #include "hogd/db_shard_routing/sharding.h" // shard_of_address, kShardFunctionId
+#include "hogd/hogdb/db_hash.h" // db_hash_from_lthash16, lthash16_from_db_hash
 #include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -21,6 +25,33 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+// Each shard hashes only the items it owns, so its storage_long_hash is a
+// partial LtHash16 multiset value and the partials sum to the whole (see
+// sharding.h). Summing here -- rather than putting a per-shard vector in the
+// header -- keeps the header identical to the single-shard case and lets
+// validators run different shard counts.
+//
+// First non-OK in shard order wins: it carries no hash, and no caller reads a
+// hash off the non-OK path.
+DbBlockResult
+combine_block_results(std::vector<DbBlockResult> const &results)
+{
+  CHECK(!results.empty()); // one entry per shard; shard 0 is the base below
+  LtHash16 total;
+  for (DbBlockResult const &r : results) {
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      return r;
+    }
+    total += lthash16_from_db_hash(r.block().storage_long_hash);
+  }
+
+  DbBlockResult combined = results[kPrimaryShard];
+  combined.block().storage_long_hash = db_hash_from_lthash16(total);
+  combined.block().storage_hash =
+      sha256(std::as_bytes(std::span(combined.block().storage_long_hash)));
+  return combined;
+}
 
 x23::Async<std::shared_ptr<ShardedDbSched>>
 ShardedDbSched::connect(x23::XdrVec<ShardCard> cards)
@@ -105,33 +136,23 @@ ShardedDbSched::abandon_snapshot(BlockID block_id)
 x23::Async<DbBlockResult>
 ShardedDbSched::close_snapshot(BlockID block_id)
 {
-  DbBlockResult result =
-      co_await shards_.primary()->dbsched_close_snapshot(block_id);
-  for (size_t i = 1; i < shards_.shard_count(); ++i) {
-    DbBlockResult r =
-        co_await shards_.shard(i)->dbsched_close_snapshot(block_id);
-    if (result.result() == DbSchedResult::DbSchedResultOK &&
-        r.result() != DbSchedResult::DbSchedResultOK) {
-      result = r;
-    }
-  }
-  co_return result;
+  // Visit every shard (a close that only some shards saw would leave the rest
+  // holding an open BlockTX), then reduce to the combined hash.
+  std::vector<DbBlockResult> results =
+      co_await shards_.broadcast_collect<DbBlockResult>([&](auto &client) {
+        return client->dbsched_close_snapshot(block_id);
+      });
+  co_return combine_block_results(results);
 }
 
 x23::Async<DbBlockResult>
 ShardedDbSched::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  DbBlockResult result =
-      co_await shards_.primary()->dbsched_commit_snapshot(block_id, value);
-  for (size_t i = 1; i < shards_.shard_count(); ++i) {
-    DbBlockResult r =
-        co_await shards_.shard(i)->dbsched_commit_snapshot(block_id, value);
-    if (result.result() == DbSchedResult::DbSchedResultOK &&
-        r.result() != DbSchedResult::DbSchedResultOK) {
-      result = r;
-    }
-  }
-  co_return result;
+  std::vector<DbBlockResult> results =
+      co_await shards_.broadcast_collect<DbBlockResult>([&](auto &client) {
+        return client->dbsched_commit_snapshot(block_id, value);
+      });
+  co_return combine_block_results(results);
 }
 
 x23::Async<DbSchedResult>
@@ -154,12 +175,20 @@ ShardedDbSched::get_tip()
 {
   // Startup fail-stop for a partially-committed cluster: read every shard and
   // require (1) unanimous genesis presence (else a wiped shard 0 re-runs
-  // genesis against shards that have it) and (2) agreement on (height, id,
-  // txs_hash) -- not the per-shard storage hashes. Log before each CHECK.
-  DbTipResult primary = co_await shards_.primary()->dbsched_get_tip();
+  // genesis against shards that have it) and (2) agreement on the whole
+  // replicated header -- height, id, txs_hash, and storage_hash. storage_hash
+  // is the *global* (summed) db hash on every shard, for genesis as well as for
+  // normal blocks, so it agrees; only DbTip.storage_long_hash is per-shard.
+  // Checking it here is what makes a shard that committed against a different
+  // item set fail at startup. Log before each CHECK.
+  std::vector<DbTipResult> tips =
+      co_await shards_.broadcast_collect<DbTipResult>(
+          [](auto &client) { return client->dbsched_get_tip(); });
+
+  DbTipResult const &primary = tips[kPrimaryShard];
   bool const primary_ok = primary.result() == DbSchedResult::DbSchedResultOK;
-  for (size_t i = 1; i < shards_.shard_count(); ++i) {
-    DbTipResult r = co_await shards_.shard(i)->dbsched_get_tip();
+  for (size_t i = 1; i < tips.size(); ++i) {
+    DbTipResult const &r = tips[i];
     bool const r_ok = r.result() == DbSchedResult::DbSchedResultOK;
 
     if (r_ok != primary_ok) {
@@ -177,7 +206,8 @@ ShardedDbSched::get_tip()
         primary.db_tip().value.proposal_header;
     if (r_header.block_height != primary_header.block_height ||
         r.db_tip().id != primary.db_tip().id ||
-        r_header.txs_hash != primary_header.txs_hash) {
+        r_header.txs_hash != primary_header.txs_hash ||
+        r_header.storage_hash != primary_header.storage_hash) {
       error(
           "db shard tip divergence: shard {} at height {} (id {}), shard 0 at "
           "height {} (id {}); refusing to start",
@@ -187,8 +217,23 @@ ShardedDbSched::get_tip()
     CHECK_EQ(r_header.block_height, primary_header.block_height);
     CHECK_EQ(r.db_tip().id, primary.db_tip().id);
     CHECK_EQ(r_header.txs_hash, primary_header.txs_hash);
+    CHECK_EQ(r_header.storage_hash, primary_header.storage_hash);
   }
-  co_return primary;
+
+  if (!primary_ok) {
+    co_return primary;
+  }
+
+  // Hand back the combined db hash: each shard persists (and re-verifies on
+  // restart) only its own partial, but everything above the facade wants the
+  // whole-db value.
+  DbTipResult combined = primary;
+  LtHash16 total;
+  for (DbTipResult const &r : tips) {
+    total += lthash16_from_db_hash(r.db_tip().storage_long_hash);
+  }
+  combined.db_tip().storage_long_hash = db_hash_from_lthash16(total);
+  co_return combined;
 }
 
 x23::Async<DbSchedResult>
