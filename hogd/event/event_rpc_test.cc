@@ -124,7 +124,7 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root,
   ConsensusValue value{};
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = event_root;
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs);
+  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -155,7 +155,7 @@ initialize_test_origin(EventRPCContext &ctx, const ConsensusValue &first)
   ASSERT_TRUE(
       ctx.indexer_outbox_store()
           .initialize_current_epoch_origin(first.proposal_header.block_height,
-                                           first.prev_hash)
+                                           first.prev_hash)()
           .has_value());
 }
 
@@ -647,7 +647,7 @@ TEST_F(EventRpcTest,
     EventRPCContext previous(temp_dir());
     initialize_test_origin(previous, archival.consensus_value);
     ASSERT_TRUE(previous.indexer_outbox_store()
-                    .publish_committed(archival)
+                    .publish_committed(archival)()
                     .has_value());
     auto records =
         previous.indexer_outbox_store().enumerate_committed_records_raw();
@@ -2061,7 +2061,7 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
     EventBlockResult close_result =
         mempool_rpc.eventsched2_close_block(41, 9, proposal_txs)();
     ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
-    auto candidate = ctx.indexer_outbox_store().load_candidate(41);
+    auto candidate = ctx.indexer_outbox_store().load_candidate(41)();
     ASSERT_TRUE(candidate.has_value()) << candidate.error();
     EXPECT_EQ(candidate->block_id, 41);
     EXPECT_EQ(candidate->block_height, 9);
@@ -2079,8 +2079,8 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
     ASSERT_EQ(mempool_rpc.eventsched2_commit_block(41, consensus_value)(),
               RPCError::kRPCNone);
 
-    EXPECT_FALSE(ctx.indexer_outbox_store().load_candidate(41).has_value());
-    auto committed = ctx.indexer_outbox_store().load_committed(9);
+    EXPECT_FALSE(ctx.indexer_outbox_store().load_candidate(41)().has_value());
+    auto committed = ctx.indexer_outbox_store().load_committed(9)();
     ASSERT_TRUE(committed.has_value()) << committed.error();
     expect_xdr_equal(committed->consensus_value, consensus_value);
     expect_xdr_equal(committed->proposal_txs, proposal_txs);
@@ -2090,7 +2090,7 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
 
   auto reopened = IndexerOutboxStore::open(temp_dir() + "/indexer-outbox");
   ASSERT_TRUE(reopened.has_value()) << reopened.error();
-  auto committed = reopened->load_committed(9);
+  auto committed = reopened->load_committed(9)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   expect_xdr_equal(committed->consensus_value, consensus_value);
 }
@@ -2111,11 +2111,11 @@ TEST_F(EventRpcTest, AbandonClosedBlockRetainsCandidateForReconciliation)
   ASSERT_EQ(exec_rpc.eventexecutor_close_block(42)(), RPCError::kRPCNone);
   ASSERT_EQ(mempool_rpc.eventsched2_close_block(42, 10, proposal_txs)().error(),
             RPCError::kRPCNone);
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(42).has_value());
+  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(42)().has_value());
 
   ASSERT_EQ(mempool_rpc.eventsched2_abandon_block(42)(), RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().load_candidate(42).has_value());
-  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(10).has_value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_candidate(42)().has_value());
+  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(10)().has_value());
 }
 
 TEST_F(EventRpcTest, CommitRemovesPreviouslyAbandonedCandidateAtSameHeight)
@@ -2132,8 +2132,8 @@ TEST_F(EventRpcTest, CommitRemovesPreviouslyAbandonedCandidateAtSameHeight)
       mempool_rpc.eventsched2_close_block(51, 10, proposal_txs)();
   ASSERT_EQ(selected.error(), RPCError::kRPCNone);
   ASSERT_EQ(abandoned.error(), RPCError::kRPCNone);
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(50).has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(51).has_value());
+  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(50)().has_value());
+  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(51)().has_value());
 
   // Models the old candidate leaving mempool's commit cache. There is
   // deliberately no second abandon after the competing candidate commits.
@@ -2148,7 +2148,7 @@ TEST_F(EventRpcTest, CommitRemovesPreviouslyAbandonedCandidateAtSameHeight)
             RPCError::kRPCNone);
 
   EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(51).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(10).has_value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(10)().has_value());
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir(),
                                                abandoned.root_hash())));
@@ -2275,7 +2275,7 @@ TEST_F(EventRpcTest, EmptyBlockPublishesCandidateAndCommittedRecords)
   EventBlockResult close_result =
       mempool_rpc.eventsched2_close_block(43, 11, proposal_txs)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
-  auto candidate = ctx.indexer_outbox_store().load_candidate(43);
+  auto candidate = ctx.indexer_outbox_store().load_candidate(43)();
   ASSERT_TRUE(candidate.has_value()) << candidate.error();
   EXPECT_TRUE(candidate->event_logs.empty());
   EXPECT_TRUE(candidate->tx_bodies.empty());
@@ -2285,7 +2285,7 @@ TEST_F(EventRpcTest, EmptyBlockPublishesCandidateAndCommittedRecords)
   initialize_test_origin(ctx, value);
   ASSERT_EQ(mempool_rpc.eventsched2_commit_block(43, value)(),
             RPCError::kRPCNone);
-  auto committed = ctx.indexer_outbox_store().load_committed(11);
+  auto committed = ctx.indexer_outbox_store().load_committed(11)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   EXPECT_TRUE(committed->event_logs.empty());
   EXPECT_TRUE(committed->tx_bodies.empty());
@@ -2340,7 +2340,7 @@ TEST_F(EventRpcTest, CompetingFirstCommitsPublishOneOriginAndRecord)
   EXPECT_NE(first_result == RPCError::kRPCNone,
             second_result == RPCError::kRPCNone);
 
-  auto committed = ctx.indexer_outbox_store().load_committed(1);
+  auto committed = ctx.indexer_outbox_store().load_committed(1)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
@@ -2383,8 +2383,8 @@ TEST_F(EventRpcTest, CommitRejectsMismatchedProposalCommitment)
   mismatched.proposal_txs_hash[0] ^= 0x01;
   EXPECT_EQ(mempool_rpc.eventsched2_commit_block(44, mismatched)(),
             RPCError::kRPCUnrecoverable);
-  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(12).has_value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().load_candidate(44).has_value());
+  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(12)().has_value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_candidate(44)().has_value());
   EXPECT_EQ(mempool_rpc.eventsched2_abandon_block(44)(), RPCError::kRPCNone);
 }
 
@@ -2400,7 +2400,7 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(13, close_result.root_hash(), proposal_txs);
-  auto candidate = ctx.indexer_outbox_store().load_candidate(45);
+  auto candidate = ctx.indexer_outbox_store().load_candidate(45)();
   ASSERT_TRUE(candidate.has_value()) << candidate.error();
   IndexerOutboxCommittedPayload committed{
       .format_version = kIndexerOutboxFormatVersion,
@@ -2411,7 +2411,7 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   };
   initialize_test_origin(ctx, value);
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_committed(committed).has_value());
+      ctx.indexer_outbox_store().publish_committed(committed)().has_value());
 
   EXPECT_EQ(mempool_rpc.eventsched2_commit_block(45, value)(),
             RPCError::kRPCNone);
@@ -2420,7 +2420,7 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   EXPECT_EQ(mempool_rpc.eventsched2_commit_block(45, value)(),
             RPCError::kRPCNone);
   EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(45).value());
-  auto loaded = ctx.indexer_outbox_store().load_committed(13);
+  auto loaded = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
   expect_xdr_equal(*loaded, committed);
 }
@@ -2444,7 +2444,7 @@ TEST_F(EventRpcTest, PrepublishedConsensusRejectsDifferentFullCandidatePayload)
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(13, closed.root_hash(), proposal_txs);
-  auto original = ctx.indexer_outbox_store().load_candidate(451);
+  auto original = ctx.indexer_outbox_store().load_candidate(451)();
   ASSERT_TRUE(original.has_value()) << original.error();
   IndexerOutboxCommittedPayload committed{
       .format_version = kIndexerOutboxFormatVersion,
@@ -2455,18 +2455,18 @@ TEST_F(EventRpcTest, PrepublishedConsensusRejectsDifferentFullCandidatePayload)
   };
   initialize_test_origin(ctx, value);
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_committed(committed).has_value());
+      ctx.indexer_outbox_store().publish_committed(committed)().has_value());
   ASSERT_TRUE(ctx.indexer_outbox_store().remove_candidate(451).has_value());
 
   IndexerOutboxCandidatePayload changed = *original;
   changed.block_id = 452;
   changed.tx_bodies[0].signed_tx.signatures.push_back(DecoratedSignature{});
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_candidate(changed).has_value());
+      ctx.indexer_outbox_store().publish_candidate(changed)().has_value());
   EXPECT_EQ(mempool_rpc.eventsched2_commit_block(452, value)(),
             RPCError::kRPCUnrecoverable);
   EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(452).value());
-  auto retained = ctx.indexer_outbox_store().load_committed(13);
+  auto retained = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(retained.has_value()) << retained.error();
   expect_xdr_equal(*retained, committed);
 }
@@ -2523,7 +2523,7 @@ TEST_F(EventRpcTest, CommitPromotesRetainedCandidateAfterContextRestart)
   EXPECT_TRUE(restarted.reconcile_outbox_tip(47, value)().has_value());
   EXPECT_TRUE(std::filesystem::exists(final_file));
   EXPECT_FALSE(restarted.indexer_outbox_store().has_candidate(47).value());
-  auto committed = restarted.indexer_outbox_store().load_committed(1);
+  auto committed = restarted.indexer_outbox_store().load_committed(1)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   expect_xdr_equal(committed->consensus_value, value);
 }
@@ -3093,10 +3093,11 @@ TEST_F(EventRpcTest,
     EventRPCContext ctx(temp_dir());
     initialize_test_origin(ctx, archival_first.consensus_value);
     ASSERT_TRUE(ctx.indexer_outbox_store()
-                    .publish_committed(archival_first)
+                    .publish_committed(archival_first)()
                     .has_value());
-    ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(archival_tip).has_value());
+    ASSERT_TRUE(ctx.indexer_outbox_store()
+                    .publish_committed(archival_tip)()
+                    .has_value());
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20),
@@ -3183,8 +3184,9 @@ TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
-    ASSERT_TRUE(
-        epoch_a.indexer_outbox_store().publish_committed(archival).has_value());
+    ASSERT_TRUE(epoch_a.indexer_outbox_store()
+                    .publish_committed(archival)()
+                    .has_value());
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20), "hogp/a");
@@ -3213,8 +3215,9 @@ TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
     EventRPCContext epoch_c(temp_dir());
     ASSERT_TRUE(epoch_c.reconcile_outbox_tip(740, archival.consensus_value)()
                     .has_value());
-    ASSERT_TRUE(
-        epoch_c.indexer_outbox_store().publish_committed(current).has_value());
+    ASSERT_TRUE(epoch_c.indexer_outbox_store()
+                    .publish_committed(current)()
+                    .has_value());
   }
 
   EventRPCContext restarted(temp_dir());
@@ -3336,8 +3339,9 @@ TEST_F(EventRpcTest, MultipleEmptyArchivalEpochsPreserveCanonicalBoundary)
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
-    ASSERT_TRUE(
-        epoch_a.indexer_outbox_store().publish_committed(archival).has_value());
+    ASSERT_TRUE(epoch_a.indexer_outbox_store()
+                    .publish_committed(archival)()
+                    .has_value());
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20), "hogp/a");
@@ -3367,8 +3371,9 @@ TEST_F(EventRpcTest, MalformedEmptyArchivalEpochOriginIsRejected)
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
-    ASSERT_TRUE(
-        epoch_a.indexer_outbox_store().publish_committed(archival).has_value());
+    ASSERT_TRUE(epoch_a.indexer_outbox_store()
+                    .publish_committed(archival)()
+                    .has_value());
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20), "hogp/a");
@@ -3400,9 +3405,9 @@ TEST_F(EventRpcTest,
       EventRPCContext ctx(dir.directory());
       initialize_test_origin(ctx, first.consensus_value);
       ASSERT_TRUE(
-          ctx.indexer_outbox_store().publish_committed(first).has_value());
+          ctx.indexer_outbox_store().publish_committed(first)().has_value());
       ASSERT_TRUE(
-          ctx.indexer_outbox_store().publish_committed(tip).has_value());
+          ctx.indexer_outbox_store().publish_committed(tip)().has_value());
       EventMempoolRpc mempool_rpc(ctx);
       ASSERT_EQ(mempool_rpc.eventsched2_open_block(kCandidate)(),
                 RPCError::kRPCNone);
@@ -3461,7 +3466,7 @@ TEST_F(EventRpcTest,
     EventRPCContext ctx(temp_dir());
     initialize_test_origin(ctx, archival.consensus_value);
     ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(archival).has_value());
+        ctx.indexer_outbox_store().publish_committed(archival)().has_value());
     EventMempoolRpc mempool_rpc(ctx);
     ASSERT_EQ(mempool_rpc.eventsched2_open_block(kCandidate)(),
               RPCError::kRPCNone);
@@ -3504,11 +3509,11 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalProtocolReentry)
     EventRPCContext ctx(temp_dir());
     initialize_test_origin(ctx, first.consensus_value);
     ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(first).has_value());
+        ctx.indexer_outbox_store().publish_committed(first)().has_value());
     ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(second).has_value());
+        ctx.indexer_outbox_store().publish_committed(second)().has_value());
     ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(third).has_value());
+        ctx.indexer_outbox_store().publish_committed(third)().has_value());
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20), "hogp/a");
@@ -3624,7 +3629,7 @@ TEST_F(EventRpcTest, ReconciliationAcceptsPreparedCurrentEpochOrigin)
   ConsensusValue tip{};
   tip.proposal_header.block_height = 20;
   ASSERT_TRUE(ctx.indexer_outbox_store()
-                  .initialize_current_epoch_origin(21, sha256(tip))
+                  .initialize_current_epoch_origin(21, sha256(tip))()
                   .has_value());
 
   EXPECT_TRUE(ctx.reconcile_outbox_tip(200, tip)().has_value());
@@ -3638,7 +3643,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsInvalidPreparedCurrentEpochOrigin)
     TmpDir dir;
     EventRPCContext ctx(dir.directory());
     ASSERT_TRUE(ctx.indexer_outbox_store()
-                    .initialize_current_epoch_origin(20, sha256(tip))
+                    .initialize_current_epoch_origin(20, sha256(tip))()
                     .has_value());
     EXPECT_FALSE(ctx.reconcile_outbox_tip(200, tip)().has_value());
   }
@@ -3648,7 +3653,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsInvalidPreparedCurrentEpochOrigin)
     ConsensusValueHash wrong_hash = sha256(tip);
     wrong_hash[0] ^= 0xff;
     ASSERT_TRUE(ctx.indexer_outbox_store()
-                    .initialize_current_epoch_origin(21, wrong_hash)
+                    .initialize_current_epoch_origin(21, wrong_hash)()
                     .has_value());
     EXPECT_FALSE(ctx.reconcile_outbox_tip(200, tip)().has_value());
   }
@@ -3661,10 +3666,12 @@ TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
   auto second = make_empty_committed(331, 21, sha256(first.consensus_value));
   auto current = make_empty_committed(332, 22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(first).has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(second).has_value());
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_committed(current).has_value());
+      ctx.indexer_outbox_store().publish_committed(first)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(second)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(current)().has_value());
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20),
                           "hogp/archival");
@@ -3692,10 +3699,12 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
   auto second = make_empty_committed(334, 21, sha256(first.consensus_value));
   auto current = make_empty_committed(335, 22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(first).has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(second).has_value());
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_committed(current).has_value());
+      ctx.indexer_outbox_store().publish_committed(first)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(second)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(current)().has_value());
   second.consensus_value.prev_hash = disconnected;
   rewrite_committed_prev_hash(temp_dir(),
                               IndexerOutboxStore::committed_filename(21),
@@ -3729,10 +3738,12 @@ TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
   auto second = make_empty_committed(337, 21, sha256(first.consensus_value));
   auto current = make_empty_committed(338, 22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(first).has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(second).has_value());
   ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_committed(current).has_value());
+      ctx.indexer_outbox_store().publish_committed(first)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(second)().has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(current)().has_value());
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20),
                           "hogp/archival");
@@ -3770,7 +3781,7 @@ TEST_F(EventRpcTest,
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
     ahead = make_consensus_value(1, closed.root_hash(), proposal_txs);
     ahead.prev_hash = sha256(genesis);
-    auto candidate = ctx.indexer_outbox_store().load_candidate(210);
+    auto candidate = ctx.indexer_outbox_store().load_candidate(210)();
     ASSERT_TRUE(candidate.has_value()) << candidate.error();
     IndexerOutboxCommittedPayload expected{
         .format_version = kIndexerOutboxFormatVersion,
@@ -3789,7 +3800,7 @@ TEST_F(EventRpcTest,
   EXPECT_FALSE(restarted.indexer_outbox_store().has_candidate(310).value());
   EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(1).value());
   EXPECT_TRUE(restarted.reconcile_outbox_tip(310, ahead)().has_value());
-  auto committed = restarted.indexer_outbox_store().load_committed(1);
+  auto committed = restarted.indexer_outbox_store().load_committed(1)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   EXPECT_EQ(x23::serialize(*committed), expected_bytes);
   EXPECT_EQ(sha256(*committed), expected_payload_digest);
@@ -3863,12 +3874,13 @@ TEST_F(EventRpcTest, ReconciliationRejectsTwoCommittedRecordsAhead)
   initialize_test_origin(ctx, first);
   ASSERT_EQ(mempool_rpc.eventsched2_commit_block(212, first)(),
             RPCError::kRPCNone);
-  auto first_record = ctx.indexer_outbox_store().load_committed(21);
+  auto first_record = ctx.indexer_outbox_store().load_committed(21)();
   ASSERT_TRUE(first_record.has_value()) << first_record.error();
   IndexerOutboxCommittedPayload second = *first_record;
   second.consensus_value.proposal_header.block_height = 22;
   second.consensus_value.prev_hash = sha256(first);
-  ASSERT_TRUE(ctx.indexer_outbox_store().publish_committed(second).has_value());
+  ASSERT_TRUE(
+      ctx.indexer_outbox_store().publish_committed(second)().has_value());
 
   EXPECT_FALSE(ctx.reconcile_outbox_tip(200, scheduler_tip)().has_value());
 }

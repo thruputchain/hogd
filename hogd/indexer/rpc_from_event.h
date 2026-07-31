@@ -10,6 +10,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include <atomic>
+#include <utility>
 
 namespace hogd {
 
@@ -40,10 +41,11 @@ public:
   }
 
   x23::Async<IndexerBlockApplyResult>
-  indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
-                                      const IndexerCommittedBlock &block)
+  indexer_event_apply_committed_block(IndexerOutboxOrigin origin,
+                                      IndexerCommittedBlock block)
   {
-    IndexerBlockApplyResult result = db_.apply_committed_block(origin, block);
+    IndexerBlockApplyResult result =
+        co_await db_.apply_committed_block(std::move(origin), std::move(block));
     if (result.outcome() == IndexerBlockApplyOutcome::IndexerBlockApplied ||
         result.outcome() == IndexerBlockApplyOutcome::IndexerBlockDuplicate) {
       failure_cache_.prune(result.progress().contiguous_height);

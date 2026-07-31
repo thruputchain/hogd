@@ -22,6 +22,7 @@
 #include "pagination.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 // Forward declare RocksDB types to avoid including headers here
 namespace rocksdb {
@@ -107,9 +108,9 @@ public:
   IndexerStatus<void> acknowledge_registration(const UPID &generation);
   std::optional<IndexerRegistrationLineage> registration_lineage() const;
   IndexerEpochResult initialize_epoch(const IndexerOutboxOrigin &origin);
-  IndexerBlockApplyResult
-  apply_committed_block(const IndexerOutboxOrigin &origin,
-                        const IndexerCommittedBlock &block);
+  x23::Async<IndexerBlockApplyResult>
+  apply_committed_block(IndexerOutboxOrigin origin,
+                        IndexerCommittedBlock block);
 
   // Everything stored in the tx_index for one transaction.
   struct TxRecord {
@@ -182,6 +183,10 @@ public:
   {
     initialize_epoch_test_hook_ = std::move(hook);
   }
+  void set_apply_validation_test_hook(std::function<void()> hook)
+  {
+    apply_validation_test_hook_ = std::move(hook);
+  }
 
   [[nodiscard]] static constexpr bool
   is_valid_iteration_order(IterationOrder order)
@@ -215,6 +220,10 @@ private:
   {}
 
   void stats_worker(std::stop_token &stoken) const;
+
+  IndexerBlockApplyResult
+  apply_validated_committed_block(const IndexerOutboxOrigin &origin,
+                                  const IndexerCommittedBlock &block);
 
   IndexerStatus<void> initialize_progress_from_db();
   IndexerStatus<void> initialize_registration_lineage_from_db();
@@ -258,6 +267,7 @@ private:
   bool legacy_v1_mode_ = false;
   std::function<void()> v1_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
+  std::function<void()> apply_validation_test_hook_;
 
   // Highest CONTIGUOUSLY ingested block height (see latest_block()),
   // kNoBlocksIndexed until the first ingest, seeded from the on-disk

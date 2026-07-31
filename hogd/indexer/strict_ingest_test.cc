@@ -18,10 +18,12 @@
 
 #include "consensus.hh"
 #include "event.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
@@ -124,7 +126,7 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   value.proposal_header.block_height = height;
   value.proposal_header.block_timepoint = 1000 + height;
   value.proposal_header.events_hash = compute_indexer_outbox_event_root(logs);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal);
+  auto txs_root = compute_indexer_proposal_txs_root(proposal)();
   EXPECT_TRUE(txs_root.has_value()) << txs_root.error();
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal);
@@ -135,7 +137,7 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
       .event_logs = std::move(logs),
       .tx_bodies = std::move(bodies),
   };
-  auto block = make_indexer_committed_block(payload);
+  auto block = make_indexer_committed_block(payload)();
   EXPECT_TRUE(block.has_value()) << block.error();
   return std::move(*block);
 }
@@ -250,6 +252,68 @@ TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
             IndexerEpochOutcome::IndexerEpochConflict);
 }
 
+TEST_F(StrictIndexerTest, CommittedValidationAwaitsBeforeIngestMutex)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(101, 0xa1);
+  IndexerCommittedBlock block = make_block(1, origin.first_prev_hash, {body});
+
+  auto apply_from_pool = [&]() -> x23::Async<IndexerBlockApplyResult> {
+    co_await default_threadpool().bg();
+    co_return co_await db_->apply_committed_block(origin, block);
+  };
+
+  EXPECT_EQ(apply_from_pool()().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+}
+
+TEST_F(StrictIndexerTest, RpcDispatcherOwnsCommittedArgumentsAcrossSuspension)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(102, 0xa2);
+  IndexerCommittedBlock block = make_block(1, origin.first_prev_hash, {body});
+  indexer_event_client_t client = make_socketpair_indexer_client(rpc_.get());
+
+  IndexerBlockApplyResult result =
+      client.indexer_event_apply_committed_block(origin, block)();
+
+  EXPECT_EQ(result.outcome(), IndexerBlockApplyOutcome::IndexerBlockApplied);
+  EXPECT_TRUE(db_->get_tx_record(sha256(body.signed_tx.tx)).has_value());
+}
+
+TEST_F(StrictIndexerTest, ConcurrentValidationSerializesDurableMutation)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(103, 0xa3);
+  IndexerCommittedBlock block = make_block(1, origin.first_prev_hash, {body});
+  std::latch validation_ready(2);
+  db_->set_apply_validation_test_hook([&] {
+    validation_ready.count_down();
+    validation_ready.wait();
+  });
+  auto apply = [&] {
+    return db_->apply_committed_block(origin, block)().outcome();
+  };
+  auto first = std::async(std::launch::async, apply);
+  auto second = std::async(std::launch::async, apply);
+
+  const IndexerBlockApplyOutcome first_outcome = first.get();
+  const IndexerBlockApplyOutcome second_outcome = second.get();
+
+  EXPECT_TRUE(
+      (first_outcome == IndexerBlockApplyOutcome::IndexerBlockApplied &&
+       second_outcome == IndexerBlockApplyOutcome::IndexerBlockDuplicate) ||
+      (second_outcome == IndexerBlockApplyOutcome::IndexerBlockApplied &&
+       first_outcome == IndexerBlockApplyOutcome::IndexerBlockDuplicate));
+  EXPECT_TRUE(db_->get_tx_record(sha256(body.signed_tx.tx)).has_value());
+}
+
 TEST_F(StrictIndexerTest, RegistrationLineageReusesUnacknowledgedThenAdvances)
 {
   UPID first_generation{};
@@ -314,7 +378,7 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   ASSERT_EQ(db_->initialize_epoch(first_origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   IndexerCommittedBlock first = make_block(1, first_origin.first_prev_hash);
-  ASSERT_EQ(db_->apply_committed_block(first_origin, first).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(first_origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   IndexerOutboxOrigin second_origin =
       make_origin("hogp/b", 2, first.identity.consensus_hash, 1);
@@ -333,7 +397,7 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
             first.identity.payload_digest);
 
   IndexerCommittedBlock second = make_block(2, first.identity.consensus_hash);
-  EXPECT_EQ(reopened->apply_committed_block(second_origin, second).outcome(),
+  EXPECT_EQ(reopened->apply_committed_block(second_origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 }
 
@@ -388,9 +452,9 @@ TEST_F(StrictIndexerTest,
             IndexerEpochOutcome::IndexerEpochInitialized);
 
   IndexerCommittedBlock first = make_block(1, boundary);
-  EXPECT_EQ(db_->apply_committed_block(epoch_a, first).outcome(),
+  EXPECT_EQ(db_->apply_committed_block(epoch_a, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
-  EXPECT_EQ(db_->apply_committed_block(epoch_b, first).outcome(),
+  EXPECT_EQ(db_->apply_committed_block(epoch_b, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
 
   rpc_.reset();
@@ -400,7 +464,7 @@ TEST_F(StrictIndexerTest,
   ASSERT_EQ(reopened->durable_progress().state(),
             IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(reopened->durable_progress().initialized().origin, epoch_c);
-  EXPECT_EQ(reopened->apply_committed_block(epoch_c, first).outcome(),
+  EXPECT_EQ(reopened->apply_committed_block(epoch_c, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 }
 
@@ -413,7 +477,7 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   IndexerCommittedBlock first =
       make_block(1, origin.first_prev_hash,
                  ProposedTransactionBatch{make_body(6, 0xBB), eventless}, true);
-  ASSERT_EQ(db_->apply_committed_block(origin, first).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
   const SignedTransactionHash eventless_hash = sha256(eventless.signed_tx.tx);
@@ -430,7 +494,7 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   EXPECT_EQ(page->refs[0].tx_hash, eventless_hash);
 
   IndexerCommittedBlock empty = make_block(2, first.identity.consensus_hash);
-  ASSERT_EQ(db_->apply_committed_block(origin, empty).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, empty)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   IndexerProgress progress = db_->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
@@ -447,27 +511,27 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
   ProposedTransaction future_body = make_body(9, 0xD0);
   IndexerCommittedBlock future =
       make_block(2, {}, ProposedTransactionBatch{future_body});
-  IndexerBlockApplyResult gap = db_->apply_committed_block(origin, future);
+  IndexerBlockApplyResult gap = db_->apply_committed_block(origin, future)();
   ASSERT_EQ(gap.outcome(), IndexerBlockApplyOutcome::IndexerBlockGap);
   EXPECT_EQ(gap.gap().expected_height, 1);
   EXPECT_FALSE(
       db_->get_tx_record(sha256(future_body.signed_tx.tx)).has_value());
 
   IndexerCommittedBlock first = make_block(1, origin.first_prev_hash);
-  ASSERT_EQ(db_->apply_committed_block(origin, first).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   IndexerCommittedBlock second = make_block(2, first.identity.consensus_hash);
-  ASSERT_EQ(db_->apply_committed_block(origin, second).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
-  EXPECT_EQ(db_->apply_committed_block(origin, second).outcome(),
+  EXPECT_EQ(db_->apply_committed_block(origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockDuplicate);
-  EXPECT_EQ(db_->apply_committed_block(origin, first).outcome(),
+  EXPECT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockDuplicate);
 
   IndexerCommittedBlock conflict = first;
   conflict.payload.consensus_value.proposal_header.block_timepoint++;
   refresh_identity(conflict);
-  EXPECT_EQ(db_->apply_committed_block(origin, conflict).outcome(),
+  EXPECT_EQ(db_->apply_committed_block(origin, conflict)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
@@ -481,7 +545,7 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
       make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
 
   auto expect_conflict = [&](const IndexerCommittedBlock &block) {
-    EXPECT_EQ(db_->apply_committed_block(origin, block).outcome(),
+    EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
               IndexerBlockApplyOutcome::IndexerBlockContentConflict);
     EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
   };
@@ -541,7 +605,7 @@ TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   IndexerCommittedBlock first = make_block(1, origin.first_prev_hash);
-  ASSERT_EQ(db_->apply_committed_block(origin, first).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   const IndexerInitializedProgress before =
       db_->durable_progress().initialized();
@@ -565,7 +629,7 @@ TEST_F(StrictIndexerTest, ReopenRejectsMalformedPerHeightIdentity)
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   IndexerCommittedBlock first = make_block(1, origin.first_prev_hash);
-  ASSERT_EQ(db_->apply_committed_block(origin, first).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   rpc_.reset();
   db_.reset();
@@ -756,7 +820,7 @@ TEST_F(StrictIndexerTest, HistoricalIdentitiesAreValidatedLazily)
   IndexerCommittedBlock first;
   for (BlockHeight height = 1; height <= 100; ++height) {
     IndexerCommittedBlock block = make_block(height, previous);
-    ASSERT_EQ(db_->apply_committed_block(origin, block).outcome(),
+    ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
               IndexerBlockApplyOutcome::IndexerBlockApplied);
     previous = block.identity.consensus_hash;
     if (height == 1) {
@@ -772,7 +836,7 @@ TEST_F(StrictIndexerTest, HistoricalIdentitiesAreValidatedLazily)
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
   EXPECT_EQ(reopened->durable_progress().initialized().contiguous_height, 100);
-  EXPECT_EQ(reopened->apply_committed_block(origin, first).outcome(),
+  EXPECT_EQ(reopened->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockInternalFailure);
 }
 
@@ -791,7 +855,7 @@ TEST_F(StrictIndexerTest, AtomicBatchNeverMakesOnePointRowVisibleAlone)
       make_block(1, origin.first_prev_hash, std::move(bodies));
   std::atomic<bool> done = false;
   std::thread writer([&] {
-    EXPECT_EQ(db_->apply_committed_block(origin, block).outcome(),
+    EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
               IndexerBlockApplyOutcome::IndexerBlockApplied);
     done.store(true, std::memory_order_release);
   });
@@ -817,7 +881,7 @@ TEST_F(StrictIndexerTest,
   IndexerCommittedBlock block =
       make_block(1, origin.first_prev_hash,
                  ProposedTransactionBatch{first, second});
-  ASSERT_EQ(db_->apply_committed_block(origin, block).outcome(),
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
   // Indexed rows and durable progress must reopen at the same committed height.

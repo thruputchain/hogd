@@ -113,8 +113,9 @@ private:
   validate_recovered_data_dir(BootstrapAccountConfig const &requested_config);
   void write_data_dir_metadata() const;
   void load_recovered_bootstrap_metadata(BootstrapAccountConfig const &config);
-  void materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
-  void initialize_fresh_event_outbox_origin();
+  x23::Async<void>
+  materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
+  x23::Async<void> initialize_fresh_event_outbox_origin();
   void commit_initialization_batch(SignedTransactionBatch const &txs);
   void refresh_bootstrap_account_balances();
   void prepare_for_failed_construction() noexcept;

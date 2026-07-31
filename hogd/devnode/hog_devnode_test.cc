@@ -960,7 +960,7 @@ make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(event_logs);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs);
+  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -984,11 +984,11 @@ append_next_test_outbox_record(std::filesystem::path const &data_dir)
   const auto *latest_record =
       latest_value.has_value() ? &latest_value.value() : nullptr;
   CHECK(latest_record != nullptr);
-  auto previous = store->load_committed(latest_record->block_height);
+  auto previous = store->load_committed(latest_record->block_height)();
   CHECK(previous.has_value());
   auto next = make_empty_outbox_append(latest_record->block_height + 1,
                                        sha256(previous->consensus_value));
-  CHECK(store->publish_committed(next).has_value());
+  CHECK(store->publish_committed(next)().has_value());
   return next;
 }
 
@@ -2199,7 +2199,7 @@ TEST(HogDevnode, Slice3bMultiHeightIndexerGapReplaysThroughStrictIndexerEvent2)
     auto store =
         IndexerOutboxStore::open_or_create_in((data_dir / "events").string());
     ASSERT_TRUE(store.has_value()) << store.error();
-    auto payload = store->load_committed(2);
+    auto payload = store->load_committed(2)();
     ASSERT_TRUE(payload.has_value()) << payload.error();
     ASSERT_EQ(payload->tx_bodies.size(), 1UL);
     ASSERT_EQ(payload->event_logs.size(), 1UL);
@@ -2375,7 +2375,7 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
         .block_height = 1,
         .event_root = compute_indexer_outbox_event_root({}),
     };
-    ASSERT_TRUE(store->publish_candidate(candidate).has_value());
+    ASSERT_TRUE(store->publish_candidate(candidate)().has_value());
   }
   ASSERT_TRUE(std::filesystem::remove(
       data_dir / "events" / "indexer-outbox" /

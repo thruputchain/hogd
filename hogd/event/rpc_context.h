@@ -179,9 +179,9 @@ private:
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
-  IndexerOutboxStatus<void>
+  x23::Async<IndexerOutboxStatus<void>>
   remove_resolved_candidates(BlockHeight committed_height);
-  IndexerOutboxStatus<std::optional<CandidatePromotion>>
+  x23::Async<IndexerOutboxStatus<std::optional<CandidatePromotion>>>
   find_canonical_candidate(const ConsensusValue &consensus_value) const;
   std::shared_ptr<void>
   enqueue_indexer_delivery(const IndexerOutboxOrigin &origin,

@@ -198,23 +198,24 @@ validate_payload_sizes(const Payload &payload)
 }
 
 template<typename Payload>
-IndexerOutboxStatus<ProposalTxsHash>
+x23::Async<IndexerOutboxStatus<ProposalTxsHash>>
 validate_canonical_proposal_mapping(const Payload &payload)
 {
   x23::XdrVec<SignedTransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!parallel_batch_to_t_serial(payload.proposal_txs.hash,
-                                  canonical_hashes) ||
-      !parallel_batch_to_t_serial(payload.proposal_txs.nondeterministic_data,
-                                  canonical_nondeterministic_data)) {
-    return std::unexpected("malformed canonical ProposalTxs parallel batch");
+  if (!(co_await parallel_batch_to_t(payload.proposal_txs.hash,
+                                     canonical_hashes)) ||
+      !(co_await parallel_batch_to_t(payload.proposal_txs.nondeterministic_data,
+                                     canonical_nondeterministic_data))) {
+    co_return std::unexpected("malformed canonical ProposalTxs parallel batch");
   }
   if (canonical_hashes.size() != canonical_nondeterministic_data.size()) {
-    return std::unexpected("canonical ProposalTxs batch cardinalities differ");
+    co_return std::unexpected(
+        "canonical ProposalTxs batch cardinalities differ");
   }
   if (canonical_hashes.size() != payload.event_logs.size() ||
       canonical_hashes.size() != payload.tx_bodies.size()) {
-    return std::unexpected(
+    co_return std::unexpected(
         "canonical proposal and event/body batch cardinalities differ");
   }
 
@@ -226,7 +227,8 @@ validate_canonical_proposal_mapping(const Payload &payload)
     if (!canonical
              .emplace(canonical_hashes[i], canonical_nondeterministic_data[i])
              .second) {
-      return std::unexpected("canonical ProposalTxs contains duplicate hashes");
+      co_return std::unexpected(
+          "canonical ProposalTxs contains duplicate hashes");
     }
   }
 
@@ -236,83 +238,85 @@ validate_canonical_proposal_mapping(const Payload &payload)
     const SignedTransactionHash body_hash =
         sha256(payload.tx_bodies[i].signed_tx.tx);
     if (body_hash != payload.event_logs[i].proposed_tx_hash) {
-      return std::unexpected(std::format(
+      co_return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
     if (!seen_bodies.insert(body_hash).second) {
-      return std::unexpected("event/body batches contain duplicate hashes");
+      co_return std::unexpected("event/body batches contain duplicate hashes");
     }
     auto entry = canonical.find(body_hash);
     if (entry == canonical.end()) {
-      return std::unexpected(
+      co_return std::unexpected(
           "event/body transaction is missing from canonical ProposalTxs");
     }
     if (!nondeterministic_data_equal(
             payload.tx_bodies[i].nondeterministic_proposal_data,
             entry->second)) {
-      return std::unexpected(
+      co_return std::unexpected(
           "transaction body nondeterministic data differs from canonical "
           "ProposalTxs");
     }
   }
   if (seen_bodies.size() != canonical.size()) {
-    return std::unexpected("canonical ProposalTxs contains extra transactions");
+    co_return std::unexpected(
+        "canonical ProposalTxs contains extra transactions");
   }
-  return proposal_txs_compatibility_hash(payload.proposal_txs);
+  co_return proposal_txs_compatibility_hash(payload.proposal_txs);
 }
 
 template<typename Payload>
-IndexerOutboxStatus<ProposalTxsHash>
+x23::Async<IndexerOutboxStatus<ProposalTxsHash>>
 validate_batches(const Payload &payload, const SHA256Hash &expected_event_root)
 {
   if (auto sizes = validate_payload_sizes(payload); !sizes) {
-    return std::unexpected(sizes.error());
+    co_return std::unexpected(sizes.error());
   }
   if (payload.event_logs.size() != payload.tx_bodies.size()) {
-    return std::unexpected("event log and transaction body batch sizes differ");
+    co_return std::unexpected(
+        "event log and transaction body batch sizes differ");
   }
   if (compute_indexer_outbox_event_root(payload.event_logs) !=
       expected_event_root) {
-    return std::unexpected("event root differs from payload identity");
+    co_return std::unexpected("event root differs from payload identity");
   }
-  return validate_canonical_proposal_mapping(payload);
+  co_return co_await validate_canonical_proposal_mapping(payload);
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 validate_candidate(const IndexerOutboxCandidatePayload &payload)
 {
   if (payload.format_version != kIndexerOutboxFormatVersion) {
-    return std::unexpected(
+    co_return std::unexpected(
         std::format("unknown candidate outbox format version {}",
                     payload.format_version));
   }
   if (payload.block_height < 0) {
-    return std::unexpected("candidate outbox height is negative");
+    co_return std::unexpected("candidate outbox height is negative");
   }
-  auto proposal_hash = validate_batches(payload, payload.event_root);
+  auto proposal_hash = co_await validate_batches(payload, payload.event_root);
   if (!proposal_hash) {
-    return std::unexpected(proposal_hash.error());
+    co_return std::unexpected(proposal_hash.error());
   }
-  return {};
+  co_return IndexerOutboxStatus<void>{};
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 validate_committed(const IndexerOutboxCommittedPayload &payload,
                    BlockHeight expected_height)
 {
   const BlockHeight height =
       payload.consensus_value.proposal_header.block_height;
   if (height < 0) {
-    return std::unexpected("committed outbox height is negative");
+    co_return std::unexpected("committed outbox height is negative");
   }
   if (height != expected_height) {
-    return std::unexpected(
+    co_return std::unexpected(
         "committed filename height differs from ConsensusValue");
   }
   if (auto sizes = validate_payload_sizes(payload); !sizes) {
-    return sizes;
+    co_return sizes;
   }
-  return validate_indexer_committed_payload(payload);
+  co_return co_await validate_indexer_committed_payload(payload);
 }
 
 IndexerOutboxRecordHeader
@@ -652,57 +656,58 @@ IndexerOutboxStore::store_indexer_slot(const EventIndexerSlot &slot) const
   return replace_bytes(kIndexerSlotFilename, std::as_bytes(std::span(bytes)));
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::publish_candidate(
     const IndexerOutboxCandidatePayload &payload) const
 {
-  if (auto valid = validate_candidate(payload); !valid) {
-    return valid;
+  if (auto valid = co_await validate_candidate(payload); !valid) {
+    co_return valid;
   }
   auto bytes = encode_file(payload);
   if (!bytes) {
-    return std::unexpected(bytes.error());
+    co_return std::unexpected(bytes.error());
   }
-  return publish_bytes(candidate_filename(payload.block_id),
-                       std::as_bytes(std::span(*bytes)));
+  co_return publish_bytes(candidate_filename(payload.block_id),
+                          std::as_bytes(std::span(*bytes)));
 }
 
-IndexerOutboxStatus<IndexerOutboxCandidatePayload>
+x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
 IndexerOutboxStore::load_candidate(BlockID block_id) const
 {
   const std::string filename = candidate_filename(block_id);
   auto header = load_header(filename);
   if (!header) {
-    return std::unexpected(header.error());
+    co_return std::unexpected(header.error());
   }
   if (header->record_identity.kind() !=
           IndexerOutboxRecordKind::IndexerOutboxCandidate ||
       header->record_identity.candidate_block_id() != block_id) {
-    return std::unexpected("candidate outbox header identity mismatch");
+    co_return std::unexpected("candidate outbox header identity mismatch");
   }
   if (std::string_view(header->protocol) != version::kHogdProtocol()) {
-    return std::unexpected("outbox protocol does not match this binary");
+    co_return std::unexpected("outbox protocol does not match this binary");
   }
   auto bytes = load_payload(filename, *header);
   if (!bytes) {
-    return std::unexpected(bytes.error());
+    co_return std::unexpected(bytes.error());
   }
   auto payload =
       decode_payload<IndexerOutboxCandidatePayload>(*bytes, "candidate");
   if (!payload) {
-    return payload;
+    co_return payload;
   }
   if (payload->block_id != header->record_identity.candidate_block_id() ||
       payload->block_height != header->block_height ||
       payload->event_root != header->event_root ||
       proposal_txs_compatibility_hash(payload->proposal_txs) !=
           header->proposal_txs_hash) {
-    return std::unexpected("candidate outbox header/payload metadata mismatch");
+    co_return std::unexpected(
+        "candidate outbox header/payload metadata mismatch");
   }
-  if (auto valid = validate_candidate(*payload); !valid) {
-    return std::unexpected(valid.error());
+  if (auto valid = co_await validate_candidate(*payload); !valid) {
+    co_return std::unexpected(valid.error());
   }
-  return payload;
+  co_return payload;
 }
 
 IndexerOutboxStatus<bool>
@@ -784,24 +789,25 @@ IndexerOutboxStore::remove_candidate(BlockID block_id) const
   return {};
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::publish_committed(
     const IndexerOutboxCommittedPayload &payload) const
 {
   const BlockHeight height =
       payload.consensus_value.proposal_header.block_height;
-  if (auto valid = validate_committed(payload, height); !valid) {
-    return valid;
+  if (auto valid = co_await validate_committed(payload, height); !valid) {
+    co_return valid;
   }
   auto bytes = encode_file(payload);
   if (!bytes) {
-    return std::unexpected(bytes.error());
+    co_return std::unexpected(bytes.error());
   }
 
-  std::lock_guard lock(*committed_publication_mutex_);
+  x23::CoroGuard publication_guard;
+  co_await publication_guard(*committed_publication_lock_);
   auto exists = has_committed(height);
   if (!exists) {
-    return std::unexpected(exists.error());
+    co_return std::unexpected(exists.error());
   }
   if (*exists) {
     // publish_bytes accepts only a byte-identical existing file. This check
@@ -811,25 +817,26 @@ IndexerOutboxStore::publish_committed(
                                    std::as_bytes(std::span(*bytes)));
     if (!published) {
       committed_append_cache_.reset();
-      return published;
+      co_return published;
     }
     // A prior attempt may have linked this exact record and then failed a
     // close/unlink/directory-fsync step. Rebuild once so this retry repairs the
     // append tip; an older duplicate is observed but cannot regress it.
-    if (auto initialized = initialize_committed_append_cache_unlocked();
+    if (auto initialized =
+            co_await initialize_committed_append_cache_unlocked();
         !initialized) {
       committed_append_cache_.reset();
-      return initialized;
+      co_return initialized;
     }
-    return {};
+    co_return IndexerOutboxStatus<void>{};
   }
 
-  if (auto initialized = initialize_committed_append_cache_unlocked();
+  if (auto initialized = co_await initialize_committed_append_cache_unlocked();
       !initialized) {
-    return initialized;
+    co_return initialized;
   }
   if (!committed_append_cache_) {
-    return std::unexpected("committed append cache was not initialized");
+    co_return std::unexpected("committed append cache was not initialized");
   }
   CommittedAppendCache &cache = committed_append_cache_.value();
   const std::string_view current_protocol = version::kHogdProtocol();
@@ -840,7 +847,7 @@ IndexerOutboxStore::publish_committed(
       if (height != cache.current_origin->origin.first_height ||
           payload.consensus_value.prev_hash !=
               cache.current_origin->origin.first_prev_hash) {
-        return std::unexpected(
+        co_return std::unexpected(
             "first committed record does not match current outbox epoch "
             "origin");
       }
@@ -849,7 +856,7 @@ IndexerOutboxStore::publish_committed(
                                cache.latest->block_height + 1 ||
                            cache.current_origin->origin.first_prev_hash !=
                                cache.latest->consensus_hash)) {
-        return std::unexpected(
+        co_return std::unexpected(
             "current outbox epoch origin does not continue archival records");
       }
       if (!cache.latest && cache.canonical_boundary &&
@@ -857,28 +864,28 @@ IndexerOutboxStore::publish_committed(
                cache.canonical_boundary->height ||
            cache.current_origin->origin.first_prev_hash !=
                cache.canonical_boundary->consensus_hash)) {
-        return std::unexpected(
+        co_return std::unexpected(
             "current outbox epoch origin does not continue canonical boundary");
       }
     }
     else {
-      return std::unexpected(
+      co_return std::unexpected(
           "current outbox epoch origin must be established before committed "
           "publication");
     }
   }
   else {
     if (!cache.current_origin) {
-      return std::unexpected(
+      co_return std::unexpected(
           "committed current outbox records have no epoch origin");
     }
     if (cache.latest->block_height == INT64_MAX ||
         height != cache.latest->block_height + 1) {
-      return std::unexpected(
+      co_return std::unexpected(
           "new committed outbox height is not the next canonical height");
     }
     if (payload.consensus_value.prev_hash != cache.latest->consensus_hash) {
-      return std::unexpected(
+      co_return std::unexpected(
           "new committed outbox record does not link to previous consensus "
           "value");
     }
@@ -888,12 +895,12 @@ IndexerOutboxStore::publish_committed(
                                  std::as_bytes(std::span(*bytes)));
   if (!published) {
     committed_append_cache_.reset();
-    return published;
+    co_return published;
   }
   auto header = load_header(committed_filename(height));
   if (!header) {
     committed_append_cache_.reset();
-    return std::unexpected(std::format(
+    co_return std::unexpected(std::format(
         "committed record published but append cache update failed: {}",
         header.error()));
   }
@@ -914,48 +921,50 @@ IndexerOutboxStore::publish_committed(
         .consensus_hash = header->consensus_hash,
     };
   }
-  return {};
+  co_return IndexerOutboxStatus<void>{};
 }
 
-IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
 IndexerOutboxStore::load_committed(BlockHeight block_height) const
 {
   if (block_height < 0) {
-    return std::unexpected("committed outbox height is negative");
+    co_return std::unexpected("committed outbox height is negative");
   }
   const std::string filename = committed_filename(block_height);
   auto header = load_header(committed_filename(block_height));
   if (!header) {
-    return std::unexpected(header.error());
+    co_return std::unexpected(header.error());
   }
   if (std::string_view(header->protocol) != version::kHogdProtocol()) {
-    return std::unexpected("outbox protocol does not match this binary");
+    co_return std::unexpected("outbox protocol does not match this binary");
   }
   if (header->record_identity.kind() !=
           IndexerOutboxRecordKind::IndexerOutboxCommitted ||
       header->block_height != block_height) {
-    return std::unexpected("committed outbox header identity mismatch");
+    co_return std::unexpected("committed outbox header identity mismatch");
   }
   auto bytes = load_payload(filename, *header);
   if (!bytes) {
-    return std::unexpected(bytes.error());
+    co_return std::unexpected(bytes.error());
   }
   auto payload =
       decode_payload<IndexerOutboxCommittedPayload>(*bytes, "committed");
   if (!payload) {
-    return payload;
+    co_return payload;
   }
-  if (auto valid = validate_committed(*payload, block_height); !valid) {
-    return std::unexpected(valid.error());
+  if (auto valid = co_await validate_committed(*payload, block_height);
+      !valid) {
+    co_return std::unexpected(valid.error());
   }
   if (sha256(payload->consensus_value) != header->consensus_hash ||
       payload->consensus_value.prev_hash != header->prev_hash ||
       payload->consensus_value.proposal_header.events_hash !=
           header->event_root ||
       payload->consensus_value.proposal_txs_hash != header->proposal_txs_hash) {
-    return std::unexpected("committed outbox header/payload metadata mismatch");
+    co_return std::unexpected(
+        "committed outbox header/payload metadata mismatch");
   }
-  return payload;
+  co_return payload;
 }
 
 IndexerOutboxStatus<std::optional<IndexerOutboxEpochOrigin>>
@@ -1001,65 +1010,68 @@ IndexerOutboxStore::load_current_epoch_origin() const
   return std::optional<IndexerOutboxEpochOrigin>(std::move(*origin));
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::initialize_current_epoch_origin(
     BlockHeight first_height, ConsensusValueHash first_prev_hash) const
 {
-  std::lock_guard lock(*committed_publication_mutex_);
-  return initialize_current_epoch_origin_unlocked(first_height,
-                                                  std::move(first_prev_hash));
+  x23::CoroGuard publication_guard;
+  co_await publication_guard(*committed_publication_lock_);
+  co_return co_await initialize_current_epoch_origin_unlocked(
+      first_height, std::move(first_prev_hash));
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
     BlockHeight first_height, ConsensusValueHash first_prev_hash) const
 {
   if (first_height < 0) {
-    return std::unexpected("indexer outbox epoch origin height is negative");
+    co_return std::unexpected("indexer outbox epoch origin height is negative");
   }
   auto existing = load_current_epoch_origin();
   if (!existing) {
-    return std::unexpected(existing.error());
+    co_return std::unexpected(existing.error());
   }
   if (*existing) {
     if ((*existing)->origin.first_height != first_height ||
         (*existing)->origin.first_prev_hash != first_prev_hash) {
-      return std::unexpected("conflicting current indexer outbox epoch origin");
+      co_return std::unexpected(
+          "conflicting current indexer outbox epoch origin");
     }
     if (consume_fault(IndexerOutboxFaultPoint::kFsyncPublishedDirectory)) {
-      return std::unexpected("injected fsync indexer outbox directory");
+      co_return std::unexpected("injected fsync indexer outbox directory");
     }
     if (fsync(directory_fd_.get()) != 0) {
-      return std::unexpected(
+      co_return std::unexpected(
           system_error("fsync indexer outbox directory", errno));
     }
-    return {};
+    co_return IndexerOutboxStatus<void>{};
   }
-  if (auto initialized = initialize_committed_append_cache_unlocked();
+  if (auto initialized = co_await initialize_committed_append_cache_unlocked();
       !initialized) {
-    return initialized;
+    co_return initialized;
   }
   auto origins = enumerate_epoch_origins_raw();
   if (!origins) {
-    return std::unexpected(origins.error());
+    co_return std::unexpected(origins.error());
   }
   if (!committed_append_cache_) {
-    return std::unexpected("committed append cache was not initialized");
+    co_return std::unexpected("committed append cache was not initialized");
   }
   const CommittedAppendCache &cache = committed_append_cache_.value();
   if (cache.canonical_boundary &&
       (first_height != cache.canonical_boundary->height ||
        first_prev_hash != cache.canonical_boundary->consensus_hash)) {
-    return std::unexpected("current indexer outbox epoch origin does not match "
-                           "canonical boundary");
+    co_return std::unexpected(
+        "current indexer outbox epoch origin does not match canonical "
+        "boundary");
   }
   if (!cache.canonical_boundary && (cache.latest || !origins->empty())) {
-    return std::unexpected("indexer outbox canonical boundary is exhausted");
+    co_return std::unexpected("indexer outbox canonical boundary is exhausted");
   }
   uint64_t epoch_sequence = 0;
   if (!origins->empty()) {
     if (origins->back().epoch_sequence == UINT64_MAX) {
-      return std::unexpected("indexer outbox epoch sequence is exhausted");
+      co_return std::unexpected("indexer outbox epoch sequence is exhausted");
     }
     epoch_sequence = origins->back().epoch_sequence + 1;
   }
@@ -1076,7 +1088,7 @@ IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
   };
   auto bytes = encode_file(origin);
   if (!bytes) {
-    return std::unexpected(bytes.error());
+    co_return std::unexpected(bytes.error());
   }
   auto published = publish_bytes(current_epoch_origin_filename(),
                                  std::as_bytes(std::span(*bytes)));
@@ -1086,28 +1098,28 @@ IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
   if (published && committed_append_cache_) {
     committed_append_cache_->current_origin = origin;
   }
-  return published;
+  co_return published;
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
 {
   if (committed_append_cache_) {
-    return {};
+    co_return IndexerOutboxStatus<void>{};
   }
   ++committed_history_scan_count_;
 
   auto records = enumerate_committed_records_raw();
   if (!records) {
-    return std::unexpected(records.error());
+    co_return std::unexpected(records.error());
   }
   auto origins = enumerate_epoch_origins_raw();
   if (!origins) {
-    return std::unexpected(origins.error());
+    co_return std::unexpected(origins.error());
   }
   auto current_origin = load_current_epoch_origin();
   if (!current_origin) {
-    return std::unexpected(current_origin.error());
+    co_return std::unexpected(current_origin.error());
   }
 
   const std::string current_protocol(version::kHogdProtocol());
@@ -1116,20 +1128,22 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
   for (size_t i = 0; i < origins->size(); ++i) {
     const auto &origin = (*origins)[i];
     if (origin.epoch_sequence != i) {
-      return std::unexpected("indexer outbox epoch sequence is discontinuous");
+      co_return std::unexpected(
+          "indexer outbox epoch sequence is discontinuous");
     }
     if (!seen_protocols.insert(origin.protocol).second) {
-      return std::unexpected("duplicate indexer outbox epoch origin");
+      co_return std::unexpected("duplicate indexer outbox epoch origin");
     }
     if (origin.protocol == current_protocol) {
       current_origin_index = i;
     }
   }
   if (current_origin_index && *current_origin_index + 1 != origins->size()) {
-    return std::unexpected("archival outbox epoch appears after current epoch");
+    co_return std::unexpected(
+        "archival outbox epoch appears after current epoch");
   }
   if (current_origin->has_value() != current_origin_index.has_value()) {
-    return std::unexpected(
+    co_return std::unexpected(
         "current indexer outbox epoch origin metadata is inconsistent");
   }
   if (*current_origin) {
@@ -1137,7 +1151,7 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
     if ((*current_origin)->epoch_sequence != info.epoch_sequence ||
         (*current_origin)->origin.first_height != info.first_height ||
         (*current_origin)->origin.first_prev_hash != info.first_prev_hash) {
-      return std::unexpected(
+      co_return std::unexpected(
           "current indexer outbox epoch origin payload does not match header");
     }
   }
@@ -1148,13 +1162,13 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
   bool boundary_exhausted = false;
   for (const auto &origin : *origins) {
     if (boundary_exhausted) {
-      return std::unexpected(
+      co_return std::unexpected(
           "indexer outbox epoch origin follows exhausted canonical tail");
     }
     if (canonical_boundary &&
         (origin.first_height != canonical_boundary->height ||
          origin.first_prev_hash != canonical_boundary->consensus_hash)) {
-      return std::unexpected(
+      co_return std::unexpected(
           "indexer outbox epoch origin does not continue canonical tail");
     }
     if (!canonical_boundary) {
@@ -1174,18 +1188,18 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
            (previous->block_height == INT64_MAX ||
             record.block_height != previous->block_height + 1 ||
             record.prev_hash != previous->consensus_hash))) {
-        return std::unexpected("committed outbox chain is discontinuous");
+        co_return std::unexpected("committed outbox chain is discontinuous");
       }
       if (record.protocol == current_protocol) {
-        auto payload = load_committed(record.block_height);
+        auto payload = co_await load_committed(record.block_height);
         if (!payload) {
-          return std::unexpected(
+          co_return std::unexpected(
               std::format("invalid current committed outbox record at {}: {}",
                           record.block_height, payload.error()));
         }
         if (sha256(payload->consensus_value) != record.consensus_hash ||
             payload->consensus_value.prev_hash != record.prev_hash) {
-          return std::unexpected(
+          co_return std::unexpected(
               "current committed outbox header/payload metadata mismatch");
         }
       }
@@ -1205,7 +1219,7 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
     }
   }
   if (record_index != records->size()) {
-    return std::unexpected(
+    co_return std::unexpected(
         "committed outbox records do not follow epoch origin order");
   }
 
@@ -1214,28 +1228,31 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
       .current_origin = std::move(*current_origin),
       .canonical_boundary = std::move(canonical_boundary),
   };
-  return {};
+  co_return IndexerOutboxStatus<void>{};
 }
 
-void
+x23::Async<void>
 IndexerOutboxStore::cache_validated_committed_append_tip(
     std::optional<IndexerOutboxCommittedRecordInfo> latest,
     std::optional<IndexerOutboxEpochOrigin> current_origin,
     std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary) const
 {
-  std::lock_guard lock(*committed_publication_mutex_);
+  x23::CoroGuard publication_guard;
+  co_await publication_guard(*committed_publication_lock_);
   committed_append_cache_ = CommittedAppendCache{
       .latest = std::move(latest),
       .current_origin = std::move(current_origin),
       .canonical_boundary = std::move(canonical_boundary),
   };
+  co_return;
 }
 
-size_t
+x23::Async<size_t>
 IndexerOutboxStore::committed_history_scan_count_for_test() const
 {
-  std::lock_guard lock(*committed_publication_mutex_);
-  return committed_history_scan_count_;
+  x23::CoroGuard publication_guard;
+  co_await publication_guard(*committed_publication_lock_);
+  co_return committed_history_scan_count_;
 }
 
 IndexerOutboxStatus<bool>

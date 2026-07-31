@@ -585,7 +585,7 @@ HogDevnodeNode::HogDevnodeNode(
     else {
       bootstrap_config_ = validate_fresh_data_dir(bootstrap_config);
       write_data_dir_metadata();
-      materialize_bootstrap_accounts(bootstrap_config_);
+      materialize_bootstrap_accounts(bootstrap_config_)();
     }
   } catch (...) {
     prepare_for_failed_construction();
@@ -914,7 +914,7 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
   refresh_bootstrap_account_balances();
 }
 
-void
+x23::Async<void>
 HogDevnodeNode::materialize_bootstrap_accounts(
     BootstrapAccountConfig const &config)
 {
@@ -932,14 +932,14 @@ HogDevnodeNode::materialize_bootstrap_accounts(
     CHECK_EQ(client.schedcoord_load_genesis_configuration(
                  GenesisConfiguration(genesis_configuration_))(),
              DbSchedResult::DbSchedResultOK);
-    initialize_fresh_event_outbox_origin();
+    co_await initialize_fresh_event_outbox_origin();
     register_event_with_mempool();
     if (!withhold_indexer_registration_for_test()) {
       register_indexer_with_event_service();
     }
     register_executor_with_mempool();
     maybe_inject_post_executor_failure();
-    return;
+    co_return;
   }
 
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
@@ -947,7 +947,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   CHECK_EQ(client.schedcoord_load_genesis_configuration(
                std::move(artifact.genesis_configuration))(),
            DbSchedResult::DbSchedResultOK);
-  initialize_fresh_event_outbox_origin();
+  co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
   if (!withhold_indexer_registration_for_test()) {
     register_indexer_with_event_service();
@@ -962,9 +962,10 @@ HogDevnodeNode::materialize_bootstrap_accounts(
 
   bootstrap_accounts_ = std::move(artifact.accounts);
   refresh_bootstrap_account_balances();
+  co_return;
 }
 
-void
+x23::Async<void>
 HogDevnodeNode::initialize_fresh_event_outbox_origin()
 {
   const DbTip genesis_tip = ctx_->get_tip();
@@ -973,13 +974,14 @@ HogDevnodeNode::initialize_fresh_event_outbox_origin()
         "fresh devnode genesis did not establish canonical height 0");
   }
   auto initialized =
-      event_ctx_.indexer_outbox_store().initialize_current_epoch_origin(
-          1, sha256(genesis_tip.value));
+      co_await event_ctx_.indexer_outbox_store()
+          .initialize_current_epoch_origin(1, sha256(genesis_tip.value));
   if (!initialized) {
     throw std::runtime_error(
         std::format("failed to initialize fresh devnode outbox origin: {}",
                     initialized.error()));
   }
+  co_return;
 }
 
 void

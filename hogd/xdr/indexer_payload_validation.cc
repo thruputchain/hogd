@@ -33,23 +33,24 @@ nondeterministic_data_equal(const NondeterministicProposalData &lhs,
   return x23::serialize(lhs) == x23::serialize(rhs);
 }
 
-IndexerPayloadStatus<ProposalTxsHash>
+x23::Async<IndexerPayloadStatus<ProposalTxsHash>>
 validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
 {
   x23::XdrVec<SignedTransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!parallel_batch_to_t_serial(payload.proposal_txs.hash,
-                                  canonical_hashes) ||
-      !parallel_batch_to_t_serial(payload.proposal_txs.nondeterministic_data,
-                                  canonical_nondeterministic_data)) {
-    return std::unexpected("malformed canonical ProposalTxs parallel batch");
+  if (!(co_await parallel_batch_to_t(payload.proposal_txs.hash,
+                                     canonical_hashes)) ||
+      !(co_await parallel_batch_to_t(payload.proposal_txs.nondeterministic_data,
+                                     canonical_nondeterministic_data))) {
+    co_return std::unexpected("malformed canonical ProposalTxs parallel batch");
   }
   if (canonical_hashes.size() != canonical_nondeterministic_data.size()) {
-    return std::unexpected("canonical ProposalTxs batch cardinalities differ");
+    co_return std::unexpected(
+        "canonical ProposalTxs batch cardinalities differ");
   }
   if (canonical_hashes.size() != payload.event_logs.size() ||
       canonical_hashes.size() != payload.tx_bodies.size()) {
-    return std::unexpected(
+    co_return std::unexpected(
         "canonical proposal and event/body batch cardinalities differ");
   }
 
@@ -61,7 +62,8 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
     if (!canonical
              .emplace(canonical_hashes[i], canonical_nondeterministic_data[i])
              .second) {
-      return std::unexpected("canonical ProposalTxs contains duplicate hashes");
+      co_return std::unexpected(
+          "canonical ProposalTxs contains duplicate hashes");
     }
   }
 
@@ -71,29 +73,30 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
     const SignedTransactionHash body_hash =
         sha256(payload.tx_bodies[i].signed_tx.tx);
     if (body_hash != payload.event_logs[i].proposed_tx_hash) {
-      return std::unexpected(std::format(
+      co_return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
     if (!seen_bodies.insert(body_hash).second) {
-      return std::unexpected("event/body batches contain duplicate hashes");
+      co_return std::unexpected("event/body batches contain duplicate hashes");
     }
     auto entry = canonical.find(body_hash);
     if (entry == canonical.end()) {
-      return std::unexpected(
+      co_return std::unexpected(
           "event/body transaction is missing from canonical ProposalTxs");
     }
     if (!nondeterministic_data_equal(
             payload.tx_bodies[i].nondeterministic_proposal_data,
             entry->second)) {
-      return std::unexpected(
+      co_return std::unexpected(
           "transaction body nondeterministic data differs from canonical "
           "ProposalTxs");
     }
   }
   if (seen_bodies.size() != canonical.size()) {
-    return std::unexpected("canonical ProposalTxs contains extra transactions");
+    co_return std::unexpected(
+        "canonical ProposalTxs contains extra transactions");
   }
-  return proposal_txs_compatibility_hash(payload.proposal_txs);
+  co_return proposal_txs_compatibility_hash(payload.proposal_txs);
 }
 
 } // namespace
@@ -111,67 +114,71 @@ compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs)
   return trie.get_root_hash();
 }
 
-IndexerPayloadStatus<TxsHash>
+x23::Async<IndexerPayloadStatus<TxsHash>>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs)
 {
   x23::XdrVec<SignedTransactionHash> hashes;
-  if (!parallel_batch_to_t_serial(proposal_txs.hash, hashes)) {
-    return std::unexpected("malformed canonical transaction hash batch");
+  if (!(co_await parallel_batch_to_t(proposal_txs.hash, hashes))) {
+    co_return std::unexpected("malformed canonical transaction hash batch");
   }
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   for (const SignedTransactionHash &hash : hashes) {
     if (!trie.insert(HexArray(hash), std::span<const std::byte>())) {
-      return std::unexpected("canonical transaction hash batch has duplicates");
+      co_return std::unexpected(
+          "canonical transaction hash batch has duplicates");
     }
   }
   trie.generate_all_hashes(/*num_threads=*/1);
-  return trie.get_root_hash();
+  co_return trie.get_root_hash();
 }
 
-IndexerPayloadStatus<void>
+x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload)
 {
   if (payload.format_version != kIndexerOutboxFormatVersion) {
-    return std::unexpected(
+    co_return std::unexpected(
         std::format("unknown committed outbox format version {}",
                     payload.format_version));
   }
   if (payload.consensus_value.proposal_header.block_height < 0) {
-    return std::unexpected("committed outbox height is negative");
+    co_return std::unexpected("committed outbox height is negative");
   }
   if (payload.event_logs.size() != payload.tx_bodies.size()) {
-    return std::unexpected("event log and transaction body batch sizes differ");
+    co_return std::unexpected(
+        "event log and transaction body batch sizes differ");
   }
   if (compute_indexer_outbox_event_root(payload.event_logs) !=
       payload.consensus_value.proposal_header.events_hash) {
-    return std::unexpected("event root differs from payload identity");
+    co_return std::unexpected("event root differs from payload identity");
   }
-  auto proposal_hash = validate_canonical_proposal_mapping(payload);
+  auto proposal_hash = co_await validate_canonical_proposal_mapping(payload);
   if (!proposal_hash) {
-    return std::unexpected(proposal_hash.error());
+    co_return std::unexpected(proposal_hash.error());
   }
   if (*proposal_hash != payload.consensus_value.proposal_txs_hash) {
-    return std::unexpected(
+    co_return std::unexpected(
         "canonical ProposalTxs commitment differs from ConsensusValue");
   }
-  auto txs_root = compute_indexer_proposal_txs_root(payload.proposal_txs);
+  auto txs_root =
+      co_await compute_indexer_proposal_txs_root(payload.proposal_txs);
   if (!txs_root) {
-    return std::unexpected(txs_root.error());
+    co_return std::unexpected(txs_root.error());
   }
   if (*txs_root != payload.consensus_value.proposal_header.txs_hash) {
-    return std::unexpected(
+    co_return std::unexpected(
         "canonical transaction root differs from ProposalHeader");
   }
-  return {};
+  co_return IndexerPayloadStatus<void>{};
 }
 
-IndexerPayloadStatus<IndexerCommittedBlock>
+x23::Async<IndexerPayloadStatus<IndexerCommittedBlock>>
 make_indexer_committed_block(const IndexerCommittedBlockPayload &payload)
 {
-  if (auto valid = validate_indexer_committed_payload(payload); !valid) {
-    return std::unexpected(valid.error());
+  if (auto valid = co_await validate_indexer_committed_payload(payload);
+      !valid) {
+    co_return std::unexpected(valid.error());
   }
-  return IndexerCommittedBlock{
+  co_return IndexerCommittedBlock{
       .payload = payload,
       .identity =
           IndexerCommittedBlockIdentity{
@@ -181,18 +188,19 @@ make_indexer_committed_block(const IndexerCommittedBlockPayload &payload)
   };
 }
 
-IndexerPayloadStatus<void>
+x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_block(const IndexerCommittedBlock &block)
 {
-  if (auto valid = validate_indexer_committed_payload(block.payload); !valid) {
-    return valid;
+  if (auto valid = co_await validate_indexer_committed_payload(block.payload);
+      !valid) {
+    co_return valid;
   }
   if (block.identity.consensus_hash != sha256(block.payload.consensus_value) ||
       sha256(block.payload) != block.identity.payload_digest) {
-    return std::unexpected(
+    co_return std::unexpected(
         "committed block identity differs from canonical payload");
   }
-  return {};
+  co_return IndexerPayloadStatus<void>{};
 }
 
 } // namespace hogd

@@ -19,6 +19,7 @@
 #include "event.hh"
 #include "event_outbox_internal.hh"
 #include "exec_result.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
@@ -139,7 +140,7 @@ make_committed_with_proposal(BlockHeight height, ProposalTxs proposal_txs,
   ConsensusValue value;
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = compute_indexer_outbox_event_root(events);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs);
+  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_header.block_timepoint = 100 + height;
@@ -230,7 +231,7 @@ make_committed_payload_golden_fixture()
   payload.proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs);
-  auto txs_root = compute_indexer_proposal_txs_root(payload.proposal_txs);
+  auto txs_root = compute_indexer_proposal_txs_root(payload.proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash =
@@ -253,7 +254,7 @@ initialize_test_origin(IndexerOutboxStore &store,
   ASSERT_TRUE(store
                   .initialize_current_epoch_origin(
                       first.consensus_value.proposal_header.block_height,
-                      first.consensus_value.prev_hash)
+                      first.consensus_value.prev_hash)()
                   .has_value());
 }
 
@@ -554,13 +555,13 @@ TEST_F(IndexerOutboxTest, RecognizedNamespaceIncludesCandidatesAndOrigins)
   ASSERT_TRUE(store.recognized_namespace_empty().has_value());
   EXPECT_TRUE(*store.recognized_namespace_empty());
   ASSERT_TRUE(
-      store.publish_candidate(make_candidate(700, 1, {}, {})).has_value());
+      store.publish_candidate(make_candidate(700, 1, {}, {}))().has_value());
   EXPECT_FALSE(*store.recognized_namespace_empty());
   ASSERT_TRUE(store.remove_candidate(700).has_value());
   EXPECT_TRUE(*store.recognized_namespace_empty());
   ConsensusValueHash parent{};
   parent[0] = 1;
-  ASSERT_TRUE(store.initialize_current_epoch_origin(1, parent).has_value());
+  ASSERT_TRUE(store.initialize_current_epoch_origin(1, parent)().has_value());
   EXPECT_FALSE(*store.recognized_namespace_empty());
 }
 
@@ -571,13 +572,13 @@ TEST_F(IndexerOutboxTest, FirstCommittedRecordMustMatchPreparedEpochOrigin)
   const auto candidate = make_candidate(701, 1, {}, {});
   {
     IndexerOutboxStore store = open_store(dir_);
-    ASSERT_TRUE(store.initialize_current_epoch_origin(1, parent).has_value());
-    ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+    ASSERT_TRUE(store.initialize_current_epoch_origin(1, parent)().has_value());
+    ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
     auto mismatched = make_committed(1, {}, {});
     mismatched.consensus_value.prev_hash = parent;
     mismatched.consensus_value.prev_hash[0] ^= 0xff;
 
-    auto published = store.publish_committed(mismatched);
+    auto published = store.publish_committed(mismatched)();
     ASSERT_FALSE(published.has_value());
     EXPECT_NE(published.error().find("epoch origin"), std::string::npos);
     EXPECT_FALSE(store.has_committed(1).value());
@@ -589,8 +590,8 @@ TEST_F(IndexerOutboxTest, FirstCommittedRecordMustMatchPreparedEpochOrigin)
   EXPECT_TRUE(reopened.has_candidate(701).value());
   auto correct = make_committed(1, {}, {});
   correct.consensus_value.prev_hash = parent;
-  ASSERT_TRUE(reopened.publish_committed(correct).has_value());
-  auto committed = reopened.load_committed(1);
+  ASSERT_TRUE(reopened.publish_committed(correct)().has_value());
+  auto committed = reopened.load_committed(1)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   EXPECT_EQ(committed->consensus_value.prev_hash, parent);
 }
@@ -606,12 +607,12 @@ TEST_F(IndexerOutboxTest,
     IndexerOutboxStore store = open_store(dir);
     const auto block_id = static_cast<BlockID>(800 + height);
     ASSERT_TRUE(
-        store.publish_candidate(make_candidate(block_id, height, {}, {}))
+        store.publish_candidate(make_candidate(block_id, height, {}, {}))()
             .has_value());
     auto committed = make_committed(height, {}, {});
     committed.consensus_value.prev_hash[0] = static_cast<uint8_t>(height);
 
-    auto published = store.publish_committed(committed);
+    auto published = store.publish_committed(committed)();
 
     ASSERT_FALSE(published.has_value());
     EXPECT_NE(published.error().find("must be established"), std::string::npos);
@@ -629,31 +630,31 @@ TEST_F(IndexerOutboxTest, CommittedPublicationRequiresCanonicalNextRecord)
   ConsensusValueHash genesis_hash{};
   genesis_hash[0] = 0x51;
   ASSERT_TRUE(
-      store.initialize_current_epoch_origin(1, genesis_hash).has_value());
+      store.initialize_current_epoch_origin(1, genesis_hash)().has_value());
 
   auto height_two = make_committed(2, {}, {});
   height_two.consensus_value.prev_hash = genesis_hash;
-  EXPECT_FALSE(store.publish_committed(height_two).has_value());
+  EXPECT_FALSE(store.publish_committed(height_two)().has_value());
   EXPECT_FALSE(store.has_committed(2).value());
 
   auto height_one = make_committed(1, {}, {});
   height_one.consensus_value.prev_hash = genesis_hash;
-  ASSERT_TRUE(store.publish_committed(height_one).has_value());
+  ASSERT_TRUE(store.publish_committed(height_one)().has_value());
   auto height_three = make_committed(3, {}, {});
   height_three.consensus_value.prev_hash = sha256(height_one.consensus_value);
-  EXPECT_FALSE(store.publish_committed(height_three).has_value());
+  EXPECT_FALSE(store.publish_committed(height_three)().has_value());
   EXPECT_FALSE(store.has_committed(3).value());
 
   auto height_two_wrong = make_committed(2, {}, {});
   height_two_wrong.consensus_value.prev_hash = genesis_hash;
-  EXPECT_FALSE(store.publish_committed(height_two_wrong).has_value());
+  EXPECT_FALSE(store.publish_committed(height_two_wrong)().has_value());
   EXPECT_FALSE(store.has_committed(2).value());
 
   height_two.consensus_value.prev_hash = sha256(height_one.consensus_value);
-  ASSERT_TRUE(store.publish_committed(height_two).has_value());
+  ASSERT_TRUE(store.publish_committed(height_two)().has_value());
   height_three.consensus_value.prev_hash = sha256(height_two.consensus_value);
-  ASSERT_TRUE(store.publish_committed(height_three).has_value());
-  EXPECT_TRUE(store.publish_committed(height_one).has_value());
+  ASSERT_TRUE(store.publish_committed(height_three)().has_value());
+  EXPECT_TRUE(store.publish_committed(height_one)().has_value());
 }
 
 TEST_F(IndexerOutboxTest, CommittedAppendScansHistoryOnceAndRebuildsOnReopen)
@@ -661,30 +662,30 @@ TEST_F(IndexerOutboxTest, CommittedAppendScansHistoryOnceAndRebuildsOnReopen)
   ConsensusValueHash previous{};
   {
     IndexerOutboxStore store = open_store(dir_);
-    EXPECT_EQ(store.committed_history_scan_count_for_test(), 0UL);
+    EXPECT_EQ(store.committed_history_scan_count_for_test()(), 0UL);
     auto first = make_committed(1, {}, {});
     first.consensus_value.prev_hash = previous;
     initialize_test_origin(store, first);
     for (BlockHeight height = 1; height <= 64; ++height) {
       auto committed = make_committed(height, {}, {});
       committed.consensus_value.prev_hash = previous;
-      ASSERT_TRUE(store.publish_committed(committed).has_value());
+      ASSERT_TRUE(store.publish_committed(committed)().has_value());
       previous = sha256(committed.consensus_value);
-      EXPECT_EQ(store.committed_history_scan_count_for_test(), 1UL);
+      EXPECT_EQ(store.committed_history_scan_count_for_test()(), 1UL);
     }
   }
 
   IndexerOutboxStore reopened = open_store(dir_);
-  EXPECT_EQ(reopened.committed_history_scan_count_for_test(), 0UL);
+  EXPECT_EQ(reopened.committed_history_scan_count_for_test()(), 0UL);
   auto height_65 = make_committed(65, {}, {});
   height_65.consensus_value.prev_hash = previous;
-  ASSERT_TRUE(reopened.publish_committed(height_65).has_value());
-  EXPECT_EQ(reopened.committed_history_scan_count_for_test(), 1UL);
+  ASSERT_TRUE(reopened.publish_committed(height_65)().has_value());
+  EXPECT_EQ(reopened.committed_history_scan_count_for_test()(), 1UL);
 
   auto height_66 = make_committed(66, {}, {});
   height_66.consensus_value.prev_hash = sha256(height_65.consensus_value);
-  ASSERT_TRUE(reopened.publish_committed(height_66).has_value());
-  EXPECT_EQ(reopened.committed_history_scan_count_for_test(), 1UL);
+  ASSERT_TRUE(reopened.publish_committed(height_66)().has_value());
+  EXPECT_EQ(reopened.committed_history_scan_count_for_test()(), 1UL);
 }
 
 TEST_F(IndexerOutboxTest, PostLinkFailureRetryRepairsAppendCache)
@@ -707,24 +708,23 @@ TEST_F(IndexerOutboxTest, PostLinkFailureRetryRepairsAppendCache)
     third.consensus_value.prev_hash = sha256(second.consensus_value);
     {
       IndexerOutboxStore store = open_store(dir);
-      ASSERT_TRUE(store.publish_candidate(make_candidate(900 + i, 1, {}, {}))
+      ASSERT_TRUE(store.publish_candidate(make_candidate(900 + i, 1, {}, {}))()
                       .has_value());
-      ASSERT_TRUE(
-          store
-              .initialize_current_epoch_origin(1,
-                                               first.consensus_value.prev_hash)
-              .has_value());
+      ASSERT_TRUE(store
+                      .initialize_current_epoch_origin(
+                          1, first.consensus_value.prev_hash)()
+                      .has_value());
       fail_next_indexer_outbox_operation_for_test(kFaults[i]);
-      EXPECT_FALSE(store.publish_committed(first).has_value());
+      EXPECT_FALSE(store.publish_committed(first)().has_value());
       EXPECT_TRUE(store.has_committed(1).value());
-      EXPECT_TRUE(store.publish_committed(first).has_value());
-      EXPECT_TRUE(store.publish_committed(second).has_value());
-      EXPECT_TRUE(store.publish_committed(first).has_value());
-      EXPECT_TRUE(store.publish_committed(third).has_value());
+      EXPECT_TRUE(store.publish_committed(first)().has_value());
+      EXPECT_TRUE(store.publish_committed(second)().has_value());
+      EXPECT_TRUE(store.publish_committed(first)().has_value());
+      EXPECT_TRUE(store.publish_committed(third)().has_value());
       EXPECT_TRUE(store.has_candidate(900 + i).value());
     }
     IndexerOutboxStore reopened = open_store(dir);
-    EXPECT_TRUE(reopened.load_committed(3).has_value());
+    EXPECT_TRUE(reopened.load_committed(3)().has_value());
     EXPECT_TRUE(reopened.has_candidate(900 + i).value());
   }
 }
@@ -748,15 +748,15 @@ TEST_F(IndexerOutboxTest, ExistingOriginRetryRepairsDirectoryDurability)
       IndexerOutboxStore store = open_store(dir);
       fail_next_indexer_outbox_operation_for_test(fault);
       EXPECT_FALSE(
-          store.initialize_current_epoch_origin(1, boundary).has_value());
+          store.initialize_current_epoch_origin(1, boundary)().has_value());
       ASSERT_TRUE(store.load_current_epoch_origin()->has_value());
 
       fail_next_indexer_outbox_operation_for_test(
           IndexerOutboxFaultPoint::kFsyncPublishedDirectory);
       EXPECT_FALSE(
-          store.initialize_current_epoch_origin(1, boundary).has_value());
+          store.initialize_current_epoch_origin(1, boundary)().has_value());
       EXPECT_TRUE(
-          store.initialize_current_epoch_origin(1, boundary).has_value());
+          store.initialize_current_epoch_origin(1, boundary)().has_value());
     }
 
     IndexerOutboxStore reopened = open_store(dir);
@@ -778,33 +778,32 @@ TEST_F(IndexerOutboxTest, ExactExistingCandidateRetryFsyncsDirectory)
   const auto candidate = make_candidate(901, 1, {}, {});
   fail_next_indexer_outbox_operation_for_test(
       IndexerOutboxFaultPoint::kClosePublishedTemp);
-  EXPECT_FALSE(store.publish_candidate(candidate).has_value());
+  EXPECT_FALSE(store.publish_candidate(candidate)().has_value());
   ASSERT_TRUE(store.has_candidate(901).value());
 
   fail_next_indexer_outbox_operation_for_test(
       IndexerOutboxFaultPoint::kFsyncPublishedDirectory);
-  EXPECT_FALSE(store.publish_candidate(candidate).has_value());
-  EXPECT_TRUE(store.publish_candidate(candidate).has_value());
+  EXPECT_FALSE(store.publish_candidate(candidate)().has_value());
+  EXPECT_TRUE(store.publish_candidate(candidate)().has_value());
 }
 
 TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
 {
   IndexerOutboxStore store = open_store(dir_);
   const auto committed = make_committed(1, {}, {});
-  ASSERT_TRUE(
-      store
-          .initialize_current_epoch_origin(1,
-                                           committed.consensus_value.prev_hash)
-          .has_value());
+  ASSERT_TRUE(store
+                  .initialize_current_epoch_origin(
+                      1, committed.consensus_value.prev_hash)()
+                  .has_value());
   fail_next_indexer_outbox_operation_for_test(
       IndexerOutboxFaultPoint::kClosePublishedTemp);
-  EXPECT_FALSE(store.publish_committed(committed).has_value());
+  EXPECT_FALSE(store.publish_committed(committed)().has_value());
   ASSERT_TRUE(store.has_committed(1).value());
 
   fail_next_indexer_outbox_operation_for_test(
       IndexerOutboxFaultPoint::kFsyncPublishedDirectory);
-  EXPECT_FALSE(store.publish_committed(committed).has_value());
-  EXPECT_TRUE(store.publish_committed(committed).has_value());
+  EXPECT_FALSE(store.publish_committed(committed)().has_value());
+  EXPECT_TRUE(store.publish_committed(committed)().has_value());
 }
 
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
@@ -834,10 +833,10 @@ TEST_F(IndexerOutboxTest, ConcurrentCommittedPublicationCannotForkOrSkip)
   ConsensusValueHash genesis_hash{};
   genesis_hash[0] = 0x52;
   ASSERT_TRUE(
-      store.initialize_current_epoch_origin(1, genesis_hash).has_value());
+      store.initialize_current_epoch_origin(1, genesis_hash)().has_value());
   auto height_one = make_committed(1, {}, {});
   height_one.consensus_value.prev_hash = genesis_hash;
-  ASSERT_TRUE(store.publish_committed(height_one).has_value());
+  ASSERT_TRUE(store.publish_committed(height_one)().has_value());
 
   auto first_height_two = make_committed(2, {}, {});
   first_height_two.consensus_value.prev_hash =
@@ -847,17 +846,17 @@ TEST_F(IndexerOutboxTest, ConcurrentCommittedPublicationCannotForkOrSkip)
   std::latch start_fork(1);
   auto first = std::async(std::launch::async, [&] {
     start_fork.wait();
-    return store.publish_committed(first_height_two);
+    return store.publish_committed(first_height_two)();
   });
   auto competing = std::async(std::launch::async, [&] {
     start_fork.wait();
-    return store.publish_committed(competing_height_two);
+    return store.publish_committed(competing_height_two)();
   });
   start_fork.count_down();
   const bool first_published = first.get().has_value();
   const bool competing_published = competing.get().has_value();
   EXPECT_NE(first_published, competing_published);
-  auto committed_two = store.load_committed(2);
+  auto committed_two = store.load_committed(2)();
   ASSERT_TRUE(committed_two.has_value()) << committed_two.error();
 
   auto height_three = make_committed(3, {}, {});
@@ -868,11 +867,11 @@ TEST_F(IndexerOutboxTest, ConcurrentCommittedPublicationCannotForkOrSkip)
   std::latch start_gap(1);
   auto next = std::async(std::launch::async, [&] {
     start_gap.wait();
-    return store.publish_committed(height_three);
+    return store.publish_committed(height_three)();
   });
   auto skipped = std::async(std::launch::async, [&] {
     start_gap.wait();
-    return store.publish_committed(height_four);
+    return store.publish_committed(height_four)();
   });
   start_gap.count_down();
   const bool next_published = next.get().has_value();
@@ -880,7 +879,7 @@ TEST_F(IndexerOutboxTest, ConcurrentCommittedPublicationCannotForkOrSkip)
   EXPECT_TRUE(next_published);
   EXPECT_FALSE(skipped_published && !store.has_committed(3).value());
   if (!skipped_published) {
-    ASSERT_TRUE(store.publish_committed(height_four).has_value());
+    ASSERT_TRUE(store.publish_committed(height_four)().has_value());
   }
   EXPECT_TRUE(store.has_committed(3).value());
   EXPECT_TRUE(store.has_committed(4).value());
@@ -908,11 +907,11 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   committed.consensus_value.prev_hash[0] = 0x77;
   EXPECT_NE(committed.consensus_value.proposal_txs_hash, ProposalTxsHash{});
 
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
-  auto loaded_candidate = store.load_candidate(42);
-  auto loaded_committed = store.load_committed(7);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto loaded_candidate = store.load_candidate(42)();
+  auto loaded_committed = store.load_committed(7)();
   auto epoch_origin = store.load_current_epoch_origin();
 
   ASSERT_TRUE(loaded_candidate.has_value()) << loaded_candidate.error();
@@ -930,16 +929,48 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
             committed.consensus_value.prev_hash);
   EXPECT_EQ(std::string_view(current_origin->origin.protocol),
             version::kHogdProtocol());
-  EXPECT_TRUE(
-      store
-          .initialize_current_epoch_origin(7,
-                                           committed.consensus_value.prev_hash)
-          .has_value());
-  EXPECT_FALSE(
-      store
-          .initialize_current_epoch_origin(8,
-                                           committed.consensus_value.prev_hash)
-          .has_value());
+  EXPECT_TRUE(store
+                  .initialize_current_epoch_origin(
+                      7, committed.consensus_value.prev_hash)()
+                  .has_value());
+  EXPECT_FALSE(store
+                   .initialize_current_epoch_origin(
+                       8, committed.consensus_value.prev_hash)()
+                   .has_value());
+}
+
+TEST_F(IndexerOutboxTest, DurableSemanticValidationAwaitsOnPoolWorker)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  ProposedTransaction body_a = make_body(101);
+  ProposedTransaction body_b = make_body(102);
+  TxEventLogBatch events{make_event(body_a, 0xa1), make_event(body_b, 0xa2)};
+  IndexerOutboxCommittedPayload committed =
+      make_committed(22, {body_a, body_b}, events);
+  IndexerOutboxCandidatePayload candidate =
+      make_candidate(220, 22, {body_a, body_b}, std::move(events));
+
+  auto exercise = [&]() -> x23::Async<bool> {
+    co_await default_threadpool().bg();
+    if (!(co_await store.publish_candidate(candidate)) ||
+        !(co_await store.initialize_current_epoch_origin(
+            committed.consensus_value.proposal_header.block_height,
+            committed.consensus_value.prev_hash)) ||
+        !(co_await store.publish_committed(committed))) {
+      co_return false;
+    }
+    auto loaded_candidate = co_await store.load_candidate(candidate.block_id);
+    auto loaded_committed = co_await store.load_committed(
+        committed.consensus_value.proposal_header.block_height);
+    if (!loaded_candidate || !loaded_committed) {
+      co_return false;
+    }
+    auto block = co_await make_indexer_committed_block(*loaded_committed);
+    co_return block.has_value() &&
+        (co_await validate_indexer_committed_block(*block)).has_value();
+  };
+
+  EXPECT_TRUE(exercise()());
 }
 
 TEST_F(IndexerOutboxTest, EventlessTransactionBodyRoundTrip)
@@ -950,8 +981,8 @@ TEST_F(IndexerOutboxTest, EventlessTransactionBodyRoundTrip)
   auto committed = make_committed(8, {body}, {event});
 
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
-  auto loaded = store.load_committed(8);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto loaded = store.load_committed(8)();
 
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
   ASSERT_EQ(loaded->event_logs.size(), 1);
@@ -965,11 +996,11 @@ TEST_F(IndexerOutboxTest, EmptyBlocksRoundTrip)
   auto candidate = make_candidate(43, 9, {}, {});
   auto committed = make_committed(9, {}, {});
 
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
-  auto loaded_candidate = store.load_candidate(43);
-  auto loaded_committed = store.load_committed(9);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto loaded_candidate = store.load_candidate(43)();
+  auto loaded_committed = store.load_committed(9)();
 
   ASSERT_TRUE(loaded_candidate.has_value()) << loaded_candidate.error();
   ASSERT_TRUE(loaded_committed.has_value()) << loaded_committed.error();
@@ -984,22 +1015,22 @@ TEST_F(IndexerOutboxTest, WireBlockUsesExactDurablePayloadDigest)
   IndexerOutboxStore store = open_store(dir_);
   IndexerOutboxCommittedPayload committed = make_committed(17, {}, {});
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
-  auto loaded = store.load_committed(17);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto loaded = store.load_committed(17)();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
-  auto wire = make_indexer_committed_block(*loaded);
+  auto wire = make_indexer_committed_block(*loaded)();
   ASSERT_TRUE(wire.has_value()) << wire.error();
   EXPECT_EQ(x23::serialize(wire->payload), x23::serialize(*loaded));
   EXPECT_EQ(wire->identity.payload_digest, sha256(*loaded));
   EXPECT_EQ(wire->identity.consensus_hash, sha256(loaded->consensus_value));
-  EXPECT_TRUE(validate_indexer_committed_block(*wire).has_value());
+  EXPECT_TRUE(validate_indexer_committed_block(*wire)().has_value());
 }
 
 TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
 {
   IndexerCommittedBlockPayload payload =
       make_committed_payload_golden_fixture();
-  ASSERT_TRUE(validate_indexer_committed_payload(payload).has_value());
+  ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
   constexpr size_t kExpectedByteLength = 652;
   const SHA256Hash kExpectedDigest{0x7c, 0xe4, 0xd8, 0x50, 0xc2, 0xe9, 0xbc,
@@ -1046,10 +1077,10 @@ TEST_F(IndexerOutboxTest, ByteIdenticalRepublishIsIdempotent)
   auto committed = make_committed(10, {}, {});
 
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   x23::Buf before =
       read_bytes(dir_, IndexerOutboxStore::committed_filename(10));
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   x23::Buf after = read_bytes(dir_, IndexerOutboxStore::committed_filename(10));
 
   EXPECT_EQ(before, after);
@@ -1065,8 +1096,8 @@ TEST_F(IndexerOutboxTest, ConflictingRepublishIsRejected)
   auto second =
       make_candidate(44, 11, {second_body}, {make_event(second_body, 0x44)});
 
-  ASSERT_TRUE(store.publish_candidate(first).has_value());
-  auto result = store.publish_candidate(second);
+  ASSERT_TRUE(store.publish_candidate(first)().has_value());
+  auto result = store.publish_candidate(second)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("mismatched"), std::string::npos);
@@ -1076,10 +1107,10 @@ TEST_F(IndexerOutboxTest, RemoveCandidateIsDurableAndIdempotent)
 {
   IndexerOutboxStore store = open_store(dir_);
   ASSERT_TRUE(
-      store.publish_candidate(make_candidate(441, 11, {}, {})).has_value());
+      store.publish_candidate(make_candidate(441, 11, {}, {}))().has_value());
 
   ASSERT_TRUE(store.remove_candidate(441).has_value());
-  EXPECT_FALSE(store.load_candidate(441).has_value());
+  EXPECT_FALSE(store.load_candidate(441)().has_value());
   EXPECT_TRUE(store.remove_candidate(441).has_value());
 }
 
@@ -1087,13 +1118,13 @@ TEST_F(IndexerOutboxTest, CorruptPayloadDigestIsRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   auto candidate = make_candidate(45, 12, {}, {});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(45);
   TestOutboxFile envelope = read_envelope(dir_, filename);
   envelope.payload_digest[0] ^= 0x01;
   write_envelope(dir_, filename, envelope);
 
-  auto result = store.load_candidate(45);
+  auto result = store.load_candidate(45)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("digest mismatch"), std::string::npos);
@@ -1103,12 +1134,12 @@ TEST_F(IndexerOutboxTest, EnvelopeAndPayloadVersionsAreRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   auto candidate = make_candidate(46, 13, {}, {});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(46);
   TestOutboxFile envelope = read_envelope(dir_, filename);
   envelope.format_version = kIndexerOutboxEnvelopeFormatVersion + 1;
   write_envelope(dir_, filename, envelope);
-  auto envelope_result = store.load_candidate(46);
+  auto envelope_result = store.load_candidate(46)();
   ASSERT_FALSE(envelope_result.has_value());
   EXPECT_NE(envelope_result.error().find("header version"), std::string::npos);
 
@@ -1118,7 +1149,7 @@ TEST_F(IndexerOutboxTest, EnvelopeAndPayloadVersionsAreRejected)
                                                 [](auto &payload) {
                                                   payload.format_version++;
                                                 });
-  auto payload_result = store.load_candidate(46);
+  auto payload_result = store.load_candidate(46)();
   ASSERT_FALSE(payload_result.has_value());
   EXPECT_NE(payload_result.error().find("candidate outbox format"),
             std::string::npos);
@@ -1128,14 +1159,14 @@ TEST_F(IndexerOutboxTest, ProtocolMismatchPrecedesPayloadDecode)
 {
   IndexerOutboxStore store = open_store(dir_);
   auto candidate = make_candidate(47, 14, {}, {});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(47);
   TestOutboxFile envelope = read_envelope(dir_, filename);
   envelope.protocol = "hogp/different";
   set_envelope_payload(envelope, x23::Buf{0, 0, 0, 0});
   write_envelope(dir_, filename, envelope);
 
-  auto result = store.load_candidate(47);
+  auto result = store.load_candidate(47)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("protocol"), std::string::npos);
@@ -1146,7 +1177,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   IndexerOutboxStore store = open_store(dir_);
   auto committed = make_committed(15, {}, {});
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(15);
   TestOutboxFile envelope = read_envelope(dir_, filename);
   envelope.protocol = "hogp/archival";
@@ -1158,7 +1189,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   ASSERT_EQ(records->size(), 1);
   EXPECT_EQ(records->front().block_height, 15);
   EXPECT_EQ(records->front().protocol, "hogp/archival");
-  EXPECT_FALSE(store.load_committed(15).has_value());
+  EXPECT_FALSE(store.load_committed(15)().has_value());
 }
 
 TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
@@ -1167,7 +1198,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   auto committed = make_committed(15, {}, {});
   committed.consensus_value.prev_hash[0] = 0x42;
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   TestOutboxFile origin =
       read_envelope(dir_, IndexerOutboxStore::current_epoch_origin_filename());
   origin.protocol = "hogp/archival";
@@ -1191,7 +1222,7 @@ TEST_F(IndexerOutboxTest, EnumerationRejectsSparseRecordWithInvalidDigest)
   IndexerOutboxStore store = open_store(dir_);
   auto committed = make_committed(151, {}, {});
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(151);
   TestOutboxFile record = read_envelope(dir_, filename);
   record.protocol = "hogp/archival";
@@ -1209,7 +1240,7 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
   IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(5);
   auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(48);
   mutate_payload<IndexerOutboxCandidatePayload>(dir_, filename,
                                                 [](auto &payload) {
@@ -1217,7 +1248,7 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
                                                       make_body(6);
                                                 });
 
-  auto body_mismatch = store.load_candidate(48);
+  auto body_mismatch = store.load_candidate(48)();
   ASSERT_FALSE(body_mismatch.has_value());
   EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 
@@ -1225,7 +1256,7 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
                                                 [](auto &payload) {
                                                   payload.tx_bodies.clear();
                                                 });
-  auto batch_mismatch = store.load_candidate(48);
+  auto batch_mismatch = store.load_candidate(48)();
   ASSERT_FALSE(batch_mismatch.has_value());
   EXPECT_NE(batch_mismatch.error().find("batch sizes"), std::string::npos);
 }
@@ -1236,7 +1267,7 @@ TEST_F(IndexerOutboxTest, NondeterministicDataMutationIsRejected)
   ProposedTransaction body = make_body(7);
   auto committed = make_committed(16, {body}, {make_event(body, 0x66)});
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(16);
   mutate_payload<IndexerOutboxCommittedPayload>(
       dir_, filename, [](auto &payload) {
@@ -1244,7 +1275,7 @@ TEST_F(IndexerOutboxTest, NondeterministicDataMutationIsRejected)
             .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0x01;
       });
 
-  auto result = store.load_committed(16);
+  auto result = store.load_committed(16)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("nondeterministic data"), std::string::npos);
@@ -1262,13 +1293,13 @@ TEST_F(IndexerOutboxTest, CanonicalProposalSegmentationChangeIsRejected)
                       make_event(body_c, 0x73)});
   ASSERT_GE(committed.proposal_txs.hash.segment_tokens.size(), 2);
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(161);
 
   IndexerOutboxCommittedPayload resegmented = committed;
   merge_first_two_segments(resegmented.proposal_txs.hash);
   write_payload(dir_, filename, resegmented);
-  auto result = store.load_committed(161);
+  auto result = store.load_committed(161)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("commitment"), std::string::npos);
@@ -1285,7 +1316,7 @@ TEST_F(IndexerOutboxTest,
       make_candidate(481, 162, {body_a, body_b, body_c},
                      {make_event(body_a, 0x81), make_event(body_b, 0x82),
                       make_event(body_c, 0x83)});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(481);
 
   x23::XdrVec<SignedTransactionHash> hashes;
@@ -1297,7 +1328,7 @@ TEST_F(IndexerOutboxTest,
   missing_hashes.pop_back();
   missing.proposal_txs.hash = t_to_parallel_batch(missing_hashes)();
   write_payload(dir_, filename, missing);
-  auto missing_result = store.load_candidate(481);
+  auto missing_result = store.load_candidate(481)();
   ASSERT_FALSE(missing_result.has_value());
   EXPECT_NE(missing_result.error().find("metadata mismatch"),
             std::string::npos);
@@ -1307,7 +1338,7 @@ TEST_F(IndexerOutboxTest,
   duplicate_hashes[1] = duplicate_hashes[0];
   duplicate.proposal_txs.hash = t_to_parallel_batch(duplicate_hashes)();
   write_payload(dir_, filename, duplicate);
-  auto duplicate_result = store.load_candidate(481);
+  auto duplicate_result = store.load_candidate(481)();
   ASSERT_FALSE(duplicate_result.has_value());
   EXPECT_NE(duplicate_result.error().find("metadata mismatch"),
             std::string::npos);
@@ -1316,7 +1347,7 @@ TEST_F(IndexerOutboxTest,
   ASSERT_FALSE(malformed.proposal_txs.hash.segment_tokens.empty());
   malformed.proposal_txs.hash.segment_tokens[0]++;
   write_payload(dir_, filename, malformed);
-  auto malformed_result = store.load_candidate(481);
+  auto malformed_result = store.load_candidate(481)();
   ASSERT_FALSE(malformed_result.has_value());
   EXPECT_NE(malformed_result.error().find("metadata mismatch"),
             std::string::npos);
@@ -1328,17 +1359,17 @@ TEST_F(IndexerOutboxTest, MalformedAndTrailingXdrAreRejected)
   const std::string malformed_name = IndexerOutboxStore::candidate_filename(49);
   const std::vector<uint8_t> malformed = {0, 0, 0, 1};
   write_bytes(dir_, malformed_name, malformed);
-  auto malformed_result = store.load_candidate(49);
+  auto malformed_result = store.load_candidate(49)();
   ASSERT_FALSE(malformed_result.has_value());
   EXPECT_NE(malformed_result.error().find("header"), std::string::npos);
 
   auto candidate = make_candidate(50, 17, {}, {});
-  ASSERT_TRUE(store.publish_candidate(candidate).has_value());
+  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string trailing_name = IndexerOutboxStore::candidate_filename(50);
   x23::Buf trailing = read_bytes(dir_, trailing_name);
   trailing.append_range(std::vector<uint8_t>{0, 0, 0, 0});
   write_bytes(dir_, trailing_name, trailing);
-  auto trailing_result = store.load_candidate(50);
+  auto trailing_result = store.load_candidate(50)();
   ASSERT_FALSE(trailing_result.has_value());
   EXPECT_NE(trailing_result.error().find("size mismatch"), std::string::npos);
 }
@@ -1347,19 +1378,19 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   auto negative_candidate = make_candidate(51, -1, {}, {});
-  auto candidate_result = store.publish_candidate(negative_candidate);
+  auto candidate_result = store.publish_candidate(negative_candidate)();
   ASSERT_FALSE(candidate_result.has_value());
   EXPECT_NE(candidate_result.error().find("negative"), std::string::npos);
 
   auto committed = make_committed(18, {}, {});
   initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed).has_value());
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(18);
   mutate_payload<IndexerOutboxCommittedPayload>(
       dir_, filename, [](auto &payload) {
         payload.consensus_value.proposal_header.events_hash[0] ^= 0x01;
       });
-  auto root_mismatch = store.load_committed(18);
+  auto root_mismatch = store.load_committed(18)();
   ASSERT_FALSE(root_mismatch.has_value());
   EXPECT_NE(root_mismatch.error().find("event root"), std::string::npos);
 
@@ -1369,7 +1400,7 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
             compute_indexer_outbox_event_root(payload.event_logs);
         payload.consensus_value.proposal_header.block_height = 19;
       });
-  auto height_mismatch = store.load_committed(18);
+  auto height_mismatch = store.load_committed(18)();
   ASSERT_FALSE(height_mismatch.has_value());
   EXPECT_NE(height_mismatch.error().find("filename height"), std::string::npos);
 
@@ -1377,7 +1408,7 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
       dir_, filename, [](auto &payload) {
         payload.consensus_value.proposal_header.block_height = -1;
       });
-  auto negative_height = store.load_committed(18);
+  auto negative_height = store.load_committed(18)();
   ASSERT_FALSE(negative_height.has_value());
   EXPECT_NE(negative_height.error().find("negative"), std::string::npos);
 }
@@ -1390,7 +1421,7 @@ TEST_F(IndexerOutboxTest,
   ProposedTransaction body = make_body(1);
   IndexerOutboxCommittedPayload payload =
       make_committed(1, {body}, {make_event(body, 1)});
-  IndexerCommittedBlock block = *make_indexer_committed_block(payload);
+  IndexerCommittedBlock block = *make_indexer_committed_block(payload)();
   IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol(),
                              .first_height = 1};
   const x23::Buf actual_record =
@@ -1443,8 +1474,9 @@ TEST_F(IndexerOutboxTest, FinalSymlinkIsRejected)
   const std::string filename = IndexerOutboxStore::candidate_filename(52);
   ASSERT_EQ(symlink("target", path_for(dir_, filename).c_str()), 0);
 
-  auto result = store.load_candidate(52);
-  auto publish_result = store.publish_candidate(make_candidate(52, 19, {}, {}));
+  auto result = store.load_candidate(52)();
+  auto publish_result =
+      store.publish_candidate(make_candidate(52, 19, {}, {}))();
 
   ASSERT_FALSE(result.has_value());
   ASSERT_FALSE(publish_result.has_value());
@@ -1460,11 +1492,11 @@ TEST_F(IndexerOutboxTest, RawEnumerationReturnsSortedRecognizedHeights)
   for (BlockHeight height : {1, 2, 3}) {
     auto committed = make_committed(height, {}, {});
     committed.consensus_value.prev_hash = previous;
-    ASSERT_TRUE(store.publish_committed(committed).has_value());
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
     previous = sha256(committed.consensus_value);
   }
   ASSERT_TRUE(
-      store.publish_candidate(make_candidate(53, 20, {}, {})).has_value());
+      store.publish_candidate(make_candidate(53, 20, {}, {}))().has_value());
   const std::vector<uint8_t> ignored = {0, 0, 0, 0};
   write_bytes(dir_, "committed-00000000000000000004.outbox.tmp.1.2", ignored);
   write_bytes(dir_, "committed-not-a-height.outbox", ignored);

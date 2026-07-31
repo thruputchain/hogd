@@ -8,6 +8,7 @@
 #include "indexer.hh"
 #include "proposal.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -18,13 +19,13 @@ inline constexpr size_t kIndexerRpcMaxMessageSize = (size_t{1} << 31) - 1;
 template<typename T> using IndexerPayloadStatus = std::expected<T, std::string>;
 
 SHA256Hash compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs);
-IndexerPayloadStatus<TxsHash>
+x23::Async<IndexerPayloadStatus<TxsHash>>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs);
-IndexerPayloadStatus<void>
+x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload);
-IndexerPayloadStatus<IndexerCommittedBlock>
+x23::Async<IndexerPayloadStatus<IndexerCommittedBlock>>
 make_indexer_committed_block(const IndexerCommittedBlockPayload &payload);
-IndexerPayloadStatus<void>
+x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_block(const IndexerCommittedBlock &block);
 
 } // namespace hogd

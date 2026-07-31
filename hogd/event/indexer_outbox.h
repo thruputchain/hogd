@@ -18,6 +18,8 @@
 #include "indexer.hh"
 #include "proposal.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -128,9 +130,9 @@ public:
   IndexerOutboxStatus<void>
   store_indexer_slot(const EventIndexerSlot &slot) const;
 
-  IndexerOutboxStatus<void>
+  x23::Async<IndexerOutboxStatus<void>>
   publish_candidate(const IndexerOutboxCandidatePayload &payload) const;
-  IndexerOutboxStatus<IndexerOutboxCandidatePayload>
+  x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
   load_candidate(BlockID block_id) const;
   IndexerOutboxStatus<bool> has_candidate(BlockID block_id) const;
   IndexerOutboxStatus<void> remove_candidate(BlockID block_id) const;
@@ -139,9 +141,9 @@ public:
   IndexerOutboxStatus<std::vector<IndexerOutboxCandidateRecordInfo>>
   enumerate_candidate_records_raw() const;
 
-  IndexerOutboxStatus<void>
+  x23::Async<IndexerOutboxStatus<void>>
   publish_committed(const IndexerOutboxCommittedPayload &payload) const;
-  IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+  x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
   IndexerOutboxStatus<bool> has_committed(BlockHeight block_height) const;
   IndexerOutboxStatus<std::optional<IndexerOutboxCommittedRecordInfo>>
@@ -158,7 +160,7 @@ public:
   enumerate_epoch_origins_raw() const;
   IndexerOutboxStatus<std::optional<IndexerOutboxEpochOrigin>>
   load_current_epoch_origin() const;
-  IndexerOutboxStatus<void>
+  x23::Async<IndexerOutboxStatus<void>>
   initialize_current_epoch_origin(BlockHeight first_height,
                                   ConsensusValueHash first_prev_hash) const;
   // False if any recognized final record exists or a recognized temporary
@@ -171,13 +173,13 @@ public:
 
   // Reconciliation has already performed the O(N) integrity scan, so seed the
   // O(1) append state from that validated snapshot. The process-wide flock and
-  // committed_publication_mutex_ make this cache valid: no external writer can
+  // committed_publication_lock_ make this cache valid: no external writer can
   // change the namespace while this store is open.
-  void cache_validated_committed_append_tip(
+  x23::Async<void> cache_validated_committed_append_tip(
       std::optional<IndexerOutboxCommittedRecordInfo> latest,
       std::optional<IndexerOutboxEpochOrigin> current_origin,
       std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary) const;
-  size_t committed_history_scan_count_for_test() const;
+  x23::Async<size_t> committed_history_scan_count_for_test() const;
 
 private:
   explicit IndexerOutboxStore(UniqueFd directory_fd)
@@ -187,9 +189,11 @@ private:
   static IndexerOutboxStatus<IndexerOutboxStore>
   finish_opening(UniqueFd directory_fd);
   IndexerOutboxStatus<void> cleanup_stale_temp_files();
-  IndexerOutboxStatus<void> initialize_current_epoch_origin_unlocked(
+  x23::Async<IndexerOutboxStatus<void>>
+  initialize_current_epoch_origin_unlocked(
       BlockHeight first_height, ConsensusValueHash first_prev_hash) const;
-  IndexerOutboxStatus<void> initialize_committed_append_cache_unlocked() const;
+  x23::Async<IndexerOutboxStatus<void>>
+  initialize_committed_append_cache_unlocked() const;
   IndexerOutboxStatus<std::vector<std::string>> list_names() const;
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
@@ -221,10 +225,11 @@ private:
   // There is intentionally no durable latest sidecar: publication of a record
   // and sidecar could not be atomic. Reconciliation/open validation seeds this
   // cache, or direct-store callers rebuild it once lazily. The directory flock
-  // guarantees this process is the singleton writer; the mutex serializes its
-  // threads. The cache advances only after durable no-clobber publication.
-  mutable std::unique_ptr<std::mutex> committed_publication_mutex_ =
-      std::make_unique<std::mutex>();
+  // guarantees this process is the singleton writer; the coroutine lock
+  // serializes its threads without blocking one worker on another. The cache
+  // advances only after durable no-clobber publication.
+  mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
+      std::make_unique<x23::CoroLock>();
   mutable std::unique_ptr<std::mutex> slot_publication_mutex_ =
       std::make_unique<std::mutex>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;

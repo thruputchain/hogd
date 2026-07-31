@@ -252,12 +252,13 @@ drain_indexer_delivery_queue(
       }
 
       CHECK_PTR(state->outbox_store);
-      auto payload = state->outbox_store->load_committed(record->block_height);
+      auto payload =
+          co_await state->outbox_store->load_committed(record->block_height);
       if (!payload) {
         panic("failed to reload committed indexer delivery {}: {}",
               record->block_height, payload.error());
       }
-      auto block = make_indexer_committed_block(*payload);
+      auto block = co_await make_indexer_committed_block(*payload);
       if (!block) {
         panic("failed to rebuild committed indexer delivery {}: {}",
               record->block_height, block.error());
@@ -461,7 +462,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
     co_return EventError{EventErrorCode::kInternal};
   }
   if (*candidate_exists) {
-    auto candidate = indexer_outbox_store_.load_candidate(block_id);
+    auto candidate = co_await indexer_outbox_store_.load_candidate(block_id);
     if (!candidate) {
       error("failed to load candidate indexer outbox record for block {}: {}",
             block_id, candidate.error());
@@ -525,7 +526,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
         context->get().snapshot_indexer_outbox_candidate(block_height, out_hash,
                                                          std::move(
                                                              proposal_txs));
-    if (auto published = indexer_outbox_store_.publish_candidate(candidate);
+    if (auto published =
+            co_await indexer_outbox_store_.publish_candidate(candidate);
         !published) {
       panic("failed to publish candidate indexer outbox record: {}",
             published.error());
@@ -576,7 +578,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);
-  auto promotion = find_canonical_candidate(consensus_value);
+  auto promotion = co_await find_canonical_candidate(consensus_value);
   if (!promotion) {
     error("failed to identify canonical candidate for height {}: {}",
           block_height, promotion.error());
@@ -592,7 +594,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
   IndexerOutboxCommittedPayload committed;
   if (*committed_exists) {
-    auto loaded = indexer_outbox_store_.load_committed(block_height);
+    auto loaded = co_await indexer_outbox_store_.load_committed(block_height);
     if (!loaded) {
       error("failed to load committed indexer outbox record at height {}: {}",
             block_height, loaded.error());
@@ -620,7 +622,8 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_return EventError{EventErrorCode::kInternal};
     }
     committed = std::move((*promotion)->committed);
-    if (auto published = indexer_outbox_store_.publish_committed(committed);
+    if (auto published =
+            co_await indexer_outbox_store_.publish_committed(committed);
         !published) {
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",
@@ -629,7 +632,8 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_return EventError{EventErrorCode::kInternal};
     }
   }
-  if (auto removed = remove_resolved_candidates(block_height); !removed) {
+  if (auto removed = co_await remove_resolved_candidates(block_height);
+      !removed) {
     error("failed to remove resolved candidate indexer outbox records through "
           "height {}: {}",
           block_height, removed.error());
@@ -658,7 +662,7 @@ EventRPCContext::confirm_committed_block(ConsensusValue consensus_value)
     error("cannot confirm indexer delivery without a reconciled tail");
     co_return EventError{EventErrorCode::kInternal};
   }
-  auto committed = indexer_outbox_store_.load_committed(block_height);
+  auto committed = co_await indexer_outbox_store_.load_committed(block_height);
   if (!committed) {
     error("cannot confirm missing committed indexer outbox height {}: {}",
           block_height, committed.error());
@@ -794,7 +798,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
         return candidate.protocol != current_protocol &&
                is_canonical_candidate(candidate);
       });
-  auto promotion = find_canonical_candidate(consensus_value);
+  auto promotion = co_await find_canonical_candidate(consensus_value);
   if (!promotion) {
     error("failed to validate canonical retained candidate: {}",
           promotion.error());
@@ -860,7 +864,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
       if (record.protocol == current_protocol) {
         auto committed =
-            indexer_outbox_store_.load_committed(record.block_height);
+            co_await indexer_outbox_store_.load_committed(record.block_height);
         if (!committed) {
           error("failed to validate current committed outbox record at {}: {}",
                 record.block_height, committed.error());
@@ -1014,8 +1018,9 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   // Mutation phase. Every rejection above preserves candidates and committed
   // records byte-for-byte.
   if (planned_origin) {
-    auto initialized = indexer_outbox_store_.initialize_current_epoch_origin(
-        planned_origin->first, planned_origin->second);
+    auto initialized =
+        co_await indexer_outbox_store_.initialize_current_epoch_origin(
+            planned_origin->first, planned_origin->second);
     if (!initialized) {
       error("failed to initialize current indexer outbox epoch origin: {}",
             initialized.error());
@@ -1033,7 +1038,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     if (!promoted) {
       co_return promoted.error();
     }
-    auto committed = indexer_outbox_store_.load_committed(tip_height);
+    auto committed = co_await indexer_outbox_store_.load_committed(tip_height);
     if (!committed || sha256(committed->consensus_value) != tip_hash ||
         committed->consensus_value.prev_hash != consensus_value.prev_hash) {
       error("promoted retained candidate did not produce the validated outbox "
@@ -1082,11 +1087,12 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     co_return EventError{EventErrorCode::kInternal};
   }
 
-  indexer_outbox_store_.cache_validated_committed_append_tip(
+  co_await indexer_outbox_store_.cache_validated_committed_append_tip(
       previous_record, *current_origin, canonical_boundary);
 
   if (previous_record) {
-    auto removed = remove_resolved_candidates(previous_record->block_height);
+    auto removed =
+        co_await remove_resolved_candidates(previous_record->block_height);
     if (!removed) {
       error("failed to clean reconciled candidates through height {}: {}",
             previous_record->block_height, removed.error());
@@ -1292,13 +1298,14 @@ EventRPCContext::register_indexer(indexer_event_client_t indexer,
              *next_height);
         co_return EventRegistrationReplayFailed;
       }
-      auto payload = indexer_outbox_store_.load_committed(record.block_height);
+      auto payload =
+          co_await indexer_outbox_store_.load_committed(record.block_height);
       if (!payload) {
         warn("failed to load indexer replay record {}: {}", record.block_height,
              payload.error());
         co_return EventRegistrationReplayFailed;
       }
-      auto block = make_indexer_committed_block(*payload);
+      auto block = co_await make_indexer_committed_block(*payload);
       if (!block || block->identity.consensus_hash != record.consensus_hash ||
           block->identity.payload_digest != record.payload_digest) {
         warn("indexer replay record {} failed identity validation",
@@ -1475,47 +1482,48 @@ EventRPCContext::abandon_block(BlockID block_id)
                                         BlockOperation::kAbandoning)) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
-  const auto clean_redundant_candidate = [&]() -> EventStatus<bool> {
+  const auto clean_redundant_candidate =
+      [&]() -> x23::Async<EventStatus<bool>> {
     auto candidate_exists = indexer_outbox_store_.has_candidate(block_id);
     if (!candidate_exists) {
       error("failed to inspect candidate indexer outbox record for block {}: "
             "{}",
             block_id, candidate_exists.error());
-      return EventError{EventErrorCode::kInternal};
+      co_return EventError{EventErrorCode::kInternal};
     }
     if (!*candidate_exists) {
-      return false;
+      co_return false;
     }
-    auto candidate = indexer_outbox_store_.load_candidate(block_id);
+    auto candidate = co_await indexer_outbox_store_.load_candidate(block_id);
     if (!candidate) {
       error("failed to load abandoned candidate {}: {}", block_id,
             candidate.error());
-      return EventError{EventErrorCode::kInternal};
+      co_return EventError{EventErrorCode::kInternal};
     }
     auto committed_exists =
         indexer_outbox_store_.has_committed(candidate->block_height);
     if (!committed_exists) {
       error("failed to inspect committed outbox record at height {}: {}",
             candidate->block_height, committed_exists.error());
-      return EventError{EventErrorCode::kInternal};
+      co_return EventError{EventErrorCode::kInternal};
     }
     if (!*committed_exists) {
-      return true;
+      co_return true;
     }
     auto committed =
-        indexer_outbox_store_.load_committed(candidate->block_height);
+        co_await indexer_outbox_store_.load_committed(candidate->block_height);
     if (!committed) {
       error("failed to validate committed outbox record at height {}: {}",
             candidate->block_height, committed.error());
-      return EventError{EventErrorCode::kInternal};
+      co_return EventError{EventErrorCode::kInternal};
     }
     if (auto removed = indexer_outbox_store_.remove_candidate(block_id);
         !removed) {
       error("failed to remove redundant abandoned candidate {}: {}", block_id,
             removed.error());
-      return EventError{EventErrorCode::kInternal};
+      co_return EventError{EventErrorCode::kInternal};
     }
-    return true;
+    co_return true;
   };
 
   info("EventRPCContext::abandon_block: block_id={} acquiring lock", block_id);
@@ -1540,7 +1548,7 @@ EventRPCContext::abandon_block(BlockID block_id)
   }
 
   if (context_ptr == nullptr) {
-    auto candidate = clean_redundant_candidate();
+    auto candidate = co_await clean_redundant_candidate();
     if (!candidate) {
       co_await finish_block_operation(block_id, nullptr, false);
       co_return candidate.error();
@@ -1566,7 +1574,7 @@ EventRPCContext::abandon_block(BlockID block_id)
   info("EventRPCContext::abandon_block: block_id={} done (post-close), gc",
        block_id);
   co_await finish_block_operation(block_id, context_ptr, true);
-  auto candidate = clean_redundant_candidate();
+  auto candidate = co_await clean_redundant_candidate();
   if (!candidate) {
     co_return candidate.error();
   }
@@ -1582,12 +1590,12 @@ EventRPCContext::reserve_block_operation(BlockID block_id,
   co_return block_operations_.try_emplace(block_id, operation).second;
 }
 
-IndexerOutboxStatus<void>
+x23::Async<IndexerOutboxStatus<void>>
 EventRPCContext::remove_resolved_candidates(BlockHeight committed_height)
 {
   auto candidates = indexer_outbox_store_.enumerate_candidate_records_raw();
   if (!candidates) {
-    return std::unexpected(candidates.error());
+    co_return std::unexpected(candidates.error());
   }
 
   for (const auto &candidate : *candidates) {
@@ -1595,9 +1603,10 @@ EventRPCContext::remove_resolved_candidates(BlockHeight committed_height)
       continue;
     }
     if (candidate.protocol == std::string_view(version::kHogdProtocol())) {
-      auto payload = indexer_outbox_store_.load_candidate(candidate.block_id);
+      auto payload =
+          co_await indexer_outbox_store_.load_candidate(candidate.block_id);
       if (!payload) {
-        return std::unexpected(
+        co_return std::unexpected(
             std::format("failed to validate current candidate {}: {}",
                         candidate.block_id, payload.error()));
       }
@@ -1605,20 +1614,22 @@ EventRPCContext::remove_resolved_candidates(BlockHeight committed_height)
     if (auto removed =
             indexer_outbox_store_.remove_candidate(candidate.block_id);
         !removed) {
-      return std::unexpected(std::format("failed to remove candidate {}: {}",
-                                         candidate.block_id, removed.error()));
+      co_return std::unexpected(std::format("failed to remove candidate {}: {}",
+                                            candidate.block_id,
+                                            removed.error()));
     }
   }
-  return {};
+  co_return IndexerOutboxStatus<void>{};
 }
 
-IndexerOutboxStatus<std::optional<EventRPCContext::CandidatePromotion>>
+x23::Async<
+    IndexerOutboxStatus<std::optional<EventRPCContext::CandidatePromotion>>>
 EventRPCContext::find_canonical_candidate(
     const ConsensusValue &consensus_value) const
 {
   auto records = indexer_outbox_store_.enumerate_candidate_records_raw();
   if (!records) {
-    return std::unexpected(records.error());
+    co_return std::unexpected(records.error());
   }
   const BlockHeight height = consensus_value.proposal_header.block_height;
   std::optional<CandidatePromotion> selected;
@@ -1630,10 +1641,12 @@ EventRPCContext::find_canonical_candidate(
         record.proposal_txs_hash != consensus_value.proposal_txs_hash) {
       continue;
     }
-    auto candidate = indexer_outbox_store_.load_candidate(record.block_id);
+    auto candidate =
+        co_await indexer_outbox_store_.load_candidate(record.block_id);
     if (!candidate) {
-      return std::unexpected(std::format("failed to validate candidate {}: {}",
-                                         record.block_id, candidate.error()));
+      co_return std::unexpected(
+          std::format("failed to validate candidate {}: {}", record.block_id,
+                      candidate.error()));
     }
     IndexerOutboxCommittedPayload committed{
         .format_version = kIndexerOutboxFormatVersion,
@@ -1642,14 +1655,15 @@ EventRPCContext::find_canonical_candidate(
         .event_logs = candidate->event_logs,
         .tx_bodies = candidate->tx_bodies,
     };
-    if (auto valid = validate_indexer_committed_payload(committed); !valid) {
-      return std::unexpected(std::format(
+    if (auto valid = co_await validate_indexer_committed_payload(committed);
+        !valid) {
+      co_return std::unexpected(std::format(
           "candidate {} cannot form canonical committed payload: {}",
           record.block_id, valid.error()));
     }
     x23::Buf bytes = x23::serialize(committed);
     if (selected && bytes != selected_bytes) {
-      return std::unexpected(
+      co_return std::unexpected(
           "multiple distinct candidates match the canonical consensus value");
     }
     if (!selected) {
@@ -1659,7 +1673,7 @@ EventRPCContext::find_canonical_candidate(
       selected_bytes = std::move(bytes);
     }
   }
-  return selected;
+  co_return selected;
 }
 
 x23::Async<void>

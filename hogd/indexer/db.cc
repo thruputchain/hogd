@@ -609,6 +609,7 @@ IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
     legacy_v1_mode_(other.legacy_v1_mode_),
     v1_ingest_test_hook_(std::move(other.v1_ingest_test_hook_)),
     initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
+    apply_validation_test_hook_(std::move(other.apply_validation_test_hook_)),
     highest_indexed_block_(
         other.highest_indexed_block_.load(std::memory_order_acquire))
 {
@@ -647,6 +648,7 @@ IndexDB::operator=(IndexDB &&other) noexcept
     legacy_v1_mode_ = other.legacy_v1_mode_;
     v1_ingest_test_hook_ = std::move(other.v1_ingest_test_hook_);
     initialize_epoch_test_hook_ = std::move(other.initialize_epoch_test_hook_);
+    apply_validation_test_hook_ = std::move(other.apply_validation_test_hook_);
     highest_indexed_block_.store(other.highest_indexed_block_.load(
                                      std::memory_order_acquire),
                                  std::memory_order_release);
@@ -1272,9 +1274,44 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
   return epoch_success(IndexerEpochOutcome::IndexerEpochInitialized, progress);
 }
 
+x23::Async<IndexerBlockApplyResult>
+IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
+                               IndexerCommittedBlock block)
+{
+  {
+    std::lock_guard g(ingest_mutex_);
+    if (!is_open()) {
+      co_return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+          "indexer database is not open");
+    }
+    if (!durable_progress_ || !xdr_equal(durable_progress_->origin, origin)) {
+      co_return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockOriginMismatch,
+          durable_progress_ ? "outbox origin mismatch"
+                            : "outbox epoch is uninitialized");
+    }
+  }
+  if (apply_validation_test_hook_) {
+    apply_validation_test_hook_();
+  }
+  try {
+    if (auto valid = co_await validate_indexer_committed_block(block); !valid) {
+      co_return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
+    }
+    co_return apply_validated_committed_block(origin, block);
+  } catch (const std::exception &e) {
+    error("failed to validate/apply committed indexer block: {}", e.what());
+    co_return apply_failure(
+        IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+        "internal committed block failure");
+  }
+}
+
 IndexerBlockApplyResult
-IndexDB::apply_committed_block(const IndexerOutboxOrigin &origin,
-                               const IndexerCommittedBlock &block)
+IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
+                                         const IndexerCommittedBlock &block)
 {
   std::lock_guard g(ingest_mutex_);
   if (!is_open()) {
@@ -1288,11 +1325,6 @@ IndexDB::apply_committed_block(const IndexerOutboxOrigin &origin,
   }
 
   try {
-    if (auto valid = validate_indexer_committed_block(block); !valid) {
-      return apply_failure(
-          IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
-    }
-
     const BlockHeight height =
         block.payload.consensus_value.proposal_header.block_height;
     if (height < 0) {
