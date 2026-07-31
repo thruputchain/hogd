@@ -18,6 +18,17 @@ opaque pagination cursors from rows arriving below a previously served cut.
 
 ## Decision
 
+### Pattern Context
+
+This design adapts the transactional outbox and store-and-forward patterns:
+committed producer records form a durable ordered log, delivery is at least
+once, and the consumer atomically persists its effects and checkpoint so replay
+is idempotent. Unlike a textbook transactional outbox, HogDB and event durability
+cannot share one database transaction. The scheduler confirmation barrier
+therefore controls delivery eligibility after both commits succeed, while
+canonical consensus identity and startup reconciliation repair the permitted
+crash windows. This is not distributed two-phase commit.
+
 Add a durable, event-side indexer outbox. Closing a candidate atomically writes
 the complete indexer payload before returning its event root to the scheduler.
 Committing receives the canonical `ConsensusValue`, verifies the candidate, and
