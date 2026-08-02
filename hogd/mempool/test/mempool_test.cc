@@ -127,6 +127,14 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   EXPECT_NE(sha256(txs), expected);
 }
 
+TEST(Mempool, ShutdownBeforeReadyIsNoop)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+
+  coordinator.schedulercoord_shutdown()();
+}
+
 // TODO(jhumphri): Update this test once we implement authentication and
 // vetting.
 TEST(Mempool, SubmitUnvetted)

@@ -187,7 +187,9 @@ public:
   // are still running.
   x23::Async<void> schedulercoord_shutdown() const
   {
-    CHECK(ready());
+    if (!ready()) {
+      co_return;
+    }
 
     // TODO(jhumphri): Implement.
     co_return;
