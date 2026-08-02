@@ -14,6 +14,7 @@
 #include <iterator>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -436,6 +437,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
       "prune auth failures", submit_dag.after(verify_node),
       [&]() -> x23::Async<void> {
         const AuthErrorCodeBatch &auth_ret = verify_node.get();
+        CHECK_EQ(auth_ret.size(), txs->size());
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
@@ -618,10 +620,18 @@ MempoolCoordinatorRpc::propose_batch(
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
                                                                        txs);
+  if (res.size() != txs.size()) {
+    throw std::runtime_error(
+        "executor returned wrong number of proposal results");
+  }
   // Record nomination metadata for txs that succeeded on the executor and mark
   // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
+    if (result.result() == ExecResult::ExecResultUnrecoverable) {
+      throw std::runtime_error(
+          "executor returned unrecoverable proposal result");
+    }
     ret_chunk[i] = tx_succeeded(result.result());
     if (ret_chunk[i]) {
       transaction_nominations.push_back(result.proposal_data());
@@ -1358,6 +1368,14 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
+  if (res.size() != txs.size()) {
+    throw std::runtime_error(
+        "executor returned wrong number of validation results");
+  }
+  if (std::ranges::contains(res, ExecResult::ExecResultUnrecoverable)) {
+    throw std::runtime_error(
+        "executor returned unrecoverable validation result");
+  }
   // Validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
   // System errors are nondeterministic and cause validation to fail.
@@ -2390,6 +2408,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
           scheduler_->current_block(), txs);
+  CHECK_EQ(auth_ret.size(), tx_hashes.size());
   x23::Vec<SignedTransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
