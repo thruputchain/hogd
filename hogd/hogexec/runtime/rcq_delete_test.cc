@@ -2560,6 +2560,62 @@ protected:
           return {};
         });
 
+    // Method 67 (issue #3152 reachability, multi-frame): consume(concurrent) ->
+    // delete -> insert(different), with the consume and insert each in their
+    // own child frame. Because deltas are flushed to the DB only at a frame
+    // boundary (try_push_new_subtransaction), the delete lands as its own
+    // subtransaction before the recreate, so HogDB sees a deletion -> RCQ
+    // exclusive upgrade. The recreated RCQ reloads the consumed concurrent
+    // entry into current_block_consumed (via make_fully_consumed_item) while
+    // added_entries holds only the new insert -- the exact shape HogDB's RCQ
+    // ExclusiveLock rejects as kInvalidExecutorBehavior. Unlike methods 62-65
+    // (single frame, so delete+recreate fold into one delta) this actually
+    // splits them across a push.
+    builder.add<SerializationFormat::kTxs>(
+        67,
+        [](NativeSyscallContext &ctx, uint32_t concurrent_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          // Consume the concurrent entry in a child frame (entrypoint 1).
+          CopyableInvokeInputs consume_in{
+              .entrypoint_id = 1,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto r1 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(concurrent_val),
+                                              std::span<uint32_t>{}, consume_in,
+                                              CopyableInvokeOutputs{});
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // Delete in this (driver) frame.
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // Insert a DIFFERENT entry in a child frame (entrypoint 0). Crossing
+          // this boundary first flushes the deletion subtransaction.
+          CopyableInvokeInputs insert_in{
+              .entrypoint_id = 0,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto r3 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(insert_val),
+                                              std::span<uint32_t>{}, insert_in,
+                                              CopyableInvokeOutputs{});
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -4267,6 +4323,59 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
     EXPECT_FALSE(queue.has_value()) << "Queue should be empty (all consumed)";
+  }
+}
+
+// Issue #3152 reachability probe (multi-frame). A prior tx commits entry 77,
+// which the method-67 tx observes as a concurrent current-block entry. Method
+// 67 consumes 77, deletes, then inserts a distinct entry 42 -- with the
+// consume and insert each in their own child frame so the delete is flushed as
+// its own subtransaction before the recreate. That makes HogDB process the
+// recreate as a deletion -> RCQ exclusive upgrade whose current_block_consumed
+// (reloaded 77) is not covered by added_entries (42): the exact shape HogDB
+// rejects as kInvalidExecutorBehavior -> kRPCUnrecoverable. A correct executor
+// must never produce it, so the transaction must not commit unrecoverably. (A
+// deterministic per-tx rejection during invoke is a safe outcome and allowed.)
+TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "kInvalidExecutorBehavior guard is HogDB-specific";
+  }
+
+  // Committed in its own tx; observable as a concurrent entry to the next tx.
+  insert(77);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kContractAddress,
+                                 .entrypoint = entrypoint_from_method_id(67),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = x23::serialize(uint32_t{77},
+                                                            uint32_t{42})},
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
+
+  // The forbidden RCQ delta is pushed when the final child (insert) frame
+  // returns -- i.e. during root_invoke, before commit -- so a
+  // kInvalidExecutorBehavior surfaces as an Unrecoverable invoke error, not
+  // just at commit. Check both. A deterministic per-tx rejection during invoke
+  // is a safe outcome and is allowed.
+  auto r = handler.root_invoke();
+  if (r.is_root_success()) {
+    ASSERT_NE(handler.try_commit_transaction(),
+              ExecResult::ExecResultUnrecoverable)
+        << "executor drove HogDB to reject a contract-produced RCQ delta as "
+           "invalid executor behavior at commit (issue #3152)";
+  }
+  else {
+    ASSERT_NE(r.result_.error().code(), InvokeErrorCode::Unrecoverable)
+        << "executor drove HogDB to reject a contract-produced RCQ delta as "
+           "invalid executor behavior during invoke (issue #3152)";
   }
 }
 
