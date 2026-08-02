@@ -13,6 +13,7 @@
 #include <ios>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -544,6 +545,10 @@ MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 x23::Async<void>
 MempoolCoordinatorRpc::finish_block(BlockID block_id, size_t executor_idx)
 {
+  if (finish_executor_started_test_hook_) {
+    co_await default_threadpool().bg();
+    finish_executor_started_test_hook_(block_id, executor_idx);
+  }
   auto r =
       co_await exec_clients_[executor_idx].executorsched_finish_block(block_id);
   CHECK_EQ(r, ExecResult::ExecResultOK);
@@ -560,8 +565,18 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     handles.push_back(finish_block(block_id, /*executor_idx=*/i));
   }
+  std::exception_ptr first_exception;
   for (x23::Async<void> &handle : handles) {
-    co_await handle;
+    try {
+      co_await handle;
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
   }
 }
 
@@ -678,8 +693,18 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
   }
 
   // Wait for the executor to finish executing the txs.
+  std::exception_ptr first_exception;
   for (size_t i = 0; i < chunks.size(); i++) {
-    co_await handles[i];
+    try {
+      co_await handles[i];
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
   }
 }
 
@@ -721,14 +746,25 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
         block_id, tx_chunk, nomination_chunks[i], status_chunk));
   }
 
-  // Wait for the RPC responses.
   transaction_nominations.reserve(txs.size());
+  // Wait for all RPC responses before reading their output buffers. If one
+  // fails, the other coroutines still reference those buffers and spans.
+  std::exception_ptr first_exception;
   for (size_t i = 0; i < large_chunks.size(); i++) {
-    co_await handles[i];
-
-    // Collect the nomination data into the [transaction_nominations] vector.
+    try {
+      co_await handles[i];
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
+  }
+  for (const auto &chunks : nomination_chunks) {
     for (const x23::XdrVec<NondeterministicProposalData> &nominated_txs :
-         nomination_chunks[i]) {
+         chunks) {
       transaction_nominations += nominated_txs;
     }
   }
@@ -1422,8 +1458,18 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
                                                           tx_found,
                                                           scheduler_));
   }
+  std::exception_ptr first_exception;
   for (x23::Async<void> &handle : lookup_handles) {
-    co_await handle;
+    try {
+      co_await handle;
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
   }
 
   for (size_t i = 0; i < tx_found.size(); i++) {
@@ -1486,11 +1532,21 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
         multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
   }
 
-  bool validated = true;
-  for (x23::Async<bool> &handle : handles) {
-    validated = (co_await handle) && validated;
+  x23::Vec<bool> results(large_chunks.size(), false);
+  std::exception_ptr first_exception;
+  for (size_t i = 0; i < handles.size(); ++i) {
+    try {
+      results[i] = co_await handles[i];
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
   }
-  co_return validated;
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
+  }
+  co_return std::ranges::all_of(results, std::identity{});
 }
 
 x23::Async<bool>
@@ -1514,11 +1570,21 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
                              /*executor_idx=*/i % exec_clients_.size()));
   }
 
-  bool validated = true;
-  for (x23::Async<bool> &handle : handles) {
-    validated = (co_await handle) && validated;
+  x23::Vec<bool> results(chunks.size(), false);
+  std::exception_ptr first_exception;
+  for (size_t i = 0; i < handles.size(); ++i) {
+    try {
+      results[i] = co_await handles[i];
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
   }
-  co_return validated;
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
+  }
+  co_return std::ranges::all_of(results, std::identity{});
 }
 
 x23::Async<ExecResult>
@@ -1682,9 +1748,24 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         x23::Async<bool> tx_hash_handle =
             parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes);
 
-        const bool decoded_tx_nominations =
-            co_await tx_nondeterministic_data_handle;
-        const bool decoded_tx_hashes = co_await tx_hash_handle;
+        std::exception_ptr first_exception;
+        bool decoded_tx_nominations = false;
+        bool decoded_tx_hashes = false;
+        try {
+          decoded_tx_nominations = co_await tx_nondeterministic_data_handle;
+        } catch (...) {
+          first_exception = std::current_exception();
+        }
+        try {
+          decoded_tx_hashes = co_await tx_hash_handle;
+        } catch (...) {
+          if (!first_exception) {
+            first_exception = std::current_exception();
+          }
+        }
+        if (first_exception) {
+          std::rethrow_exception(first_exception);
+        }
         if (!decoded_tx_nominations || !decoded_tx_hashes) {
           info("schedulercoord_validate rejected malformed nomination batch");
           log_validation_return = false;
@@ -1806,12 +1887,27 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                          tx_nominations_span));
         }
 
-        x23::Vec<PreparedAndValidatedChunk> chunk_results;
-        chunk_results.reserve(chunk_handles.size());
-        for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
-          chunk_results.push_back(co_await handle);
+        x23::Vec<std::optional<PreparedAndValidatedChunk>> chunk_results(
+            chunk_handles.size());
+        std::exception_ptr first_exception;
+        for (size_t i = 0; i < chunk_handles.size(); ++i) {
+          try {
+            chunk_results[i].emplace(co_await chunk_handles[i]);
+          } catch (...) {
+            if (!first_exception) {
+              first_exception = std::current_exception();
+            }
+          }
         }
-        for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
+        if (first_exception) {
+          std::rethrow_exception(first_exception);
+        }
+        for (std::optional<PreparedAndValidatedChunk> &settled :
+             chunk_results) {
+          if (!settled) {
+            panic("validation result missing without a captured exception");
+          }
+          PreparedAndValidatedChunk &chunk_result = *settled;
           validated = chunk_result.validated && validated;
           missing_tx_hashes += chunk_result.missing_tx_hashes;
           cache.txs += chunk_result.txs;
@@ -2173,13 +2269,28 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         if (invalid_consensus_value) {
           co_return;
         }
+        x23::Vec<DbSchedResult> results(commit_plan.abandon_block_ids.size(),
+                                        DbSchedResult::DbSchedResultError);
         x23::Vec<x23::Async<DbSchedResult>> snapshot_handles;
         snapshot_handles.reserve(commit_plan.abandon_block_ids.size());
         for (const BlockID id : commit_plan.abandon_block_ids) {
           snapshot_handles.push_back(abandon_snapshot(id));
         }
-        for (x23::Async<DbSchedResult> &handle : snapshot_handles) {
-          CHECK_EQ(co_await handle, DbSchedResult::DbSchedResultOK);
+        std::exception_ptr first_exception;
+        for (size_t i = 0; i < snapshot_handles.size(); ++i) {
+          try {
+            results[i] = co_await snapshot_handles[i];
+          } catch (...) {
+            if (!first_exception) {
+              first_exception = std::current_exception();
+            }
+          }
+        }
+        if (first_exception) {
+          std::rethrow_exception(first_exception);
+        }
+        for (const DbSchedResult result : results) {
+          CHECK_EQ(result, DbSchedResult::DbSchedResultOK);
         }
         co_return;
       });
@@ -2190,13 +2301,28 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         if (invalid_consensus_value) {
           co_return;
         }
+        x23::Vec<RPCError> results(commit_plan.abandon_block_ids.size(),
+                                   RPCError::kRPCUnrecoverable);
         x23::Vec<x23::Async<RPCError>> event_handles;
         event_handles.reserve(commit_plan.abandon_block_ids.size());
         for (const BlockID id : commit_plan.abandon_block_ids) {
           event_handles.push_back(eventsched_abandon_block(id));
         }
-        for (x23::Async<RPCError> &handle : event_handles) {
-          CHECK_EQ(co_await handle, RPCError::kRPCNone);
+        std::exception_ptr first_exception;
+        for (size_t i = 0; i < event_handles.size(); ++i) {
+          try {
+            results[i] = co_await event_handles[i];
+          } catch (...) {
+            if (!first_exception) {
+              first_exception = std::current_exception();
+            }
+          }
+        }
+        if (first_exception) {
+          std::rethrow_exception(first_exception);
+        }
+        for (const RPCError result : results) {
+          CHECK_EQ(result, RPCError::kRPCNone);
         }
         co_return;
       });

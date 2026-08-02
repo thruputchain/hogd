@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -341,6 +342,17 @@ public:
       co_await scheduler_->transfer_finished_.wait(current_height);
     }
     co_return;
+  }
+
+  void set_finish_executor_started_test_hook(
+      std::function<void(BlockID, size_t)> hook)
+  {
+    finish_executor_started_test_hook_ = std::move(hook);
+  }
+
+  x23::Async<void> test_finish_all_executors(BlockID block_id)
+  {
+    co_await finish_all_executors(block_id);
   }
 
 private:
@@ -686,6 +698,7 @@ private:
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;

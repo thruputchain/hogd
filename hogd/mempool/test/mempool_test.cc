@@ -1,9 +1,12 @@
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
 #include <latch>
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -133,6 +136,57 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
 
   coordinator.schedulercoord_shutdown()();
+}
+
+TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
+{
+  MempoolTestInfra server;
+  constexpr BlockID kBlock = std::numeric_limits<BlockID>::max() - 6;
+  std::latch failure_started(1);
+  std::latch blocked_started(1);
+  std::latch final_cleanup_started(1);
+  std::latch allow_blocked_cleanup(1);
+  std::atomic_size_t started{0};
+  server.mempool_coord_rpc().set_finish_executor_started_test_hook(
+      [&](BlockID block_id, size_t executor_idx) {
+        EXPECT_EQ(block_id, kBlock);
+        started.fetch_add(1, std::memory_order_relaxed);
+        if (executor_idx == 0) {
+          failure_started.count_down();
+          throw std::runtime_error("first executor cleanup failure");
+        }
+        if (executor_idx == 1) {
+          blocked_started.count_down();
+          allow_blocked_cleanup.wait();
+          throw std::runtime_error("blocked executor cleanup failure");
+        }
+        if (executor_idx == MempoolCoordinatorRpc::kNumClientsPerExecutor - 1) {
+          final_cleanup_started.count_down();
+        }
+        throw std::runtime_error("later executor cleanup failure");
+      });
+
+  auto cleanup = std::async(std::launch::async, [&] {
+    server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+  });
+  failure_started.wait();
+  blocked_started.wait();
+  final_cleanup_started.wait();
+  EXPECT_EQ(cleanup.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::timeout);
+
+  allow_blocked_cleanup.count_down();
+  bool caught_first_exception = false;
+  try {
+    cleanup.get();
+  } catch (const std::runtime_error &e) {
+    caught_first_exception = true;
+    EXPECT_STREQ(e.what(), "first executor cleanup failure");
+  }
+  EXPECT_TRUE(caught_first_exception);
+  EXPECT_EQ(started.load(std::memory_order_relaxed),
+            MempoolCoordinatorRpc::kNumClientsPerExecutor);
+  server.mempool_coord_rpc().set_finish_executor_started_test_hook({});
 }
 
 // TODO(jhumphri): Update this test once we implement authentication and
