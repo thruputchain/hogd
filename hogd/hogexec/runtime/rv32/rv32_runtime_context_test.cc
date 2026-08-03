@@ -987,7 +987,7 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
   ContractTraitClient<no_syscall_test::NoSyscallTest> wasm_client(
       kWasmContractAddress);
   SignedTransaction wasm_handler_tx{
-      .tx = Transaction{.invocation = wasm_client.make_invocation<"run_test">(
+      .tx = Transaction{.invocation = wasm_client.make_invocation<u8"run_test">(
                             kEnoughGas, static_cast<uint64_t>(kSyscallCount)),
                         .uniquifier = Uniquifier{
                             .block_expiry_height =
@@ -1058,7 +1058,7 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
   SignedTransaction wasm_handler_tx{
       .tx = Transaction{
           .invocation =
-              wasm_client.make_invocation<"sha256">(kParityGas, input),
+              wasm_client.make_invocation<u8"sha256">(kParityGas, input),
           .uniquifier = Uniquifier{
               .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
               .nonce = 2,
@@ -1134,7 +1134,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnMatchesWasmTraceAndOutput)
   SignedTransaction wasm_handler_tx{
       .tx = Transaction{
           .invocation =
-              wasm_client.make_invocation<"sha256">(kParityGas, input),
+              wasm_client.make_invocation<u8"sha256">(kParityGas, input),
           .uniquifier = Uniquifier{
               .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
               .nonce = 4,
@@ -1206,7 +1206,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchMatchesWasm)
       kWasmContractAddress);
   SignedTransaction wasm_handler_tx{
       .tx = Transaction{.invocation =
-                            wasm_client.make_invocation<"sha256_repeated">(
+                            wasm_client.make_invocation<u8"sha256_repeated">(
                                 kParityGas, uint32_t{1}, input),
                         .uniquifier = Uniquifier{
                             .block_expiry_height =
@@ -1276,7 +1276,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
   SignedTransaction wasm_handler_tx{
       .tx = Transaction{
           .invocation =
-              wasm_client.make_invocation<"write_storage_and_log_event">(
+              wasm_client.make_invocation<u8"write_storage_and_log_event">(
                   kParityGas),
           .uniquifier = Uniquifier{
               .block_expiry_height = std::numeric_limits<BlockHeight>::max(),

@@ -36,23 +36,20 @@ most_derived_cast(T *x)
 }
 
 // StringLiteral provides a string structural type that can be passed as a
-// template parameter. It is parameterized on the character type so it can carry
-// either an ordinary (`char`) or a UTF-8 (`char8_t`) literal. Callers that hash
-// the bytes into protocol data must pass a `u8""` literal, so the stored code
-// units are the standard's charset-independent UTF-8 encoding rather than the
-// implementation-defined ordinary execution-charset encoding
-// (`-fexec-charset`).
-template<std::size_t N, typename CharT = char> struct StringLiteral {
-  CharT buf[N];
+// template parameter. It stores UTF-8 (`char8_t`) code units, so callers must
+// pass a `u8""` literal: the stored bytes are then the standard's UTF-8
+// encoding rather than the implementation-defined ordinary execution-charset
+// encoding (`-fexec-charset`), which matters wherever the literal is hashed
+// into protocol data (see hogd issues #2573, #2579).
+template<std::size_t N> struct StringLiteral {
+  char8_t buf[N];
 
-  constexpr StringLiteral(const CharT (&str)[N]) { std::copy_n(str, N, buf); }
-  constexpr std::basic_string_view<CharT> get() const
+  constexpr StringLiteral(const char8_t (&str)[N]) { std::copy_n(str, N, buf); }
+  constexpr std::u8string_view get() const
   {
-    return std::basic_string_view<CharT>(buf, N - 1);
+    return std::u8string_view(buf, N - 1);
   }
 };
-template<size_t N> StringLiteral(const char (&)[N]) -> StringLiteral<N, char>;
-template<size_t N>
-StringLiteral(const char8_t (&)[N]) -> StringLiteral<N, char8_t>;
+template<size_t N> StringLiteral(const char8_t (&)[N]) -> StringLiteral<N>;
 
 } // namespace hogd

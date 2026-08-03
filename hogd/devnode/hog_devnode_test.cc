@@ -830,9 +830,9 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("artifactHint", "./dev-wallet.rv32a");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
       w.field("doActionEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
     });
     w.object_field("bootstrapAccounts", [&](json::Writer &w) {
       w.field("count", static_cast<std::int64_t>(count));
@@ -1033,11 +1033,11 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "contracts/dev_wallet.rv32a");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -1866,7 +1866,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = Calldata{},
             },
@@ -1947,9 +1947,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(11), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -2039,9 +2039,9 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(17), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -2592,10 +2592,11 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(deploy_nonce,
-                                                                 contract_hash),
+                .calldata =
+                    wallet_meta::make_calldata<u8"deploy">(deploy_nonce,
+                                                           contract_hash),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -2712,17 +2713,17 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
         x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                       erc20_meta::entrypoint<"transfer">(),
+                       erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            created_wallet_address,
                            make_erc20_amount(uint128_t{200'000'000})));
     Transaction prefund_wallet_tx{
         .invocation =
             Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                       .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                        .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"do_action">(
+                       .calldata = wallet_meta::make_calldata<u8"do_action">(
                            transfer_calldata)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -2750,11 +2751,12 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     Transaction create_wallet_tx{
         .invocation =
-            Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"create_wallet">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"create_wallet">(
-                           create_wallet_nonce, wallet_hash, owner_public_key)},
+            Invocation{
+                .invoked_address = sponsor_wallet_address,
+                .entrypoint = wallet_meta::entrypoint<u8"create_wallet">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<u8"create_wallet">(
+                    create_wallet_nonce, wallet_hash, owner_public_key)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 31},

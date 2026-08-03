@@ -69,9 +69,10 @@ TEST_P(FibonacciTest, FibonacciCalls)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
-                                  kSufficientGas, 5U),
-                              .uniquifier = make_new_uniquifier()}},
+            .tx =
+                Transaction{.invocation = client.make_invocation<u8"fibonacci">(
+                                kSufficientGas, 5U),
+                            .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -93,10 +94,11 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  client.make_invocation<"slow_fibonacci">(2000,
+            .tx =
+                Transaction{.invocation =
+                                client.make_invocation<u8"slow_fibonacci">(2000,
                                                                            20U),
-                              .uniquifier = make_new_uniquifier()}},
+                            .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
@@ -121,7 +123,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
       [](NativeSyscallContext &ctx, uint32_t input,
          uint32_t expect) -> InvokeStatus<void> {
         fib_client_t client(kFibContractAddr);
-        auto decoded = client.template invoke_opt<"fibonacci">(ctx, input);
+        auto decoded = client.template invoke_opt<u8"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};

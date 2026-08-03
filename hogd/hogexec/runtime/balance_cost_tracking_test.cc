@@ -100,7 +100,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -191,7 +191,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
@@ -206,7 +206,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
@@ -334,14 +334,14 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
         // 1. Try to transfer (balance_cost - 1) in try_invoke frame -
         // should fail because insufficient to cover balance cost
-        auto calldata1 = erc20_meta::make_calldata<"transfer">(
+        auto calldata1 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
         CopyableInvokeOutputs r1_outputs{};
         auto r1 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
-                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
@@ -367,7 +367,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         auto r2 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
-                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
@@ -387,13 +387,13 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
         // 3. Call transfer again with remainder (1), in try_invoke
         // frame - should succeed
-        auto calldata2 = erc20_meta::make_calldata<"transfer">(
+        auto calldata2 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
         auto r3 = [&]() {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
-                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
@@ -491,11 +491,12 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 
     // Overspend via transfer: records deferred-negative delta on
     // sender, returns local success.
-    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+    auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
       CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .entrypoint_id =
+              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -514,12 +515,12 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
     // Reading sender's balance must now surface as a deterministic
     // fault: the child frame runs but traps, so the invoke syscall returns
     // kSyscallErrorCodeNone with frame_status == Fault.
-    auto calldata_get = erc20_meta::make_calldata<"get_balance">();
+    auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
     CopyableInvokeOutputs r_get_outputs{};
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -595,11 +596,12 @@ TEST_F(BalanceCostTrackingTest,
         GenesisConfigurationLoader::kPresetNativeTokenAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+    auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
       CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .entrypoint_id =
+              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -616,12 +618,12 @@ TEST_F(BalanceCostTrackingTest,
     }
 
     auto calldata_get =
-        erc20_meta::make_calldata<"get_balance_of">(kSenderAddr);
+        erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
     CopyableInvokeOutputs r_get_outputs{};
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -700,11 +702,12 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
         GenesisConfigurationLoader::kPresetNativeTokenAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
+    auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
         kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     auto r_transfer = [&]() {
       CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+          .entrypoint_id =
+              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -720,11 +723,11 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
-    auto calldata_get = erc20_meta::make_calldata<"get_balance">();
+    auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -806,7 +809,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -818,7 +821,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
     }
 
     auto r_balance =
-        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
+        native_token_client.invoke_opt<u8"get_balance_of">(ctx, kReceiverAddr);
 
     if (!r_balance.has_value() || !r_balance.value().has_value() ||
         !r_balance.value().value().has_value() ||
@@ -908,7 +911,7 @@ TEST_F(BalanceCostTrackingTest,
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -920,7 +923,7 @@ TEST_F(BalanceCostTrackingTest,
     }
 
     auto r_balance =
-        native_token_client.invoke_opt<"get_balance_of">(ctx, kReceiverAddr);
+        native_token_client.invoke_opt<u8"get_balance_of">(ctx, kReceiverAddr);
 
     if (!r_balance.has_value() || !r_balance.value().has_value() ||
         !r_balance.value().value().has_value() ||
@@ -1009,7 +1012,7 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
     auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<"transfer">(
+    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
         make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -1109,7 +1112,7 @@ TEST_F(BalanceCostTrackingTest,
         make_amount(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility});
 
     // total_supply() before the transfer is the fixed native HOG supply.
-    auto ts_before = client.invoke_opt<"total_supply">(ctx);
+    auto ts_before = client.invoke_opt<u8"total_supply">(ctx);
     if (!ts_before.has_value() || !ts_before.value().has_value() ||
         !ts_before.value().value().has_value() ||
         !ts_before.value().value().value().is_ok() ||
@@ -1119,7 +1122,7 @@ TEST_F(BalanceCostTrackingTest,
     }
 
     // Transfer to the all-zero address. This is accepted, not rejected.
-    auto r_transfer = client.invoke_opt<"transfer">(
+    auto r_transfer = client.invoke_opt<u8"transfer">(
         ctx, kZeroAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
     if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
         !r_transfer.value().value().has_value() ||
@@ -1129,7 +1132,7 @@ TEST_F(BalanceCostTrackingTest,
     }
 
     // total_supply() is unchanged: the native token does not burn.
-    auto ts_after = client.invoke_opt<"total_supply">(ctx);
+    auto ts_after = client.invoke_opt<u8"total_supply">(ctx);
     if (!ts_after.has_value() || !ts_after.value().has_value() ||
         !ts_after.value().value().has_value() ||
         !ts_after.value().value().value().is_ok() ||

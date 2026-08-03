@@ -467,8 +467,10 @@ TEST_F(Rv32PairHistogramTest, TraceFibonacciAndErc20)
   {
     auto addr = deploy_rv32("fibonacci.rv32a", 0);
     ContractTraitClient<fibonacci::Fibonacci> client(addr);
-    EXPECT_TRUE(trace_invocation(
-        "fibonacci", client.make_invocation<"fibonacci">(kSufficientGas, 10U)));
+    EXPECT_TRUE(
+        trace_invocation("fibonacci",
+                         client.make_invocation<u8"fibonacci">(kSufficientGas,
+                                                               10U)));
   }
 
   {
@@ -483,17 +485,16 @@ TEST_F(Rv32PairHistogramTest, TraceFibonacciAndErc20)
     const auto spender = make_contract_address(100);
     EXPECT_TRUE(
         trace_invocation("itc_erc20",
-                         client.make_invocation<"initialize">(kSufficientGas,
-                                                              owner)));
+                         client.make_invocation<u8"initialize">(kSufficientGas,
+                                                                owner)));
     EXPECT_TRUE(trace_invocation(
-        "itc_erc20", client.make_invocation<"total_supply">(kSufficientGas)));
+        "itc_erc20", client.make_invocation<u8"total_supply">(kSufficientGas)));
     EXPECT_TRUE(trace_invocation(
         "itc_erc20",
-        client.make_invocation<"get_balance_of">(kSufficientGas, owner)));
-    EXPECT_TRUE(
-        trace_invocation("itc_erc20",
-                         client.make_invocation<"allowance">(kSufficientGas,
-                                                             owner, spender)));
+        client.make_invocation<u8"get_balance_of">(kSufficientGas, owner)));
+    EXPECT_TRUE(trace_invocation(
+        "itc_erc20",
+        client.make_invocation<u8"allowance">(kSufficientGas, owner, spender)));
   }
 
   for (auto const &[name, hist] : histograms_) {

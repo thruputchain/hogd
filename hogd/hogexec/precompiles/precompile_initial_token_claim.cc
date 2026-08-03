@@ -129,7 +129,7 @@ make_native_initial_token_claim_contract()
 {
   NativeContractBuilder builder;
 
-  builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
+  builder.add<initial_token_claim::InitialTokenClaim, u8"claim_initial_tokens">(
       [](NativeSyscallContext &ctx, SHA256Hash hash, SHA256Hash nonce,
          ContractEntrypointID entrypoint,
          x23::BufView calldata) -> InvokeStatus<void> {
@@ -164,8 +164,8 @@ make_native_initial_token_claim_contract()
                             *allocation & 0xffffffffffffffffULL);
 
         auto transfer_result =
-            native_token_client.invoke_opt<"transfer">(ctx, receiver_addr,
-                                                       allocation_tuple);
+            native_token_client.invoke_opt<u8"transfer">(ctx, receiver_addr,
+                                                         allocation_tuple);
 
         if (!transfer_result.has_value() ||
             !transfer_result.value().has_value() ||

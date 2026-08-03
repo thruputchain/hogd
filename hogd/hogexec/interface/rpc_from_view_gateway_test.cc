@@ -195,7 +195,7 @@ public:
   {
     ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
     return TransactionViewQuery{
-        .invocation = client.make_invocation<"read_value">(UINT64_MAX, kKey),
+        .invocation = client.make_invocation<u8"read_value">(UINT64_MAX, kKey),
         .parent_address = {},
         .auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData),
         .forwarded_tokens = {},

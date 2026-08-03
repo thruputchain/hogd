@@ -57,7 +57,7 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultValidFirst)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_fault_valid_first">(UINT64_MAX),
+              client_.make_invocation<u8"test_fault_valid_first">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -72,7 +72,7 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultInvalidFirst)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_fault_invalid_first">(UINT64_MAX),
+              client_.make_invocation<u8"test_fault_invalid_first">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -85,7 +85,7 @@ TEST_F(NnintOutputFaultTestWasmTest, ValidationFailure)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_validation_failure">(UINT64_MAX),
+              client_.make_invocation<u8"test_validation_failure">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},

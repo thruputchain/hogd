@@ -72,7 +72,7 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
   auto init_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                caller_client.make_invocation<"initialize">(
+                                caller_client.make_invocation<u8"initialize">(
                                     UINT64_MAX, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -139,7 +139,7 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
   auto init_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                caller_client.make_invocation<"initialize">(
+                                caller_client.make_invocation<u8"initialize">(
                                     UINT64_MAX, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -207,7 +207,7 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
   auto init_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                caller_client.make_invocation<"initialize">(
+                                caller_client.make_invocation<u8"initialize">(
                                     UINT64_MAX, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -276,7 +276,7 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
   auto init_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                caller_client.make_invocation<"initialize">(
+                                caller_client.make_invocation<u8"initialize">(
                                     UINT64_MAX, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -344,7 +344,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
   auto init_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                caller_client.make_invocation<"initialize">(
+                                caller_client.make_invocation<u8"initialize">(
                                     UINT64_MAX, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -366,11 +366,9 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
       reinterpret_cast<const uint8_t *>(test_str.data() + test_str.size()));
   auto write_handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{.invocation =
-                              caller_client.make_invocation<"write_own_state">(
-                                  UINT64_MAX, test_data),
-                          .uniquifier = make_new_uniquifier()}},
+          .tx = Transaction{.invocation = caller_client.make_invocation<
+                                u8"write_own_state">(UINT64_MAX, test_data),
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto write_res = write_handler.root_invoke();

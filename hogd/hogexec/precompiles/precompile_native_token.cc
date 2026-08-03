@@ -450,23 +450,23 @@ make_native_token_contract()
   NativeContractBuilder builder;
 
   // initialize
-  builder.add<itc_erc20::ERC20, "initialize">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, "initialize", 1>);
+  builder.add<itc_erc20::ERC20, u8"initialize">(
+      kAlwaysErrorMethod<itc_erc20::ERC20, u8"initialize", 1>);
 
   // transfer
-  builder.add<itc_erc20::ERC20, "transfer">(transfer_impl);
+  builder.add<itc_erc20::ERC20, u8"transfer">(transfer_impl);
 
   // transfer_from
-  builder.add<itc_erc20::ERC20, "transfer_from">(transfer_from_impl);
+  builder.add<itc_erc20::ERC20, u8"transfer_from">(transfer_from_impl);
 
   // allowance
-  builder.add<itc_erc20::ERC20, "allowance">(get_allowance_impl);
+  builder.add<itc_erc20::ERC20, u8"allowance">(get_allowance_impl);
 
   // adjust_allowance
-  builder.add<itc_erc20::ERC20, "adjust_allowance">(adjust_allowance_impl);
+  builder.add<itc_erc20::ERC20, u8"adjust_allowance">(adjust_allowance_impl);
 
   // get_balance_of
-  builder.add<itc_erc20::ERC20, "get_balance_of">(
+  builder.add<itc_erc20::ERC20, u8"get_balance_of">(
       [](NativeSyscallContext &ctx, ContractAddress contract_address)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance_of: contract_address {}",
@@ -488,7 +488,7 @@ make_native_token_contract()
       });
 
   // get_balance
-  builder.add<itc_erc20::ERC20, "get_balance">(
+  builder.add<itc_erc20::ERC20, u8"get_balance">(
       [](NativeSyscallContext &ctx)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance");
@@ -515,15 +515,15 @@ make_native_token_contract()
       });
 
   // mint
-  builder.add<itc_erc20::ERC20, "mint">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, "mint", 1>);
+  builder.add<itc_erc20::ERC20, u8"mint">(
+      kAlwaysErrorMethod<itc_erc20::ERC20, u8"mint", 1>);
 
   // burn
-  builder.add<itc_erc20::ERC20, "burn">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, "burn", 1>);
+  builder.add<itc_erc20::ERC20, u8"burn">(
+      kAlwaysErrorMethod<itc_erc20::ERC20, u8"burn", 1>);
 
   // total_supply
-  builder.add<itc_erc20::ERC20, "total_supply">(
+  builder.add<itc_erc20::ERC20, u8"total_supply">(
       [](NativeSyscallContext &runtime)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token total_supply");

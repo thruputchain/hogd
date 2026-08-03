@@ -151,7 +151,7 @@ GenesisConfigurationBuilder::make_unfurl_genesis_transactions() const
 
     SignedTransaction tx{
         .tx = Transaction{
-            .invocation = client.make_invocation<"claim_initial_tokens">(
+            .invocation = client.make_invocation<u8"claim_initial_tokens">(
                 kClaimGas, config.contract_hash, config.initial_nonce,
                 config.entrypoint, config.calldata),
             .uniquifier = {.block_expiry_height =
