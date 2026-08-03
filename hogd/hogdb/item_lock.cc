@@ -332,13 +332,30 @@ ItemLock::handle_try_atomic_from_pending(
     CHECK((before == nullptr && pending_refcount_ == 0) ||
           (before != nullptr && pending_refcount_ == 1));
 
-    set_exclusive_lock(ul);
-
-    auto res = std::get<ExclusiveLock>(lock_contents_)
-                   .try_atomic_change_lock(before, after, ctx);
+    // Validate the exclusive change before replacing lock_contents_ so the
+    // upgrade is failure-atomic. set_exclusive_lock() overwrites the prior
+    // (non-exclusive) lock variant, and the validation is fallible (e.g. an
+    // RCQ delta can fail exclusive validation); the lock variant is not
+    // movable, so we cannot snapshot-and-restore it. ExclusiveLock is
+    // stateless and its validator reads only `after`/`ctx`, so validating on
+    // a temporary is equivalent to validating the installed lock. On failure
+    // lock_contents_ is left untouched instead of poisoned with an
+    // ExclusiveLock that no longer matches the change the transaction retains.
+    //
+    // This equivalence holds only while ExclusiveLock carries no state: if it
+    // ever gains members, validating a throwaway temporary would discard state
+    // that the installed lock needs, so this failure-atomic path must be
+    // revisited (move the validated lock into lock_contents_ on success rather
+    // than reconstructing it via set_exclusive_lock()). See issue #3152.
+    static_assert(std::is_empty_v<ExclusiveLock>,
+                  "ExclusiveLock must stay stateless for the failure-atomic "
+                  "exclusive upgrade to validate on a temporary; see #3152");
+    ExclusiveLock exclusive_lock;
+    auto res = exclusive_lock.try_atomic_change_lock(before, after, ctx);
     if (!res.has_value()) {
       return res;
     }
+    set_exclusive_lock(ul);
     return snapshot_cost_transform(*res, snapshot_cost_,
                                    after->is_permanent_exclusive());
   }

@@ -22,6 +22,7 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
@@ -1081,6 +1082,75 @@ TEST(ItemLockTest, StaleUncommittedReadCannotBypassPermanentExclusive)
            "finalization on attempt "
         << attempt;
   }
+}
+
+// Regression test for issue #3152: a failed RCQ exclusive upgrade used to
+// call set_exclusive_lock() -- replacing lock_contents_ with an ExclusiveLock
+// -- before the fallible exclusive validation, and never restored the prior
+// DeletionLock when validation failed. That poisoned the pending lock: the
+// transaction still retained its deletion change while the lock variant had
+// become an ExclusiveLock, so a later deletion modification spuriously
+// conflicted. The upgrade must now be failure-atomic: on a rejected change
+// the lock is left equivalent to its prior deletion reservation.
+TEST(ItemLockTest, FailedRCQExclusiveUpgradeIsFailureAtomic)
+{
+  auto dir_status = Directory::open_temporary();
+  ASSERT_TRUE(dir_status.has_value());
+  auto dir = std::move(*dir_status);
+
+  auto db_status =
+      Database::open(dir.get_path(), Database::estimate_heap_size(10_MiB), 0);
+  ASSERT_TRUE(db_status.has_value());
+  HogDBDAO dao(RAMDB(std::move(*db_status)));
+
+  auto key = make_item_key(make_address(42), 3152);
+  QueueEntry consumed_entry{0x11};
+  QueueEntry inserted_entry{0x22};
+
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = 1;
+  metadata.max_live_block_num = 1;
+  RetrocausalQueueBlock block{};
+  block.block_number = 1;
+  block.entries.push_back(consumed_entry);
+  ASSERT_TRUE(dao.write_retrocausal_queue_metadata(key, metadata).has_value());
+  ASSERT_TRUE(dao.write_retrocausal_queue_block(key, block).has_value());
+  ASSERT_TRUE(dao.commit().has_value());
+
+  const int128_t snapshot_cost = kTestCostModel.get_retrocausal_queue_cost(1);
+  LockContext ctx(&dao, 1, key, &kTestCostModel);
+
+  ItemLock lock({snapshot_cost, ItemLockCacheData::from_rcq()});
+  auto deletion = make_deletion_change();
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &deletion, ctx).has_value());
+
+  // Build a recreated-RCQ change whose current-block consume references a
+  // reloaded snapshot entry that this delta does not add. Narrowing over the
+  // pending deletion makes the change exclusive (a type change).
+  RetrocausalQueueDelta delta;
+  delta.insert.added_entries.push_back(inserted_entry);
+  delta.consume =
+      x23::Ptr<RetrocausalQueueConsumeDelta>(new RetrocausalQueueConsumeDelta{
+          .past_block_consume = {.max_fully_consumed_block_number = 1,
+                                 .partial_consumed_number = 0},
+          .current_block_consumed = {consumed_entry}});
+
+  ItemChange recreated_rcq(RetrocausalQueueIt(std::move(delta)));
+  ASSERT_TRUE(recreated_rcq.narrow(deletion).has_value());
+  ASSERT_TRUE(recreated_rcq.is_exclusive());
+
+  // The exclusive upgrade is rejected by RCQ exclusive validation (a
+  // current-block consumed entry that this delta does not add).
+  auto upgrade = lock.try_atomic_change_lock(&deletion, &recreated_rcq, ctx);
+  ASSERT_FALSE(upgrade.has_value());
+  EXPECT_EQ(upgrade.error(), HogDBError{HogDBCode::kInvalidExecutorBehavior});
+
+  // The lock must not be poisoned: the prior deletion reservation is intact,
+  // so re-applying a deletion modification succeeds (as it would on a fresh
+  // lock) instead of seeing a spurious conflict.
+  auto retained_deletion = make_deletion_change();
+  auto retry = lock.try_atomic_change_lock(&deletion, &retained_deletion, ctx);
+  EXPECT_TRUE(retry.has_value());
 }
 
 } // namespace hogd

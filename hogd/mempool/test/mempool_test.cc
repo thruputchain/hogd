@@ -5,10 +5,8 @@
 #include <latch>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <set>
 #include <stdexcept>
-#include <string>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -20,38 +18,29 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
-#include "hogd/http/http.h"
-#include "hogd/http/http_test.h"
 #include "hogd/init.h"
-#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_gateway.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
-#include "hogd/metrics/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/version.h"
 #include "parallel.hh"
 #include "proposal.hh"
-#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
-#include "x23/cleanup.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -142,217 +131,12 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   EXPECT_NE(sha256(txs), expected);
 }
 
-TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
+TEST(Mempool, ShutdownBeforeReadyIsNoop)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
-  SignedTransactionHashBatch hashes;
-  hashes.resize(2);
 
-  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
-
-  ASSERT_EQ(result.size(), hashes.size());
-  EXPECT_FALSE(result[0]);
-  EXPECT_FALSE(result[1]);
-}
-
-TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
-                   std::chrono::milliseconds(20)),
-               "event startup timed out waiting for canonical tip");
-}
-
-TEST(Mempool, EventStartupTimesOutWithoutActivation)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
-                   std::chrono::milliseconds(20)),
-               "event startup timed out waiting for activation");
-}
-
-TEST(Mempool, EventPreparedCardIsUnavailableBeforeActivation)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-
-  EventCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
-  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-  EXPECT_FALSE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, EventPrepareUsesTypedPreGenesisAndInvalidTipOutcomes)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  EventCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-
-  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
-            EventPrepareOutcome::EventPrepareNotReady);
-  ConsensusValue pregenesis{};
-  pregenesis.proposal_header.block_height = -1;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
-                        .consensus_value = pregenesis});
-  for (size_t retry = 0; retry < 3; ++retry) {
-    EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
-              EventPrepareOutcome::EventPrepareNotReady);
-    EXPECT_FALSE(registration.event_registered(nullptr));
-  }
-
-  ConsensusValue invalid = pregenesis;
-  invalid.proposal_header.block_height = -2;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 0, .consensus_value = invalid});
-  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
-            EventPrepareOutcome::EventPrepareError);
-  EXPECT_FALSE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, EventPrepareRejectsMismatchedProtocol)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-  EventCard card{.protocol = "hogp/not-this-binary",
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),
-            EventPrepareOutcome::EventPrepareError);
-  EXPECT_FALSE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, ActivatedEventRejectsFurtherPrepareAndActivate)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-
-  EventCard first{.protocol = version::kHogdProtocol(),
-                  .address_for_exec = "127.0.0.1:1",
-                  .address_for_sched = "127.0.0.1:2"};
-  auto first_prepared = MempoolEventRpc::schedevent_prepare_event(first);
-  ASSERT_EQ(first_prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-  ASSERT_EQ(MempoolEventRpc::schedevent_activate_event(
-                first_prepared.snapshot())
-                .outcome(),
-            EventActivationOutcome::EventActivationOK);
-  ASSERT_TRUE(registration.event_registered(nullptr));
-
-  EventCard replacement{.protocol = version::kHogdProtocol(),
-                        .address_for_exec = "127.0.0.1:3",
-                        .address_for_sched = "127.0.0.1:4"};
-  auto replacement_prepared =
-      MempoolEventRpc::schedevent_prepare_event(replacement);
-  EXPECT_EQ(replacement_prepared.outcome(),
-            EventPrepareOutcome::EventPrepareError);
-  EXPECT_EQ(MempoolEventRpc::schedevent_activate_event(
-                first_prepared.snapshot())
-                .outcome(),
-            EventActivationOutcome::EventActivationError);
-  EventCard registered;
-  ASSERT_TRUE(registration.event_registered(&registered));
-  EXPECT_EQ(registered, first);
-}
-
-TEST(Mempool, EventActivationRejectsChangedCanonicalTip)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue first_value{};
-  first_value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = first_value});
-  EventCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
-  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-
-  ConsensusValue changed_value = first_value;
-  changed_value.proposal_header.block_height = 8;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 80, .consensus_value = changed_value});
-  auto activated =
-      MempoolEventRpc::schedevent_activate_event(prepared.snapshot());
-  ASSERT_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
-  EXPECT_EQ(activated.current_tip().block_id, 80);
-  EXPECT_FALSE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, EventActivationRejectsModifiedPreparedSnapshot)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-  EventCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
-  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-
-  EventRegistrationSnapshot modified = prepared.snapshot();
-  modified.tip.block_id = 71;
-  auto activated = MempoolEventRpc::schedevent_activate_event(modified);
-  EXPECT_EQ(activated.outcome(), EventActivationOutcome::EventActivationError);
-  EXPECT_FALSE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, ExactTipActivationPublishesPreparedCard)
-{
-  Registration &registration = Registration::registration();
-  registration.clear();
-  x23::Defer cleanup([&registration] { registration.clear(); });
-  ConsensusValue value{};
-  value.proposal_header.block_height = 7;
-  registration.publish_event_canonical_tip(
-      EventCanonicalTip{.block_id = 70, .consensus_value = value});
-  EventCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_exec = "127.0.0.1:1",
-                 .address_for_sched = "127.0.0.1:2"};
-  auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
-  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-  auto activated =
-      MempoolEventRpc::schedevent_activate_event(prepared.snapshot());
-  ASSERT_EQ(activated.outcome(), EventActivationOutcome::EventActivationOK);
-  EventCard registered;
-  ASSERT_TRUE(registration.event_registered(&registered));
-  EXPECT_EQ(registered, card);
+  coordinator.schedulercoord_shutdown()();
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
@@ -361,7 +145,6 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
   constexpr BlockID kBlock = std::numeric_limits<BlockID>::max() - 6;
   std::latch failure_started(1);
   std::latch blocked_started(1);
-  std::latch final_cleanup_started(1);
   std::latch allow_blocked_cleanup(1);
   std::atomic_size_t started{0};
   server.mempool_coord_rpc().set_finish_executor_started_test_hook(
@@ -377,9 +160,6 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
           allow_blocked_cleanup.wait();
           throw std::runtime_error("blocked executor cleanup failure");
         }
-        if (executor_idx == MempoolCoordinatorRpc::kNumClientsPerExecutor - 1) {
-          final_cleanup_started.count_down();
-        }
         throw std::runtime_error("later executor cleanup failure");
       });
 
@@ -388,7 +168,6 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
   });
   failure_started.wait();
   blocked_started.wait();
-  final_cleanup_started.wait();
   EXPECT_EQ(cleanup.wait_for(std::chrono::milliseconds(50)),
             std::future_status::timeout);
 
@@ -406,117 +185,8 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
   server.mempool_coord_rpc().set_finish_executor_started_test_hook({});
 }
 
-TEST(Mempool, NestedValidationFanoutsDrainBeforeRethrowingFirstException)
-{
-  MempoolTestInfra server;
-  constexpr BlockID kBlock = std::numeric_limits<BlockID>::max() - 7;
-  const size_t num_txs =
-      available_parallelism() * 2 * MempoolCoordinatorRpc::kChunkSize;
-  x23::Vec<ProposedTransaction> txs(num_txs);
-  for (size_t i = 0; i < txs.size(); ++i) {
-    txs[i].signed_tx.tx.uniquifier.nonce = i;
-  }
-
-  std::latch failure_started(1);
-  std::latch later_inner_started(1);
-  std::latch blocked_outer_started(1);
-  std::latch final_validation_started(1);
-  std::latch allow_blocked_validation(1);
-  server.mempool_coord_rpc().set_validate_batch_chunk_test_hook(
-      [&](BlockID block_id, uint64_t first_nonce) -> std::optional<bool> {
-        EXPECT_EQ(block_id, kBlock);
-        if (first_nonce == 0) {
-          failure_started.count_down();
-          throw std::runtime_error("first validation failure");
-        }
-        if (first_nonce == MempoolCoordinatorRpc::kChunkSize) {
-          later_inner_started.count_down();
-        }
-        if (first_nonce == 2 * MempoolCoordinatorRpc::kChunkSize) {
-          blocked_outer_started.count_down();
-          allow_blocked_validation.wait();
-          throw std::runtime_error("blocked validation failure");
-        }
-        if (first_nonce == num_txs - MempoolCoordinatorRpc::kChunkSize) {
-          final_validation_started.count_down();
-        }
-        return true;
-      });
-
-  auto validation = std::async(std::launch::async, [&] {
-    return server.mempool_coord_rpc().test_validate_batch(kBlock, txs)();
-  });
-  failure_started.wait();
-  later_inner_started.wait();
-  blocked_outer_started.wait();
-  final_validation_started.wait();
-  EXPECT_EQ(validation.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::timeout);
-
-  allow_blocked_validation.count_down();
-  bool caught_first_exception = false;
-  try {
-    std::ignore = validation.get();
-  } catch (const std::runtime_error &e) {
-    caught_first_exception = true;
-    EXPECT_STREQ(e.what(), "first validation failure");
-  }
-  EXPECT_TRUE(caught_first_exception);
-  server.mempool_coord_rpc().set_validate_batch_chunk_test_hook({});
-}
-
-TEST(Mempool, PreparedValidationFanoutDrainsBeforeRethrowingFirstException)
-{
-  MempoolTestInfra server;
-  constexpr BlockID kBlock = std::numeric_limits<BlockID>::max() - 8;
-  x23::XdrVec<SignedTransactionHash> hashes(3);
-  x23::XdrVec<NondeterministicProposalData> nominations(3);
-  for (size_t i = 0; i < hashes.size(); ++i) {
-    hashes[i][0] = static_cast<uint8_t>(i);
-  }
-
-  std::latch failure_started(1);
-  std::latch blocked_started(1);
-  std::latch final_chunk_started(1);
-  std::latch allow_blocked_chunk(1);
-  server.mempool_coord_rpc().set_prepare_and_validate_chunk_test_hook(
-      [&](BlockID block_id, const SignedTransactionHash &first_hash) {
-        EXPECT_EQ(block_id, kBlock);
-        if (first_hash[0] == 0) {
-          failure_started.count_down();
-          throw std::runtime_error("first prepared validation failure");
-        }
-        if (first_hash[0] == 1) {
-          blocked_started.count_down();
-          allow_blocked_chunk.wait();
-          throw std::runtime_error("blocked prepared validation failure");
-        }
-        final_chunk_started.count_down();
-        throw std::runtime_error("later prepared validation failure");
-      });
-
-  auto validation = std::async(std::launch::async, [&] {
-    server.mempool_coord_rpc().test_prepare_and_validate_chunks(kBlock, hashes,
-                                                                nominations)();
-  });
-  failure_started.wait();
-  blocked_started.wait();
-  final_chunk_started.wait();
-  EXPECT_EQ(validation.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::timeout);
-
-  allow_blocked_chunk.count_down();
-  bool caught_first_exception = false;
-  try {
-    validation.get();
-  } catch (const std::runtime_error &e) {
-    caught_first_exception = true;
-    EXPECT_STREQ(e.what(), "first prepared validation failure");
-  }
-  EXPECT_TRUE(caught_first_exception);
-  server.mempool_coord_rpc().set_prepare_and_validate_chunk_test_hook({});
-}
-
+// TODO(jhumphri): Update this test once we implement authentication and
+// vetting.
 TEST(Mempool, SubmitUnvetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -529,6 +199,9 @@ TEST(Mempool, SubmitUnvetted)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+// This submits duplicate txs at the same block height, which tests that the
+// mempool scheduler can detect and discard duplicate txs. This does *not* test
+// that hogdb detects duplicate uniquifiers.
 TEST(Mempool, SubmitUnvettedDuplicateRejectedByMempool)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -855,6 +528,34 @@ TEST(Mempool, NominateBatch)
     }
     EXPECT_EQ(parsed_tx_hashes_set, tx_hashes_set);
   }
+}
+
+TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  const DbTip db_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()().db_tip();
+
+  server.mempool_coord_rpc().set_propose_batch_result_test_hook(
+      [](ExecProposeBatchResult &) {
+        throw std::runtime_error("injected proposal failure");
+      });
+  EXPECT_THROW(propose_block(server, db_tip), std::runtime_error);
+  server.mempool_coord_rpc().set_propose_batch_result_test_hook({});
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), txs.size());
+  const SchedulerProposalResult retry = propose_block(server, db_tip);
+  ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  EXPECT_EQ(proposed_txs, txs);
 }
 
 TEST(Mempool, NominateEmpty)
@@ -1581,16 +1282,6 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
 
-  auto forwarded_proposal_txs =
-      server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  if (!forwarded_proposal_txs.has_value()) {
-    ADD_FAILURE() << "Proposal transactions were not forwarded";
-    return;
-  }
-  const ProposalTxs &forwarded_txs = forwarded_proposal_txs.value();
-  EXPECT_EQ(x23::serialize(forwarded_txs),
-            x23::serialize(proposed.proposal.transactions));
-
   EXPECT_EQ(proposed.proposal.header.proposer, context.proposer);
   EXPECT_EQ(proposed.proposal.header.block_timepoint, context.block_timepoint);
   EXPECT_NE(proposed.proposal.header.storage_hash, StorageShortHash{});
@@ -1600,58 +1291,10 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
       server.mempool_coord_rpc().schedulercoord_commit_block(proposed.block_id,
                                                              value)();
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-  auto forwarded_consensus =
-      server.event_sched_rpc().get_committed_consensus_value(
-          proposed.block_id)();
-  if (!forwarded_consensus.has_value()) {
-    ADD_FAILURE() << "Consensus value was not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_consensus.value()), x23::serialize(value));
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   EXPECT_EQ(get_tip.db_tip().value.proposal_header, proposed.proposal.header);
-}
-
-TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
-{
-  MempoolTestInfra server;
-  SchedulerGetTipResult get_tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  const DbTip parent_tip = get_tip.db_tip();
-
-  SchedulerProposalResult res_propose =
-      server.mempool_coord_rpc().schedulercoord_propose_block(
-          parent_tip.id, ProposalContext{})();
-  ASSERT_EQ(res_propose.outcome(),
-            SchedulerProposalOutcome::SchedulerProposalOK);
-  const SchedulerProposedBlock &proposed = res_propose.proposed_block();
-  EXPECT_TRUE(proposed.proposal.transactions.hash.xdr.empty());
-  EXPECT_TRUE(proposed.proposal.transactions.nondeterministic_data.xdr.empty());
-
-  auto forwarded_proposal_txs =
-      server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  if (!forwarded_proposal_txs.has_value()) {
-    ADD_FAILURE() << "Proposal transactions were not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_proposal_txs.value()),
-            x23::serialize(proposed.proposal.transactions));
-
-  ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
-  ASSERT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(
-                proposed.block_id, value)(),
-            SchedulerCommitOutcome::SchedulerCommitOK);
-  auto forwarded_consensus =
-      server.event_sched_rpc().get_committed_consensus_value(
-          proposed.block_id)();
-  if (!forwarded_consensus.has_value()) {
-    ADD_FAILURE() << "Consensus value was not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_consensus.value()), x23::serialize(value));
 }
 
 TEST(Mempool, CommitBlockRejectsMismatchedConsensusValue)
@@ -1785,28 +1428,10 @@ TEST(Mempool, ValidateTwo)
                                                                proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
-  auto forwarded_proposal_txs =
-      server.event_sched_rpc().get_closed_proposal_txs(
-          res_validate.block().block_id)();
-  if (!forwarded_proposal_txs.has_value()) {
-    ADD_FAILURE() << "Proposal transactions were not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_proposal_txs.value()),
-            x23::serialize(proposal.transactions));
 
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-  auto forwarded_consensus =
-      server.event_sched_rpc().get_committed_consensus_value(
-          res_validate.block().block_id)();
-  if (!forwarded_consensus.has_value()) {
-    ADD_FAILURE() << "Consensus value was not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_consensus.value()),
-            x23::serialize(consensus_value(db_tip, proposal)));
 
   // Now propose another block.
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -1859,15 +1484,6 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
-  auto event_tip = Registration::registration().event_canonical_tip();
-  if (!event_tip.has_value()) {
-    ADD_FAILURE() << "Event canonical tip was not published";
-    return;
-  }
-  const EventCanonicalTip &initial_event_tip = event_tip.value();
-  EXPECT_EQ(initial_event_tip.block_id, db_tip.id);
-  EXPECT_EQ(x23::serialize(initial_event_tip.consensus_value),
-            x23::serialize(db_tip.value));
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -1912,15 +1528,6 @@ TEST(Mempool, GetTip)
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
   EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
-  event_tip = Registration::registration().event_canonical_tip();
-  if (!event_tip.has_value()) {
-    ADD_FAILURE() << "Event canonical tip was not updated";
-    return;
-  }
-  const EventCanonicalTip &committed_event_tip = event_tip.value();
-  EXPECT_EQ(committed_event_tip.block_id, db_tip.id);
-  EXPECT_EQ(x23::serialize(committed_event_tip.consensus_value),
-            x23::serialize(db_tip.value));
 }
 
 TEST(Mempool, GenerateBlockId)
@@ -2058,13 +1665,6 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
-  Registration &registration = Registration::registration();
-  EXPECT_FALSE(registration.event_registered(nullptr));
-  EventCard event_card{.protocol = version::kHogdProtocol(),
-                       .address_for_exec = "127.0.0.1:1",
-                       .address_for_sched = "127.0.0.1:2"};
-  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(event_card).outcome(),
-            EventPrepareOutcome::EventPrepareNotReady);
 
   GenesisConfigurationBuilder builder;
   GenesisConfiguration genesis_configuration =
@@ -2118,61 +1718,6 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   ExpectedDBTip final_tip = gateway.schedgateway_get_tip()();
   EXPECT_EQ(final_tip.error(), RPCError::kRPCNone);
   EXPECT_EQ(final_tip.db_tip().value.proposal_header.block_height, 0);
-  server.register_runtime_after_genesis();
-  EXPECT_TRUE(registration.event_registered(nullptr));
-}
-
-TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
-{
-  MempoolTestInfra server(/*skip_genesis_block=*/true);
-  GenesisConfigurationBuilder builder;
-  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
-                builder.build_or_panic(
-                    StorageCostModel::default_cost_model()))(),
-            DbSchedResult::DbSchedResultOK);
-
-  HttpServer health_server;
-  add_health_metrics_routes(health_server);
-  const uint16_t health_port =
-      health_server.start_server(x23::HostPort{"127.0.0.1", 0});
-  auto health_status = [&] {
-    return request(health_port,
-                   "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  };
-
-  auto runtime_init = std::async(std::launch::async, [&] {
-    server.mempool_coord_rpc().finish_runtime_init()();
-  });
-  EXPECT_EQ(runtime_init.wait_for(std::chrono::milliseconds(100)),
-            std::future_status::timeout);
-  EXPECT_FALSE(server.mempool_coord_rpc().ready());
-  EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
-  auto premature_work = std::async(std::launch::async, [&] {
-    SchedulerProposalResult proposal =
-        server.mempool_coord_rpc().schedulercoord_propose_block(0, {})();
-    SchedulerValidationResult validation =
-        server.mempool_coord_rpc().schedulercoord_validate_block(0, {})();
-    return std::pair{proposal.outcome(), validation.outcome()};
-  });
-  ASSERT_EQ(premature_work.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
-  const auto [proposal_outcome, validation_outcome] = premature_work.get();
-  EXPECT_EQ(proposal_outcome, SchedulerProposalOutcome::SchedulerProposalError);
-  EXPECT_EQ(validation_outcome,
-            SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
-
-  server.register_event_only_after_genesis();
-  EXPECT_EQ(runtime_init.wait_for(std::chrono::milliseconds(100)),
-            std::future_status::timeout);
-  EXPECT_FALSE(server.mempool_coord_rpc().ready());
-  EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
-
-  server.register_executor_only_after_event();
-  ASSERT_EQ(runtime_init.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  runtime_init.get();
-  EXPECT_TRUE(server.mempool_coord_rpc().ready());
-  EXPECT_NE(health_status().find("\"status\":\"ok\""), std::string::npos);
 }
 
 TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
