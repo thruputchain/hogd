@@ -112,7 +112,16 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  x23assert(ret.size() <= 0x80000003UZ);
+  // We only ever emit a single final fragment, so the body must fit in
+  // the low 31 bits of the ONC-RPC fragment header (the high bit is the
+  // last-fragment flag).  Enforce this in all builds: with x23assert
+  // compiled out under NDEBUG, an oversized body would have its length
+  // truncated to the low 31 bits, and the receiver would treat the
+  // remaining bytes as the next record's framing.
+  if (ret.size() - 4 > 0x7fffffffUZ) [[unlikely]]
+    throw XdrBadInput("make_record: record body size {} exceeds maximum "
+                      "single-fragment size {}",
+                      ret.size() - 4, 0x7fffffffUZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
