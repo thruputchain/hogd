@@ -222,24 +222,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // subtract amount from owner's balance
-  auto r1 =
-      ctx.handler().modify_native_token_balance(*owner, -amount_signed_int);
-  if (!r1.has_value()) {
-    return r1.error().to_invoke_error();
-  }
-  if (!r1.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
-  // add amount to receiver's balance
-  auto r2 =
-      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
-  if (!r2.has_value()) {
-    return r2.error().to_invoke_error();
-  }
-  if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+  if (auto moved = native_token_unchecked_transfer(ctx.handler(), *owner,
+                                                   receiver, amount_signed_int);
+      !moved.has_value()) {
+    return moved.error();
   }
 
   auto event_buf =
@@ -285,24 +271,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // subtract amount from owner's balance
-  auto r1 =
-      ctx.handler().modify_native_token_balance(owner, -amount_signed_int);
-  if (!r1.has_value()) {
-    return r1.error().to_invoke_error();
-  }
-  if (!r1.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
-  // add amount to receiver's balance
-  auto r2 =
-      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
-  if (!r2.has_value()) {
-    return r2.error().to_invoke_error();
-  }
-  if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+  if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
+                                                   receiver, amount_signed_int);
+      !moved.has_value()) {
+    return moved.error();
   }
 
   // Spending one's own tokens needs no allowance; otherwise the (strict)
@@ -427,6 +399,29 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 }
 
 } // namespace
+
+InvokeStatus<void>
+native_token_unchecked_transfer(SystemCallHandler &handler,
+                                ContractAddress const &from,
+                                ContractAddress const &to, int128_t amount)
+{
+  CHECK(amount >= 0);
+  auto r1 = handler.modify_native_token_balance(from, -amount);
+  if (!r1.has_value()) {
+    return r1.error().to_invoke_error();
+  }
+  if (!r1.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  auto r2 = handler.modify_native_token_balance(to, amount);
+  if (!r2.has_value()) {
+    return r2.error().to_invoke_error();
+  }
+  if (!r2.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  return {};
+}
 
 Topic const &
 native_token_transfer_event_signature()
