@@ -1142,6 +1142,21 @@ TEST(HogDevnode, ZeroRamdbBytesPrintsFriendlyUsageBeforeInitialization)
                          "--ramdb-bytes must be positive");
 }
 
+TEST(HogDevnode, RamdbReservationFailurePrintsDiagnostic)
+{
+  // 1 EiB cannot be reserved on any host; the failure must name the size and
+  // point at the flag instead of the bare "Cannot allocate memory" it used
+  // to print.
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "ramdb failed to reserve 1073741824.0 GiB");
+}
+
+TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
+{
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "Reduce capacity with --ramdb-bytes.");
+}
+
 TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
 {
   // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)

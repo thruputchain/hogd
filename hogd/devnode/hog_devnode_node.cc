@@ -32,6 +32,7 @@
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
+#include "hogd/base/os.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -454,6 +455,41 @@ read_event_log_file(std::filesystem::path const &path)
   }
   return events;
 }
+
+std::string
+ramdb_reserve_failure_message(std::size_t ramdb_bytes, std::string_view detail)
+{
+  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+  std::string message = std::format("ramdb failed to reserve {:.1f} GiB ({})",
+                                    static_cast<double>(ramdb_bytes) / kGiB,
+                                    detail);
+  if (const std::size_t physical = total_physical_memory(); physical > 0) {
+    message += std::format("; system has {:.1f} GiB physical RAM",
+                           static_cast<double>(physical) / kGiB);
+  }
+  message += ". Reduce capacity with --ramdb-bytes.";
+  return message;
+}
+
+// run_ramdb_open translates the std::system_error that the Database
+// constructor throws when the ramdb arena mmap is refused (ENOMEM under the
+// kernel's overcommit accounting) into an actionable startup error. Other
+// system errors pass through unchanged.
+template<typename Fn>
+auto
+run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
+{
+  try {
+    return fn();
+  } catch (const std::system_error &e) {
+    if (e.code() == std::errc::not_enough_memory) {
+      throw std::runtime_error(
+          ramdb_reserve_failure_message(ramdb_bytes, e.code().message()));
+    }
+    throw;
+  }
+}
+
 } // namespace
 
 HogDevnodeNode::HogDevnodeNode(
@@ -951,15 +987,23 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
 HogDBDAO
 HogDevnodeNode::open_db_backend() const
 {
-  DBStatus<std::uint64_t> lsn =
-      Database::check(db_dir_.directory(), ramdb_bytes_);
-  CHECK(lsn.has_value());
+  DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::check(db_dir_.directory(), ramdb_bytes_);
+  });
+  if (!lsn.has_value()) {
+    lsn.error().raise("ramdb integrity check failed for '{}'",
+                      db_dir_.directory());
+  }
   info("database '{}' passed integrity check; current LSN is {}",
        db_dir_.directory(), *lsn);
 
   DBStatus<std::unique_ptr<Database>> ramdb =
-      Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
-  CHECK(ramdb.has_value());
+      run_ramdb_open(ramdb_bytes_, [&] {
+        return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+      });
+  if (!ramdb.has_value()) {
+    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+  }
 
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   HogDBStatus<DbTip> recovered_tip = db.read_dbtip();
