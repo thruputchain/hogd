@@ -1082,6 +1082,7 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
+  EXPECT_TRUE(stdout_output.contains("--ramdb-bytes <bytes>"));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
@@ -1127,6 +1128,43 @@ TEST(HogDevnode, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Invalid")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, InvalidRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "not-a-size"},
+                         "Invalid --ramdb-bytes: not-a-size");
+}
+
+TEST(HogDevnode, ZeroRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "0"},
+                         "--ramdb-bytes must be positive");
+}
+
+TEST(HogDevnode, RamdbReservationFailurePrintsDiagnostic)
+{
+  // 1 EiB cannot be reserved on any host; the failure must name the size and
+  // point at the flag instead of the bare "Cannot allocate memory" it used
+  // to print.
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "ramdb failed to reserve 1073741824.0 GiB");
+}
+
+TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
+{
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "Reduce capacity with --ramdb-bytes.");
+}
+
+TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
+{
+  // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)
+  // configuration the flag exists for.
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--ramdb-bytes", "2147483648"});
+  process.wait_for_readiness();
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode,
