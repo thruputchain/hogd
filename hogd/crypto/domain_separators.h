@@ -5,14 +5,15 @@
 #include <optional>
 
 #include "auth_claim.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/crypto/crypto.h"
 #include "preimage.hh"
 #include "x23/serialize_cxs.h"
 
 namespace hogd {
 
-// Build a DomainSeparator from a `u8""` (UTF-8) literal. The name must be a
-// `char8_t` literal, not an ordinary `char` one: these bytes are hashed into a
+// Build a DomainSeparator from a name literal. The name must be a `char8_t`
+// (`u8""`) literal, not an ordinary `char` one: these bytes are hashed into a
 // transaction-auth address, so they must be the standard's UTF-8 encoding
 // rather than implementation-defined ordinary-literal code units, which depend
 // on the execution character set (`-fexec-charset`) and could diverge across
@@ -27,17 +28,19 @@ make_domain_separator(const char8_t (&name)[N])
   };
 }
 
-// CXS-encode the pubkey-auth domain separator. Array size is cxs_size of that
-// concrete value (not a type-level bound).
+// CXS-encode a DomainSeparator built from Name. Array size is cxs_size of that
+// concrete value (not a type-level bound). Name must be a `u8""` literal, so
+// `make_domain_separator` binds it (an ordinary `char` StringLiteral does not).
+template<StringLiteral Name>
 consteval auto
-pubkey_auth_domain_separator_cxs()
+domain_separator_cxs()
 {
-  return x23::serialize_cxs_array<x23::cxs_size(make_domain_separator(
-      u8"PubkeyAccount"))>(make_domain_separator(u8"PubkeyAccount"));
+  return x23::serialize_cxs_array<x23::cxs_size(
+      make_domain_separator(Name.buf))>(make_domain_separator(Name.buf));
 }
 
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
-    pubkey_auth_domain_separator_cxs();
+    domain_separator_cxs<u8"PubkeyAccount">();
 
 // Derives the address of a standalone-pubkey account:
 // SHA256(domain_separator || cxs(preimage)). Returns std::nullopt if the
