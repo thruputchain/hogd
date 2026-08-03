@@ -136,8 +136,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<"initialize">(),
-                             erc20_meta::make_calldata<"initialize">(
+                             erc20_meta::entrypoint<u8"initialize">(),
+                             erc20_meta::make_calldata<u8"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              wallet_initial_hogs);
@@ -151,8 +151,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
     builder.add_initial_config(wallet_contract, wallet.initial_nonce,
-                               wallet_meta::entrypoint<"initialize">(),
-                               wallet_meta::make_calldata<"initialize">(
+                               wallet_meta::entrypoint<u8"initialize">(),
+                               wallet_meta::make_calldata<u8"initialize">(
                                    wallet.public_key),
                                wallet_initial_hogs);
   }
@@ -168,13 +168,14 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata =
-        x23::serialize(erc20_address_, erc20_meta::entrypoint<"mint">(),
+        x23::serialize(erc20_address_, erc20_meta::entrypoint<u8"mint">(),
                        GasAmount{1'000'000},
-                       erc20_meta::make_calldata<"mint">(wallets_[i].address,
-                                                         make_amount(uint128_t{
-                                                             1'000'000'000})));
+                       erc20_meta::make_calldata<u8"mint">(
+                           wallets_[i].address,
+                           make_amount(uint128_t{1'000'000'000})));
 
-    auto calldata = wallet_meta::make_calldata<"do_action">(internal_calldata);
+    auto calldata =
+        wallet_meta::make_calldata<u8"do_action">(internal_calldata);
 
     auto tx = SignedTransaction{
         .tx =
@@ -182,7 +183,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                 .invocation =
                     Invocation{
                         .invoked_address = owner_address,
-                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                        .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                         .gas_limit = GasAmount{20'000},
                         .calldata = std::move(calldata),
                     },
@@ -272,22 +273,22 @@ ERC20BasicAuthExperimentState::extend_experiment(
 
             // has to match the deserialized objects in simple_wallet::do_action
             static auto entrypoint_transfer =
-                erc20_meta::entrypoint<"transfer">();
+                erc20_meta::entrypoint<u8"transfer">();
             Calldata internal_calldata =
                 x23::serialize(erc20_address_, entrypoint_transfer,
                                GasAmount{1'000'000},
-                               erc20_meta::make_calldata<"transfer">(
+                               erc20_meta::make_calldata<u8"transfer">(
                                    wallets_[receiver].address,
                                    make_amount(amount)));
 
             static auto entrypoint_do_action =
-                wallet_meta::entrypoint<"do_action">();
+                wallet_meta::entrypoint<u8"do_action">();
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
                 .gas_limit = GasAmount{20'000},
-                .calldata =
-                    wallet_meta::make_calldata<"do_action">(internal_calldata),
+                .calldata = wallet_meta::make_calldata<u8"do_action">(
+                    internal_calldata),
             };
 
             work_txs[j] = SignedTransaction{

@@ -55,7 +55,7 @@ TEST_F(OutputAliasTestWasmTest, NnintExactOverlap)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_nnint_exact_overlap">(UINT64_MAX),
+              client_.make_invocation<u8"test_nnint_exact_overlap">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -67,12 +67,13 @@ TEST_F(OutputAliasTestWasmTest, NnintExactOverlap)
 TEST_F(OutputAliasTestWasmTest, NnintPartialOverlap)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<"test_nnint_partial_overlap">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_nnint_partial_overlap">(
+                          UINT64_MAX),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -83,7 +84,7 @@ TEST_F(OutputAliasTestWasmTest, NnintNoOverlap)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_nnint_no_overlap">(UINT64_MAX),
+              client_.make_invocation<u8"test_nnint_no_overlap">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -97,7 +98,7 @@ TEST_F(OutputAliasTestWasmTest, CalldataSpanWritableOverlap)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_calldata_span_writable_overlap">(
+              client_.make_invocation<u8"test_calldata_span_writable_overlap">(
                   UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -112,7 +113,7 @@ TEST_F(OutputAliasTestWasmTest, CalldataNoOverlap)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_calldata_no_overlap">(UINT64_MAX),
+              client_.make_invocation<u8"test_calldata_no_overlap">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -126,7 +127,7 @@ TEST_F(OutputAliasTestWasmTest, InputInputOverlapFault)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
-              client_.make_invocation<"test_log_event_input_input_alias">(
+              client_.make_invocation<u8"test_log_event_input_input_alias">(
                   UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -139,13 +140,13 @@ TEST_F(OutputAliasTestWasmTest, InputInputOverlapFault)
 TEST_F(OutputAliasTestWasmTest, InputOutputOverlapFault)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<"test_nnint_input_alias_output">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation =
+              client_.make_invocation<u8"test_nnint_input_alias_output">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

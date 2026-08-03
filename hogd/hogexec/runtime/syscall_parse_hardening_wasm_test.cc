@@ -63,7 +63,7 @@ TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              "test_verify_signature_noncanonical_scheme_fault">(UINT64_MAX),
+              u8"test_verify_signature_noncanonical_scheme_fault">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -75,12 +75,12 @@ TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
 TEST_F(SyscallParseHardeningWasmTest, ChangePubkeyOptionalPointerFaults)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = client_.make_invocation<
-                      "test_change_pubkey_optional_pointer_fault">(UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_change_pubkey_optional_pointer_fault">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -90,12 +90,13 @@ TEST_F(SyscallParseHardeningWasmTest,
        GetDeployAddressOptionalPointerSentinelBehavior)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<
-              "test_get_deploy_address_optional_pointer_sentinel">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation = client_.make_invocation<
+                      u8"test_get_deploy_address_optional_pointer_sentinel">(
+                      UINT64_MAX),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

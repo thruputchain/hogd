@@ -17,8 +17,14 @@ namespace hogd {
 
 TEST(DomainSeparators, PubkeyAuthCxs)
 {
+  // Pin the separator bytes numerically rather than against ordinary `char`
+  // literals: the separator is hashed into an auth address, so it must be the
+  // charset-independent ASCII/UTF-8 encoding of "PubkeyAccount" (0x50 'P' ...)
+  // regardless of the build's `-fexec-charset`. Comparing against 'P' etc.
+  // would spuriously pass on a divergent-charset build.
   constexpr std::array<uint8_t, 15> kExpected{
-      0, 13, 'P', 'u', 'b', 'k', 'e', 'y', 'A', 'c', 'c', 'o', 'u', 'n', 't',
+      0x00, 0x0D, 0x50, 0x75, 0x62, 0x6B, 0x65, 0x79,
+      0x41, 0x63, 0x63, 0x6F, 0x75, 0x6E, 0x74,
   };
   static_assert(kPubkeyAuthDomainSeparatorCxs == kExpected);
 }

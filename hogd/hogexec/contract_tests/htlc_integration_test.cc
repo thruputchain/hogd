@@ -135,17 +135,17 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata mint_calldata =
-        x23::serialize(kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
-                       GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"mint">(kWalletContractAddress,
-                                                         make_amount(amount)));
+    Calldata mint_calldata = x23::serialize(
+        kERC20ContractAddress, erc20_meta::entrypoint<u8"mint">(),
+        GasAmount{UINT64_MAX},
+        erc20_meta::make_calldata<u8"mint">(kWalletContractAddress,
+                                            make_amount(amount)));
     Ed25519Signature mint_sig =
         ed25519_sign(wallet_secret_key_, mint_calldata).value();
 
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
-            .invocation = wallet_client_.make_invocation<"do_action">(
+            .invocation = wallet_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -168,17 +168,18 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata approve_calldata = x23::serialize(
-        kERC20ContractAddress, erc20_meta::entrypoint<"adjust_allowance">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"adjust_allowance">(kHTLCContractAddress,
-                                                      make_difference(amount)));
+    Calldata approve_calldata =
+        x23::serialize(kERC20ContractAddress,
+                       erc20_meta::entrypoint<u8"adjust_allowance">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<u8"adjust_allowance">(
+                           kHTLCContractAddress, make_difference(amount)));
     Ed25519Signature approve_sig =
         ed25519_sign(wallet_secret_key_, approve_calldata).value();
 
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
-            .invocation = wallet_client_.make_invocation<"do_action">(
+            .invocation = wallet_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, approve_sig, approve_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -204,9 +205,9 @@ protected:
 
     Calldata create_htlc_calldata =
         x23::serialize(kHTLCContractAddress,
-                       htlc_meta::entrypoint<"create_htlc">(),
+                       htlc_meta::entrypoint<u8"create_htlc">(),
                        GasAmount{UINT64_MAX},
-                       htlc_meta::make_calldata<"create_htlc">(
+                       htlc_meta::make_calldata<u8"create_htlc">(
                            kReceiverAddress, kERC20ContractAddress,
                            make_difference(amount), expiration_height, hash));
     Ed25519Signature create_sig =
@@ -214,7 +215,7 @@ protected:
 
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
-            .invocation = wallet_client_.make_invocation<"do_action">(
+            .invocation = wallet_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, create_sig, create_htlc_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -239,8 +240,8 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<"claim_htlc">(UINT64_MAX, hash,
-                                                           preimage),
+                htlc_client_.make_invocation<u8"claim_htlc">(UINT64_MAX, hash,
+                                                             preimage),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -269,7 +270,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<"refund_htlc">(UINT64_MAX, hash),
+                htlc_client_.make_invocation<u8"refund_htlc">(UINT64_MAX, hash),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -306,7 +307,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<"initialize">(UINT64_MAX),
+                htlc_client_.make_invocation<u8"initialize">(UINT64_MAX),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -327,7 +328,7 @@ protected:
     // This gives the wallet contract address minting privileges
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
-            .invocation = erc20_client_.make_invocation<"initialize">(
+            .invocation = erc20_client_.make_invocation<u8"initialize">(
                 UINT64_MAX, kWalletContractAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -347,7 +348,7 @@ protected:
   {
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
-            .invocation = wallet_client_.make_invocation<"initialize">(
+            .invocation = wallet_client_.make_invocation<u8"initialize">(
                 UINT64_MAX, wallet_public_key_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -401,7 +402,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
            uint128_xdr expected_balance) -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
-          auto result = erc20_client.template invoke_opt<"get_balance_of">(
+          auto result = erc20_client.template invoke_opt<u8"get_balance_of">(
               ctx, kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {

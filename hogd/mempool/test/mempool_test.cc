@@ -739,10 +739,10 @@ TEST(Mempool, NewlyDeployedContractHogCount)
       kDeployAndTransferAddress);
   SignedTransaction tx{
       .tx = Transaction{
-          .invocation =
-              deploy_and_transfer_client.make_invocation<"deploy_and_transfer">(
-                  /*gas_amount=*/5'000'000'000, deploy_nonce, fibonacci_hash,
-                  make_amount(kTransferAmount)),
+          .invocation = deploy_and_transfer_client
+                            .make_invocation<u8"deploy_and_transfer">(
+                                /*gas_amount=*/5'000'000'000, deploy_nonce,
+                                fibonacci_hash, make_amount(kTransferAmount)),
           .uniquifier = {.block_expiry_height =
                              std::numeric_limits<BlockHeight>::max(),
                          .nonce = 1},
@@ -1724,7 +1724,7 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
-  txs[1].tx.invocation = fib_client.make_invocation<"slow_fibonacci">(
+  txs[1].tx.invocation = fib_client.make_invocation<u8"slow_fibonacci">(
       /*gas_amount=*/5'000'000'000, uint32_t{11});
   txs[1].tx.uniquifier = txs[0].tx.uniquifier;
 

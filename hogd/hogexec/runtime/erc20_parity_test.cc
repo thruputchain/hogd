@@ -299,18 +299,18 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_caller_fns;
     native_caller_fns.emplace(
-        0, make_capture_driver<"transfer">(kNativeTokenAddr, native_result_key,
-                                           native_receiver,
-                                           make_amount(transfer_amount)));
+        0, make_capture_driver<u8"transfer">(kNativeTokenAddr,
+                                             native_result_key, native_receiver,
+                                             make_amount(transfer_amount)));
     auto native_caller =
         std::make_unique<NativeContract>(std::move(native_caller_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_caller_fns;
     wasm_caller_fns.emplace(
-        0, make_capture_driver<"transfer">(kWasmTokenAddr, wasm_result_key,
-                                           wasm_receiver,
-                                           make_amount(transfer_amount)));
+        0, make_capture_driver<u8"transfer">(kWasmTokenAddr, wasm_result_key,
+                                             wasm_receiver,
+                                             make_amount(transfer_amount)));
     auto wasm_caller =
         std::make_unique<NativeContract>(std::move(wasm_caller_fns));
 
@@ -323,13 +323,13 @@ protected:
         [start_balance](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<"initialize">(ctx, kWasmAdminAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<"mint">(ctx, kWasmCallerAddr,
-                                                make_amount(start_balance));
+          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmCallerAddr,
+                                                  make_amount(start_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -403,7 +403,7 @@ protected:
       return [token, spender,
               amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
-        auto r = client.invoke_opt<"adjust_allowance">(
+        auto r = client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
@@ -431,7 +431,7 @@ protected:
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_spender_fns;
-    native_spender_fns.emplace(0, make_capture_driver<"transfer_from">(
+    native_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                       kNativeTokenAddr, native_result_key,
                                       kNativeOwnerAddr, kNativeOwnerAddr,
                                       make_amount(transfer_amount)));
@@ -440,10 +440,10 @@ protected:
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_spender_fns;
-    wasm_spender_fns.emplace(
-        0, make_capture_driver<"transfer_from">(kWasmTokenAddr, wasm_result_key,
-                                                kWasmOwnerAddr, kWasmOwnerAddr,
-                                                make_amount(transfer_amount)));
+    wasm_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
+                                    kWasmTokenAddr, wasm_result_key,
+                                    kWasmOwnerAddr, kWasmOwnerAddr,
+                                    make_amount(transfer_amount)));
     auto wasm_spender =
         std::make_unique<NativeContract>(std::move(wasm_spender_fns));
 
@@ -454,13 +454,13 @@ protected:
         [owner_balance](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<"initialize">(ctx, kWasmAdminAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<"mint">(ctx, kWasmOwnerAddr,
-                                                make_amount(owner_balance));
+          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmOwnerAddr,
+                                                  make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -536,7 +536,7 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_caller_fns;
     native_caller_fns.emplace(
-        0, make_capture_driver<"adjust_allowance">(
+        0, make_capture_driver<u8"adjust_allowance">(
                kNativeTokenAddr, native_result_key, kNativeCallerAddr,
                make_difference(static_cast<int128_t>(amount))));
     auto native_caller =
@@ -545,7 +545,7 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         wasm_caller_fns;
     wasm_caller_fns.emplace(
-        0, make_capture_driver<"adjust_allowance">(
+        0, make_capture_driver<u8"adjust_allowance">(
                kWasmTokenAddr, wasm_result_key, kWasmCallerAddr,
                make_difference(static_cast<int128_t>(amount))));
     auto wasm_caller =
@@ -557,7 +557,7 @@ protected:
     wasm_admin_fns.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<"initialize">(ctx, kWasmAdminAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};

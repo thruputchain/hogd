@@ -60,9 +60,9 @@ std::unique_ptr<NativeContract>
 make_test_contract()
 {
   NativeContractBuilder builder;
-  builder.add<TestContract, "return_ok_void">(
+  builder.add<TestContract, u8"return_ok_void">(
       []() -> InvokeStatus<void> { return {}; });
-  builder.add<TestContract, "return_ok_int">(
+  builder.add<TestContract, u8"return_ok_int">(
       []() -> InvokeStatus<int32_t> { return {123}; });
   return builder.build();
 }
@@ -73,10 +73,10 @@ make_caller_contract()
   NativeContractBuilder builder;
 
   // Call return_ok_void method from TestContract
-  builder.add<CallerContract, "call_return_ok_void">(
+  builder.add<CallerContract, u8"call_return_ok_void">(
       [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = client.template invoke_opt<"return_ok_void">(ctx);
+        auto result = client.template invoke_opt<u8"return_ok_void">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -84,10 +84,10 @@ make_caller_contract()
       });
 
   // Call return_ok_int method from TestContract
-  builder.add<CallerContract, "call_return_ok_int">(
+  builder.add<CallerContract, u8"call_return_ok_int">(
       [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = client.template invoke_opt<"return_ok_int">(ctx);
+        auto result = client.template invoke_opt<u8"return_ok_int">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -163,7 +163,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  "call_return_ok_void">(1000)}},
+                                  u8"call_return_ok_void">(1000)}},
       *context_);
 
   auto res = handler.root_invoke();
@@ -181,7 +181,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  "call_return_ok_int">(1000)}},
+                                  u8"call_return_ok_int">(1000)}},
       *context_);
 
   auto res = handler.root_invoke();

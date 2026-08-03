@@ -57,7 +57,7 @@ template<StringLiteral DictionaryStr>
 std::string
 encode_basen(std::span<const std::byte> buf)
 {
-  constexpr std::string_view kDictionary = DictionaryStr.get();
+  constexpr std::u8string_view kDictionary = DictionaryStr.get();
   static_assert(std::has_single_bit(kDictionary.size()));
   constexpr int kBits = std::countr_zero(kDictionary.size());
   constexpr uint32_t kMask = kDictionary.size() - 1;
@@ -72,7 +72,8 @@ encode_basen(std::span<const std::byte> buf)
     bits_left += kBitsPerByte;
 
     while (bits_left >= kBits) {
-      out += kDictionary[(tmp >> (bits_left - kBits)) & kMask];
+      out +=
+          static_cast<char>(kDictionary[(tmp >> (bits_left - kBits)) & kMask]);
       bits_left -= kBits;
     }
   }
@@ -81,7 +82,8 @@ encode_basen(std::span<const std::byte> buf)
     // handle any residual bits that don't divide evenly.
     assert(bits_left < kBits);
     if (bits_left > 0)
-      out += kDictionary[(tmp << (kBits - bits_left)) & kMask];
+      out +=
+          static_cast<char>(kDictionary[(tmp << (kBits - bits_left)) & kMask]);
   }
 
   return out;
@@ -122,7 +124,7 @@ print_si_bytes(size_t val, bool add_space)
 std::string
 encode_hex(std::span<const std::byte> buf)
 {
-  constexpr StringLiteral kHexDictionary("0123456789abcdef");
+  constexpr StringLiteral kHexDictionary(u8"0123456789abcdef");
   static_assert(kHexDictionary.get().size() == 16);
   return encode_basen<kHexDictionary>(buf);
 }
@@ -144,7 +146,8 @@ decode_hex(std::string_view str)
 std::string
 encode_base32(std::span<const std::byte> buf)
 {
-  constexpr StringLiteral kBase32Dictionary("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567");
+  constexpr StringLiteral kBase32Dictionary(
+      u8"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567");
   static_assert(kBase32Dictionary.get().size() == 32);
   return encode_basen<kBase32Dictionary>(buf);
 }
@@ -153,7 +156,7 @@ std::string
 encode_base64(std::span<const std::byte> buf)
 {
   constexpr StringLiteral kBase64Dictionary(
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+      u8"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
   static_assert(kBase64Dictionary.get().size() == 64);
   return encode_basen<kBase64Dictionary>(buf);
 }
@@ -162,7 +165,7 @@ std::string
 encode_base64_url_safe(std::span<const std::byte> buf)
 {
   constexpr StringLiteral kBase64Dictionary(
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
+      u8"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
   static_assert(kBase64Dictionary.get().size() == 64);
   return encode_basen<kBase64Dictionary>(buf);
 }

@@ -12,9 +12,15 @@
 
 namespace hogd {
 
+// Build a DomainSeparator from a name literal. The name must be a `char8_t`
+// (`u8""`) literal, not an ordinary `char` one: these bytes are hashed into a
+// transaction-auth address, so they must be the standard's UTF-8 encoding
+// rather than implementation-defined ordinary-literal code units, which depend
+// on the execution character set (`-fexec-charset`) and could diverge across
+// honest builds. See hogd issues #2573 and #2579 for the same fix elsewhere.
 template<size_t N>
 consteval DomainSeparator
-make_domain_separator(const char (&name)[N])
+make_domain_separator(const char8_t (&name)[N])
 {
   return {
       .ext = ExtensionPoint(0),
@@ -22,8 +28,9 @@ make_domain_separator(const char (&name)[N])
   };
 }
 
-// CXS-encode a DomainSeparator built from Name. Array size is
-// cxs_size of that concrete value (not a type-level bound).
+// CXS-encode a DomainSeparator built from Name. Array size is cxs_size of that
+// concrete value (not a type-level bound). Name must be a `u8""` literal, so
+// `make_domain_separator` binds it (an ordinary `char` StringLiteral does not).
 template<StringLiteral Name>
 consteval auto
 domain_separator_cxs()
@@ -33,7 +40,7 @@ domain_separator_cxs()
 }
 
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
-    domain_separator_cxs<"PubkeyAccount">();
+    domain_separator_cxs<u8"PubkeyAccount">();
 
 // Derives the address of a standalone-pubkey account:
 // SHA256(domain_separator || cxs(preimage)). Returns std::nullopt if the

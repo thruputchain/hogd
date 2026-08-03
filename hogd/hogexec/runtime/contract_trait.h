@@ -169,14 +169,8 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   template<StringLiteral Name>
   constexpr static size_t kLookupIndex = [] {
     for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
-      // Name is a char selector; kExportNames is u8. Compare as unsigned bytes
-      // (char is signed on this target, so a bare `char == char8_t` would
-      // integer-promote and mismatch code units >= 0x80).
-      if (std::ranges::equal(Name.get(), ContractTrait::kExportNames[i],
-                             [](char a, char8_t b) {
-                               return static_cast<unsigned char>(a) ==
-                                      static_cast<unsigned char>(b);
-                             })) {
+      // Both Name and kExportNames are u8 (char8_t), so compare directly.
+      if (std::ranges::equal(Name.get(), ContractTrait::kExportNames[i])) {
         return i;
       }
     }

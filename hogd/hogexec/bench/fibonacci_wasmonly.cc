@@ -49,8 +49,9 @@ struct BenchmarkState : public CommonBenchState {
     using client_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
     genesis_builder.add_initial_config(
         fibonacci_contract, SHA256Hash{},
-        client_meta_t::entrypoint<"fibonacci">(),
-        client_meta_t::make_calldata<"fibonacci">(uint32_t{5}), 1'000'000'000);
+        client_meta_t::entrypoint<u8"fibonacci">(),
+        client_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}),
+        1'000'000'000);
 
     contract_addr_ = GenesisConfigurationLoader::calculate_deployed_address(
         sha256(*fibonacci_contract), SHA256Hash{});
@@ -83,11 +84,12 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
                                  i]() -> uint64_t {
         auto runtime_context = make_hogexec_context();
         auto tx = SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  fib_client.make_invocation<"slow_fibonacci">(
-                                      UINT64_MAX, nfib),
-                              .uniquifier = CommonBenchState::bench_uniquifier(
-                                  base_height, static_cast<uint64_t>(i))}};
+            .tx =
+                Transaction{.invocation =
+                                fib_client.make_invocation<u8"slow_fibonacci">(
+                                    UINT64_MAX, nfib),
+                            .uniquifier = CommonBenchState::bench_uniquifier(
+                                base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
         auto r = handler.root_invoke();
@@ -145,8 +147,8 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     const auto tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
-                                                             nfib)}};
+                fib_client.make_invocation<u8"slow_fibonacci">(UINT64_MAX,
+                                                               nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {
       int offset = i * ntx_per_thread;

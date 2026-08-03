@@ -173,7 +173,7 @@ protected:
         contract_address);
     return Transaction{
         .invocation =
-            contract_client.make_invocation<"test_nnint_get_key_not_exist">(
+            contract_client.make_invocation<u8"test_nnint_get_key_not_exist">(
                 UINT64_MAX),
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
