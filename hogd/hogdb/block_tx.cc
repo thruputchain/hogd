@@ -246,30 +246,38 @@ BlockTX::read_nnint128_base(const ItemKey &key)
   if (auto s = check_stale(); !s) [[unlikely]]
     return s.error();
   auto *lock = item_locks_.get(key);
-  if (!lock) {
-    if (!key.is_contract_data()) {
-      auto r = db_.read_nnint128(key);
-      if (!r) {
-        if (r.error() == HogDBCode::kNotFound ||
-            r.error() == HogDBCode::kTypeMismatch) {
-          return 0;
-        }
-        return r.error();
-      }
-      return *r;
-    }
-
-    auto snapshot = get_snapshot_cost_and_cache_data(key);
-    if (!snapshot) {
-      return snapshot.error();
-    }
-    lock = item_locks_.insert_or_get(key, *snapshot);
-    CHECK_PTR(lock);
+  if (lock) {
+    auto base = lock->get_cached_nnint128_base();
+    return base.has_value() ? *base : 0;
   }
 
-  auto base = lock->get_cached_nnint128_base();
-  if (base) {
-    return *base;
+  if (!key.is_contract_data()) {
+    auto r = db_.read_nnint128(key);
+    if (!r) {
+      if (r.error() == HogDBCode::kNotFound ||
+          r.error() == HogDBCode::kTypeMismatch) {
+        return 0;
+      }
+      return r.error();
+    }
+    return *r;
+  }
+
+  // Contract-data base read: derive the base straight from the snapshot
+  // WITHOUT publishing an item_locks_ node. The caller
+  // (InvokeTX::request_nnint128) validates overflow/bounds against this base
+  // and can fail recoverably before any change is admitted. ConcurrentMap has
+  // no per-key deletion, so publishing a node here would strand it in the
+  // block for every key that fails validation and never acquires a lock
+  // (#3161). The node is created lazily by the normal lock path (via
+  // request_change -> lock) only once a change is actually admitted.
+  auto snapshot = get_snapshot_cost_and_cache_data(key);
+  if (!snapshot) {
+    return snapshot.error();
+  }
+  const auto &cache_data = snapshot->second;
+  if (cache_data.is_cached_nnint128_base()) {
+    return cache_data.get_cached_nnint128_base();
   }
   return 0;
 }
