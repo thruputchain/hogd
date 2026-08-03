@@ -9,6 +9,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/db_shard_routing/sharding.h"
 #include "types.hh"
 #include "x23/async.h"

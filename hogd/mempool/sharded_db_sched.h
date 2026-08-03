@@ -76,8 +76,8 @@ public:
 
   // Fan out to every shard; first non-OK wins. The returned db hash is the sum
   // of the shards' partials, so the block header carries the value an unsharded
-  // db would produce. commit is not atomic under partial failure (see 2PC
-  // TODOs).
+  // db would produce. commit is not atomic under partial failure (see the
+  // cross-shard TODO(sharding) notes).
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
                                             ConsensusValue value);
