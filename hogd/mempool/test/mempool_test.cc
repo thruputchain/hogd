@@ -530,7 +530,7 @@ TEST(Mempool, NominateBatch)
   }
 }
 
-TEST(Mempool, ProposalResponseFailureRollsBackPendingNomination)
+TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -544,7 +544,9 @@ TEST(Mempool, ProposalResponseFailureRollsBackPendingNomination)
       server.mempool_coord_rpc().schedcoord_get_tip()().db_tip();
 
   server.mempool_coord_rpc().set_propose_batch_result_test_hook(
-      [](ExecProposeBatchResult &result) { result.clear(); });
+      [](ExecProposeBatchResult &) {
+        throw std::runtime_error("injected proposal failure");
+      });
   EXPECT_THROW(propose_block(server, db_tip), std::runtime_error);
   server.mempool_coord_rpc().set_propose_batch_result_test_hook({});
 

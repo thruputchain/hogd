@@ -16,7 +16,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -641,18 +640,12 @@ MempoolCoordinatorRpc::propose_batch(
   if (propose_batch_result_test_hook_) {
     propose_batch_result_test_hook_(res);
   }
-  if (res.size() != txs.size()) {
-    throw std::runtime_error(
-        "executor returned wrong number of proposal results");
-  }
+  CHECK_EQ(res.size(), txs.size());
   // Record nomination metadata for txs that succeeded on the executor and mark
   // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
-    if (result.result() == ExecResult::ExecResultUnrecoverable) {
-      throw std::runtime_error(
-          "executor returned unrecoverable proposal result");
-    }
+    CHECK(result.result() != ExecResult::ExecResultUnrecoverable);
     ret_chunk[i] = tx_succeeded(result.result());
     if (ret_chunk[i]) {
       transaction_nominations.push_back(result.proposal_data());
@@ -1471,14 +1464,8 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  if (res.size() != txs.size()) {
-    throw std::runtime_error(
-        "executor returned wrong number of validation results");
-  }
-  if (std::ranges::contains(res, ExecResult::ExecResultUnrecoverable)) {
-    throw std::runtime_error(
-        "executor returned unrecoverable validation result");
-  }
+  CHECK_EQ(res.size(), txs.size());
+  CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
   // Validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
   // System errors are nondeterministic and cause validation to fail.
@@ -1818,6 +1805,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         std::exception_ptr first_exception;
         bool decoded_tx_nominations = false;
         bool decoded_tx_hashes = false;
+        // Await both spawned decodes even if either one throws.
         try {
           decoded_tx_nominations = co_await tx_nondeterministic_data_handle;
         } catch (...) {
