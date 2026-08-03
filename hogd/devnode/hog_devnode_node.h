@@ -42,11 +42,15 @@ namespace hogd {
 
 class HogDevnodeNode {
 public:
+  // RAMDB maps this capacity but does not consume it as steady-state RSS.
+  static constexpr std::size_t kDefaultRamDbBytes = 15UL * 1024 * 1024 * 1024;
+
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
       BootstrapAccountConfig const &bootstrap_config = {},
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
-      NetworkHash network_hash = {});
+      NetworkHash network_hash = {},
+      std::size_t ramdb_bytes = kDefaultRamDbBytes);
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -89,8 +93,6 @@ public:
   std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
-  // RAMDB maps this capacity but does not consume it as steady-state RSS.
-  static constexpr std::size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
   static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
 
   HogDBDAO open_db_backend() const;
@@ -124,6 +126,7 @@ private:
   const NetworkHash network_hash_;
   std::optional<std::filesystem::path> data_dir_;
   BootstrapAccountConfig bootstrap_config_;
+  const std::size_t ramdb_bytes_;
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;

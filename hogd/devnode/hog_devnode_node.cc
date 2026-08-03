@@ -37,6 +37,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -435,20 +436,54 @@ write_metadata_atomically(std::filesystem::path const &path,
   require_io(dir.sync(), "fsync hog-devnode data metadata directory");
 }
 
+std::string
+ramdb_reserve_failure_message(std::size_t ramdb_bytes, std::string_view detail)
+{
+  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+  std::string message =
+      std::format("ramdb failed to reserve {:.1f} GiB ({})",
+                  static_cast<double>(ramdb_bytes) / kGiB, detail);
+  if (const std::size_t physical = total_physical_memory(); physical > 0) {
+    message += std::format("; system has {:.1f} GiB physical RAM",
+                           static_cast<double>(physical) / kGiB);
+  }
+  message += ". Reduce capacity with --ramdb-bytes.";
+  return message;
+}
+
+// run_ramdb_open translates the std::system_error that the Database
+// constructor throws when the ramdb arena mmap is refused (ENOMEM under the
+// kernel's overcommit accounting) into an actionable startup error. Other
+// system errors pass through unchanged.
+template<typename Fn>
+auto
+run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
+{
+  try {
+    return fn();
+  } catch (const std::system_error &e) {
+    if (e.code() == std::errc::not_enough_memory) {
+      throw std::runtime_error(
+          ramdb_reserve_failure_message(ramdb_bytes, e.code().message()));
+    }
+    throw;
+  }
+}
+
 } // namespace
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     BootstrapAccountConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
-    NetworkHash network_hash)
+    NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
-    event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
-    opened_db_(open_db_backend()), event_ctx_(event_dir_.directory()),
-    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
-    event_indexer_server_(event_ctx_)
+    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
+    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
+    indexer_dir_(data_dir, kIndexerSubdir), opened_db_(open_db_backend()),
+    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
     // A composed devnode exclusively owns the process-wide registration
@@ -1049,15 +1084,22 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
 HogDBDAO
 HogDevnodeNode::open_db_backend() const
 {
-  DBStatus<std::uint64_t> lsn =
-      Database::check(db_dir_.directory(), kRamDbBytes);
-  CHECK(lsn.has_value());
+  DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::check(db_dir_.directory(), ramdb_bytes_);
+  });
+  if (!lsn.has_value()) {
+    lsn.error().raise("ramdb integrity check failed for '{}'",
+                      db_dir_.directory());
+  }
   info("database '{}' passed integrity check; current LSN is {}",
        db_dir_.directory(), *lsn);
 
-  DBStatus<std::unique_ptr<Database>> ramdb =
-      Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
-  CHECK(ramdb.has_value());
+  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+  });
+  if (!ramdb.has_value()) {
+    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+  }
 
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   HogDBStatus<DbTip> recovered_tip = db.read_dbtip();

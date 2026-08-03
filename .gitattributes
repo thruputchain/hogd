@@ -1,1 +1,2 @@
 hogd/hogexec/runtime/rv32/fixtures/compiled_sha256_return/compiled_sha256_return_fixture.h linguist-generated=true
+*.sh text eol=lf
