@@ -200,7 +200,6 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   hog-devnode-macos-arm64:
-    needs: release
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
       contents: read
