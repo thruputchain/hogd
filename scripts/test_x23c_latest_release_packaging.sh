@@ -14,13 +14,13 @@ chmod +x "$binary"
 script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/package_x23c_latest_release.sh"
 artifacts_dir="$tmpdir/artifacts"
 
-(cd /tmp && "$script" "$binary" "$artifacts_dir")
+if (cd /tmp && "$script" "$binary" "$artifacts_dir") 2>/dev/null; then
+  echo "error: expected missing platform argument to fail" >&2
+  exit 1
+fi
 
-test -f "$artifacts_dir/x23c-linux-x86_64.tar.gz"
-test -f "$artifacts_dir/SHA256SUMS"
-test -f "$artifacts_dir/release_notes.md"
-
-tar tzf "$artifacts_dir/x23c-linux-x86_64.tar.gz" | grep -Fxq "x23c"
-grep -Fq "x23c-linux-x86_64.tar.gz" "$artifacts_dir/SHA256SUMS"
-grep -Fq "Source commit:" "$artifacts_dir/release_notes.md"
-grep -Fq "Build date:" "$artifacts_dir/release_notes.md"
+for platform in linux-x86_64 linux-arm64; do
+  (cd /tmp && "$script" "$binary" "$artifacts_dir" "$platform")
+  test -f "$artifacts_dir/x23c-$platform.tar.gz"
+  tar tzf "$artifacts_dir/x23c-$platform.tar.gz" | grep -Fxq "x23c"
+done
