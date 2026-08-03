@@ -460,9 +460,10 @@ HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     BootstrapAccountConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
-    NetworkHash network_hash)
+    NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
+    ramdb_bytes_(ramdb_bytes),
     runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
     event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
     event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
@@ -951,13 +952,13 @@ HogDBDAO
 HogDevnodeNode::open_db_backend() const
 {
   DBStatus<std::uint64_t> lsn =
-      Database::check(db_dir_.directory(), kRamDbBytes);
+      Database::check(db_dir_.directory(), ramdb_bytes_);
   CHECK(lsn.has_value());
   info("database '{}' passed integrity check; current LSN is {}",
        db_dir_.directory(), *lsn);
 
   DBStatus<std::unique_ptr<Database>> ramdb =
-      Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+      Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
   CHECK(ramdb.has_value());
 
   HogDBDAO db(RAMDB(std::move(*ramdb)));

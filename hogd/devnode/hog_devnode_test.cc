@@ -1082,6 +1082,7 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
+  EXPECT_TRUE(stdout_output.contains("--ramdb-bytes <bytes>"));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
@@ -1127,6 +1128,28 @@ TEST(HogDevnode, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Invalid")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, InvalidRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "not-a-size"},
+                         "Invalid --ramdb-bytes: not-a-size");
+}
+
+TEST(HogDevnode, ZeroRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "0"},
+                         "--ramdb-bytes must be positive");
+}
+
+TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
+{
+  // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)
+  // configuration the flag exists for.
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--ramdb-bytes", "2147483648"});
+  process.wait_for_readiness();
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode,
