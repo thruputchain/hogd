@@ -1184,6 +1184,57 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
   ASSERT_FALSE(r.has_value());
 }
 
+// Regression test for issue #3152, exercised through the executor->db RPC
+// path. A delete-then-recreate-as-RCQ sequence hits the non-exclusive ->
+// exclusive upgrade in ItemLock::handle_try_atomic_from_pending. When the
+// recreated RCQ delta fails exclusive validation (a current-block consumed
+// entry not in added_entries), the upgrade must be failure-atomic: it must
+// leave the pending DeletionLock intact rather than replacing it with an
+// ExclusiveLock. Before the fix the pending lock was poisoned, so a later
+// deletion of the same key in the transaction spuriously conflicted.
+TEST_F(DirectRCQTests, FailedRCQExclusiveUpgradeDoesNotPoisonPendingDeletion)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_3152_poison");
+
+  // Commit the key as a bytestring so that in the next transaction the first
+  // change is a plain (non-exclusive) deletion.
+  auto tx_setup = make_new_per_tx_db_proxy();
+  tx_setup.add_delta(key, make_bytestring_delta("hello"),
+                     std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx_setup.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  advance_block();
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Delete the key: a non-exclusive DeletionLock.
+  tx.add_delta(key, make_delete_delta(),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Recreate as an RCQ whose current-block consume references an entry that
+  // this delta does not add. The deletion->RCQ type change makes this a
+  // non-exclusive -> exclusive upgrade, and the RCQ exclusive validator
+  // rejects the mismatch as kInvalidExecutorBehavior.
+  tx.add_delta(key,
+               make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0x99})},
+                                             {make_rcq_entry({0x22})}),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value());
+
+  // Failure-atomicity: the pending deletion reservation must be intact, so
+  // deleting the key again succeeds instead of conflicting on a poisoned
+  // ExclusiveLock left behind by the failed upgrade.
+  tx.add_delta(key, make_delete_delta(),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+}
+
 // ---------------------------------------------------------------------------
 // Validation-mode stress tests
 // ---------------------------------------------------------------------------
