@@ -3,7 +3,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <format>
 #include <memory>
 #include <optional>
@@ -71,11 +70,11 @@ private:
 };
 
 ContractAddress
-address_owned_by(size_t shard, size_t shard_count)
+address_owned_by(size_t owner, size_t shard_count)
 {
   for (uint8_t id = 1; id != 0; ++id) {
     ContractAddress address = make_test_address(id);
-    if (shard_of_address(address, shard_count) == shard) {
+    if (shard_of_address(address, shard_count) == owner) {
       return address;
     }
   }
@@ -112,8 +111,8 @@ TEST(AuthShardingTest, LookupRoutesToOwningShard)
   fixture.initialize_at(2);
 
   for (size_t owner = 0; owner < kShards; ++owner) {
-    auto result = fixture.auth_server().lookup_auth_data(
-        2, address_owned_by(owner, kShards))();
+    const ContractAddress address = address_owned_by(owner, kShards);
+    auto result = fixture.auth_server().lookup_auth_data(2, address)();
     ASSERT_TRUE(result.has_value()) << "shard " << owner;
     ASSERT_NE(result.value(), nullptr) << "shard " << owner;
     EXPECT_TRUE(result.value()->second.has_value())
@@ -136,8 +135,8 @@ TEST(AuthShardingTest, HeightAdvancesOnlyAfterEveryShardReports)
     fixture.shard(s).increment_height(); // block 3
   }
 
-  fixture.auth_server().register_auth_data_updates(
-      3, make_slice(address_0, auth_data_0))();
+  KeyChangeBatch slice_0 = make_slice(address_0, auth_data_0);
+  fixture.auth_server().register_auth_data_updates(3, std::move(slice_0))();
 
   std::atomic<bool> lookup_returned = false;
   std::jthread waiter([&] {
@@ -148,8 +147,8 @@ TEST(AuthShardingTest, HeightAdvancesOnlyAfterEveryShardReports)
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_FALSE(lookup_returned) << "height advanced before shard 1 reported";
 
-  fixture.auth_server().register_auth_data_updates(
-      3, make_slice(address_1, auth_data_1))();
+  KeyChangeBatch slice_1 = make_slice(address_1, auth_data_1);
+  fixture.auth_server().register_auth_data_updates(3, std::move(slice_1))();
   waiter.join();
 
   auto result_0 = fixture.auth_server().lookup_auth_data(3, address_0)();

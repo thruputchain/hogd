@@ -8,6 +8,7 @@
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/db_shard_routing/sharding.h"
 #include "hogd/hog_auth/status.h"
 #include "types.hh"
