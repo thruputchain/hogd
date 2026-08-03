@@ -32,11 +32,11 @@
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
-#include "hogd/base/os.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -460,9 +460,9 @@ std::string
 ramdb_reserve_failure_message(std::size_t ramdb_bytes, std::string_view detail)
 {
   constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
-  std::string message = std::format("ramdb failed to reserve {:.1f} GiB ({})",
-                                    static_cast<double>(ramdb_bytes) / kGiB,
-                                    detail);
+  std::string message =
+      std::format("ramdb failed to reserve {:.1f} GiB ({})",
+                  static_cast<double>(ramdb_bytes) / kGiB, detail);
   if (const std::size_t physical = total_physical_memory(); physical > 0) {
     message += std::format("; system has {:.1f} GiB physical RAM",
                            static_cast<double>(physical) / kGiB);
@@ -499,11 +499,11 @@ HogDevnodeNode::HogDevnodeNode(
     NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    ramdb_bytes_(ramdb_bytes),
-    runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
-    event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
-    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
+    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
+    indexer_dir_(data_dir, kIndexerSubdir), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   try {
     HogDBDAO db = open_db_backend();
@@ -997,10 +997,9 @@ HogDevnodeNode::open_db_backend() const
   info("database '{}' passed integrity check; current LSN is {}",
        db_dir_.directory(), *lsn);
 
-  DBStatus<std::unique_ptr<Database>> ramdb =
-      run_ramdb_open(ramdb_bytes_, [&] {
-        return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
-      });
+  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+  });
   if (!ramdb.has_value()) {
     ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
   }

@@ -502,8 +502,9 @@ parse_args(int argc, char *argv[])
       continue;
     }
     if (arg == "--ramdb-bytes" && i + 1 < argc) {
-      options.ramdb_bytes = hogd::parse_integer_arg<std::size_t>(
-          "--ramdb-bytes", argv[++i], argv, usage, /*base=*/0);
+      options.ramdb_bytes =
+          hogd::parse_integer_arg<std::size_t>("--ramdb-bytes", argv[++i], argv,
+                                               usage, /*base=*/0);
       if (options.ramdb_bytes == 0) {
         hogd::arg_error("--ramdb-bytes must be positive", argv, usage);
       }
