@@ -5,6 +5,7 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -25,6 +26,7 @@
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
+#include "hogd/hog_exec/runtime/item/shard_fanout.h" // pop_from_shards
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -527,22 +529,22 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
       case RPCError::kRPCNone:
         break;
       case RPCError::kRPCStorageWriteFailed:
+      {
         if (conflict_out != nullptr) {
           *conflict_out = std::move(res.conflict());
         }
         // A failed push must leave every shard at its start depth (so `false`
         // means "nothing pushed"). The conflicting shard already rolled itself
-        // back; pop the subtransaction each earlier shard accepted.
-        for (size_t undo = 0; undo < shard; ++undo) {
-          auto pr = clients_[undo].pop_subtransactions(block_id, tx_id, 1);
-          if (to_system_error_code<VoidMarker{}>(pr, [] {}).has_value()) {
-            continue;
-          }
-          error("Unrecoverable: failed to unwind subtransaction on shard {}",
-                undo);
+        // back; pop the subtransaction each earlier shard accepted. pop_from_
+        // shards visits ALL of them even if one pop fails, keeping the stacks
+        // aligned; any failure here is unrecoverable.
+        RPCError undo_err = pop_from_shards(std::span(clients_).first(shard),
+                                            block_id, tx_id, /*count=*/1);
+        if (undo_err != RPCError::kRPCNone) {
           return SystemError{SystemErrorCode::Unrecoverable};
         }
         return false;
+      }
       case RPCError::kRPCBadBlockID:
         return SystemError{SystemErrorCode::Abandon};
       default:
@@ -574,17 +576,11 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  // Pop `count` from every shard's (aligned) savepoint stack. Visit ALL shards
-  // and return the first error: stopping early would desync the stacks.
-  SystemStatus<void> first_error{};
-  for (auto &client : clients_) {
-    auto res = client.pop_subtransactions(block_id, tx_id, count);
-    auto status = to_system_error_code<VoidMarker{}>(res, [] {});
-    if (!status.has_value() && first_error.has_value()) {
-      first_error = status;
-    }
-  }
-  return first_error;
+  // Pop `count` from every shard's (aligned) savepoint stack. pop_from_shards
+  // visits ALL shards and returns the first error: stopping early would desync
+  // the stacks.
+  RPCError err = pop_from_shards(std::span(clients_), block_id, tx_id, count);
+  return to_system_error_code<VoidMarker{}>(err, [] {});
 }
 
 SystemStatus<DbTip>
