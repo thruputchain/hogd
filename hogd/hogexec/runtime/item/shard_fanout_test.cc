@@ -1,11 +1,11 @@
 #include "hogd/hogexec/runtime/item/shard_fanout.h"
 
-#include <cstdint>
 #include <span>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "hogd/base/types.h"
 #include "rpc_types.hh" // RPCError, BlockID, TransactionID
 
 namespace hogd {
@@ -17,7 +17,9 @@ struct MockShardClient {
   RPCError pop_result = RPCError::kRPCNone;
   int pop_calls = 0;
 
-  RPCError pop_subtransactions(BlockID, TransactionID, uint32_t)
+  RPCError pop_subtransactions(BlockID /*block_id*/,
+                               TransactionID /*transaction_id*/,
+                               uint32_t /*count*/)
   {
     ++pop_calls;
     return pop_result;
