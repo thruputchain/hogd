@@ -1,9 +1,12 @@
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
 #include <latch>
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -15,6 +18,7 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/types.h"
@@ -125,6 +129,60 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+TEST(Mempool, ShutdownBeforeReadyIsNoop)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+
+  coordinator.schedulercoord_shutdown()();
+}
+
+TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
+{
+  MempoolTestInfra server;
+  constexpr BlockID kBlock = std::numeric_limits<BlockID>::max() - 6;
+  std::latch failure_started(1);
+  std::latch blocked_started(1);
+  std::latch allow_blocked_cleanup(1);
+  std::atomic_size_t started{0};
+  server.mempool_coord_rpc().set_finish_executor_started_test_hook(
+      [&](BlockID block_id, size_t executor_idx) {
+        EXPECT_EQ(block_id, kBlock);
+        started.fetch_add(1, std::memory_order_relaxed);
+        if (executor_idx == 0) {
+          failure_started.count_down();
+          throw std::runtime_error("first executor cleanup failure");
+        }
+        if (executor_idx == 1) {
+          blocked_started.count_down();
+          allow_blocked_cleanup.wait();
+          throw std::runtime_error("blocked executor cleanup failure");
+        }
+        throw std::runtime_error("later executor cleanup failure");
+      });
+
+  auto cleanup = std::async(std::launch::async, [&] {
+    server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+  });
+  failure_started.wait();
+  blocked_started.wait();
+  EXPECT_EQ(cleanup.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::timeout);
+
+  allow_blocked_cleanup.count_down();
+  bool caught_first_exception = false;
+  try {
+    cleanup.get();
+  } catch (const std::runtime_error &e) {
+    caught_first_exception = true;
+    EXPECT_STREQ(e.what(), "first executor cleanup failure");
+  }
+  EXPECT_TRUE(caught_first_exception);
+  EXPECT_EQ(started.load(std::memory_order_relaxed),
+            MempoolCoordinatorRpc::kNumClientsPerExecutor);
+  server.mempool_coord_rpc().set_finish_executor_started_test_hook({});
 }
 
 // TODO(jhumphri): Update this test once we implement authentication and
@@ -470,6 +528,34 @@ TEST(Mempool, NominateBatch)
     }
     EXPECT_EQ(parsed_tx_hashes_set, tx_hashes_set);
   }
+}
+
+TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  const DbTip db_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()().db_tip();
+
+  server.mempool_coord_rpc().set_propose_batch_result_test_hook(
+      [](ExecProposeBatchResult &) {
+        throw std::runtime_error("injected proposal failure");
+      });
+  EXPECT_THROW(propose_block(server, db_tip), std::runtime_error);
+  server.mempool_coord_rpc().set_propose_batch_result_test_hook({});
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), txs.size());
+  const SchedulerProposalResult retry = propose_block(server, db_tip);
+  ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  EXPECT_EQ(proposed_txs, txs);
 }
 
 TEST(Mempool, NominateEmpty)

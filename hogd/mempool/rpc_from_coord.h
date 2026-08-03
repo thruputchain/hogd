@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -187,7 +188,9 @@ public:
   // are still running.
   x23::Async<void> schedulercoord_shutdown() const
   {
-    CHECK(ready());
+    if (!ready()) {
+      co_return;
+    }
 
     // TODO(jhumphri): Implement.
     co_return;
@@ -341,6 +344,23 @@ public:
     co_return;
   }
 
+  void set_finish_executor_started_test_hook(
+      std::function<void(BlockID, size_t)> hook)
+  {
+    finish_executor_started_test_hook_ = std::move(hook);
+  }
+
+  void set_propose_batch_result_test_hook(
+      std::function<void(ExecProposeBatchResult &)> hook)
+  {
+    propose_batch_result_test_hook_ = std::move(hook);
+  }
+
+  x23::Async<void> test_finish_all_executors(BlockID block_id)
+  {
+    co_await finish_all_executors(block_id);
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -469,7 +489,8 @@ private:
   x23::Async<void> finish_all_executors(BlockID block_id);
   x23::Vec<x23::DagNode<void>>
   add_finish_all_executors_nodes(x23::Dag &dag, const PendingBlock &cache,
-                                 const x23::DagDeps &deps);
+                                 const x23::DagDeps &deps,
+                                 const x23::Vec<x23::DagCleanup> &cleanups);
 
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,
@@ -497,6 +518,7 @@ private:
   };
   struct ScheduleNodes {
     x23::DagNode<void> lock_scheduler;
+    x23::DagCleanup nomination_cleanup;
     x23::Vec<x23::DagNode<void>> schedule_chunks;
     x23::Vec<x23::DagNode<void>> propose_chunks;
     x23::Vec<x23::DagNode<void>> txset_insert_chunks;
@@ -513,15 +535,18 @@ private:
     x23::DagNode<void> build_header;
   };
 
-  InitializeBlockNodes add_initialize_block_nodes(x23::Dag &dag,
-                                                  const PendingBlock &cache,
-                                                  const x23::DagDeps &deps);
+  InitializeBlockNodes add_initialize_block_nodes(
+      x23::Dag &dag, const PendingBlock &cache, const x23::DagDeps &deps,
+      const x23::DagCleanup &snapshot_cleanup,
+      const x23::DagCleanup &event_cleanup,
+      const x23::Vec<x23::DagCleanup> &executor_cleanups);
   ScheduleNodes add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                                    x23::DagDeps scheduling_deps,
                                    const x23::DagDeps &proposal_deps);
   FinishNominationNodes add_finish_nominating_block_nodes(
       x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
       PendingBlock &cache, const x23::DagDeps &proposal_deps,
+      const x23::Vec<x23::DagCleanup> &executor_cleanups,
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
@@ -684,6 +709,8 @@ private:
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
+  std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
