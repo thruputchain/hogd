@@ -582,10 +582,11 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 }
 
 x23::Vec<x23::DagNode<void>>
-MempoolCoordinatorRpc::add_finish_all_executors_nodes(x23::Dag &dag,
-                                                      const PendingBlock &cache,
-                                                      const x23::DagDeps &deps)
+MempoolCoordinatorRpc::add_finish_all_executors_nodes(
+    x23::Dag &dag, const PendingBlock &cache, const x23::DagDeps &deps,
+    const x23::Vec<x23::DagCleanup> &cleanups)
 {
+  CHECK_EQ(cleanups.size(), exec_clients_.size());
   x23::Vec<x23::DagNode<void>> nodes;
   nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -593,6 +594,7 @@ MempoolCoordinatorRpc::add_finish_all_executors_nodes(x23::Dag &dag,
         dag.async<void>("finish executor", deps, [&, i]() -> x23::Async<void> {
           co_await finish_block(cache.block_id,
                                 /*executor_idx=*/i);
+          cleanups[i].disarm();
           co_return;
         }));
   }
@@ -636,6 +638,9 @@ MempoolCoordinatorRpc::propose_batch(
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
                                                                        txs);
+  if (propose_batch_result_test_hook_) {
+    propose_batch_result_test_hook_(res);
+  }
   if (res.size() != txs.size()) {
     throw std::runtime_error(
         "executor returned wrong number of proposal results");
@@ -780,32 +785,50 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 }
 
 MempoolCoordinatorRpc::InitializeBlockNodes
-MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
-                                                  const PendingBlock &cache,
-                                                  const x23::DagDeps &deps)
+MempoolCoordinatorRpc::add_initialize_block_nodes(
+    x23::Dag &dag, const PendingBlock &cache, const x23::DagDeps &deps,
+    const x23::DagCleanup &snapshot_cleanup,
+    const x23::DagCleanup &event_cleanup,
+    const x23::Vec<x23::DagCleanup> &executor_cleanups)
 {
+  CHECK_EQ(executor_cleanups.size(), exec_clients_.size());
   InitializeBlockNodes nodes;
   nodes.create_snapshot = dag.async<DbSchedResult>(
       "create proposal snapshot", deps, [&]() -> x23::Async<DbSchedResult> {
-        co_return co_await create_snapshot(
+        const DbSchedResult result = co_await create_snapshot(
             /*prev_block_id=*/last_committed_block_.id, cache.block_id,
             BlockExecutionMode::kBlockExecutionModeProposal);
+        if (result == DbSchedResult::DbSchedResultOK) {
+          snapshot_cleanup.arm();
+        }
+        co_return result;
       });
 
   // Executor proposal blocks depend on the event block being open because they
   // can send event RPCs as soon as they start processing.
-  nodes.open_event = dag.async<RPCError>(
-      "open event block", deps, [&]() -> x23::Async<RPCError> {
-        co_return co_await eventsched_open_block(cache.block_id);
-      });
+  nodes.open_event =
+      dag.async<RPCError>("open event block", deps,
+                          [&]() -> x23::Async<RPCError> {
+                            const RPCError result =
+                                co_await eventsched_open_block(cache.block_id);
+                            if (result == RPCError::kRPCNone) {
+                              event_cleanup.arm();
+                            }
+                            co_return result;
+                          });
 
   nodes.open_proposal_blocks.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     nodes.open_proposal_blocks.push_back(dag.async<ExecResult>(
         "open executor proposal block", dag.after(nodes.open_event),
         [&, i]() -> x23::Async<ExecResult> {
-          co_return co_await open_proposal_block(cache.block_id,
-                                                 /*executor_idx=*/i);
+          const ExecResult result =
+              co_await open_proposal_block(cache.block_id,
+                                           /*executor_idx=*/i);
+          if (result == ExecResult::ExecResultOK) {
+            executor_cleanups[i].arm();
+          }
+          co_return result;
         }));
   }
 
@@ -833,18 +856,6 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(x23::Dag &dag,
         if (create_snapshot_result != DbSchedResult::DbSchedResultOK ||
             open_event.get() != RPCError::kRPCNone ||
             !open_proposal_block_success) {
-          // One of the RPCs failed, so we need to undo any of the successful
-          // RPC calls.
-          if (create_snapshot_result == DbSchedResult::DbSchedResultOK) {
-            CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-                     DbSchedResult::DbSchedResultOK);
-          }
-          if (open_event.get() == RPCError::kRPCNone) {
-            CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
-                     RPCError::kRPCNone);
-          }
-          co_await finish_all_executors(cache.block_id);
-
           co_return false;
         }
         co_return true;
@@ -896,12 +907,29 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.txset_insert_chunks.reserve(kNumSchedulerIterations);
   nodes.serialize_chunks.reserve(kNumSchedulerIterations * 3);
 
+  nodes.nomination_cleanup =
+      dag.cleanup("rollback scheduler nomination",
+                  [&, state]() -> x23::Async<void> {
+                    state->schedule_guard.reset();
+                    scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
+                                              cache.tx_hashes.end());
+                    {
+                      x23::CoroGuard scheduler_guard;
+                      co_await scheduler_guard(scheduler_->global_lock_);
+                      scheduler_->abandon_pending_nomination(cache.block_id);
+                    }
+                    cache.block_id = 0;
+                    co_return;
+                  });
+  const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
+
   nodes.lock_scheduler =
       dag.async<void>("lock scheduler nomination", std::move(scheduling_deps),
-                      [&, state]() -> x23::Async<void> {
+                      [&, state, nomination_cleanup]() -> x23::Async<void> {
                         co_await state->schedule_guard(
                             scheduler_->global_lock_);
                         scheduler_->start_pending_nomination(cache.block_id);
+                        nomination_cleanup.arm();
                         co_return;
                       });
 
@@ -1144,12 +1172,14 @@ MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
     PendingBlock &cache, const x23::DagDeps &proposal_deps,
+    const x23::Vec<x23::DagCleanup> &executor_cleanups,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps)
 {
   FinishNominationNodes nodes;
   nodes.finish_executors =
-      add_finish_all_executors_nodes(dag, cache, proposal_deps);
+      add_finish_all_executors_nodes(dag, cache, proposal_deps,
+                                     executor_cleanups);
   nodes.close_snapshot =
       dag.async<DbBlockResult>("close proposal snapshot", proposal_deps,
                                [&]() -> x23::Async<DbBlockResult> {
@@ -1258,7 +1288,36 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         SchedulerProposalOutcome::SchedulerProposalError);
   }
 
+  std::atomic<BlockID> proposal_block_id{0};
   x23::Dag nomination_dag("schedulercoord_nominate", default_threadpool());
+  x23::DagCleanup cache_cleanup =
+      nomination_dag.cleanup("clear proposal cache", [&]() -> x23::Async<void> {
+        nominated_block_cache_.block_id = 0;
+        co_return;
+      });
+  x23::DagCleanup snapshot_cleanup = nomination_dag.cleanup(
+      "abandon proposal snapshot", [&]() -> x23::Async<void> {
+        CHECK_EQ(co_await abandon_snapshot(proposal_block_id.load()),
+                 DbSchedResult::DbSchedResultOK);
+        co_return;
+      });
+  x23::DagCleanup event_cleanup = nomination_dag.cleanup(
+      "abandon proposal event block", [&]() -> x23::Async<void> {
+        CHECK_EQ(co_await eventsched_abandon_block(proposal_block_id.load()),
+                 RPCError::kRPCNone);
+        co_return;
+      });
+  x23::Vec<x23::DagCleanup> executor_cleanups;
+  executor_cleanups.reserve(exec_clients_.size());
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    executor_cleanups.push_back(
+        nomination_dag.cleanup("finish proposal executor",
+                               [&, i]() -> x23::Async<void> {
+                                 co_await finish_block(proposal_block_id.load(),
+                                                       /*executor_idx=*/i);
+                                 co_return;
+                               }));
+  }
 
   // HOG transfers and auth changes from the previous block both affect the
   // scheduling priorities for this block, but neither depends on the other.
@@ -1278,6 +1337,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   auto prepare_cache_node = nomination_dag.async<void>(
       "prepare nomination cache", [&]() -> x23::Async<void> {
         nominated_block_cache_.block_id = generate_block_id();
+        proposal_block_id.store(nominated_block_cache_.block_id);
+        cache_cleanup.arm();
         // We place the block txs and tx hashes into these vectors. We mark
         // these vectors static and clear them on each call to [nominate()] so
         // to avoid memory allocation/free overhead.
@@ -1310,7 +1371,9 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       add_initialize_block_nodes(nomination_dag, nominated_block_cache_,
                                  nomination_dag.after(transfer_data_node,
                                                       auth_data_node,
-                                                      prepare_cache_node));
+                                                      prepare_cache_node),
+                                 snapshot_cleanup, event_cleanup,
+                                 executor_cleanups);
   auto check_initialize_block_node = nomination_dag.async<void>(
       "check initialize block",
       nomination_dag.after(initialize_block_nodes.initialized),
@@ -1329,11 +1392,27 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
       nomination_dag, last_committed_block_, context, nominated_block_cache_,
-      dag_deps_from_nodes(schedule_nodes.propose_chunks),
+      dag_deps_from_nodes(schedule_nodes.propose_chunks), executor_cleanups,
       schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
 
   co_await nomination_dag.run();
+  if (nomination_dag.ok()) {
+    schedule_nodes.nomination_cleanup.disarm();
+    cache_cleanup.disarm();
+    snapshot_cleanup.disarm();
+    event_cleanup.disarm();
+  }
+  for (const x23::DagFailure &failure : nomination_dag.cleanup_failures()) {
+    try {
+      std::rethrow_exception(failure.exception);
+    } catch (const std::exception &e) {
+      error("scheduler proposal cleanup '{}' failed: {}", failure.node,
+            e.what());
+    } catch (...) {
+      error("scheduler proposal cleanup '{}' failed", failure.node);
+    }
+  }
   if (!nomination_dag.ok() && nomination_dag.failure().exception) {
     std::rethrow_exception(nomination_dag.failure().exception);
   }
@@ -1350,19 +1429,6 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
-    // Add the txs from the first call to [schedule()] above back to the
-    // scheduler.
-    // We do not reset the hog ages since failure is rare and one failure will
-    // not impact long term fairness. We also do not recover expired txs. A
-    // failure is pretty bad and unexpected, and I do not think it is worth
-    // adding complexity and overhead in the common case to for full recovery
-    // from a rare event.
-    co_await scheduler_->add_txs(nominated_block_cache_.txs);
-    {
-      x23::CoroGuard cg;
-      co_await cg(scheduler_->global_lock_);
-      scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
-    }
     info("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
