@@ -163,7 +163,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  "call_return_ok_void">(1000)}},
+                                  u8"call_return_ok_void">(1000)}},
       *context_);
 
   auto res = handler.root_invoke();
@@ -181,7 +181,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  "call_return_ok_int">(1000)}},
+                                  u8"call_return_ok_int">(1000)}},
       *context_);
 
   auto res = handler.root_invoke();

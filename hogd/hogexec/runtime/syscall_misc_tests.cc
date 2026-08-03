@@ -69,7 +69,7 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = client_.make_invocation<
-                      "test_get_return_before_return_buffer_set">(UINT64_MAX),
+                      u8"test_get_return_before_return_buffer_set">(UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),

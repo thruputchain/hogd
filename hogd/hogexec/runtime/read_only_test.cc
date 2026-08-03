@@ -379,7 +379,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto res = native_token_client.invoke_opt<
-            "get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
+            u8"get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kObserverAddr);
         if (!res.has_value() || !res.value().has_value() ||
             !res.value().value().has_value() ||
@@ -395,7 +395,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   fns_caller.emplace(
       1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto res = native_token_client.invoke_opt<
-            "transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
+            u8"transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kReceiverAddr, make_amount(transfer_amount));
         // The invoke should fail because modify_native_token_balance
         // returns InvalidSyscallInput in read-only mode, which causes
@@ -625,7 +625,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
           .invocation =
               Invocation{.invoked_address = contract_addr_,
                          .entrypoint = meta::entrypoint<
-                             "read_only_aliasing_before_read_only_check">(),
+                             u8"read_only_aliasing_before_read_only_check">(),
                          .gas_limit = UINT64_MAX,
                          .calldata = {}},
           .uniquifier = make_new_uniquifier(),

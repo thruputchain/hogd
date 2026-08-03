@@ -206,7 +206,7 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation = caller.make_invocation<
-                                  "call_fibonacci_expect_out_of_gas">(
+                                  u8"call_fibonacci_expect_out_of_gas">(
                                   UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);

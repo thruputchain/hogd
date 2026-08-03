@@ -160,7 +160,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_.make_invocation<
-                                      "call_fibonacci_expect_out_of_gas">(
+                                      u8"call_fibonacci_expect_out_of_gas">(
                                       UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
@@ -177,7 +177,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_.make_invocation<
-                                      "call_fibonacci_expect_out_of_gas">(
+                                      u8"call_fibonacci_expect_out_of_gas">(
                                       UINT64_MAX, uint32_t{20}, uint64_t{1010}),
                               .uniquifier = make_new_uniquifier()}},
         *wasm_runtime_context_);
