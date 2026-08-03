@@ -7,6 +7,7 @@ members = [
     "integration_test_contracts/calldata_raw",
     "integration_test_contracts/calldata_wrapper",
     "integration_test_contracts/cxs_roundtrip",
+    "integration_test_contracts/default_wallet",
     "integration_test_contracts/dev_wallet",
     "integration_test_contracts/deploy_and_transfer",
     "integration_test_contracts/delegate_call_test",
@@ -54,8 +55,10 @@ edition = "2024"
 # groundhog dependencies
 sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-xdr = { registry = "groundhog", version = "0.19", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.19" }
+# default features include std, which cannot build for the on-chain targets
+groundhog-domain-separator = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.20", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.20" }
 xdrs = { registry = "groundhog", version = "0.8.1", features = ["int128", "heapless"] }
 sha2 = { version = "0.10.8", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
