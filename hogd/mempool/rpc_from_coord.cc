@@ -45,8 +45,10 @@
 #include "hogd/mempool/shared.h"
 #include "parallel.hh"
 #include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
@@ -203,7 +205,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
-  CHECK(ready());
+  if (!ready()) {
+    co_return;
+  }
 
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
@@ -377,7 +381,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
-  CHECK(ready());
+  if (!ready()) {
+    co_return;
+  }
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
@@ -523,17 +529,29 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<RPCError>
-MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id)
+MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
+                                               const ConsensusValue &value)
 {
-  co_return co_await event_sched_client_->eventsched_commit_block(block_id);
+  co_return co_await event_sched_client_->eventsched_commit_block(block_id,
+                                                                  value);
+}
+
+x23::Async<RPCError>
+MempoolCoordinatorRpc::eventsched_confirm_committed_block(
+    const ConsensusValue &value)
+{
+  co_return co_await event_sched_client_->eventsched_confirm_committed_block(
+      value);
 }
 
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
-                                              BlockHeight block_height)
+                                              BlockHeight block_height,
+                                              const ProposalTxs &txs)
 {
   co_return co_await event_sched_client_->eventsched_close_block(block_id,
-                                                                 block_height);
+                                                                 block_height,
+                                                                 txs);
 }
 
 x23::Async<DbBlockResult>
@@ -1165,6 +1183,7 @@ MempoolCoordinatorRpc::FinishNominationNodes
 MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
     x23::Dag &dag, const DbTip &db_tip, const ProposalContext &context,
     PendingBlock &cache, const x23::DagDeps &proposal_deps,
+    const x23::DagDeps &proposal_txs_deps,
     const x23::Vec<x23::DagCleanup> &executor_cleanups,
     const std::shared_ptr<MerkleTriePrefix> &txset_trie,
     const x23::DagDeps &txset_hash_deps)
@@ -1180,10 +1199,13 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                      cache.block_id);
                                });
   nodes.close_event = dag.async<EventBlockResult>(
-      "close event block", proposal_deps,
+      "close event block", proposal_txs_deps,
       [&]() -> x23::Async<EventBlockResult> {
+        const ProposalTxs &proposal_txs =
+            cache.proposal_result.proposed_block().proposal.transactions;
         co_return co_await eventsched_close_block(
-            cache.block_id, db_tip.value.proposal_header.block_height + 1);
+            cache.block_id, db_tip.value.proposal_header.block_height + 1,
+            proposal_txs);
       });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
@@ -1239,19 +1261,40 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.value);
   x23::Async<RPCError> event_commit_handle =
-      eventsched_commit_block(cache.block_id);
-  {
-    DbBlockResult result = co_await commit_snapshot_handle;
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+      eventsched_commit_block(cache.block_id, cache.db_tip.value);
+  std::exception_ptr first_exception;
+  DbBlockResult db_result;
+  RPCError event_result = RPCError::kRPCUnrecoverable;
+  // Keep these awaits separate so a failure cannot skip draining its sibling.
+  try {
+    db_result = co_await commit_snapshot_handle;
+  } catch (...) {
+    first_exception = std::current_exception();
   }
-  CHECK_EQ(co_await event_commit_handle, RPCError::kRPCNone);
+  try {
+    event_result = co_await event_commit_handle;
+  } catch (...) {
+    if (!first_exception) {
+      first_exception = std::current_exception();
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
+  }
+  CHECK_EQ(db_result.result(), DbSchedResult::DbSchedResultOK);
+  CHECK_EQ(event_result, RPCError::kRPCNone);
+  CHECK_EQ(co_await eventsched_confirm_committed_block(cache.db_tip.value),
+           RPCError::kRPCNone);
 }
 
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
 {
-  CHECK(ready());
+  if (!ready()) {
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
   if (context.protocol != 0) {
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
@@ -1385,7 +1428,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                          nomination_dag.after(check_initialize_block_node));
   add_finish_nominating_block_nodes(
       nomination_dag, last_committed_block_, context, nominated_block_cache_,
-      dag_deps_from_nodes(schedule_nodes.propose_chunks), executor_cleanups,
+      dag_deps_from_nodes(schedule_nodes.propose_chunks),
+      dag_deps_from_nodes(schedule_nodes.serialize_chunks), executor_cleanups,
       schedule_nodes.txset_trie,
       dag_deps_from_nodes(schedule_nodes.txset_insert_chunks));
 
@@ -1653,7 +1697,10 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                                      Proposal proposal)
 {
-  CHECK(ready());
+  if (!ready()) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+  }
 
   ElapsedTimer timer;
   SchedulerValidationOutcome validation_outcome =
@@ -2032,7 +2079,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       [&]() -> x23::Async<EventBlockResult> {
         co_return co_await eventsched_close_block(validation_block_id,
                                                   scheduler_->current_block() +
-                                                      1);
+                                                      1,
+                                                  proposal.transactions);
       });
   x23::DagDeps close_validation_deps =
       merge_dag_deps(validation_dag.after(close_snapshot_node, close_event_node,
@@ -2149,7 +2197,9 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(
     BlockID block_id, ConsensusValue expected_value)
 {
-  CHECK(ready());
+  if (!ready()) {
+    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+  }
   MempoolMetrics::instance().commit_attempt_count.increment();
 
   const std::chrono::steady_clock::time_point commit_started_at =
@@ -2351,7 +2401,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
       });
 
   auto abandon_events_node = commit_dag.async<void>(
-      "abandon event blocks", commit_dag.after(prepare_node),
+      "abandon event blocks", commit_dag.after(commit_block_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {
           co_return;
@@ -2510,6 +2560,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
             scheduler_->size());
         MempoolMetrics::instance().scheduler_tx_cache_size.record(
             scheduler_->tx_cache_size());
+        Registration::registration().publish_event_canonical_tip(
+            EventCanonicalTip{.block_id = last_committed_block_.id,
+                              .consensus_value = last_committed_block_.value});
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
@@ -2564,7 +2617,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
   });
 
-  CHECK(ready());
+  CHECK(initialized_.load(std::memory_order_acquire));
   CHECK_EQ(height, auth_data_height_.load() + 1);
 
   x23::CoroGuard cg;
