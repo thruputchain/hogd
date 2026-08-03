@@ -27,8 +27,8 @@ template<std::size_t N> struct Utf8StringLiteral {
     std::copy_n(str, N, buf);
   }
 };
-template<size_t N> Utf8StringLiteral(const char8_t (&)[N])
-    -> Utf8StringLiteral<N>;
+template<size_t N>
+Utf8StringLiteral(const char8_t (&)[N]) -> Utf8StringLiteral<N>;
 
 template<size_t N>
 consteval DomainSeparator
