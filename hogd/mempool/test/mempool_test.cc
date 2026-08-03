@@ -36,7 +36,6 @@
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_gateway.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "hogd/metrics/shared.h"
