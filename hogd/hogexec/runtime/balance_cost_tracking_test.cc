@@ -463,10 +463,11 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   EXPECT_EQ(receiver_balance, 0);
 }
 
-// Regression test for #1503: overspending via transfer leaves a deferred
-// negative delta on the sender's balance item. A subsequent get_balance in the
-// same transaction must surface as a Deterministic error rather than aborting
-// on an assertion (debug) or wrapping to a huge unsigned value (release).
+// Regression test for #1503: a deferred negative delta on the sender's
+// balance item (staged at the handler layer because the public transfer is
+// now strict) must surface as a Deterministic error on a subsequent
+// get_balance in the same transaction rather than aborting on an assertion
+// (debug) or wrapping to a huge unsigned value (release).
 TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 {
   constexpr static ContractAddress kSenderAddr = make_contract_address(160);
@@ -489,25 +490,20 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         GenesisConfigurationLoader::kPresetNativeTokenAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // Overspend via transfer: records deferred-negative delta on
-    // sender, returns local success.
-    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
-        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
-    auto r_transfer = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                             calldata_transfer,
-                                             std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
-    }();
-
-    if (!r_transfer.has_value() ||
-        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "overspending transfer did not return success";
+    // The public transfer path is strict now; stage the deferred negative
+    // delta directly at the handler layer (the surface #1503 guards) to
+    // keep the read-side fault and commit-time rejection covered.
+    auto r_debit = ctx.handler().modify_native_token_balance(
+        ctx.handler().get_current_address(), -kTransferAmount);
+    if (!r_debit.has_value() || !r_debit.value().has_value()) {
+      ADD_FAILURE() << "staging the direct overspend debit failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto r_credit =
+        ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                  kTransferAmount);
+    if (!r_credit.has_value() || !r_credit.value().has_value()) {
+      ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
@@ -575,7 +571,9 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 }
 
 // Companion to NegativeBalanceReadbackReturnsDeterministic that exercises the
-// get_balance_of read-site (which takes an explicit contract address).
+// get_balance_of read-site (which takes an explicit contract address). The
+// overspend is staged at the handler layer because the public transfer path
+// is now strict.
 TEST_F(BalanceCostTrackingTest,
        NegativeBalanceReadbackGetBalanceOfReturnsDeterministic)
 {
@@ -595,23 +593,20 @@ TEST_F(BalanceCostTrackingTest,
         GenesisConfigurationLoader::kPresetNativeTokenAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    auto calldata_transfer = erc20_meta::make_calldata<"transfer">(
-        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
-    auto r_transfer = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                             calldata_transfer,
-                                             std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
-    }();
-
-    if (!r_transfer.has_value() ||
-        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "overspending transfer did not return success";
+    // The public transfer path is strict now; stage the deferred negative
+    // delta directly at the handler layer (the surface #1503 guards) to
+    // keep the read-side fault and commit-time rejection covered.
+    auto r_debit = ctx.handler().modify_native_token_balance(
+        ctx.handler().get_current_address(), -kTransferAmount);
+    if (!r_debit.has_value() || !r_debit.value().has_value()) {
+      ADD_FAILURE() << "staging the direct overspend debit failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto r_credit =
+        ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                  kTransferAmount);
+    if (!r_credit.has_value() || !r_credit.value().has_value()) {
+      ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
 
