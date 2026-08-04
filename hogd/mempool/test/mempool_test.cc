@@ -335,11 +335,13 @@ TEST(Mempool, LookupResponseByteBudget)
   lookup.push_back(hash);
   lookup.push_back(hash);
 
-  // With a budget for exactly one transaction, the first hash returns the
-  // transaction and the over-budget duplicate returns the not-found sentinel.
+  // Budget for exactly one returned transaction: the 4-byte vector length
+  // prefix plus one entry (its 4-byte optional discriminant and body).  The
+  // first hash returns the transaction; the over-budget duplicate returns the
+  // not-found sentinel.
+  const size_t one_tx_budget = 2 * sizeof(uint32_t) + x23::xdr_size(*tx);
   const x23::XdrVec<x23::Ptr<SignedTransaction>> capped =
-      server.mempool_coord_rpc().lookup_transactions(lookup,
-                                                     x23::xdr_size(*tx));
+      server.mempool_coord_rpc().lookup_transactions(lookup, one_tx_budget);
   ASSERT_EQ(capped.size(), 2UL);
   ASSERT_NE(capped[0].get(), nullptr);
   EXPECT_EQ(sha256(capped[0]->tx), hash);

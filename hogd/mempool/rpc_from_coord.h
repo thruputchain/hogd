@@ -258,10 +258,16 @@ public:
   }
 
   // Shared lookup used by the trusted RPC above and the public gateway.
-  // [response_byte_limit] bounds the total serialized size of the returned
-  // transactions; once it is exhausted the remaining hashes get the not-found
-  // sentinel, which keeps the "one OptSignedTransaction per input hash, same
-  // order" contract intact.
+  // [response_byte_limit] bounds the serialized size of the response as we
+  // build it, counting the full XDR framing (the 4-byte vector length prefix
+  // and the 4-byte optional discriminant on every entry) as well as the
+  // transaction bodies.  Once a transaction body would push the response past
+  // the budget we stop materializing bodies and emit the not-found sentinel
+  // instead, which keeps the "one OptSignedTransaction per input hash, same
+  // order" contract intact.  Hashes past the budget still cost their mandatory
+  // 4-byte "absent" discriminant, but that residual framing is fixed per input
+  // hash and so is inherently bounded by the request size; it cannot be dropped
+  // without breaking the positional contract.
   x23::XdrVec<x23::Ptr<SignedTransaction>>
   lookup_transactions(const SignedTransactionHashBatch &tx_hashes,
                       size_t response_byte_limit)
@@ -270,13 +276,16 @@ public:
 
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
-    size_t response_bytes = 0;
+    // Start with the vector's XDR length prefix; every entry then adds its
+    // 4-byte optional discriminant, plus the body for entries we materialize.
+    size_t response_bytes = sizeof(uint32_t);
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
-      const size_t tx_bytes = tx ? x23::xdr_size(*tx) : 0;
-      if (tx && response_bytes + tx_bytes <= response_byte_limit) {
-        response_bytes += tx_bytes;
+      const size_t entry_bytes =
+          sizeof(uint32_t) + (tx ? x23::xdr_size(*tx) : 0);
+      if (tx && response_bytes + entry_bytes <= response_byte_limit) {
+        response_bytes += entry_bytes;
         // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
         // using [x23::Ptr]'s value constructor rather than just use the
         // existing [tx] pointer. This avoids the issue where [tx] is freed from
@@ -290,6 +299,8 @@ public:
         ret.push_back(x23::Ptr<SignedTransaction>(*tx));
       }
       else {
+        // Absent entry: only the 4-byte optional discriminant is serialized.
+        response_bytes += sizeof(uint32_t);
         ret.push_back(nullptr);
       }
     }
