@@ -118,6 +118,14 @@ public:
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 
+  // Readiness contract for the SchedulerCoord1 surface: the coordinator is a
+  // trusted component, and [schedulercoord_intro_coord] is the only RPC it may
+  // legitimately send before the scheduler comes online -- it is what registers
+  // the coordinator, drives [finish_init()], and publishes [ready_]. Every
+  // other handler opens with [CHECK(ready())] on purpose: a non-intro call
+  // arriving before [finish_init()] has completed is a serious protocol
+  // violation by a trusted peer, and crashing is the intended response rather
+  // than silently dropping or erroring the call and masking the bug.
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
