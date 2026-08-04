@@ -6,24 +6,20 @@
 #include <memory>
 #include <span>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/initial_token_claim.h"
-#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
+#include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -155,26 +151,18 @@ make_native_initial_token_claim_contract()
         auto receiver_addr = SystemCallHandler::static_get_deploy_address(
             ctx.handler().get_current_address(), nonce, hash);
 
-        // Transfer tokens to the receiver via HOG token contract
-        auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-
-        std::tuple<uint64_t, uint64_t> allocation_tuple =
-            std::make_tuple(*allocation >> 64,
-                            *allocation & 0xffffffffffffffffULL);
-
-        auto transfer_result =
-            native_token_client.invoke_opt<u8"transfer">(ctx, receiver_addr,
-                                                         allocation_tuple);
-
-        if (!transfer_result.has_value() ||
-            !transfer_result.value().has_value() ||
-            !transfer_result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        auto transfer_ok = transfer_result.value().value().value();
-        if (!transfer_ok.is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        // Genesis claims are initial token allocations, not ERC20 transfers:
+        // move the balance directly (no child frame, no Transfer event)
+        // instead of invoking the strict public `transfer`, which cannot see
+        // the commit-time storage refund of the exclusive delete above. HogDB
+        // validates the claim's net balance at commit, where the
+        // exclusive-delete refund nets against this debit exactly.
+        auto self_addr = ctx.handler().get_current_address();
+        if (auto moved = native_token_unchecked_transfer(
+                ctx.handler(), self_addr, receiver_addr,
+                static_cast<int128_t>(*allocation));
+            !moved.has_value()) {
+          return moved.error();
         }
 
         // Deploy the contract using hash and nonce

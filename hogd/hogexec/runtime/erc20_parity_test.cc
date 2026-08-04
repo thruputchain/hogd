@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -15,6 +18,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
@@ -26,6 +30,7 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -78,14 +83,13 @@ using CapturedRecord = std::vector<uint8_t>;
 // Drives the native HOG precompile and the WASM itc_erc20 contract through the
 // same ERC20 operations, capturing each call's commit ExecResult plus the
 // literal return/abort bytes. The two backends agree byte-for-byte on valid
-// operations *and* on allowance handling (the native token's allowance check is
-// strict like itc's) -- the *Parity tests guard that. They diverge only on the
-// *balance*: the native token validates the net balance at commit (deferred),
-// so it accepts a same-key self-transfer that nets to zero and defers other
-// balance rejections to commit, while itc_erc20 enforces a strict per-debit
-// balance check at invoke. That gap is inherent -- the native token's deferred
-// balance netting underpins system flows like the genesis token claim -- and
-// the *Diverges tests pin it down.
+// operations, on allowance handling, and on balance checking: the native
+// token's transfer and transfer_from both enforce a strict per-debit check at
+// invoke, just like itc_erc20, returning ERC20Error::TooLarge when
+// amount > available. The *Parity tests guard all of these behaviors, including
+// boundary cases (exact-balance succeeds, one-over aborts) and the reference
+// check order (allowance debit first, then owner debit, then receiver credit)
+// for transfer_from.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Erc20ParityTest : public ::testing::Test,
                         public NativeContractTestFramework {
@@ -121,6 +125,11 @@ protected:
   static constexpr ContractAddress kWasmOwnerAddr = make_contract_address(208);
   static constexpr ContractAddress kWasmSpenderAddr =
       make_contract_address(209);
+  // transfer_from to a distinct recipient: two extra recipient addresses.
+  static constexpr ContractAddress kNativeTfRecipientAddr =
+      make_contract_address(210);
+  static constexpr ContractAddress kWasmTfRecipientAddr =
+      make_contract_address(211);
 
   // Native contract ids in the multiplexed context's native map.
   static constexpr int32_t kWasmAdminId = 50;
@@ -141,6 +150,23 @@ protected:
     return std::make_tuple(static_cast<int64_t>(amount >> 64),
                            static_cast<uint64_t>(amount &
                                                  0xffffffffffffffffULL));
+  }
+
+  // Compute the contract-data storage key that itc_erc20 uses for addr's
+  // balance. The WASM SDK's .hash() CXS-encodes the tuple (b"balance", addr)
+  // and SHA-256s the result. CXS fixed-opaque arrays have no padding, so the
+  // preimage is exactly: 7 bytes of "balance" || 32 bytes of addr = 39 bytes.
+  static StorageKeyContractData
+  itc_erc20_balance_key(ContractAddress const &addr)
+  {
+    std::array<uint8_t, 39> preimage{};
+    // "balance" in ASCII/UTF-8
+    static constexpr std::array<uint8_t, 7> kTag = {0x62, 0x61, 0x6c, 0x61,
+                                                    0x6e, 0x63, 0x65};
+    std::ranges::copy(kTag, preimage.begin());
+    std::ranges::copy(addr, preimage.begin() + 7);
+    return StorageKeyContractData{
+        sha256(std::span<const uint8_t>(preimage.data(), preimage.size()))};
   }
 
   // Builds a native "driver" contract whose method 0 invokes `target`'s ERC20
@@ -286,12 +312,16 @@ protected:
   // precompile and the WASM itc_erc20, with each caller starting from a
   // freshly-minted balance of `start_balance`. Pass each caller's own address
   // as the receiver for a self-transfer, or a distinct address for an ordinary
-  // transfer. Returns {native_record, wasm_record}, the byte-for-byte captured
-  // outcomes (tag + frame status + literal return/abort bytes).
+  // transfer. When recipient_start_balance > 0 the receiver is pre-funded on
+  // both backends before the transfer runs (native: direct write bypassing the
+  // supply-cap guard; WASM: direct write to the itc_erc20 balance key).
+  // Returns {native_record, wasm_record}, the byte-for-byte captured outcomes
+  // (tag + frame status + literal return/abort bytes).
   std::pair<CapturedRecord, CapturedRecord>
   run_transfer_parity(uint128_t start_balance, uint128_t transfer_amount,
                       ContractAddress native_receiver,
-                      ContractAddress wasm_receiver)
+                      ContractAddress wasm_receiver,
+                      uint128_t recipient_start_balance = 0)
   {
     auto native_result_key = make_storage_key("native_result");
     auto wasm_result_key = make_storage_key("wasm_result");
@@ -380,6 +410,31 @@ protected:
     // Fund the native caller (native HOG balance) and, via the admin tx, the
     // WASM caller (itc token balance).
     setup_grant_storage_token(kNativeCallerAddr, start_balance);
+
+    // Pre-fund the recipient when caller-requested (e.g. CreditOverflow test).
+    // Both backends bypass the per-backend funding limit: balances near
+    // INT128_MAX are unreachable via normal supply flows but we need them to
+    // exercise the credit-overflow code path.
+    if (recipient_start_balance > 0) {
+      // Native: write directly to the HOG balance slot, bypassing the
+      // supply-cap assert in setup_grant_storage_token.
+      write_item(make_free_native_token_balance_addrkey(native_receiver),
+                 std::make_shared<const StorageItemWrapper>(
+                     static_cast<int128_t>(recipient_start_balance),
+                     get_default_cost_model()));
+
+      // WASM: write directly to the itc_erc20 NonnegativeInt balance key,
+      // bypassing the mint path (which would overflow the total-supply key).
+      StorageKey wasm_balance_skey(StorageKeyType::ContractData);
+      wasm_balance_skey.contract_data_key() =
+          itc_erc20_balance_key(wasm_receiver);
+      write_item(AddressAndKey{.address = kWasmTokenAddr,
+                               .key = std::move(wasm_balance_skey)},
+                 std::make_shared<const StorageItemWrapper>(
+                     static_cast<int128_t>(recipient_start_balance),
+                     get_default_cost_model()));
+    }
+
     run_tx(kWasmAdminAddr, 0, ctx);
 
     return {run_capture_tx(kNativeCallerAddr, native_result_key, ctx),
@@ -443,6 +498,145 @@ protected:
     wasm_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                     kWasmTokenAddr, wasm_result_key,
                                     kWasmOwnerAddr, kWasmOwnerAddr,
+                                    make_amount(transfer_amount)));
+    auto wasm_spender =
+        std::make_unique<NativeContract>(std::move(wasm_spender_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        wasm_admin_fns;
+    wasm_admin_fns.emplace(
+        0,
+        [owner_balance](
+            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
+          if (!init.has_value() || !init.value().has_value()) {
+            ADD_FAILURE() << "itc initialize failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmOwnerAddr,
+                                                  make_amount(owner_balance));
+          if (!mint.has_value() || !mint.value().has_value() ||
+              !mint.value().value().has_value() ||
+              !mint.value().value().value().is_ok()) {
+            ADD_FAILURE() << "itc mint failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto wasm_admin =
+        std::make_unique<NativeContract>(std::move(wasm_admin_fns));
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
+    native_map.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
+    native_map.emplace(kWasmAdminId, std::move(wasm_admin));
+    native_map.emplace(kNativeOwnerId, std::move(native_owner));
+    native_map.emplace(kNativeSpenderId, std::move(native_spender));
+    native_map.emplace(kWasmOwnerId, std::move(wasm_owner));
+    native_map.emplace(kWasmSpenderId, std::move(wasm_spender));
+    auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
+    auto wasm_ctx = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    MultiplexedContext ctx(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kNative, {native_ctx.release(), true}},
+        });
+
+    auto native_token_obj = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(native_token_obj);
+    write_deployment(kNativeTokenAddr, native_token_obj);
+
+    auto wasm_token_obj = erc20_meta::load_wasm();
+    EXPECT_TRUE(wasm_token_obj);
+    write_contract(wasm_token_obj);
+    write_deployment(kWasmTokenAddr, wasm_token_obj);
+
+    auto deploy_native = [this](ContractAddress addr, int32_t id) {
+      auto obj = make_native_contract(id);
+      write_contract(obj);
+      write_deployment(addr, obj);
+    };
+    deploy_native(kWasmAdminAddr, kWasmAdminId);
+    deploy_native(kNativeOwnerAddr, kNativeOwnerId);
+    deploy_native(kNativeSpenderAddr, kNativeSpenderId);
+    deploy_native(kWasmOwnerAddr, kWasmOwnerId);
+    deploy_native(kWasmSpenderAddr, kWasmSpenderId);
+
+    // Owner balances: native HOG grant for the native owner; admin mint for the
+    // WASM owner.
+    setup_grant_storage_token(kNativeOwnerAddr, owner_balance);
+    run_tx(kWasmAdminAddr, 0, ctx);
+
+    // Owners grant allowances.
+    run_tx(kNativeOwnerAddr, 0, ctx);
+    run_tx(kWasmOwnerAddr, 0, ctx);
+
+    // Spenders run the delegated transfer and capture the outcome.
+    return {run_capture_tx(kNativeSpenderAddr, native_result_key, ctx),
+            run_capture_tx(kWasmSpenderAddr, wasm_result_key, ctx)};
+  }
+
+  // Runs transfer_from(owner, distinct_recipient, transfer_amount) against both
+  // backends. The owner starts with `owner_balance` and grants the spender an
+  // allowance of `allowance`. The recipient is a distinct address from the
+  // owner. Returns {native_record, wasm_record}.
+  std::pair<CapturedRecord, CapturedRecord>
+  run_transfer_from_parity(uint128_t owner_balance, uint128_t allowance,
+                           uint128_t transfer_amount)
+  {
+    auto native_result_key = make_storage_key("native_result");
+    auto wasm_result_key = make_storage_key("wasm_result");
+
+    // An owner driver that grants `spender` an allowance on `token`.
+    auto make_grant = [](ContractAddress token, ContractAddress spender,
+                         uint128_t amt) -> NativeContract::function_t {
+      return [token, spender,
+              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        ContractTraitClient<itc_erc20::ERC20> client(token);
+        auto r = client.invoke_opt<u8"adjust_allowance">(
+            ctx, spender, make_difference(static_cast<int128_t>(amt)));
+        if (!r.has_value() || !r.value().has_value() ||
+            !r.value().value().has_value() ||
+            !r.value().value().value().is_ok()) {
+          ADD_FAILURE() << "grant allowance failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      };
+    };
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        native_owner_fns;
+    native_owner_fns.emplace(0, make_grant(kNativeTokenAddr, kNativeSpenderAddr,
+                                           allowance));
+    auto native_owner =
+        std::make_unique<NativeContract>(std::move(native_owner_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        wasm_owner_fns;
+    wasm_owner_fns.emplace(0, make_grant(kWasmTokenAddr, kWasmSpenderAddr,
+                                         allowance));
+    auto wasm_owner =
+        std::make_unique<NativeContract>(std::move(wasm_owner_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        native_spender_fns;
+    native_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
+                                      kNativeTokenAddr, native_result_key,
+                                      kNativeOwnerAddr, kNativeTfRecipientAddr,
+                                      make_amount(transfer_amount)));
+    auto native_spender =
+        std::make_unique<NativeContract>(std::move(native_spender_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        wasm_spender_fns;
+    wasm_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
+                                    kWasmTokenAddr, wasm_result_key,
+                                    kWasmOwnerAddr, kWasmTfRecipientAddr,
                                     make_amount(transfer_amount)));
     auto wasm_spender =
         std::make_unique<NativeContract>(std::move(wasm_spender_fns));
@@ -632,34 +826,21 @@ TEST_F(Erc20ParityTest, FundedSelfTransferParity)
          "self-transfer";
 }
 
-// Over-balance self-transfer (#2134) -- an inherent native-vs-ERC20 gap, not a
-// bug to fix. The native token validates the *net* of a transaction at commit;
-// a self-transfer's debit and credit hit the same balance key and net to zero,
-// so the native token ACCEPTS it (and emits a Transfer event) even though the
-// caller never had the tokens. itc_erc20's strict per-debit check rejects it at
-// invoke. Both transactions commit (neither stages a bad net); the outcomes
-// differ, and that difference is by design -- the native token's deferred
-// netting also underpins system flows (e.g. the genesis token claim) that a
-// strict check would break.
-TEST_F(Erc20ParityTest, OverBalanceSelfTransferDiverges)
+// Over-balance self-transfer: both backends now reject at invoke with
+// ERC20Error::TooLarge, byte-identically (closes the #2134 behavior; the
+// native token's strict per-debit check matches itc_erc20).
+TEST_F(Erc20ParityTest, OverBalanceSelfTransferParity)
 {
   auto [native_record, wasm_record] =
       run_transfer_parity(/*start_balance=*/10, /*transfer_amount=*/100,
                           kNativeCallerAddr, kWasmCallerAddr);
-  // Native: deferred net-zero -> accepted at invoke (frame Return).
-  ASSERT_GE(native_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
-            ExecResult::ExecResultOK);
-  EXPECT_EQ(native_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
-      << "native accepts the over-balance self-transfer (deferred net-zero)";
-  // itc_erc20: strict -> rejected at invoke (frame Abort).
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on over-balance "
+         "self-transfer";
   ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK);
   EXPECT_EQ(wasm_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc_erc20 rejects it at invoke (strict)";
-  EXPECT_NE(native_record, wasm_record);
+      << "both backends must reject at invoke";
 }
 
 // A funded delegated self-transfer: a spender with sufficient allowance moves
@@ -674,63 +855,170 @@ TEST_F(Erc20ParityTest, FundedTransferFromSelfParity)
          "transfer_from self";
 }
 
-// Over-balance delegated self-transfer (#1969): transfer_from(owner, owner,
-// amount) where amount exceeds the owner's balance but the spender has the
-// allowance. Same inherent gap as the direct self-transfer: the same-key
-// debit/credit net to zero, so the native token accepts it (and consumes the
-// allowance) while itc_erc20 rejects it at invoke.
-TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfDiverges)
+// Over-balance delegated self-transfer: both backends reject at invoke with
+// ERC20Error::TooLarge (byte-identical). That the staged allowance debit
+// reverts with the aborted frame is verified in
+// NativeTokenAllowanceTest.OverBalanceTransferFromRevertsAllowanceDebit.
+TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(
       /*owner_balance=*/10, /*allowance=*/100, /*transfer_amount=*/100);
-  ASSERT_GE(native_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
-            ExecResult::ExecResultOK);
-  EXPECT_EQ(native_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
-      << "native accepts the over-balance delegated self-transfer";
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on over-balance "
+         "transfer_from";
   ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK);
   EXPECT_EQ(wasm_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc_erc20 rejects it at invoke (strict)";
-  EXPECT_NE(native_record, wasm_record);
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
-// An over-balance transfer to a *distinct* recipient. The native token defers
-// validation to commit, so the transfer returns Ok at invoke and the
-// transaction fails at commit (the negative balance delta is rejected by the
-// commit-time lock); itc_erc20 rejects at invoke. Both reject the transfer, but
-// at different layers -- another facet of the same deferred-vs-strict gap.
-TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientDivergesByLayer)
+// Boundary: transfer_from of the owner's exact full balance (allowance
+// ample) succeeds on both backends.
+TEST_F(Erc20ParityTest, ExactBalanceTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/100);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+}
+
+// Boundary: one past the owner's balance (allowance ample) aborts on both
+// backends with identical ERC20Error::TooLarge bytes.
+TEST_F(Erc20ParityTest, OneOverBalanceTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/101);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// Both allowance and balance insufficient: identical outcome on both
+// backends. (Both legs throw the same TooLarge bytes, so this can't
+// distinguish which leg fired -- the structural ordering below matches the
+// reference so no future error-code split can diverge.)
+TEST_F(Erc20ParityTest, BothInsufficientTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/10, /*allowance=*/10, /*transfer_amount=*/100);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// An over-balance transfer to a distinct recipient: both backends reject at
+// invoke with ERC20Error::TooLarge, the aborted child stages nothing, and
+// the surrounding transaction commits cleanly on both.
+TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientParity)
 {
   auto [native_record, wasm_record] =
       run_transfer_parity(/*start_balance=*/10, /*transfer_amount=*/100,
                           kNativeRecipientAddr, kWasmRecipientAddr);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on over-balance "
+         "transfer to a distinct recipient";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
+      << "the transaction must commit (nothing staged by the aborted child)";
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
 
-  // Native: the transfer returns Ok at invoke, so the captured outcome is just
-  // the (non-OK) commit ExecResult -- the negative balance delta is rejected by
-  // the commit-time lock and the record write is rolled back with it.
+// Boundary: a transfer of the caller's exact full balance lands the balance
+// at exactly zero and SUCCEEDS on both backends (the reference errors only
+// when the resulting total would be < 0).
+TEST_F(Erc20ParityTest, ExactBalanceTransferParity)
+{
+  auto [native_record, wasm_record] =
+      run_transfer_parity(/*start_balance=*/100, /*transfer_amount=*/100,
+                          kNativeRecipientAddr, kWasmRecipientAddr);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on exact-balance "
+         "transfer";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "exact-balance transfer must succeed";
+}
+
+// Boundary: one token over the full balance aborts on both backends with
+// identical ERC20Error::TooLarge bytes.
+TEST_F(Erc20ParityTest, OneOverBalanceTransferParity)
+{
+  auto [native_record, wasm_record] =
+      run_transfer_parity(/*start_balance=*/100, /*transfer_amount=*/101,
+                          kNativeRecipientAddr, kWasmRecipientAddr);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged one past the "
+         "balance boundary";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// Credit-side overflow beyond the supply cap: the receiver already holds
+// INT128_MAX, which cannot occur under the total-supply bound (~2^59) but
+// can be hand-crafted in tests. Native no longer checks the credit leg at
+// invoke (supply-bound makes it unreachable); the WASM reference still
+// checks it, so the two backends diverge on this artificial state.
+// Native accepts the transfer at invoke; the transaction is then rejected
+// at commit by HogDB's add-capacity bound. WASM rejects at invoke with
+// ERC20Error::TooLarge. Documented divergence, not a bug.
+TEST_F(Erc20ParityTest, CreditOverflowBeyondSupplyDiverges)
+{
+  auto [native_record, wasm_record] = run_transfer_parity(
+      /*start_balance=*/100, /*transfer_amount=*/1, kNativeRecipientAddr,
+      kWasmRecipientAddr,
+      /*recipient_start_balance=*/
+      uint128_t{std::numeric_limits<int128_t>::max()});
+  // Native: invoke accepted, tx rejected at commit (add-capacity bound).
   ASSERT_EQ(native_record.size(), 1U);
-  EXPECT_NE(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
-      << "native should reject the over-balance transfer at commit";
-
-  // itc_erc20: the transaction commits (the reverted child stages nothing), and
-  // the transfer itself aborted at invoke.
+  EXPECT_NE(static_cast<ExecResult>(native_record[0]),
+            ExecResult::ExecResultOK);
+  // WASM: invoke-time Abort, tx commits (nothing staged by the aborted child).
   ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK)
-      << "itc commits cleanly (nothing staged)";
   EXPECT_EQ(wasm_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc rejects the over-balance transfer at invoke";
-
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
   EXPECT_NE(native_record, wasm_record);
 }
 
-// transfer_from with sufficient balance but insufficient allowance. The
-// allowance has no genesis-style deferred-netting constraint, so the native
-// token's allowance debit is strict like itc_erc20's: both reject at invoke
-// with ERC20Error::TooLarge, byte-identically.
+// An amount above INT128_MAX (not representable as a signed balance delta):
+// pin that both backends reject it with the same observable result.
+TEST_F(Erc20ParityTest, HugeAmountTransferParity)
+{
+  auto [native_record, wasm_record] = run_transfer_parity(
+      /*start_balance=*/1'000, /*transfer_amount=*/uint128_t{1} << 127,
+      kNativeRecipientAddr, kWasmRecipientAddr);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on amount > "
+         "INT128_MAX";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// amount > INT128_MAX → both backends abort with TooLarge at the conversion,
+// before the allowance debit.
+TEST_F(Erc20ParityTest, HugeAmountTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/1'000, /*allowance=*/1'000,
+      /*transfer_amount=*/uint128_t{1} << 127);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on transfer_from "
+         "amount > INT128_MAX";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// transfer_from with sufficient balance but insufficient allowance. Both
+// allowance and balance debits are strict (invoke-time TooLarge rejection);
+// this test pins the allowance leg's byte-identical rejection between the
+// native precompile and the WASM itc_erc20 reference.
 TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(
@@ -764,6 +1052,35 @@ TEST_F(Erc20ParityTest, ZeroAmountTransferParity)
   EXPECT_EQ(native_record, wasm_record)
       << "native precompile and WASM itc_erc20 diverged on zero-amount "
          "transfer";
+}
+
+// A funded transfer_from to a distinct recipient: a spender with sufficient
+// allowance moves tokens from owner to a third-party recipient. Both backends
+// must accept it and return byte-identical results.
+TEST_F(Erc20ParityTest, FundedTransferFromToRecipientParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_parity(
+      /*owner_balance=*/1'000, /*allowance=*/200, /*transfer_amount=*/100);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on funded "
+         "transfer_from to a distinct recipient";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+}
+
+// One past the owner balance in a transfer_from to a distinct recipient: both
+// backends reject at invoke with ERC20Error::TooLarge, byte-identically.
+TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_parity(
+      /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/101);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged one past the "
+         "balance boundary on transfer_from to a distinct recipient";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
 // adjust_allowance(self, +amount): granting oneself an allowance is rejected by

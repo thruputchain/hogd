@@ -136,8 +136,8 @@ erc20_error(itc_erc20::ERC20Error code)
 // Strict allowance adjustment, mirroring itc_erc20::add_to_allowance (the SDK's
 // non_negative_int_try_strict_inc): force-load the committed allowance and
 // reject an out-of-range running total at invoke (returns false), rather than
-// deferring to commit. Allowance has no genesis-style transient-dip concern, so
-// the native token can match the strict ERC20 reference here.
+// deferring to commit. The balance debit in transfer_impl / transfer_from_impl
+// mirrors the same SDK primitive.
 InvokeStatus<bool>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
@@ -174,7 +174,7 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     return false;
   }
   int128_t new_add = output_add + amount;
-  // Strict non-negativity on the committed base + accumulated increments.
+  // Strict non-negativity on the committed base + net in-tx delta.
   if (integer_add_overflow(output_set, new_add) || (output_set + new_add) < 0) {
     return false;
   }
@@ -216,30 +216,40 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return owner.error();
   }
 
-  // can't negate bigger values
+  // An amount above INT128_MAX cannot be represented as a signed balance delta;
+  // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // subtract amount from owner's balance
-  auto r1 =
-      ctx.handler().modify_native_token_balance(*owner, -amount_signed_int);
-  if (!r1.has_value()) {
-    return r1.error().to_invoke_error();
+  // Strict per-debit check mirroring itc_erc20's add_to_balance /
+  // non_negative_int_try_strict_inc: the running balance (committed base +
+  // net in-tx delta) may not go below zero. A debit landing exactly at
+  // zero is accepted -- the reference's only rejection is `total < 0`.
+  auto owner_avail = ctx.handler().get_native_token_balance(*owner);
+  if (!owner_avail.has_value()) {
+    return owner_avail.error().to_invoke_error();
   }
-  if (!r1.value().has_value()) {
+  if (!owner_avail.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity.
     return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (amount_signed_int > owner_avail.value().value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  // add amount to receiver's balance
-  auto r2 =
-      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
-  if (!r2.has_value()) {
-    return r2.error().to_invoke_error();
-  }
-  if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+  // No credit-side overflow check: total supply (~2^59) keeps any reachable
+  // receiver balance + amount far below INT128_MAX, so the reference's
+  // checked add on the credit leg cannot fire. HogDB's commit-time
+  // add-capacity bound remains the backstop for hand-crafted states.
+
+  if (auto moved = native_token_unchecked_transfer(ctx.handler(), *owner,
+                                                   receiver, amount_signed_int);
+      !moved.has_value()) {
+    return moved.error();
   }
 
   auto event_buf =
@@ -279,35 +289,17 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return spender.error();
   }
 
-  // can't negate bigger values
+  // An amount above INT128_MAX cannot be represented as a signed balance delta;
+  // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // subtract amount from owner's balance
-  auto r1 =
-      ctx.handler().modify_native_token_balance(owner, -amount_signed_int);
-  if (!r1.has_value()) {
-    return r1.error().to_invoke_error();
-  }
-  if (!r1.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
-  // add amount to receiver's balance
-  auto r2 =
-      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
-  if (!r2.has_value()) {
-    return r2.error().to_invoke_error();
-  }
-  if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
-  // Spending one's own tokens needs no allowance; otherwise the (strict)
-  // allowance debit rejects an insufficient allowance at invoke with
-  // ERC20Error::TooLarge, mirroring itc_erc20.
+  // Order mirrors itc_erc20::transfer_from: the (strict) allowance debit
+  // first when spending someone else's tokens, then the strict owner
+  // debit, then the receiver credit. Any failure aborts the frame and
+  // reverts the staged allowance debit.
   if (owner != *spender) {
     auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
@@ -316,6 +308,34 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     if (!allow_res.value()) {
       return erc20_error(itc_erc20::ERC20Error::TooLarge);
     }
+  }
+
+  // Strict per-debit balance check; see transfer_impl for the semantics
+  // (fail iff amount > committed base + net in-tx delta; exact-zero
+  // landings succeed).
+  auto owner_avail = ctx.handler().get_native_token_balance(owner);
+  if (!owner_avail.has_value()) {
+    return owner_avail.error().to_invoke_error();
+  }
+  if (!owner_avail.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity.
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (amount_signed_int > owner_avail.value().value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  // No credit-side overflow check: total supply (~2^59) keeps any reachable
+  // receiver balance + amount far below INT128_MAX, so the reference's
+  // checked add on the credit leg cannot fire. HogDB's commit-time
+  // add-capacity bound remains the backstop for hand-crafted states.
+
+  if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
+                                                   receiver, amount_signed_int);
+      !moved.has_value()) {
+    return moved.error();
   }
 
   auto event_buf =
@@ -427,6 +447,32 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 }
 
 } // namespace
+
+InvokeStatus<void>
+native_token_unchecked_transfer(SystemCallHandler &handler,
+                                ContractAddress const &from,
+                                ContractAddress const &to, int128_t amount)
+{
+  // Callers are privileged system code (the strict trait methods and the
+  // genesis claim); a negative amount is a precondition violation, not a
+  // recoverable input.
+  CHECK(amount >= 0);
+  auto r1 = handler.modify_native_token_balance(from, -amount);
+  if (!r1.has_value()) {
+    return r1.error().to_invoke_error();
+  }
+  if (!r1.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  auto r2 = handler.modify_native_token_balance(to, amount);
+  if (!r2.has_value()) {
+    return r2.error().to_invoke_error();
+  }
+  if (!r2.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  return {};
+}
 
 Topic const &
 native_token_transfer_event_signature()
