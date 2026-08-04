@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "event.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/event_cursor.h"
@@ -976,6 +977,13 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
 // background threads exist.
 TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
 {
+  if constexpr (!is_debug_build()) {
+    // The "CHECK FAILED" panic message this death test matches is only
+    // produced in debug builds (x23::panic is std::unreachable() under
+    // NDEBUG).  Matches RecoveryTests.RecoveredHighBitRCQLiveEntriesDiesOnLoad.
+    GTEST_SKIP();
+  }
+
   // consume_events leaves its thread pool and RocksDB's background
   // threads alive, so the default fork-only death test style forks a
   // multi-threaded process.  "threadsafe" re-execs instead, which is
