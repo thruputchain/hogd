@@ -80,15 +80,13 @@ using CapturedRecord = std::vector<uint8_t>;
 // Drives the native HOG precompile and the WASM itc_erc20 contract through the
 // same ERC20 operations, capturing each call's commit ExecResult plus the
 // literal return/abort bytes. The two backends agree byte-for-byte on valid
-// operations, on allowance handling, and now also on balance checking: the
-// native token's transfer enforces a strict per-debit check at invoke, just
-// like itc_erc20, returning ERC20Error::TooLarge when amount > available.
-// The *Parity tests guard all of these behaviors. The remaining divergence
-// test covers the delegated self-transfer (transfer_from with owner == receiver)
-// where the same-key debit and credit net to zero: transfer's balance check is
-// strict and parity-tested; transfer_from's delegated self-transfer is still
-// deferred-netting pending the transfer_from strictness change (see
-// OverBalanceTransferFromSelfDiverges).
+// operations, on allowance handling, and on balance checking: the native
+// token's transfer and transfer_from both enforce a strict per-debit check at
+// invoke, just like itc_erc20, returning ERC20Error::TooLarge when
+// amount > available. The *Parity tests guard all of these behaviors, including
+// boundary cases (exact-balance succeeds, one-over aborts) and the reference
+// check order (allowance debit first, then owner debit, then receiver credit)
+// for transfer_from.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Erc20ParityTest : public ::testing::Test,
                         public NativeContractTestFramework {
@@ -711,27 +709,57 @@ TEST_F(Erc20ParityTest, FundedTransferFromSelfParity)
          "transfer_from self";
 }
 
-// Over-balance delegated self-transfer (#1969): transfer_from(owner, owner,
-// amount) where amount exceeds the owner's balance but the spender has the
-// allowance. Same inherent gap as the direct self-transfer: the same-key
-// debit/credit net to zero, so the native token accepts it (and consumes the
-// allowance) while itc_erc20 rejects it at invoke.
-TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfDiverges)
+// Over-balance delegated self-transfer: both backends reject at invoke with
+// ERC20Error::TooLarge and the allowance is untouched (closes the #1969
+// behavior).
+TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(
       /*owner_balance=*/10, /*allowance=*/100, /*transfer_amount=*/100);
-  ASSERT_GE(native_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
-            ExecResult::ExecResultOK);
-  EXPECT_EQ(native_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
-      << "native accepts the over-balance delegated self-transfer";
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on over-balance "
+         "transfer_from";
   ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(wasm_record[0]), ExecResult::ExecResultOK);
   EXPECT_EQ(wasm_record[2],
-            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
-      << "itc_erc20 rejects it at invoke (strict)";
-  EXPECT_NE(native_record, wasm_record);
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// Boundary: transfer_from of the owner's exact full balance (allowance
+// ample) succeeds on both backends.
+TEST_F(Erc20ParityTest, ExactBalanceTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/100);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+}
+
+// Boundary: one past the owner's balance (allowance ample) aborts on both
+// backends with identical ERC20Error::TooLarge bytes.
+TEST_F(Erc20ParityTest, OneOverBalanceTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/101);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// Both allowance and balance insufficient: identical outcome on both
+// backends. (Both legs throw the same TooLarge bytes, so this can't
+// distinguish which leg fired -- the structural ordering below matches the
+// reference so no future error-code split can diverge.)
+TEST_F(Erc20ParityTest, BothInsufficientTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/10, /*allowance=*/10, /*transfer_amount=*/100);
+  EXPECT_EQ(native_record, wasm_record);
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
 // An over-balance transfer to a distinct recipient: both backends reject at

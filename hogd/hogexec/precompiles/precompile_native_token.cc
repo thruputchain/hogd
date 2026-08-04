@@ -308,15 +308,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
-                                                   receiver, amount_signed_int);
-      !moved.has_value()) {
-    return moved.error();
-  }
-
-  // Spending one's own tokens needs no allowance; otherwise the (strict)
-  // allowance debit rejects an insufficient allowance at invoke with
-  // ERC20Error::TooLarge, mirroring itc_erc20.
+  // Order mirrors itc_erc20::transfer_from: the (strict) allowance debit
+  // first when spending someone else's tokens, then the strict owner
+  // debit, then the receiver credit. Any failure aborts the frame and
+  // reverts the staged allowance debit.
   if (owner != *spender) {
     auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
@@ -325,6 +320,46 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     if (!allow_res.value()) {
       return erc20_error(itc_erc20::ERC20Error::TooLarge);
     }
+  }
+
+  // Strict per-debit balance check; see transfer_impl for the semantics
+  // (fail iff amount > committed base + in-tx increments; exact-zero
+  // landings succeed).
+  auto owner_avail = ctx.handler().get_native_token_balance(owner);
+  if (!owner_avail.has_value()) {
+    return owner_avail.error().to_invoke_error();
+  }
+  if (!owner_avail.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (amount_signed_int > owner_avail.value().value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  // Credit-leg overflow; self-transfer checks the post-debit value. See
+  // transfer_impl.
+  int128_t receiver_avail{};
+  if (receiver == owner) {
+    receiver_avail = owner_avail.value().value() - amount_signed_int;
+  }
+  else {
+    auto r_avail = ctx.handler().get_native_token_balance(receiver);
+    if (!r_avail.has_value()) {
+      return r_avail.error().to_invoke_error();
+    }
+    if (!r_avail.value().has_value()) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    receiver_avail = r_avail.value().value();
+  }
+  if (integer_add_overflow(receiver_avail, amount_signed_int)) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
+                                                   receiver, amount_signed_int);
+      !moved.has_value()) {
+    return moved.error();
   }
 
   auto event_buf =
