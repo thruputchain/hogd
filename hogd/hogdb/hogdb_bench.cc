@@ -97,6 +97,27 @@ double bench_hot_fraction = 0.0;
 // pass is what makes it interleavable with serving rather than a barrier.
 size_t bench_max_victims = 0;
 
+// When true, replay_reads() emulates a fast tier holding only the hottest
+// kFastTierFraction of loglets, by evicting the rest of the file-backed heap.
+// Requires RAMDB_HEAP_FILE; without it there is nothing to fault back from.
+bool bench_emulate_tier = false;
+
+// How often, in accesses, to re-evict the cold set during an emulated-tier
+// replay. 0 -- the default -- evicts once before the replay and never again.
+//
+// Re-eviction was meant to make the count per *access* rather than per distinct
+// cold page, since a cold page stays resident once faulted in. It does not work:
+// at 1000 it produced 1.03 major faults per access in both arms, i.e. exactly one
+// per access, which means each sweep was dropping the hot set as well. Sweeping
+// msync + fadvise over the ~3 GB cold region hundreds of times puts the whole
+// file under writeback and reclaim pressure, and the kept pages go with it.
+//
+// So the measurement is first-touch: distinct cold pages read from the device.
+// That under-counts repeat misses and is therefore conservative against the
+// miss-ratio model, which is the right direction for a headline number. Left as a
+// knob for anyone who wants to revisit it, but the default is the sound path.
+size_t bench_evict_every = 0;
+
 // When positive, re-draw the rank -> payee permutation every this many blocks,
 // so the hot accounts change identity mid-run. Without it every workload here
 // has a static hot set, which is exactly the case where "was ever hot" and "is
@@ -132,7 +153,11 @@ int bench_sketch_width = 20;
 // numbers from the two binaries are comparable.
 constexpr double kFastNs = 70.0;
 constexpr double kSlowNs = 300.0;
-constexpr double kFastTierFraction = 0.20;
+// Not constexpr: -P sweeps it. The fast tier's share of occupied loglets is a
+// property of the machine, and with -T it is emulated exactly rather than
+// modelled, so it is the one assumed constant that can now be varied and
+// measured instead of argued.
+double kFastTierFraction = 0.20;
 
 void
 fail(HogDBError err)
@@ -265,6 +290,9 @@ private:
   // byte-identical across epochs, so the only thing that moves is which account
   // holds each rank.
   std::vector<uint32_t> op_rank_;
+  // Loglet-index mask of the fast tier, filled by report_layout and used by
+  // replay_reads to emulate a tier of that size. Empty means no emulation.
+  std::vector<bool> fast_tier_keep_;
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -820,9 +848,21 @@ Benchmark::replay_reads()
 {
   if (payee_slot_.empty())
     return;
+
+  // Emulate a fast tier of exactly the loglets report_layout selected, if the
+  // heap is file-backed and a tier size was requested. Re-evicted periodically:
+  // a cold loglet stays resident after its first fault, so evicting only once
+  // would count faults per distinct cold loglet rather than per cold access. The
+  // replay is read-only, so the pages are clean and eviction costs no writeback.
+  bool emulate = bench_emulate_tier && !fast_tier_keep_.empty();
+  if (emulate)
+    db_.get_ramdb().evict_heap_except(fast_tier_keep_);
+
   Zipf zipf(payee_space_, bench_theta);
   uint64_t rng = kBenchSeed ^ 0x5C0DE5ULL;
   for (size_t i = 1; i < payee_space_; i++) {
+    if (emulate && bench_evict_every > 0 && i % bench_evict_every == 0)
+      db_.get_ramdb().evict_heap_except(fast_tier_keep_);
     ItemKey key = make_key(0, payee_slot_[zipf(rng)]);
     auto ret = db_.read_nnint128(key);
     if (unlikely(!ret))
@@ -884,6 +924,14 @@ Benchmark::report_layout(std::string_view label)
                 static_cast<double>(kLogletRegionSize);
   }
   fast_hot /= static_cast<double>(fast_count);
+
+  // Record the fast tier as a loglet-index mask, so replay_reads() can emulate a
+  // tier of exactly this size by evicting everything else. The set is chosen by
+  // true access count -- the oracle the paper assumes -- so the emulated tier is
+  // the best a page-based tiering system could possibly pick.
+  fast_tier_keep_.assign(nloglets, false);
+  for (size_t i = 0; i < fast_count; ++i)
+    fast_tier_keep_[occupied[i]] = true;
 
   double hit = total > 0 ? static_cast<double>(fast) /
                                static_cast<double>(total)
@@ -1472,6 +1520,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "permutation every N blocks (moving hot set)");
     std::println("  -G, --age-epoch <N>    halve the sketch counters every N "
                  "blocks (classifier aging)");
+    std::println("  -T, --emulate-tier     evict all but the fast tier's "
+                 "loglets during the fault replay (needs RAMDB_HEAP_FILE)");
+    std::println("  -P, --tier-fraction <F> fast tier's share of occupied "
+                 "loglets (default: 0.20)");
+    std::println("  -e, --evict-every <N>  re-evict the cold set every N "
+                 "accesses (default: 0 = once only; see the comment, >0 is "
+                 "known to evict the hot set too)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1513,6 +1568,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"auto-consolidate", required_argument, nullptr, 'A'},
       {"hotset-epoch", required_argument, nullptr, 'E'},
       {"age-epoch",    required_argument, nullptr, 'G'},
+      {"emulate-tier", no_argument,       nullptr, 'T'},
+      {"evict-every",  required_argument, nullptr, 'e'},
+      {"tier-fraction", required_argument, nullptr, 'P'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1528,7 +1586,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:F:V:A:E:G:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:F:V:A:E:G:Te:P:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1588,6 +1646,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       hogd::bench_auto_victims = std::stoul(optarg, nullptr, 0);
       // The trigger classifies with the sketch, so it needs the sketch fed.
       hogd::bench_sketch_classifier = true;
+      break;
+    case 'T':
+      hogd::bench_emulate_tier = true;
+      break;
+    case 'P':
+      hogd::kFastTierFraction = std::stod(optarg);
+      break;
+    case 'e':
+      hogd::bench_evict_every = std::stoul(optarg, nullptr, 0);
       break;
     case 'E':
       hogd::bench_hotset_epoch = std::stoi(optarg);

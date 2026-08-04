@@ -192,6 +192,14 @@ public:
   // comparing their fault counts.
   void evict_heap() { loglet_allocator_->evict_region(); }
 
+  // evict_heap_except emulates a fast tier holding exactly the loglets set in
+  // keep, by dropping the resident pages of all the others. See
+  // LogletAllocator::evict_except.
+  void evict_heap_except(const std::vector<bool> &keep)
+  {
+    loglet_allocator_->evict_except(keep);
+  }
+
   // heat_enabled lets a caller skip building a key it would only throw away.
   bool heat_enabled() const { return heat_ != nullptr; }
 

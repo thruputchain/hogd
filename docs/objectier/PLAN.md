@@ -312,12 +312,24 @@ workload, the same capacity, a different layout, and this many fewer accesses fe
 to the device. Report the fault ratio, not nanoseconds. The 70/300 AMAT figures
 stay explicitly labelled as a model throughout.
 
-**First run was null and the cause is in the harness, not the idea** — see P3a in
-`TODO.md`. The working set was eight times smaller than the cap, so nothing was
-ever evicted, and the bench's per-account anonymous state grows fast enough that
-simply scaling up trades paging for OOM kills. Fixing the harness's footprint is
-now the highest-value item on this plan, because it is the only route to any
-unmodelled number.
+**Done, by explicit eviction rather than a cap — see P3b in `TODO.md`.** The
+cap approach is abandoned: it applies to the whole process for its whole life, and
+the write phase needs far more resident heap than the replay being measured, so
+there is no cap that both survives setup and binds on reads (700M gives no faults,
+600M OOM-kills). `hogdb_bench -T` instead evicts every loglet outside the fast
+tier from the mapping *and* the page cache, and `-P` sets the tier size exactly.
+
+**The consolidated layout reads ~2× less from the device** — 1.94× to 2.29× across
+tier sizes from 5% to 50%, and exactly zero faults in both arms when the whole
+occupied set is kept. That is the first number here that assumes none of the three
+latency/capacity constants.
+
+**But it does not validate the model, and 3.3 is still open.** At a 50% tier the
+model predicts no misses at all while the measurement shows thousands, and the
+measured ratio grows with tier size where the model says the benefit should vanish.
+The fault count and the modelled hit rate are measuring subtly different things and
+the discrepancy is unexplained; the two must not be presented as corroborating.
+Resolving that is now the top item — see 3.3.
 
 ### 3.2 Tier the allocator (C1)
 
@@ -383,11 +395,12 @@ assumed.
 
 ## Recommended order, and what to cut
 
-1. **Fix the SSD harness's memory footprint** (3.1 / P3a). There is no other
-   hardware, so paging against NVMe is the only unmodelled measurement available,
-   and it currently returns zero faults because the working set is far smaller
-   than the cap. This is now the top item: everything else on this list refines
-   numbers that are all modelled.
+1. **Reconcile the measured fault count with the modelled hit rate** (3.3 / P3b).
+   The emulated tier now gives a real ~2× device-read reduction, but at a 50% tier
+   the model predicts zero misses where thousands are measured. Until that is
+   explained, the fault ratio is a standalone measurement and the model is
+   unvalidated. Instrument which loglets the replay actually faults on and compare
+   against the set the join calls cold.
 2. **Drift-driven aging** (successor to 1.1). A fixed epoch makes the trigger
    relocate on every block forever; without any aging it goes silent and the
    layout rots. Neither is shippable, and neither implementation has the middle.

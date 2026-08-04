@@ -39,6 +39,27 @@ namespace {
 //
 // Experimental facility, off unless RAMDB_HEAP_FILE names a path. MAP_SHARED so
 // evicted pages go back to the file rather than to swap.
+
+// Descriptor for the RAMDB_HEAP_FILE mapping, -1 when the heap is anonymous.
+// One static suffices: this facility maps a single heap per process.
+int heap_backing_fd = -1;
+
+// drop_page_cache evicts a range of the backing file from page cache, so the
+// next access reads from the device. MADV_DONTNEED alone only drops the
+// *mapping* -- the page stays cached and comes back as a minor fault with no
+// device read, which is how the first attempt measured 748k minor faults and
+// zero major ones. No-op for an anonymous heap, which has no device behind it.
+void
+drop_page_cache(off_t offset, size_t bytes)
+{
+  if (heap_backing_fd < 0)
+    return;
+  if (int e = posix_fadvise(heap_backing_fd, offset, static_cast<off_t>(bytes),
+                            POSIX_FADV_DONTNEED);
+      e != 0)
+    warn("posix_fadvise DONTNEED failed: {}", e);
+}
+
 inline void *
 map_backing_file(size_t len)
 {
@@ -59,8 +80,10 @@ map_backing_file(size_t len)
     e.raise();
   }
   void *addr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  // The mapping keeps the file alive; the descriptor is not needed past this.
-  close(fd);
+  // Keep the descriptor rather than closing it: the mapping alone would keep
+  // the file alive, but evicting to the device needs posix_fadvise on the file.
+  // See drop_page_cache.
+  heap_backing_fd = fd;
   if (addr == MAP_FAILED) {
     Errno e;
     error("Couldn't mmap heap backing file: {}", e);
@@ -210,6 +233,35 @@ LogletAllocator::evict_region()
     warn("msync before eviction failed: {}", Errno());
   if (madvise(base_addr_, len_, MADV_DONTNEED) != 0)
     warn("madvise MADV_DONTNEED for eviction failed: {}", Errno());
+  drop_page_cache(0, len_);
+}
+
+void
+LogletAllocator::evict_except(const std::vector<bool> &keep)
+{
+  // Evict in runs of adjacent non-kept loglets so one syscall pair covers as
+  // much as possible; a hot set of 20% leaves long cold stretches.
+  size_t n = loglets_.size();
+  for (size_t i = 0; i < n;) {
+    if (i < keep.size() && keep[i]) {
+      ++i;
+      continue;
+    }
+    size_t start = i;
+    while (i < n && !(i < keep.size() && keep[i]))
+      ++i;
+
+    std::byte *addr = base_addr_ + (start * kLogletRegionSize);
+    size_t bytes = (i - start) * kLogletRegionSize;
+    // msync for the same reason evict_region() does: on a MAP_SHARED file
+    // mapping MADV_DONTNEED repopulates from the file, so dirty pages must
+    // reach it first or their contents are lost.
+    if (msync(addr, bytes, MS_SYNC) != 0)
+      warn("msync before eviction failed: {}", Errno());
+    if (madvise(addr, bytes, MADV_DONTNEED) != 0)
+      warn("madvise MADV_DONTNEED for eviction failed: {}", Errno());
+    drop_page_cache(static_cast<off_t>(start * kLogletRegionSize), bytes);
+  }
 }
 
 LogletAllocator::~LogletAllocator()

@@ -45,7 +45,8 @@ and cold objects primarily under a single index").
 | P1.1 | Aging under a moving hot set | **done — un-aged tracking fails silently; halve() stays** |
 | BUG-4 | Trigger default overridden by a DAO wrapper's own default | **fixed** |
 | P2.3 | Trigger wired into the production commit path | **done — verified on hog-devnode** |
-| P3a | SSD-backed slow tier, measured by major faults | **null — cap never bound, see below** |
+| P3a | SSD-backed slow tier via a resident-set cap | **abandoned — no cap both survives setup and binds on reads** |
+| P3b | Emulated fast tier by explicit eviction | **done — 2.0x fewer device reads, measured** |
 
 ### What landed
 
@@ -811,6 +812,76 @@ Until that lands, every tiering number in this document remains modelled. The
 layout results do not depend on it — they are hit rates from allocator
 introspection — but the fault count was supposed to be the one unmodelled figure,
 and it is not yet a figure at all.
+
+### P3b — an emulated fast tier, and the first unmodelled number
+
+Yes, the fast tier can be shrunk, but not with a resident-set cap. `-T` evicts
+every loglet outside the fast tier from both the mapping *and* the page cache, so
+a later access to one is a real read from the SSD. `-P` sets the tier's share of
+occupied loglets, so its size is exact and sweepable rather than inferred.
+
+500 K accounts, θ=0.99, one eviction before the replay, `data/tier_emulation.csv`:
+
+| tier | scattered faults | consolidated faults | ratio | modelled hit (scat → cons) |
+|---|---|---|---|---|
+| 5% | 2944 | 1520 | 1.94× | 0.277 → 0.791 |
+| 10% | 2797 | 1430 | 1.96× | 0.454 → 0.829 |
+| 20% | 2538 | 1265 | **2.01×** | 0.682 → 0.893 |
+| 30% | 2312 | 1114 | 2.08× | 0.879 → 0.957 |
+| 50% | 1805 | 788 | 2.29× | 1.000 → 1.000 |
+| 100% | **0** | **0** | — | 1.000 → 1.000 |
+
+**The consolidated layout reads about half as much from the device, at every tier
+size.** 1.94–2.29×, stable across a 10× range of tier sizes. This is the first
+figure in this document that assumes none of `kFastNs`, `kSlowNs` or
+`kFastTierFraction` — it is counted, not modelled.
+
+**Two checks that the instrument is sound.** Keeping every occupied loglet
+(`-P 1.0`) gives exactly zero major faults in both arms, so faults come only from
+evicted loglets and there is no page-cache or disk-buffer confound. And fault
+counts fall monotonically as the tier grows, in both arms.
+
+#### What does not reconcile, and should not be glossed
+
+At a 50% tier the modelled hit rate is 1.0000 for both arms — no misses at all —
+yet 1805 and 788 faults are measured. A hit rate of 1.0000 to four places allows
+~25 missed accesses out of 500 K; the measurement is ~70× that. The ratio also
+*grows* with tier size, where the model says the benefit should vanish by 50%.
+
+So the fault count and the modelled hit rate are measuring subtly different
+things, and the discrepancy is unexplained. **Do not present the two as
+confirming each other.** The ~2× fault ratio stands on its own as a measurement;
+the claim "measured AMAT tracks the model", which was Phase 3.3's purpose, is not
+supported by this and is still open. Next step is to instrument which loglets the
+replay actually faults on and compare that set against the ones the join counts
+as cold.
+
+#### Two dead ends worth recording
+
+**A resident-set cap cannot isolate the read phase.** `run_ssd_tier.sh` caps the
+whole process for its whole life, but the write phase needs far more resident heap
+than the replay being measured. Measured: 404 MiB anonymous (unreclaimable with
+swap off) against 367 MiB of heap mapping. The sweep goes from no faults at 700M
+straight to OOM kills at 600M — there is no cap in between that both survives
+setup and squeezes the replay. Explicit eviction sidesteps this entirely and makes
+the tier size exact rather than a subtraction.
+
+**`MADV_DONTNEED` alone does not reach the device.** It drops the mapping and
+leaves the page in page cache, so the next access is a *minor* fault: the first
+attempt measured 748 K minor faults and zero major ones. The backing-file
+descriptor is now retained so `posix_fadvise(POSIX_FADV_DONTNEED)` can evict the
+cache entry too. Worth remembering — the run looked like it was working, and the
+arms even differed in the right direction (748 K → 686 K), while no read was
+reaching the SSD at all.
+
+**Re-evicting during the replay does not work either.** It was meant to make the
+count per access rather than per distinct cold page. At an interval of 1000
+accesses it produced 1.03 major faults per access in *both* arms — exactly one per
+access, i.e. each sweep was dropping the hot set too, since msync + fadvise over
+the ~3 GB cold region hundreds of times puts the whole file under writeback and
+reclaim pressure. Default is now a single eviction, and the measurement is
+therefore first-touch: distinct cold pages, which under-counts repeat misses and
+is conservative.
 
 ### BUG-3 — `consolidate()` freed loglets through a dangling allocator
 

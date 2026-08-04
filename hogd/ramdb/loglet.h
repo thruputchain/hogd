@@ -470,6 +470,23 @@ public:
   // through the resident-set cap, not the layout it produced.
   void evict_region();
 
+  // evict_except drops the resident pages of every loglet whose index is not set
+  // in keep, leaving the kept ones alone. With a file-backed heap this emulates a
+  // fast tier that holds exactly the kept loglets: a later access to any other
+  // one is a major fault against the device.
+  //
+  // Why this exists rather than a resident-set cap: a cap applies to the whole
+  // process for its whole life, and the write phase of a workload needs far more
+  // resident heap than the read phase being measured -- so the cap either does
+  // not bind during reads or OOM-kills during writes, with no window between.
+  // Choosing the kept set directly also makes the tier *size* exact and
+  // sweepable, and matches how the ObjecTier paper frames it: an oracle that
+  // perfectly picks the hottest N% of pages.
+  //
+  // Cheap when the kept set is being re-evicted between reads, because a
+  // read-only replay leaves the pages clean and nothing has to be written back.
+  void evict_except(const std::vector<bool> &keep);
+
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
 

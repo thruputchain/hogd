@@ -1,0 +1,7 @@
+tier_fraction,scattered_major_faults,consolidated_major_faults,fault_ratio,scattered_modelled_hit,consolidated_modelled_hit
+0.05,2944,1520,1.94,0.2767,0.7911
+0.10,2797,1430,1.96,0.4541,0.8287
+0.20,2538,1265,2.01,0.6824,0.8932
+0.30,2312,1114,2.08,0.8794,0.9571
+0.50,1805,788,2.29,1.0000,1.0000
+1.00,0,0,,1.0000,1.0000
