@@ -197,8 +197,8 @@ private:
     CHECK_PTR(hog_db_handle_.get());
 
     hog_db_handle_->ci_client.start_server("hogd/hog_exec/bench/bench_server",
-                                          {"-e", std::to_string(exec_port_),
-                                           "-c", std::to_string(coord_port_)});
+                                           {"-e", std::to_string(exec_port_),
+                                            "-c", std::to_string(coord_port_)});
   }
 
   EventCard start_event_server(uint16_t event_server_port)

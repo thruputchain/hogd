@@ -7,11 +7,11 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/mock_dbauth_rpc.h"
-#include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/x23.h"

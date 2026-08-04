@@ -17,8 +17,6 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/http/http.h"
-#include "hogd/init.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -26,6 +24,8 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/http/http.h"
+#include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "types.hh"
 

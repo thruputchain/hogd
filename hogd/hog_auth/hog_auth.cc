@@ -8,8 +8,6 @@
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
-#include "hogd/hog_auth/auth_server.h"
-#include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -17,6 +15,8 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"

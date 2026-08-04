@@ -28,8 +28,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_db/hog_age_reconciliation.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -69,9 +69,9 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
 int
 hog_db_init(std::string_view path, size_t ram_bytes,
-           const std::string *coordinator_addr, std::string_view bind_ip,
-           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
-           uint16_t gateway_port, uint16_t metrics_port)
+            const std::string *coordinator_addr, std::string_view bind_ip,
+            uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
+            uint16_t gateway_port, uint16_t metrics_port)
 {
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -303,6 +303,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hog_db_init(path, *ram_bytes, coordinator_addr, bind_ip,
-                          exec_port, mempool_port, auth_port, gateway_port,
-                          metrics_port);
+                           exec_port, mempool_port, auth_port, gateway_port,
+                           metrics_port);
 };

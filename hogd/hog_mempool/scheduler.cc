@@ -483,8 +483,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
           size_t num_added = 0;
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db, so
-              // we silently drop the tx.
+              // The account for this tx does not exist in our copy of hog_db,
+              // so we silently drop the tx.
               info("scheduler: dropping tx for unknown account {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               continue;

@@ -4,8 +4,8 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"

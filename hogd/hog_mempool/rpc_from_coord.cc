@@ -2051,8 +2051,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         {
           DbBlockResult db_result = close_snapshot_node.get();
           // A forged RCQ observation can pass executor validation and be
-          // rejected only by hog_db at [dbsched_close_snapshot()], so an invalid
-          // nominated block can reach this path.
+          // rejected only by hog_db at [dbsched_close_snapshot()], so an
+          // invalid nominated block can reach this path.
           if (db_result.result() != DbSchedResult::DbSchedResultOK) {
             co_await cancel_with_result(
                 SchedulerValidationOutcome::SchedulerValidationInvalid,

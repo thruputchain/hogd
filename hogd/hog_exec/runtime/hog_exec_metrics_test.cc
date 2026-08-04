@@ -8,7 +8,8 @@ namespace hogd {
 
 // This binary deliberately does not use run_hog_exec_tests(): the point is to
 // exercise launch_log_worker() in a process that forgot to call
-// init_hog_exec_metrics(), which is the state the bench clients were in (#2605).
+// init_hog_exec_metrics(), which is the state the bench clients were in
+// (#2605).
 TEST(HogexecMetricsTest, LaunchLogWorkerRequiresInitializedMetrics)
 {
   EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");

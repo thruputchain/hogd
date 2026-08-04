@@ -3,10 +3,10 @@
 #include <span>
 #include <vector>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
-#include "hog_exec_constants.hh"
 #include "syscall_error.hh"
 
 namespace hogd {

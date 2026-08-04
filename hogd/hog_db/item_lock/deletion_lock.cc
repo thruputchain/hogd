@@ -4,8 +4,8 @@
 
 #include "hogd/base/log.h"
 #include "hogd/hog_db/change_set.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/status.h"

@@ -51,10 +51,10 @@ parse_host_port(const std::string &label, const std::string &address)
 
 int
 hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
-             int nthreads, uint16_t mempool_port, uint16_t metrics_port,
-             const std::optional<std::string> &db_executor_addr,
-             const std::optional<std::string> &event_executor_addr,
-             std::optional<uint16_t> view_gateway_port)
+              int nthreads, uint16_t mempool_port, uint16_t metrics_port,
+              const std::optional<std::string> &db_executor_addr,
+              const std::optional<std::string> &event_executor_addr,
+              std::optional<uint16_t> view_gateway_port)
 {
   init_hog_exec_metrics();
 
@@ -218,6 +218,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   return hogd::hog_exec_init(coord_address, bind_ip, *nthreads, mempool_port,
-                            metrics_port, db_executor_addr, event_executor_addr,
-                            view_gateway_port);
+                             metrics_port, db_executor_addr,
+                             event_executor_addr, view_gateway_port);
 }

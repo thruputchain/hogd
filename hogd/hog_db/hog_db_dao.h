@@ -73,7 +73,8 @@ public:
   HogDbStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                                 std::span<std::byte> val_out)
   {
-    return db_->get_if_type(key, type, val_out).transform_error(to_hog_db_error);
+    return db_->get_if_type(key, type, val_out)
+        .transform_error(to_hog_db_error);
   }
 
   HogDbStatus<OwningSpan<const std::byte>>

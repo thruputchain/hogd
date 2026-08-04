@@ -138,11 +138,11 @@ lazy_init() noexcept
     static std::mutex init_mutex;
     std::lock_guard lock(init_mutex);
     static bool initialized = false;
-    // init_hog_exec_metrics() registers several metrics and is not atomic: if it
-    // throws partway (e.g. bad_alloc mid-registration) it leaves the executor
-    // component partially populated with done_with_init still false. A naive
-    // retry would re-register a duplicate name and trip init_metric()'s CHECK
-    // (an abort, defeating this noexcept initializer's structured-error
+    // init_hog_exec_metrics() registers several metrics and is not atomic: if
+    // it throws partway (e.g. bad_alloc mid-registration) it leaves the
+    // executor component partially populated with done_with_init still false. A
+    // naive retry would re-register a duplicate name and trip init_metric()'s
+    // CHECK (an abort, defeating this noexcept initializer's structured-error
     // contract). Latch that as a permanent failure and keep reporting it
     // instead of retrying into the abort.
     static bool metrics_init_failed = false;

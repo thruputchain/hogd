@@ -7,8 +7,8 @@
 
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/bytestring_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"

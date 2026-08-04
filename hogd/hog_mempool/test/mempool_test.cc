@@ -27,12 +27,12 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
-#include "hogd/init.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "parallel.hh"
 #include "proposal.hh"
@@ -272,10 +272,10 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     }
     else {
       // The tx should not be included in the nominated block on all iterations
-      // after the first because it is a duplicate tx. Thus, hog_db should reject
-      // the tx's uniquifier as a duplicate, so hog_exec should fail the tx with
-      // error code [ExecResultTxNonDeterministicError]. The mempool should then
-      // discard the tx and not include it in the nominated block.
+      // after the first because it is a duplicate tx. Thus, hog_db should
+      // reject the tx's uniquifier as a duplicate, so hog_exec should fail the
+      // tx with error code [ExecResultTxNonDeterministicError]. The mempool
+      // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
       EXPECT_TRUE(tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
@@ -398,10 +398,10 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
     }
     else {
       // The tx should not be included in the nominated block on all iterations
-      // after the first because it is a duplicate tx. Thus, hog_db should reject
-      // the tx's uniquifier as a duplicate, so hog_exec should fail the tx with
-      // error code [ExecResultTxNonDeterministicError]. The mempool should then
-      // discard the tx and not include it in the nominated block.
+      // after the first because it is a duplicate tx. Thus, hog_db should
+      // reject the tx's uniquifier as a duplicate, so hog_exec should fail the
+      // tx with error code [ExecResultTxNonDeterministicError]. The mempool
+      // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
       EXPECT_TRUE(tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
@@ -632,10 +632,10 @@ TEST(Mempool, NominateTxWithError)
     }
     else {
       // The tx should not be included in the nominated block on all iterations
-      // after the first because it is a duplicate tx. Thus, hog_db should reject
-      // the tx's uniquifier as a duplicate, so hog_exec should fail the tx with
-      // error code [ExecResultTxNonDeterministicError]. The mempool should then
-      // discard the tx and not include it in the nominated block.
+      // after the first because it is a duplicate tx. Thus, hog_db should
+      // reject the tx's uniquifier as a duplicate, so hog_exec should fail the
+      // tx with error code [ExecResultTxNonDeterministicError]. The mempool
+      // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
       EXPECT_TRUE(tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
@@ -998,8 +998,8 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
     ASSERT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
 
-  // Submit the same tx again so that hog_db detects the duplicate tx and hog_exec
-  // fails the tx.
+  // Submit the same tx again so that hog_db detects the duplicate tx and
+  // hog_exec fails the tx.
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 

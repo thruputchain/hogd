@@ -12,6 +12,7 @@
 
 #include "contract.hh"
 #include "db_conflict.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
@@ -21,7 +22,6 @@
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/status.h"
-#include "hog_exec_constants.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"

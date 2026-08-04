@@ -5,8 +5,8 @@
 #include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
-#include "hogd/hog_auth/status.h"
 #include "hogd/base/log.h"
+#include "hogd/hog_auth/status.h"
 #include "types.hh"
 #include "x23/async.h"
 

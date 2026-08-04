@@ -6,8 +6,8 @@
 #include <span>
 
 #include "hogd/base/log.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
 

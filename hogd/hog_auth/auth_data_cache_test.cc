@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "address_auth.hh"
-#include "hogd/hog_auth/auth_data_cache.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_auth/auth_data_cache.h"
 #include "hogd/init.h"
 #include "types.hh"
 

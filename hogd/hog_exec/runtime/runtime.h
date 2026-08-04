@@ -192,7 +192,8 @@ public:
 std::unique_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // create RuntimeContext for running wasm contracts, and initialize with
 // hog_exec's imported function(s)
-std::unique_ptr<RuntimeContext> make_hog_exec_wasm_context(RuntimeEngine engine);
+std::unique_ptr<RuntimeContext>
+make_hog_exec_wasm_context(RuntimeEngine engine);
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.

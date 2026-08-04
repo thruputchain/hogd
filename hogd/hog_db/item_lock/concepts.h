@@ -6,8 +6,8 @@
 
 #include "db_conflict.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
