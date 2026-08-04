@@ -404,14 +404,24 @@ Benchmark::consolidate_by_access()
 void
 Benchmark::report_faults(std::string_view label)
 {
+  // Start both layouts from the same cold state. Without this the consolidated
+  // arm is measured on the residue of the consolidation pass, which has just
+  // streamed the whole heap through the resident-set cap.
+  db_->evict_heap();
+
   struct rusage before{};
   struct rusage after{};
   getrusage(RUSAGE_SELF, &before);
 
+  // Bounded replay. What we need is the fault *rate* per access; reading every
+  // item once against a paging heap costs hours and measures nothing extra.
+  constexpr int kMaxReplayAccesses = 500'000;
+  int accesses = std::min(item_count(), kMaxReplayAccesses);
+
   Zipf zipf(static_cast<uint64_t>(item_count()), bench_theta);
   uint64_t rng = kBenchSeed + 0xFA17U;
   double seconds = measure([&] {
-    for (int i = 0; i < item_count(); ++i) {
+    for (int i = 0; i < accesses; ++i) {
       uint64_t key = make_rank_key(zipf(rng));
       DBStatus<DBItem> ret = db_->get(byte_view(key));
       if (unlikely(!ret))
@@ -420,7 +430,7 @@ Benchmark::report_faults(std::string_view label)
   });
 
   getrusage(RUSAGE_SELF, &after);
-  std::println("faults,{},{},{},{:.3f}", label,
+  std::println("faults,{},{},{},{},{:.3f}", label, accesses,
                after.ru_majflt - before.ru_majflt,
                after.ru_minflt - before.ru_minflt, seconds);
 }

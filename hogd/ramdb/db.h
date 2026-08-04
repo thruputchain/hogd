@@ -175,6 +175,11 @@ public:
 
   size_t heat_bytes() const { return heat_ ? heat_->size_bytes() : 0; }
 
+  // evict_heap drops the heap's resident pages. Only meaningful with a
+  // file-backed heap; used to give two layouts the same cold start before
+  // comparing their fault counts.
+  void evict_heap() { loglet_allocator_->evict_region(); }
+
   // heat_enabled lets a caller skip building a key it would only throw away.
   bool heat_enabled() const { return heat_ != nullptr; }
 

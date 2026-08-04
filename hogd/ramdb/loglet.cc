@@ -200,6 +200,18 @@ LogletAllocator::create(size_t len, size_t reserved_count,
   return log;
 }
 
+void
+LogletAllocator::evict_region()
+{
+  // msync first: for a MAP_SHARED file mapping, MADV_DONTNEED repopulates from
+  // the file on the next access, so dirty pages must reach it beforehand or
+  // their contents are lost.
+  if (msync(base_addr_, len_, MS_SYNC) != 0)
+    warn("msync before eviction failed: {}", Errno());
+  if (madvise(base_addr_, len_, MADV_DONTNEED) != 0)
+    warn("madvise MADV_DONTNEED for eviction failed: {}", Errno());
+}
+
 LogletAllocator::~LogletAllocator()
 {
   unmap_segment(base_addr_, len_);

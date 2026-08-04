@@ -461,6 +461,15 @@ public:
   // get_loglet returns the loget the item is stored in.
   Loglet &get_loglet(ItemHeader *item) { return loglets_[loglet_index(item)]; }
 
+  // evict_region drops the resident pages of the whole heap, flushing dirty ones
+  // first. With a file-backed heap this forces a cold start: subsequent accesses
+  // repopulate from the device.
+  //
+  // Needed to compare two layouts fairly. A measurement taken straight after a
+  // consolidation pass otherwise reflects whatever that pass last streamed
+  // through the resident-set cap, not the layout it produced.
+  void evict_region();
+
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
 
