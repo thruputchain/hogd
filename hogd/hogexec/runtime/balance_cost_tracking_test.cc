@@ -780,6 +780,122 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
   EXPECT_EQ(from_xdr(sender_balance_opt.value().nnint()), kInitialBalance);
 }
 
+// Sequential debit regression: a successful transfer must reduce the balance
+// seen by a later transfer in the same transaction. If the second transfer
+// exceeds that remainder, only the second child frame aborts; the first
+// transfer and its event remain committed.
+TEST_F(BalanceCostTrackingTest,
+       SecondInTxTransferOverRemainingBalanceAbortsAlone)
+{
+  constexpr static ContractAddress kSenderAddr = make_contract_address(220);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(221);
+
+  auto const *cost_model = get_default_cost_model();
+  static int128_t kBalanceCost = cost_model->get_balance_cost();
+  static int128_t kFirstTransfer = kBalanceCost + 100;
+  static int128_t kCommittedSenderRemainder = 50;
+  static int128_t kReplayCost = replay_cache_cost_charged(1);
+  static int128_t kGrantAmount =
+      kFirstTransfer + kCommittedSenderRemainder + kReplayCost;
+  static int128_t kInTxRemainder = kGrantAmount - kFirstTransfer;
+  static int128_t kSecondTransfer = kInTxRemainder + 1;
+  setup_grant_storage_token(kSenderAddr, kGrantAmount);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+    auto first =
+        client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
+                                        make_amount(static_cast<uint128_t>(
+                                            kFirstTransfer)));
+    if (!first.has_value() || !first.value().has_value() ||
+        !first.value().value().has_value() ||
+        !first.value().value().value().is_ok()) {
+      ADD_FAILURE() << "first in-tx transfer did not succeed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto second =
+        client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
+                                        make_amount(static_cast<uint128_t>(
+                                            kSecondTransfer)));
+    if (!second.has_value() || !second.value().has_value() ||
+        !second.value().value().has_value() ||
+        second.value().value().value().is_ok()) {
+      ADD_FAILURE() << "second in-tx transfer did not abort on the reduced "
+                       "balance";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto balance = client.invoke_opt<u8"get_balance">(ctx);
+    if (!balance.has_value() || !balance.value().has_value() ||
+        !balance.value().value().has_value() ||
+        !balance.value().value().value().is_ok()) {
+      ADD_FAILURE() << "get_balance after contained second transfer failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto amount = balance.value().value().value().ok();
+    uint128_t observed =
+        (uint128_t{std::get<0>(amount)} << 64) | std::get<1>(amount);
+    if (observed != static_cast<uint128_t>(kInTxRemainder)) {
+      ADD_FAILURE() << "failed second transfer changed the in-tx balance";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 39;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  EphemeralTxIdentifier tx_id;
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+  advance_block();
+
+  auto sender_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kSenderAddr));
+  ASSERT_TRUE(sender_balance.has_value());
+  EXPECT_EQ(from_xdr(sender_balance->nnint()), kCommittedSenderRemainder);
+
+  auto receiver_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kReceiverAddr));
+  ASSERT_TRUE(receiver_balance.has_value());
+  EXPECT_EQ(from_xdr(receiver_balance->nnint()), 100);
+
+  auto event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(event_log.has_value());
+  EXPECT_EQ(event_log->events.size(), 1U)
+      << "only the successful first transfer should emit an event";
+}
+
 // Pins the native-side sequential in-tx semantics: tokens received earlier in
 // the same transaction are spendable by the receiver in that same transaction
 // (available = base + net in-tx delta). The WASM-side counterpart is the

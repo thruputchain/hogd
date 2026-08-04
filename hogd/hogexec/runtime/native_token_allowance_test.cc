@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -26,9 +27,13 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
+#include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -1313,6 +1318,269 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
       << "allowance NNInt entry must exist after Tx1";
   EXPECT_EQ(from_xdr(allowance_item->nnint()), kGrantAllowance)
       << "committed allowance must be unchanged after aborted transfer_from";
+}
+
+// An allowance granted by the owner is immediately visible to a nested
+// spender in the same transaction. A successful delegated spend consumes part
+// of it; a second spend one unit above the remainder aborts without disturbing
+// the first spend or its allowance debit.
+TEST_F(NativeTokenAllowanceTest,
+       SameTransactionAllowanceGrantSpendAndContainedFailure)
+{
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(230);
+  constexpr static ContractAddress kSpenderAddr = make_contract_address(231);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(232);
+
+  auto const *cost_model = get_default_cost_model();
+  static int128_t kBalanceCost = cost_model->get_balance_cost();
+  static int128_t kTransferAmount = kBalanceCost + 100;
+  constexpr static int128_t kResidualAllowance = 25;
+  static int128_t kGrantedAllowance = kTransferAmount + kResidualAllowance;
+  static int128_t kSecondTransferAmount = kResidualAllowance + 1;
+  constexpr static int128_t kCommittedOwnerRemainder = 50;
+  static int128_t kOwnerGrant =
+      kTransferAmount + kCommittedOwnerRemainder + replay_cache_cost_charged(1);
+
+  setup_grant_storage_token(kOwnerAddr, kOwnerGrant);
+  setup_grant_storage_token(
+      GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      cost_model->get_nnint_cost());
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> spender_fns;
+  spender_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client = ContractTraitClient<itc_erc20::ERC20>(
+            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+        auto first = client.invoke_opt<u8"transfer_from">(
+            ctx, kOwnerAddr, kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kTransferAmount)));
+        if (!first.has_value() || !first.value().has_value() ||
+            !first.value().value().has_value() ||
+            !first.value().value().value().is_ok()) {
+          ADD_FAILURE() << "same-tx transfer_from did not consume the grant";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto second = client.invoke_opt<u8"transfer_from">(
+            ctx, kOwnerAddr, kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+        if (!second.has_value() || !second.value().has_value() ||
+            !second.value().value().has_value() ||
+            second.value().value().value().is_ok()) {
+          ADD_FAILURE() << "second transfer_from did not abort on the "
+                           "remaining allowance";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto allowance =
+            client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
+        if (!allowance.has_value() || !allowance.value().has_value() ||
+            !allowance.value().value().has_value() ||
+            !allowance.value().value().value().is_ok() ||
+            amount_to_u128(allowance.value().value().value().ok()) !=
+                static_cast<uint128_t>(kResidualAllowance)) {
+          ADD_FAILURE() << "failed second spend changed the residual allowance";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto spender_contract =
+      std::make_unique<NativeContract>(std::move(spender_fns));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> owner_fns;
+  owner_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client = ContractTraitClient<itc_erc20::ERC20>(
+            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto grant = client.invoke_opt<u8"adjust_allowance">(
+            ctx, kSpenderAddr, make_difference(kGrantedAllowance));
+        if (!grant.has_value() || !grant.value().has_value() ||
+            !grant.value().value().has_value() ||
+            !grant.value().value().value().is_ok()) {
+          ADD_FAILURE() << "same-tx allowance grant failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs outputs{};
+        auto invoke =
+            ctx.syscall<SyscallNo::kInvoke>(kSpenderAddr,
+                                            std::span<const std::byte>{},
+                                            std::span<const std::byte>{},
+                                            inputs, outputs);
+        if (!invoke.has_value() ||
+            invoke.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE() << "nested spender did not return normally";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto owner_contract = std::make_unique<NativeContract>(std::move(owner_fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kOwnerNativeId = 40;
+  constexpr int32_t kSpenderNativeId = 41;
+  contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
+  contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto owner_xdr = make_native_contract(kOwnerNativeId);
+  write_contract(owner_xdr);
+  write_deployment(kOwnerAddr, owner_xdr);
+  auto spender_xdr = make_native_contract(kSpenderNativeId);
+  write_contract(spender_xdr);
+  write_deployment(kSpenderAddr, spender_xdr);
+
+  EphemeralTxIdentifier tx_id;
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kOwnerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+  advance_block();
+
+  auto allowance_key_data =
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr,
+                                                       kSpenderAddr);
+  ASSERT_TRUE(allowance_key_data.has_value());
+  StorageKey allowance_storage_key(StorageKeyType::ContractData);
+  allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
+  AddressAndKey allowance_addrkey{
+      .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      .key = std::move(allowance_storage_key)};
+  auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
+  ASSERT_TRUE(allowance_item.has_value());
+  EXPECT_EQ(from_xdr(allowance_item->nnint()), kResidualAllowance);
+
+  auto owner_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwnerAddr));
+  ASSERT_TRUE(owner_balance.has_value());
+  EXPECT_EQ(from_xdr(owner_balance->nnint()), kCommittedOwnerRemainder);
+
+  auto receiver_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kReceiverAddr));
+  ASSERT_TRUE(receiver_balance.has_value());
+  EXPECT_EQ(from_xdr(receiver_balance->nnint()), 100);
+
+  auto event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(event_log.has_value());
+  EXPECT_EQ(event_log->events.size(), 2U)
+      << "only the grant and successful delegated transfer should emit";
+}
+
+// A delegated zero transfer over fresh keys succeeds at invoke, including the
+// zero allowance debit, but cannot commit: the two fresh native-balance rows
+// each have to fund their own creation cost from a zero credit. Storage-cost
+// parity with the contract-data-backed WASM token is deliberately outside the
+// ERC20 parity harness (which runs with zero costs), so pin this native
+// accounting edge separately here.
+TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
+{
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(233);
+  constexpr static ContractAddress kSpenderAddr = make_contract_address(234);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(235);
+
+  setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
+  setup_grant_storage_token(
+      GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      get_default_cost_model()->get_nnint_cost());
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto client = ContractTraitClient<itc_erc20::ERC20>(
+        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto transfer =
+        client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
+                                             make_amount(0));
+    if (!transfer.has_value() || !transfer.value().has_value() ||
+        !transfer.value().value().has_value() ||
+        !transfer.value().value().value().is_ok()) {
+      ADD_FAILURE() << "zero transfer_from over fresh keys failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto allowance =
+        client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
+    if (!allowance.has_value() || !allowance.value().has_value() ||
+        !allowance.value().value().has_value() ||
+        !allowance.value().value().value().is_ok() ||
+        amount_to_u128(allowance.value().value().value().ok()) != 0) {
+      ADD_FAILURE() << "zero transfer_from changed the allowance value";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto spender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSpenderNativeId = 42;
+  contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto spender_xdr = make_native_contract(kSpenderNativeId);
+  write_contract(spender_xdr);
+  write_deployment(kSpenderAddr, spender_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSpenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  EXPECT_FALSE(lookup_storage_item_from_db(
+                   make_free_native_token_balance_addrkey(kOwnerAddr))
+                   .has_value());
+  EXPECT_FALSE(lookup_storage_item_from_db(
+                   make_free_native_token_balance_addrkey(kReceiverAddr))
+                   .has_value());
+
+  auto allowance_key_data =
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr,
+                                                       kSpenderAddr);
+  ASSERT_TRUE(allowance_key_data.has_value());
+  StorageKey allowance_storage_key(StorageKeyType::ContractData);
+  allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
+  EXPECT_FALSE(
+      lookup_storage_item_from_db(
+          AddressAndKey{
+              .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
+              .key = std::move(allowance_storage_key)})
+          .has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
