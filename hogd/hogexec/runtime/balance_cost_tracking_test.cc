@@ -839,7 +839,8 @@ TEST_F(BalanceCostTrackingTest,
     auto amount = balance.value().value().value().ok();
     uint128_t observed =
         (uint128_t{std::get<0>(amount)} << 64) | std::get<1>(amount);
-    if (observed != static_cast<uint128_t>(kInTxRemainder)) {
+    auto const expected = static_cast<uint128_t>(kInTxRemainder);
+    if (observed != expected) {
       ADD_FAILURE() << "failed second transfer changed the in-tx balance";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
