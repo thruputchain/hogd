@@ -390,6 +390,7 @@ add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
+add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
