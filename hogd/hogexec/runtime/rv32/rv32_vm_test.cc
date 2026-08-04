@@ -7,8 +7,11 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <span>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -257,6 +260,46 @@ TEST(Rv32MachineYieldApi, startResumeMatchesRunForSameHost)
   EXPECT_EQ(driven.memory()[11], 4U);
 }
 
+std::string
+digest_hex(const std::optional<ArtifactDigest> &digest)
+{
+  if (!digest.has_value()) {
+    return "<digest computation failed>";
+  }
+  static constexpr std::string_view kHex = "0123456789abcdef";
+  std::string out;
+  for (const uint8_t byte : *digest) {
+    out += kHex[byte >> 4U];
+    out += kHex[byte & 0x0FU];
+  }
+  return out;
+}
+
+std::vector<uint8_t>
+ascii_bytes(std::string_view text)
+{
+  return std::vector<uint8_t>(text.begin(), text.end());
+}
+
+// The section digest algorithm (kArtifactSectionDigestAlgorithm) is
+// consensus-visible: every validator must derive the same bytes from the same
+// section, or the same artifact is admitted on some nodes and rejected on
+// others. Pin artifact_digest() to the published SHA-256 vectors so a swap of
+// the underlying digest call that changes those bytes -- or silently fails to
+// produce them -- fails here instead of in consensus. Regression test for hogd
+// issue #2696, where a failing one-shot OpenSSL SHA256() left the digest all
+// zeros and so admitted artifacts carrying all-zero section digests.
+TEST(Rv32ArtifactTest, computesCanonicalSha256SectionDigests)
+{
+  EXPECT_EQ(digest_hex(artifact_digest({})),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  EXPECT_EQ(digest_hex(artifact_digest(ascii_bytes("abc"))),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  EXPECT_EQ(digest_hex(artifact_digest(ascii_bytes(
+                "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"))),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+}
+
 TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 {
   const auto parsed = parse_artifact(compiled_sha256_return::kArtifact);
@@ -453,7 +496,8 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
     const auto code =
         std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
                                                    code_size);
-    store_digest_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
+    store_digest_at(artifact, kArtifactCodeDigestOffset,
+                    test_artifact::require_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
   {

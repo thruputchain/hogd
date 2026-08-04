@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -125,6 +126,9 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   const auto initial_memory =
       bytes.subspan(size_t{kArtifactHeaderBytes} + code_size,
                     initial_memory_size);
+  // std::optional<T> != T is false only for an engaged, equal optional, so a
+  // digest-computation failure (nullopt) deterministically rejects the
+  // artifact instead of admitting it under some substitute digest value.
   if (artifact_digest(code) != code_digest) {
     return std::unexpected(ArtifactError::kCodeDigestMismatch);
   }
@@ -142,17 +146,42 @@ artifact_image_checks(std::span<const uint8_t> bytes)
 
 } // namespace
 
-ArtifactDigest
+std::optional<ArtifactDigest>
 artifact_digest(std::span<const uint8_t> bytes)
 {
+  // SHA256_Init/Update/Final, NOT the one-shot SHA256(). Two reasons, both
+  // consensus-critical:
+  //
+  //  - These are the same primitives hogd::SHA256Hasher (crypto/crypto.h)
+  //    uses, so the artifact section digest is bit-identical to every other
+  //    consensus SHA-256 in the node without linking the crypto library here
+  //    (rv32_vm is deliberately dependency-narrow -- see CMakeLists.txt).
+  //  - In OpenSSL 3, one-shot SHA256() dispatches through EVP_Q_digest and can
+  //    return null while leaving the output buffer untouched -- e.g. under
+  //    `default_properties = fips=yes` with no FIPS provider loaded. The old
+  //    code ignored that return and handed back an all-zero digest, so such a
+  //    node would admit an artifact whose stored section digests are all zero
+  //    while every other validator rejects it. See hogd issue #2696.
+  //
+  // The legacy API cannot fail this way, but the returns are checked anyway:
+  // a failure yields nullopt, which callers must turn into a rejection rather
+  // than into some other digest value.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  SHA256_CTX ctx;
+  if (SHA256_Init(&ctx) != 1) {
+    return std::nullopt;
+  }
+  // OpenSSL ignores the input pointer when len is zero, but a null pointer is
+  // still not worth handing it; skip the update entirely for empty sections.
+  if (!bytes.empty() && SHA256_Update(&ctx, bytes.data(), bytes.size()) != 1) {
+    return std::nullopt;
+  }
   ArtifactDigest digest = {};
-  // Keep rv32_vm dependency-narrow for now. Protocol activation should either
-  // use the consensus SHA256 wrapper or keep an explicit equivalence check.
-  static constexpr std::array<uint8_t, 1> kEmpty = {0};
-  // OpenSSL ignores the input pointer when len is zero; provide a non-null
-  // placeholder so the call shape remains valid for empty sections too.
-  const uint8_t *input = bytes.empty() ? kEmpty.data() : bytes.data();
-  SHA256(input, bytes.size(), digest.data());
+  if (SHA256_Final(digest.data(), &ctx) != 1) {
+    return std::nullopt;
+  }
+#pragma GCC diagnostic pop
   return digest;
 }
 

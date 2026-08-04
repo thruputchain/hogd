@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
 #include <span>
 #include <vector>
@@ -32,6 +34,22 @@ append_u64(std::vector<uint8_t> &out, uint64_t value)
   for (size_t i = 0; i < sizeof(uint64_t); ++i) {
     out.push_back(static_cast<uint8_t>(value >> (i * 8)));
   }
+}
+
+// artifact_digest() returns nullopt only if the platform SHA-256 is broken.
+// Stop hard rather than stamp a bogus digest into a test artifact. Not
+// .value(): this target is deliberately dependency-narrow (see CMakeLists.txt)
+// and has no exception handler, so a throw here would just be a worse abort.
+inline ArtifactDigest
+require_digest(std::span<const uint8_t> bytes)
+{
+  const auto digest = artifact_digest(bytes);
+  if (!digest.has_value()) {
+    std::fputs("artifact_digest failed: platform SHA-256 unavailable\n",
+               stderr);
+    std::abort();
+  }
+  return *digest;
 }
 
 inline void
@@ -68,8 +86,8 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, static_cast<uint32_t>(code.size()));
   append_u32(artifact, static_cast<uint32_t>(initial_memory.size()));
   append_u32(artifact, initial_memory_start);
-  append_digest(artifact, artifact_digest(code));
-  append_digest(artifact, artifact_digest(initial_memory));
+  append_digest(artifact, require_digest(code));
+  append_digest(artifact, require_digest(initial_memory));
   append_bytes(artifact, code);
   append_bytes(artifact, initial_memory);
   return artifact;
