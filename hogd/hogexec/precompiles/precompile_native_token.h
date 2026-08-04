@@ -16,10 +16,10 @@ class SystemCallHandler;
 // this directly because its in-tx balance is transiently short by the
 // storage deposit that hogdb's exclusive-delete refund nets at commit.
 // `amount` must be nonnegative.
-InvokeStatus<void>
-native_token_unchecked_transfer(SystemCallHandler &handler,
-                                ContractAddress const &from,
-                                ContractAddress const &to, int128_t amount);
+InvokeStatus<void> native_token_unchecked_transfer(SystemCallHandler &handler,
+                                                   ContractAddress const &from,
+                                                   ContractAddress const &to,
+                                                   int128_t amount);
 
 std::unique_ptr<NativeContract> make_native_token_contract();
 

@@ -1188,8 +1188,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
         auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
-                                                       make_difference(
-                                                           kGrantAllowance));
+                                                         make_difference(
+                                                             kGrantAllowance));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {

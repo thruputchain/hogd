@@ -695,7 +695,8 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
     CopyableInvokeOutputs transfer_outputs{};
     auto r_transfer = [&]() {
       CopyableInvokeInputs inputs{
-          .entrypoint_id = sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+          .entrypoint_id =
+              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };
@@ -810,7 +811,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 
         auto calldata_back =
             erc20_meta::make_calldata<u8"transfer">(kSenderAddr,
-                                                  make_amount(uint128_t{50}));
+                                                    make_amount(uint128_t{50}));
         CopyableInvokeOutputs back_outputs{};
         auto r_back = [&]() {
           CopyableInvokeInputs inputs{
