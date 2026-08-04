@@ -1,7 +1,7 @@
 #pragma once
 
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 
 namespace hogd {

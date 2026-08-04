@@ -98,7 +98,7 @@ struct ForeignTracedInvokeResult {
   struct FFIDataBuffer serialized_events;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
-  // of hogexec.
+  // of hog_exec.
   enum TestFFIErrorCode ffi_error_code;
 };
 
@@ -128,7 +128,7 @@ struct ForeignTryCommitResult {
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
-  // of hogexec.
+  // of hog_exec.
   enum TestFFIErrorCode ffi_error_code;
 };
 

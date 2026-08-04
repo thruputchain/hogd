@@ -8,7 +8,7 @@ fi
 BUILD_DIR=$1
 NUM_ACCOUNTS=$2
 RUNTIME=${3:-wasm}
-CLIENT="$BUILD_DIR/hogd/hogexec/bench/payments_bench"
+CLIENT="$BUILD_DIR/hogd/hog_exec/bench/payments_bench"
 
 # Optional third arg selects the contract runtime: "rv32" deploys the .rv32a
 # artifacts, anything else (default) uses the wasm builds.

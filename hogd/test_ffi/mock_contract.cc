@@ -1,8 +1,8 @@
 #include "hogd/test_ffi/mock_contract.h"
 
 #include "ffi_enums.hh"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 
 namespace hogd {
 

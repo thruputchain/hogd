@@ -18,7 +18,7 @@ for i in $(seq 0 15); do
   host="aws-hog$i"
   ssh "$host" '
     rm -rf /tmp/hogx/* &&
-    killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server || true
+    killall -9 hog-indexer hog-auth hog-db hog-exec chuckd scpd hog-mempool hog-event loadgen_server || true
   ' &
 done
 wait

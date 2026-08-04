@@ -9,32 +9,32 @@
 #include <vector>
 
 #include "genesis.hh"
-#include "hogd/auth/auth_server.h"
+#include "hogd/hog_auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/fake_coordinator.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/event/rpc_context.h"
-#include "hogd/event/rpc_from_exec.h"
-#include "hogd/event/rpc_from_indexer.h"
-#include "hogd/event/rpc_from_sched.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_auth.h"
-#include "hogd/hogdb/rpc_from_exec.h"
-#include "hogd/hogdb/rpc_from_gateway.h"
-#include "hogd/hogdb/rpc_from_sched.h"
-#include "hogd/hogexec/interface/executor.h"
-#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
-#include "hogd/indexer/db.h"
-#include "hogd/indexer/recent_tx_failure_cache.h"
-#include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
-#include "hogd/mempool/rpc_from_auth.h"
-#include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_db.h"
-#include "hogd/mempool/rpc_from_event.h"
-#include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/hog_event/rpc_context.h"
+#include "hogd/hog_event/rpc_from_exec.h"
+#include "hogd/hog_event/rpc_from_indexer.h"
+#include "hogd/hog_event/rpc_from_sched.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_auth.h"
+#include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/rpc_from_gateway.h"
+#include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_exec/interface/executor.h"
+#include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/rpc_from_block_explorer.h"
+#include "hogd/hog_indexer/rpc_from_event.h"
+#include "hogd/hog_mempool/rpc_from_auth.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/rpc_from_db.h"
+#include "hogd/hog_mempool/rpc_from_event.h"
+#include "hogd/hog_mempool/rpc_from_exec.h"
+#include "hogd/hog_mempool/shared.h"
 #include "transaction.hh"
 #include "x23/async.h"
 
@@ -95,8 +95,8 @@ public:
 private:
   static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
 
-  HogDBDAO open_db_backend() const;
-  void init_db_backend(HogDBDAO db,
+  HogDbDAO open_db_backend() const;
+  void init_db_backend(HogDbDAO db,
                        std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
   void reconcile_indexer_with_recovered_tip();
@@ -146,10 +146,10 @@ private:
   std::unique_ptr<RPCContext> ctx_;
   EventRPCContext event_ctx_;
 
-  std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-  std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
-  std::unique_ptr<HogDBAuthServer> db_auth_server_;
-  std::unique_ptr<HogDBGatewayServer> db_gateway_server_;
+  std::unique_ptr<HogDbExecutorServer> db_executor_server_;
+  std::unique_ptr<HogDbSchedServer> db_scheduler_server_;
+  std::unique_ptr<HogDbAuthServer> db_auth_server_;
+  std::unique_ptr<HogDbGatewayServer> db_gateway_server_;
   std::unique_ptr<ViewGatewayServer> view_gateway_server_;
 
   EventMempoolServer event_sched_server_;

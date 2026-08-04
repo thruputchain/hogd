@@ -7,10 +7,10 @@
 #include "exec_result.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/test_main.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/test_main.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "hogd/loadgen/status.h"
@@ -27,7 +27,7 @@ public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, false)
+          TestDB::kHogDb, false)
   {}
 
 protected:
@@ -53,7 +53,7 @@ protected:
 
   std::unique_ptr<RuntimeContext> runtime_context_;
 
-  void SetUp() override { runtime_context_ = make_hogexec_context(); }
+  void SetUp() override { runtime_context_ = make_hog_exec_context(); }
 
   // Runs the full erc20 payments experiment in-process: genesis deploy, the
   // initialization/mint blocks, then 100 wallet-authorized transfer work txs.
@@ -252,5 +252,5 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  return hogd::run_hogexec_tests(argc, argv);
+  return hogd::run_hog_exec_tests(argc, argv);
 }

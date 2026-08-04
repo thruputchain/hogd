@@ -16,7 +16,7 @@ cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 # remove /tmp/hogx from prior runs on all hosts
 for host in hog1 hog2 hog3; do
   ssh $host "rm -rf /tmp/hogx/*"
-  ssh $host "killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server || true"
+  ssh $host "killall -9 hog-indexer hog-auth hog-db hog-exec chuckd scpd hog-mempool hog-event loadgen_server || true"
 done
 
 "$HOGX" -m 3 config together -a loadgen -t 2

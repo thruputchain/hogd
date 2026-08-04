@@ -30,7 +30,7 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 

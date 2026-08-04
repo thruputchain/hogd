@@ -9,14 +9,14 @@
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "event.hh"
-#include "hogd/auth/auth_server.h"
+#include "hogd/hog_auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/hogexec/runtime/event_server_proxy.h"
-#include "hogd/hogexec/runtime/item/database_proxy.h"
-#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
-#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
@@ -83,7 +83,7 @@ public:
   bool has_open_handlers() const { return open_handler_count_ > 0; }
 
   // Poison the DB's lifecycle. Set when a handler close failed to confirm
-  // closure of its HogDB transaction (issue #2596): the open-handler guard has
+  // closure of its HogDb transaction (issue #2596): the open-handler guard has
   // already been released by the handler's destruction, but an InvokeTX may
   // still hold a BlockTX open, so advancing the block could drive the scheduler
   // over orphaned transaction state. Once poisoned, advance_new_block() refuses
@@ -98,7 +98,7 @@ public:
     return event_server_.get_events(identifier.block_id, identifier.tx_id);
   }
 
-  auto &get_base_db() { return hogdb_wrapper_; }
+  auto &get_base_db() { return hog_db_wrapper_; }
 
   std::optional<WireStorageItem>
   get_snapshot_item(AddressAndKey const &addrkey);
@@ -122,7 +122,7 @@ private:
 
   BlockID current_block_id_ = 0;
 
-  HogdbWrapper hogdb_wrapper_;
+  HogdbWrapper hog_db_wrapper_;
 
   std::unique_ptr<AuthServer> auth_server_;
   RpcServer<AuthDBRpc> auth_db_server_;

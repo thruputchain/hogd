@@ -7,7 +7,7 @@ fi
 
 BUILD_DIR=$1
 
-CLIENT="$BUILD_DIR/hogd/hogexec/bench/fibonacci_rv32only"
+CLIENT="$BUILD_DIR/hogd/hog_exec/bench/fibonacci_rv32only"
 
 # Run the client process (waits for it to finish)
 "$CLIENT" -c 10001 -e 10000 -s hog11 -s hog8
