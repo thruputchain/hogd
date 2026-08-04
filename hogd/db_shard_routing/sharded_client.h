@@ -11,10 +11,13 @@
 
 namespace hogd {
 
-// One client per shard plus the async fan-out primitives, routing via
-// sharding.h. `Client` is any per-shard handle; the caller's lambdas
-// dereference it. Async-only (the executor's DatabaseProxy uses the sharding.h
-// core).
+// One client per shard plus the async primitives for talking to a sharded
+// database over a coroutine RPC interface, routing via the shared sharding.h
+// core. `Client` is any per-shard handle (a value or shared_ptr); the caller's
+// lambdas dereference it, so both `client.m(...)` and `client->m(...)` work.
+// Async-only -- the synchronous executor DatabaseProxy uses the sharding.h core
+// directly instead. sharding.h says which shard holds which keys;
+// ShardedDbSched says how each RPC must route to match.
 template<typename Client> class ShardedClient {
 public:
   explicit ShardedClient(std::vector<Client> clients)
