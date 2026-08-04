@@ -518,5 +518,58 @@ TEST_F(DefaultWalletParityTest, PreFrameRejectMissingTarget)
   expect_parity(calls);
 }
 
+TEST_F(DefaultWalletParityTest, ReturnDataExactFitSucceeds)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(1017)); // total = exactly 1024
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, ReturnDataOneOverFails)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(1018)); // total = 1025 -> ReturnDataTooLarge
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, ReturnDataMaxSingleCalleeReturnFails)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(1021)); // n = 1024 (callee max), total = 1028
+  expect_parity(calls);
+}
+
+// Overflow triggered on the SECOND call: the first call's result must be
+// discarded by the revert identically on both backends.
+TEST_F(DefaultWalletParityTest, ReturnDataCumulativeOverflowOnLaterCall)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(600));
+  calls.push_back(echo_call(600));
+  expect_parity(calls);
+}
+
+// CXS length-prefix width breakpoints: where cxs_u32_len(n) jumps 1->2 and
+// 2->3 — the spots where a hand-mirrored accounting would drift.
+TEST_F(DefaultWalletParityTest, ReturnDataPrefixWidthBreakpoints)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  for (size_t d : {60U, 61U, 62U, 63U, 64U, 252U, 253U, 254U, 255U, 256U}) {
+    wallet_calls_t calls;
+    calls.push_back(echo_call(d));
+    SCOPED_TRACE(d);
+    expect_parity(calls);
+  }
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
