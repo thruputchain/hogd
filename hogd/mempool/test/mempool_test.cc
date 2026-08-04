@@ -41,6 +41,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -307,6 +308,46 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(std::move(batch))();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             mempool_tx_size_limit);
+}
+
+// A gateway lookup returns one entry per input hash, but a matched transaction
+// can be much larger than the 32-byte hash used to request it.  To keep an
+// unauthenticated caller from amplifying a small request (e.g. one live
+// transaction's hash repeated many times) into an unbounded response, the
+// coordinator caps the total serialized size of the transactions it returns.
+TEST(Mempool, GatewayLookupResponseByteBudget)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  const SignedTransactionHash hash = sha256(txs[0].tx);
+  const std::shared_ptr<const SignedTransaction> tx =
+      server.mempool_coord_rpc().scheduler()->find_tx(hash);
+  ASSERT_TRUE(tx);
+
+  // Budget for exactly one returned transaction.
+  server.mempool_coord_rpc().set_lookup_response_byte_limit_test_hook(
+      x23::xdr_size(*tx));
+
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  SignedTransactionHashBatch lookup;
+  lookup.push_back(hash);
+  lookup.push_back(hash);
+
+  x23::XdrVec<x23::Ptr<SignedTransaction>> result =
+      gateway.schedgateway_lookup_tx(std::move(lookup))();
+  ASSERT_EQ(result.size(), 2UL);
+  // The first hash fits within the budget and returns the transaction; the
+  // duplicate exceeds it and is not materialized.
+  ASSERT_NE(result[0].get(), nullptr);
+  EXPECT_EQ(sha256(result[0]->tx), hash);
+  EXPECT_EQ(result[1].get(), nullptr);
 }
 
 TEST(Mempool, SubmitVetted)

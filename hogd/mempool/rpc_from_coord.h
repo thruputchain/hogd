@@ -49,6 +49,7 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -63,6 +64,16 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 1'000'000;
   static constexpr size_t kDefaultMempoolTxSizeLimit = 5'000'000;
+
+  // Upper bound on the total serialized size of the transactions returned from
+  // a single [schedcoord_lookup_transactions] call.  A lookup request carries
+  // one 32-byte hash per transaction, but a matched transaction can be far
+  // larger, so without a cap an unauthenticated gateway caller could force an
+  // unbounded response -- and an unbounded number of heap-backed transaction
+  // copies -- from a small request, e.g. by repeating a single live
+  // transaction's hash many times.  A legitimate wallet only looks up a handful
+  // of its own in-flight transactions and never approaches this bound.
+  static constexpr size_t kMaxLookupResponseBytes = 16UZ * 1024 * 1024;
 
   static constexpr size_t kNumSchedulerIterations = 25;
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
@@ -251,10 +262,17 @@ public:
 
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
+    // Bound the total serialized size of the transactions we materialize so a
+    // caller cannot amplify a small request into an unbounded response (see
+    // [kMaxLookupResponseBytes]).  Once the budget is exhausted we return the
+    // not-found sentinel for the remaining hashes.
+    size_t response_bytes = 0;
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
-      if (tx) {
+      const size_t tx_bytes = tx ? x23::xdr_size(*tx) : 0;
+      if (tx && response_bytes + tx_bytes <= lookup_response_byte_limit_) {
+        response_bytes += tx_bytes;
         // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
         // using [x23::Ptr]'s value constructor rather than just use the
         // existing [tx] pointer. This avoids the issue where [tx] is freed from
@@ -354,6 +372,11 @@ public:
       std::function<void(ExecProposeBatchResult &)> hook)
   {
     propose_batch_result_test_hook_ = std::move(hook);
+  }
+
+  void set_lookup_response_byte_limit_test_hook(size_t limit)
+  {
+    lookup_response_byte_limit_ = limit;
   }
 
   x23::Async<void> test_finish_all_executors(BlockID block_id)
@@ -704,6 +727,7 @@ private:
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
   const ssize_t mempool_tx_size_limit_;
+  size_t lookup_response_byte_limit_ = kMaxLookupResponseBytes;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
