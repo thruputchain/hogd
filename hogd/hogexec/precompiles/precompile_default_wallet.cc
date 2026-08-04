@@ -278,9 +278,15 @@ make_native_default_wallet_contract()
           return NativeContractBuilder::host_fn_error_conversion(r.error());
         }
         if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-          // The sdk's deploy_contract syscall_throw()s here: a frame fault,
-          // not a WalletError.
-          return InvokeError{InvokeErrorCode::Deterministic};
+          // The sdk's deploy_contract syscall_throw()s on error — a library
+          // abort encoding LibraryExn::Syscall{kDeployContract, errno}, not a
+          // WalletError and not a frame fault.
+          LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
+          exn.syscall_exn() = SyscallExn{
+              .call_number = SyscallNo::kDeployContract,
+              .err_number = static_cast<SysErr>(*r),
+          };
+          return deploy_result_t::make_err(LibraryException{std::move(exn)});
         }
         return deploy_result_t::make_ok(deployed);
       });

@@ -318,6 +318,17 @@ protected:
     return out;
   }
 
+  CapturedRecord run_wallet_deploy_tx(ContractAddress const &wallet,
+                                      PubkeyAccountPreimage const &preimage,
+                                      SHA256Hash const &nonce,
+                                      SHA256Hash const &hash)
+  {
+    ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
+    return run_wallet_root_tx(
+        client.make_invocation<u8"deploy">(UINT64_MAX, nonce, hash),
+        make_pubkey_claim(preimage));
+  }
+
   // Runs `addr`'s method-0 capture driver and returns a single byte-comparable
   // outcome: the commit ExecResult byte followed by the literal invoke record.
   CapturedRecord run_capture_tx(ContractAddress const &addr,
@@ -569,6 +580,57 @@ TEST_F(DefaultWalletParityTest, ReturnDataPrefixWidthBreakpoints)
     SCOPED_TRACE(d);
     expect_parity(calls);
   }
+}
+
+TEST_F(DefaultWalletParityTest, DeployHappyPath)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  // Deployable target: any contract present in the DB by hash. echo is
+  // already written by setup; reuse its hash.
+  auto echo_obj = echo_meta::load_wasm();
+  SHA256Hash target_hash = sha256(*echo_obj);
+  SHA256Hash nonce{};
+  nonce.fill(9);
+
+  auto native = run_wallet_deploy_tx(native_wallet_, native_preimage_,
+                                     nonce, target_hash);
+  auto wasm =
+      run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, target_hash);
+
+  // Status + commit parity (indices per run_wallet_root_tx record layout).
+  ASSERT_GE(native.size(), 2U);
+  ASSERT_GE(wasm.size(), 2U);
+  EXPECT_EQ(native[0], wasm[0]);
+  EXPECT_EQ(native[1], wasm[1]);
+  EXPECT_EQ(native[0], 1);
+
+  // Each backend's returned bytes are its own expected deploy address
+  // (CXS of a fixed 32-byte array: the raw bytes, no prefix).
+  auto expect_addr = [](CapturedRecord const &rec, ContractAddress const &want) {
+    ASSERT_EQ(rec.size(), 2U + 32U);
+    EXPECT_TRUE(std::equal(want.begin(), want.end(), rec.begin() + 2));
+  };
+  expect_addr(native, SystemCallHandler::static_get_deploy_address(
+                          native_wallet_, nonce, target_hash));
+  expect_addr(wasm, SystemCallHandler::static_get_deploy_address(
+                        wasm_wallet_, nonce, target_hash));
+}
+
+TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  SHA256Hash bogus{};
+  bogus.fill(0xEE);
+  SHA256Hash nonce{};
+  nonce.fill(10);
+  auto native =
+      run_wallet_deploy_tx(native_wallet_, native_preimage_, nonce, bogus);
+  auto wasm =
+      run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, bogus);
+  // Address-independent outcome: full byte comparison applies.
+  EXPECT_EQ(native, wasm);
 }
 
 // NOLINTEND(bugprone-exception-escape)
