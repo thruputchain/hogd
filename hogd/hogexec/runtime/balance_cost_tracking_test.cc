@@ -797,7 +797,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
   static int128_t kTransferToReceiver = 50 + kBalanceCost;
   // Sender starts with enough for two balance items plus overhead and
   // replay-cache cost so the commit succeeds.
-  static int128_t kInitialBalance = 2 * kBalanceCost + 100;
+  static int128_t kInitialBalance = (2 * kBalanceCost) + 100;
   setup_grant_storage_token(kSenderAddr,
                             kInitialBalance + replay_cache_cost_charged(1));
 
