@@ -931,7 +931,8 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
               {
                   .invoked_address =
                       GenesisConfigurationLoader::kDeployContractAddress,
-                  .entrypoint = itc_meta::entrypoint<"claim_initial_tokens">(),
+                  .entrypoint =
+                      itc_meta::entrypoint<u8"claim_initial_tokens">(),
                   .gas_limit = UINT64_MAX,
                   .calldata = std::move(forged),
               },

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 
 #include "hogd/base/cpputil.h"
@@ -54,7 +55,9 @@ public:
     trace("Invoke method {} (Name {}) calldata: {}",
           encode_hex(std::as_bytes(
               std::span(trait_meta_t::template entrypoint<Name>().data(), 8))),
-          Name.get(), x23::show(calldata));
+          std::string_view(reinterpret_cast<const char *>(Name.get().data()),
+                           Name.get().size()),
+          x23::show(calldata));
 
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{

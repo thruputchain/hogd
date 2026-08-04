@@ -231,11 +231,10 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata mint_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"mint">(),
-                       GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"mint">(wallet,
-                                                         make_amount(amount)));
+    Calldata mint_calldata = x23::serialize(
+        kERC20Address, erc20_meta::entrypoint<u8"mint">(),
+        GasAmount{UINT64_MAX},
+        erc20_meta::make_calldata<u8"mint">(wallet, make_amount(amount)));
     Ed25519Signature mint_sig = ed25519_sign(secret_key, mint_calldata).value();
 
     auto &wallet_client =
@@ -243,9 +242,8 @@ protected:
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation =
-                wallet_client.make_invocation<"do_action">(UINT64_MAX, mint_sig,
-                                                           mint_calldata),
+            .invocation = wallet_client.make_invocation<u8"do_action">(
+                UINT64_MAX, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -272,9 +270,9 @@ protected:
     // increase)
     Calldata approve_calldata =
         x23::serialize(kERC20Address,
-                       erc20_meta::entrypoint<"adjust_allowance">(),
+                       erc20_meta::entrypoint<u8"adjust_allowance">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"adjust_allowance">(
+                       erc20_meta::make_calldata<u8"adjust_allowance">(
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
     Ed25519Signature approve_sig =
@@ -285,7 +283,7 @@ protected:
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_client.make_invocation<"do_action">(
+            .invocation = wallet_client.make_invocation<u8"do_action">(
                 UINT64_MAX, approve_sig, approve_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -308,18 +306,19 @@ protected:
   {
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
 
-    Calldata open_calldata = x23::serialize(
-        kPaymentChannelAddress, pc_meta::entrypoint<"open_channel">(),
-        GasAmount{UINT64_MAX},
-        pc_meta::make_calldata<"open_channel">(party_a_pubkey_, party_b_pubkey_,
-                                               kWalletBAddress, kERC20Address,
-                                               make_difference(amount), salt));
+    Calldata open_calldata =
+        x23::serialize(kPaymentChannelAddress,
+                       pc_meta::entrypoint<u8"open_channel">(),
+                       GasAmount{UINT64_MAX},
+                       pc_meta::make_calldata<u8"open_channel">(
+                           party_a_pubkey_, party_b_pubkey_, kWalletBAddress,
+                           kERC20Address, make_difference(amount), salt));
     Ed25519Signature open_sig =
         ed25519_sign(party_a_secret_, open_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, open_sig, open_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -347,16 +346,16 @@ protected:
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
 
     Calldata join_calldata = x23::serialize(
-        kPaymentChannelAddress, pc_meta::entrypoint<"join_channel">(),
+        kPaymentChannelAddress, pc_meta::entrypoint<u8"join_channel">(),
         GasAmount{UINT64_MAX},
-        pc_meta::make_calldata<"join_channel">(channel_id,
-                                               make_difference(amount)));
+        pc_meta::make_calldata<u8"join_channel">(channel_id,
+                                                 make_difference(amount)));
     Ed25519Signature join_sig =
         ed25519_sign(party_b_secret_, join_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_b_client_.make_invocation<"do_action">(
+            .invocation = wallet_b_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, join_sig, join_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -390,7 +389,7 @@ protected:
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = pc_client_.make_invocation<"close_channel">(
+            .invocation = pc_client_.make_invocation<u8"close_channel">(
                 UINT64_MAX, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
@@ -425,7 +424,7 @@ protected:
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = pc_client_.make_invocation<"dispute">(
+            .invocation = pc_client_.make_invocation<u8"dispute">(
                 UINT64_MAX, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
@@ -455,8 +454,8 @@ protected:
   {
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation =
-                pc_client_.make_invocation<"finalize">(UINT64_MAX, channel_id),
+            .invocation = pc_client_.make_invocation<u8"finalize">(UINT64_MAX,
+                                                                   channel_id),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -492,8 +491,8 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                pc_client_.make_invocation<"initialize">(UINT64_MAX,
-                                                         kTestDisputePeriod),
+                pc_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                                                           kTestDisputePeriod),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -514,8 +513,8 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                erc20_client_.make_invocation<"initialize">(UINT64_MAX,
-                                                            kWalletAAddress),
+                erc20_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                                                              kWalletAAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -533,9 +532,8 @@ protected:
   {
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation =
-                wallet_a_client_.make_invocation<"initialize">(UINT64_MAX,
-                                                               party_a_pubkey_),
+            .invocation = wallet_a_client_.make_invocation<u8"initialize">(
+                UINT64_MAX, party_a_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -553,9 +551,8 @@ protected:
   {
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation =
-                wallet_b_client_.make_invocation<"initialize">(UINT64_MAX,
-                                                               party_b_pubkey_),
+            .invocation = wallet_b_client_.make_invocation<u8"initialize">(
+                UINT64_MAX, party_b_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -590,16 +587,16 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -651,16 +648,16 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -713,16 +710,16 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -765,16 +762,16 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -818,16 +815,16 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -874,16 +871,16 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -933,9 +930,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
@@ -943,7 +940,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -986,9 +983,9 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
@@ -996,7 +993,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
 
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = wallet_a_client_.make_invocation<"do_action">(
+            .invocation = wallet_a_client_.make_invocation<u8"do_action">(
                 UINT64_MAX, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =

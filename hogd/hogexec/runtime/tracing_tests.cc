@@ -77,7 +77,8 @@ TEST_F(TracingTest, Sha256Repeated)
 
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
-                      client.make_invocation<"sha256_repeated">(10000, n, data),
+                      client.make_invocation<u8"sha256_repeated">(10000, n,
+                                                                  data),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
@@ -144,7 +145,7 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   // Initialize fibonacci_call with the fibonacci contract's address
   {
     auto handler = make_new_system_call_handler(
-        Transaction{.invocation = caller_client.make_invocation<"initialize">(
+        Transaction{.invocation = caller_client.make_invocation<u8"initialize">(
                         UINT64_MAX, fibonacci_addr),
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
@@ -158,8 +159,9 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   // Call call_fibonacci(5, gas_limit) with tracing enabled
   uint64_t gas_limit = 1'000'000;
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = caller_client.make_invocation<"call_fibonacci">(
-                      gas_limit, uint32_t{5}, gas_limit),
+      Transaction{.invocation =
+                      caller_client.make_invocation<u8"call_fibonacci">(
+                          gas_limit, uint32_t{5}, gas_limit),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
@@ -227,8 +229,8 @@ TEST_F(TracingTest, NoSyscallTest)
 
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
-                      client.make_invocation<"run_test">(10000,
-                                                         uint64_t{12345}),
+                      client.make_invocation<u8"run_test">(10000,
+                                                           uint64_t{12345}),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
@@ -265,7 +267,7 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = client.make_invocation<"run_test">(
+      Transaction{.invocation = client.make_invocation<u8"run_test">(
                       10000, static_cast<uint64_t>(kSyscallCount)),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);

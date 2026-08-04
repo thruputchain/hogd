@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -102,7 +103,10 @@ public:
     auto r = client.template invoke_opt<Name>(ctx, args...);
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok()) {
-      ADD_FAILURE() << "itc_erc20 call did not return Ok: " << Name.get();
+      ADD_FAILURE() << "itc_erc20 call did not return Ok: "
+                    << std::string_view(reinterpret_cast<const char *>(
+                                            Name.get().data()),
+                                        Name.get().size());
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
@@ -135,34 +139,36 @@ protected:
         kMethodTransfer,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<"transfer">(ctx, target, kBob,
-                                     make_amount(kTransferAmount));
+          return call_ok<u8"transfer">(ctx, target, kBob,
+                                       make_amount(kTransferAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodAdjustAllowance,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<"adjust_allowance">(ctx, target, kSpender,
-                                             make_difference(kAllowanceAmount));
+          return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
+                                               make_difference(
+                                                   kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransferFrom,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<"transfer_from">(ctx, target, kAlice, kBob,
-                                          make_amount(kTransferFromAmount));
+          return call_ok<u8"transfer_from">(ctx, target, kAlice, kBob,
+                                            make_amount(kTransferFromAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodInitialize,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<"initialize">(ctx, target, kAlice);
+          return call_ok<u8"initialize">(ctx, target, kAlice);
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodMint,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<"mint">(ctx, target, kAlice, make_amount(kMintAmount));
+          return call_ok<u8"mint">(ctx, target, kAlice,
+                                   make_amount(kMintAmount));
         });
     auto wrapper_contract = builder.build();
 

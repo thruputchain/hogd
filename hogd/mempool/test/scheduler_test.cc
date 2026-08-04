@@ -855,7 +855,7 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  constexpr char kProgramName[] = "slow_fibonacci";
+  constexpr char8_t kProgramName[] = u8"slow_fibonacci";
   constexpr uint32_t kFibonacciN = 10;
 
   SignedTransaction tx1{

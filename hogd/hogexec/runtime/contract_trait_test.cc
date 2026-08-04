@@ -68,9 +68,9 @@ TEST(ContractTraitTest, EntrypointFromMethodID)
 
 using fibonacci_client_t = ContractTraitMeta<fibonacci::Fibonacci>;
 static_assert(
-    std::same_as<fibonacci_client_t::return_t<"fibonacci">, uint32_t>);
+    std::same_as<fibonacci_client_t::return_t<u8"fibonacci">, uint32_t>);
 // static_assert that "invalid_fibonacci" is not a valid method name
-// static_assert(!std::same_as<fibonacci_client_t::return_t<"invalid_fibonacci">,
+// static_assert(!std::same_as<fibonacci_client_t::return_t<u8"invalid_fibonacci">,
 // uint32_t>);
 
 // #2898: generated trait metadata must be u8"" so entrypoint-id derivation
@@ -119,7 +119,7 @@ TEST(ContractTraitTest, EntrypointDebugCrossCheckDerivesFromUtf8Metadata)
   // So the entrypoint() cross-check holds and returns the canonical id. Against
   // the pre-#2898 code (ordinary literals) this diverged and aborted under a
   // non-UTF-8 -fexec-charset.
-  ASSERT_EQ(meta::entrypoint<"transfer">(), canonical);
+  ASSERT_EQ(meta::entrypoint<u8"transfer">(), canonical);
 }
 
 } // namespace hogd

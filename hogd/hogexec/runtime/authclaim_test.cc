@@ -73,7 +73,7 @@ TEST_F(AuthClaimTestFixture, TestGetAuthClaim)
   // Contract expects allowed_keys == 0 && required_weight == 0
   AuthClaim claim{};
   auto result =
-      run_method(client.make_invocation<"test_get_auth_claim">(UINT64_MAX),
+      run_method(client.make_invocation<u8"test_get_auth_claim">(UINT64_MAX),
                  claim);
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
@@ -85,7 +85,7 @@ TEST_F(AuthClaimTestFixture, TestSetAddressRequiredWeight)
   setup_contract(contract_addr);
 
   auto result = run_method(
-      client.make_invocation<"test_set_address_required_weight">(UINT64_MAX));
+      client.make_invocation<u8"test_set_address_required_weight">(UINT64_MAX));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -96,7 +96,7 @@ TEST_F(AuthClaimTestFixture, TestAddAddressPublicKey)
   setup_contract(contract_addr);
 
   auto result = run_method(
-      client.make_invocation<"test_add_address_public_key">(UINT64_MAX));
+      client.make_invocation<u8"test_add_address_public_key">(UINT64_MAX));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -107,7 +107,7 @@ TEST_F(AuthClaimTestFixture, TestRemoveAddressPublicKey)
   setup_contract(contract_addr);
 
   auto result = run_method(
-      client.make_invocation<"test_remove_address_public_key">(UINT64_MAX));
+      client.make_invocation<u8"test_remove_address_public_key">(UINT64_MAX));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -118,7 +118,7 @@ TEST_F(AuthClaimTestFixture, TestAddPubkeyIndexOob)
   setup_contract(contract_addr);
 
   auto result = run_method(
-      client.make_invocation<"test_add_pubkey_index_oob">(UINT64_MAX));
+      client.make_invocation<u8"test_add_pubkey_index_oob">(UINT64_MAX));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 

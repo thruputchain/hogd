@@ -35,7 +35,7 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
   // We use threads rather than coroutines since not all tests use coroutines.
   for (const ChunkRange &chunk : chunks) {
     futures.push_back(worker_pool.submit([chunk, &txs, &fib_client] {
-      constexpr char kProgramName[] = "slow_fibonacci";
+      constexpr char8_t kProgramName[] = u8"slow_fibonacci";
       constexpr uint32_t kFibonacciN = 10;
 
       for (size_t i = chunk.start; i < chunk.end; i++) {

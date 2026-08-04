@@ -125,7 +125,7 @@ make_native_initial_token_claim_contract()
 {
   NativeContractBuilder builder;
 
-  builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
+  builder.add<initial_token_claim::InitialTokenClaim, u8"claim_initial_tokens">(
       [](NativeSyscallContext &ctx, SHA256Hash hash, SHA256Hash nonce,
          ContractEntrypointID entrypoint,
          x23::BufView calldata) -> InvokeStatus<void> {

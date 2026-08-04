@@ -242,7 +242,7 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
     if (std::expected<void, std::string> valid =
             require_string_value(**deploy_entrypoint,
                                  entrypoint_hex(
-                                     wallet_meta::entrypoint<"deploy">()),
+                                     wallet_meta::entrypoint<u8"deploy">()),
                                  "devWallet.deployEntrypoint");
         !valid) {
       return std::unexpected(std::move(valid.error()));
@@ -259,7 +259,7 @@ validate_dev_wallet_assertions(const json::Value &dev_wallet)
     if (std::expected<void, std::string> valid =
             require_string_value(**do_action_entrypoint,
                                  entrypoint_hex(
-                                     wallet_meta::entrypoint<"do_action">()),
+                                     wallet_meta::entrypoint<u8"do_action">()),
                                  "devWallet.doActionEntrypoint");
         !valid) {
       return std::unexpected(std::move(valid.error()));

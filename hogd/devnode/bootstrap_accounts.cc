@@ -107,8 +107,8 @@ append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
             wallet_contract_hash, nonce);
 
     builder.add_initial_config(wallet_contract, nonce,
-                               wallet_meta::entrypoint<"initialize">(),
-                               wallet_meta::make_calldata<"initialize">(
+                               wallet_meta::entrypoint<u8"initialize">(),
+                               wallet_meta::make_calldata<u8"initialize">(
                                    public_key),
                                static_cast<int128_t>(config.storage_tokens));
     accounts.push_back(BootstrapAccountMetadata{

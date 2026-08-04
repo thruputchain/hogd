@@ -284,11 +284,11 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
         w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
         w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
@@ -460,8 +460,8 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     builder.add_initial_config(
-        wallet_contract, nonce, wallet_meta::entrypoint<"initialize">(),
-        wallet_meta::make_calldata<"initialize">(config.faucet->public_key),
+        wallet_contract, nonce, wallet_meta::entrypoint<u8"initialize">(),
+        wallet_meta::make_calldata<u8"initialize">(config.faucet->public_key),
         static_cast<int128_t>(config.faucet->storage_tokens));
     faucet = HostedFaucetMetadata{
         .wallet_address = wallet_address,

@@ -59,7 +59,8 @@ TEST_F(ReturnFaultTestWasmTest, InvokeRunTest)
 {
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = client_.make_invocation<"run_test">(UINT64_MAX),
+      Transaction{.invocation =
+                      client_.make_invocation<u8"run_test">(UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
