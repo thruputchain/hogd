@@ -1351,6 +1351,20 @@ IndexDB::get_events(EventQuery const &query) const
       winner->advance(order);
       continue;
     }
+    // Index-integrity: a contract_index row and the tx_index receipt it
+    // hydrates through are written by the same consume_events() call, so
+    // the row's (block, contract) must agree with the receipt.  The join
+    // between the two column families is by tx hash alone -- tx_index
+    // carries no receipt identity or event-vector digest -- so a second
+    // write under that hash silently re-points every contract_index row
+    // referencing it, and a contract-history query would return one
+    // contract's payload under another contract's filter (#2295).
+    //
+    // Queries are read-only, so no caller can drive the index into this
+    // state; reaching it means the on-disk index is already corrupt, and
+    // serving corrupt history is worse than dying loudly.
+    CHECK_EQ(tx_events->first, win_pos.block);
+
     const TxEventLog &event_log = tx_events->second;
     if (win_pos.seq >= event_log.events.size()) {
       error("get_events: seq {} out of range ({}) for tx {}", win_pos.seq,
@@ -1359,6 +1373,12 @@ IndexDB::get_events(EventQuery const &query) const
       continue;
     }
     TxEmittedEvent const &emitted_event = event_log.events[win_pos.seq];
+
+    // The row was created from this very event (see
+    // create_contract_index_sst_chunk), and iterators are bounded to a
+    // single (address, kind) prefix, so the emitter address must match
+    // the contract whose stream we are walking.
+    CHECK_EQ(emitted_event.contract_address, winner->contract());
 
     // Topic filter: match if ANY filter that includes this contract
     // accepts the event.  One entry in the contract_index = one event
