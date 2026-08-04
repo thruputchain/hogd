@@ -136,8 +136,8 @@ erc20_error(itc_erc20::ERC20Error code)
 // Strict allowance adjustment, mirroring itc_erc20::add_to_allowance (the SDK's
 // non_negative_int_try_strict_inc): force-load the committed allowance and
 // reject an out-of-range running total at invoke (returns false), rather than
-// deferring to commit. Allowance has no genesis-style transient-dip concern, so
-// the native token can match the strict ERC20 reference here.
+// deferring to commit. The balance debit in transfer_impl / transfer_from_impl
+// mirrors the same SDK primitive.
 InvokeStatus<bool>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
@@ -216,9 +216,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return owner.error();
   }
 
-  // can't negate bigger values
+  // An amount above INT128_MAX cannot be represented as a signed balance delta;
+  // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
@@ -302,9 +303,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return spender.error();
   }
 
-  // can't negate bigger values
+  // An amount above INT128_MAX cannot be represented as a signed balance delta;
+  // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 

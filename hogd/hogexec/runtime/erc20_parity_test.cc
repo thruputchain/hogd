@@ -832,6 +832,18 @@ TEST_F(Erc20ParityTest, CreditOverflowTransferParity)
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
+// An amount above INT128_MAX (not representable as a signed balance delta):
+// pin that both backends reject it with the same observable result.
+TEST_F(Erc20ParityTest, HugeAmountTransferParity)
+{
+  auto [native_record, wasm_record] = run_transfer_parity(
+      /*start_balance=*/1'000, /*transfer_amount=*/uint128_t{1} << 127,
+      kNativeRecipientAddr, kWasmRecipientAddr);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on amount > "
+         "INT128_MAX";
+}
+
 // transfer_from with sufficient balance but insufficient allowance. The
 // allowance has no genesis-style deferred-netting constraint, so the native
 // token's allowance debit is strict like itc_erc20's: both reject at invoke
