@@ -710,8 +710,9 @@ TEST_F(Erc20ParityTest, FundedTransferFromSelfParity)
 }
 
 // Over-balance delegated self-transfer: both backends reject at invoke with
-// ERC20Error::TooLarge and the allowance is untouched (closes the #1969
-// behavior).
+// ERC20Error::TooLarge (byte-identical). That the staged allowance debit
+// reverts with the aborted frame is verified in
+// NativeTokenAllowanceTest.OverBalanceTransferFromRevertsAllowanceDebit.
 TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(
@@ -862,10 +863,10 @@ TEST_F(Erc20ParityTest, HugeAmountTransferFromParity)
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
-// transfer_from with sufficient balance but insufficient allowance. The
-// allowance has no genesis-style deferred-netting constraint, so the native
-// token's allowance debit is strict like itc_erc20's: both reject at invoke
-// with ERC20Error::TooLarge, byte-identically.
+// transfer_from with sufficient balance but insufficient allowance. Both
+// allowance and balance debits are strict (invoke-time TooLarge rejection);
+// this test pins the allowance leg's byte-identical rejection between the
+// native precompile and the WASM itc_erc20 reference.
 TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
 {
   auto [native_record, wasm_record] = run_transfer_from_self_parity(

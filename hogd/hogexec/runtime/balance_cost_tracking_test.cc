@@ -616,7 +616,7 @@ TEST_F(BalanceCostTrackingTest,
     auto r_get = [&]() {
       CopyableInvokeInputs inputs{
           .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<"get_balance">()),
+              sdk_method_id(erc20_meta::entrypoint<"get_balance_of">()),
           .gas_limit = UINT64_MAX,
           .flags = std::to_underlying(InvokeFlag::None),
       };

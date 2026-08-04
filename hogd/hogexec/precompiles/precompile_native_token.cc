@@ -232,6 +232,9 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity.
     return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (amount_signed_int > owner_avail.value().value()) {
@@ -332,6 +335,9 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity.
     return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (amount_signed_int > owner_avail.value().value()) {

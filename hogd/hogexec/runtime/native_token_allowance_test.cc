@@ -1149,6 +1149,166 @@ TEST_F(NativeTokenAllowanceTest,
   }
 }
 
+// 10. Over-balance transfer_from with ample allowance: the child frame Aborts
+// (TooLarge on the owner balance check), the tx commits, and the committed
+// allowance is unchanged -- the staged allowance debit reverted with the
+// aborted frame.
+TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
+{
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(200);
+  constexpr static ContractAddress kSpenderAddr = make_contract_address(201);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(202);
+  // Allowance is ample (500), but the owner's residual balance after Tx1 is
+  // only 50, so the balance check in transfer_from fires before the tokens
+  // move.
+  constexpr static int128_t kGrantAllowance = 500;
+  constexpr static int128_t kTransferAmount = 500;
+  constexpr static int128_t kOwnerResidualBalance = 50; // < kTransferAmount
+
+  // Owner commits Tx1 (allowance grant) and needs replay-cache token.  After
+  // Tx1 the owner's residual balance is kOwnerResidualBalance, which is
+  // strictly less than kTransferAmount.
+  setup_grant_storage_token(kOwnerAddr,
+                            replay_cache_cost_charged(1) + kOwnerResidualBalance);
+  // Spender commits Tx2 (transfer_from attempt) and needs replay-cache token.
+  setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
+  // Native token contract pays for the new allowance NNInt entry created in
+  // Tx1; Tx2's staged debit reverts with the aborted frame so no extra cost.
+  setup_grant_storage_token(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                            get_default_cost_model()->get_nnint_cost());
+
+  // Owner method 0: grant the spender an allowance of kGrantAllowance.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
+  fns_owner.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client = ContractTraitClient<itc_erc20::ERC20>(
+            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto r = client.invoke_opt<"adjust_allowance">(ctx, kSpenderAddr,
+                                                       make_difference(
+                                                           kGrantAllowance));
+        if (!r.has_value() || !r.value().has_value() ||
+            !r.value().value().has_value() ||
+            !r.value().value().value().is_ok()) {
+          ADD_FAILURE() << "adjust_allowance(+kGrantAllowance) did not succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto owner_contract = std::make_unique<NativeContract>(std::move(fns_owner));
+
+  // Spender method 0: attempt transfer_from(owner, receiver, kTransferAmount).
+  // The allowance check passes (kGrantAllowance >= kTransferAmount) but the
+  // owner balance check fails (kOwnerResidualBalance < kTransferAmount), so
+  // the child frame Aborts and the staged allowance debit reverts.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
+  fns_spender.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client = ContractTraitClient<itc_erc20::ERC20>(
+            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto r = client.invoke_opt<"transfer_from">(
+            ctx, kOwnerAddr, kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kTransferAmount)));
+        // All three optional layers must be present: the syscall ran, the
+        // frame ran and returned data, and the data deserialized. Any missing
+        // layer indicates an unexpected low-level error.
+        if (!r.has_value() || !r.value().has_value() ||
+            !r.value().value().has_value()) {
+          ADD_FAILURE()
+              << "invoke_opt for transfer_from failed at syscall/frame level";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // The child frame Aborts on over-balance, encoding as Result::Err.
+        // Confirm the rejection; an unexpected Ok here means the transfer
+        // succeeded despite insufficient balance.
+        if (r.value().value().value().is_ok()) {
+          ADD_FAILURE() << "expected transfer_from to reject over-balance "
+                           "child frame but it returned Ok";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Result::Err confirmed -- child frame Aborted with ERC20Error::TooLarge.
+        // Return {} so the spender's root frame completes normally.
+        return {};
+      });
+  auto spender_contract =
+      std::make_unique<NativeContract>(std::move(fns_spender));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kOwnerNativeId = 37;
+  constexpr int32_t kSpenderNativeId = 38;
+  contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
+  contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto owner_xdr = make_native_contract(kOwnerNativeId);
+  write_contract(owner_xdr);
+  write_deployment(kOwnerAddr, owner_xdr);
+  auto spender_xdr = make_native_contract(kSpenderNativeId);
+  write_contract(spender_xdr);
+  write_deployment(kSpenderAddr, spender_xdr);
+
+  // Tx 1: owner grants allowance of kGrantAllowance to spender.
+  {
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kOwnerAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
+    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
+  }
+
+  advance_block();
+
+  // Tx 2: spender calls transfer_from for kTransferAmount. The child frame
+  // Aborts (owner balance kOwnerResidualBalance < kTransferAmount); the
+  // spender's outer frame returns normally and the tx commits.
+  {
+    auto h_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = kSpenderAddr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto h = make_new_system_call_handler(h_tx, *runtime_context);
+    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = h_tx})());
+  }
+
+  advance_block();
+
+  // DB readback: the committed allowance must still equal the original grant.
+  // The staged allowance debit from the aborted transfer_from child frame
+  // reverted with that frame and must not appear in the committed state.
+  auto allowance_key_data =
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kSpenderAddr);
+  ASSERT_TRUE(allowance_key_data.has_value());
+  StorageKey allowance_storage_key(StorageKeyType::ContractData);
+  allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
+  AddressAndKey allowance_addrkey{
+      .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      .key = std::move(allowance_storage_key)};
+  auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
+  ASSERT_TRUE(allowance_item.has_value())
+      << "allowance NNInt entry must exist after Tx1";
+  EXPECT_EQ(from_xdr(allowance_item->nnint()), kGrantAllowance)
+      << "committed allowance must be unchanged after aborted transfer_from";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
