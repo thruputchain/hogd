@@ -136,12 +136,27 @@ public:
   {
     return db_->heat_estimate(key);
   }
+  uint8_t heat_threshold(double hot_fraction) const
+  {
+    return db_->heat_threshold(hot_fraction);
+  }
   bool heat_enabled() const { return db_->heat_enabled(); }
   void record_heat(std::span<const std::byte> key) { db_->record_heat(key); }
   size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
-                     float min_mixedness)
+                     float min_mixedness, size_t max_victims = 0)
   {
-    return db_->consolidate(is_hot, min_mixedness);
+    return db_->consolidate(is_hot, min_mixedness, max_victims);
+  }
+  void enable_auto_consolidation(double hot_fraction, size_t max_victims,
+                                 float min_mixedness = 0.0F)
+  {
+    db_->enable_auto_consolidation(hot_fraction, max_victims, min_mixedness);
+  }
+  size_t consolidate_incremental() { return db_->consolidate_incremental(); }
+  uint64_t consolidation_passes() const { return db_->consolidation_passes(); }
+  uint64_t consolidation_loglets() const
+  {
+    return db_->consolidation_loglets();
   }
   uint64_t compaction_passes() const { return db_->compaction_passes(); }
   uint64_t compaction_bytes_reclaimed() const

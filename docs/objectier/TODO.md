@@ -37,6 +37,11 @@ and cold objects primarily under a single index").
 | X5 | Measured cleaner cost vs the 0.06% estimate | unblocked |
 | C1 | Tier-aware `LogletAllocator` | todo |
 | X3 | Item-size sweep (tests paper §4.3's untested prediction) | **done** — prediction holds |
+| P1.4 | Bounded victim claiming + write-head rollover | **done** |
+| P1.2 | Adaptive threshold from the sketch's count distribution | **done** |
+| P2.0 | Quiescence budget: cost per loglet vs. the available window | **done** |
+| P2.1 | Trigger policy — bounded pass at every block boundary | **done** (ramdb + bench; production call site open) |
+| P2.2 | Steady state — does the layout converge? | **done — converges in 13 closes, then stops** |
 
 ### What landed
 
@@ -452,6 +457,237 @@ it.
 Still open: `HeatSketch::halve()` exists but is never called, so the sketch tracks
 "was ever hot" rather than "is hot". Aging needs an epoch and a workload whose hot
 set moves before it can be evaluated at all.
+
+### P1.4 — consolidation is now bounded, and reaches the newest data
+
+Two structural gaps closed, both prerequisites for putting consolidation on a
+trigger. Prompted by the flexkvs comparison: its cleaner picks one victim
+segment per tick and never takes the list away from anyone, and both properties
+turned out to matter here.
+
+**Bounded claiming.** `consolidate()` used to swap the whole of
+`compactable_loglets_` out, measure, and put the non-victims back. For the
+duration a concurrent `compact()` saw an empty list, reclaimed nothing, and
+`background_worker` escalated. It now claims in batches of 32 and returns each
+non-victim immediately, so the list is never empty, and takes a `max_victims`
+bound so a pass can be sized rather than run to completion. The budget is fixed
+at pass start because non-victims go back on the end of the list — without that
+a pass keeps meeting the loglets it just returned.
+
+**Write-head rollover.** A per-thread head reached the compactable set only when
+it filled, so up to one loglet per writing thread of the *newest* items was
+permanently invisible to consolidation. `Database::consolidate()` now calls
+`ItemAllocator::roll_over_heads()` first, which hands every head over without
+taking a replacement — no allocation, so it cannot block, and an idle thread is
+left holding nothing. Safe because `consolidate()` already forbids overlapping
+`put()`/`remove()`.
+
+`DatabaseTest.ConsolidateWriteHeads` relocates **128 loglets** where the old code
+found zero: exactly the one-per-core figure the earlier note predicted, now a
+test rather than a caveat.
+
+One wart the rollover exposed: an idle thread's head is *empty*, and an empty
+loglet has `mixedness() == 0`, so at `-m 0` all 128 were selected and counted as
+victims — 192 "relocated" loglets against 73 occupied. Loglets with no live bytes
+are now skipped and left to `compact()`, which is the code that can actually
+reclaim them.
+
+### P1.2 — the threshold comes out of the sketch, not a flag
+
+`HeatSketch::hot_threshold(f)` histograms the table's non-zero counters and
+returns the count at which the hottest `f` of tracked keys are hot. The table is
+its own count distribution — every key occupies one counter per row — so this is
+exact for a collision-free sketch, and collisions bias it up, which under-selects
+rather than over-selects. Exposed as `hogdb_bench -F/--hot-fraction`.
+
+This is the same idea as flexkvs's `get_victim_threshold_smooth`, which samples
+100 hash buckets every millisecond and takes an EWMA-smoothed 80th percentile.
+Reading the sketch is strictly better: one pass, exact, deterministic, no RNG and
+no smoothing constant, and the knob is a *fraction of the working set* rather
+than a percentile of a sample.
+
+500 K accounts, θ=0.99, 3 rounds, w=22 sketch, scattered start at hit 0.6824
+(143.06 ns):
+
+| `--hot-fraction` | derived threshold | hit after | AMAT |
+|---|---|---|---|
+| 0.02 | 12 | 0.8672 | 100.54 ns |
+| 0.05 | 6 | 0.8934 | 94.53 ns |
+| 0.10 | 6 | 0.8934 | 94.53 ns |
+| **0.20** | **3** | **0.8970** | **93.69 ns** |
+| 0.40 | 3 | 0.8970 | 93.69 ns |
+| `--hot-hits 2` (fixed) | 2 | 0.8970 | 93.69 ns |
+
+**The optimum is the fast tier's own size.** `kFastTierFraction` is 0.20 and the
+hit rate peaks there; asking for a hot set much smaller than the tier (0.02)
+costs 3 points because genuinely hot items are left classified cold. So the
+threshold is not a free parameter to sweep — it is determined by the tier, and
+the sketch can now derive the corresponding access count on its own. That closes
+the "inherited from a default" hole; what it does *not* do is close the gap to
+the 0.9574 rank-sorted ceiling, which is still unexplained.
+
+Note the plateau above 0.20 and the tie with the hand-set `-k 2`. The count
+distribution here is shallow — the thresholds the sweep actually landed on were
+1, 2, 3, 6 and 12 — so the curve is coarse and 0.20 is where the peak *begins*
+rather than a resolved optimum. A deeper access trace is needed before reading
+anything into the shape between those points.
+
+### P2.0 — the quiescence budget, measured
+
+The question gating the trigger design (2.1): *how much consolidation fits in the
+gap between ledger closes?* It needs two numbers, and only one of them is a
+property of ramdb.
+
+**First finding, before any measurement: there is no quiescent window, because
+nothing declares one.** `Database::set_active()` exists and its comment
+describes consolidation's precondition exactly — *"when inactive, items should
+not be accessed; this allows the database to run background activities that
+could disrupt performance and may not be thread safe"* — but the only caller in
+the tree is `db_test.cc`. hogdb never calls it. So the signal a quiescence
+trigger would hang off is present in the API and unwired, and wiring it at the
+block boundary is a prerequisite, not an afterthought.
+
+**Cost per loglet.** `hogdb_bench -V N` bounds the pass; 500 K accounts, θ=0.99,
+`-F 0.20`. Baseline scattered hit rate 0.6824.
+
+| `-V` | loglets | seconds | s/loglet | hit rate | AMAT |
+|---|---|---|---|---|---|
+| 1 | 1 | 0.0236 | 0.0236 | 0.6764 | 144.42 ns |
+| 2 | 2 | 0.0466 | 0.0233 | 0.6997 | 139.08 ns |
+| 5 | 5 | 0.1166 | 0.0233 | 0.7404 | 129.72 ns |
+| 10 | 10 | 0.2262 | 0.0226 | 0.8187 | 111.71 ns |
+| **20** | **20** | **0.4570** | **0.0229** | **0.9047** | **91.91 ns** |
+| 30 | 30 | 0.6095 | 0.0203 | 0.9047 | 91.91 ns |
+| 50 | 50 | 0.8968 | 0.0179 | 0.9047 | 91.92 ns |
+| 0 (all) | 82 | 1.3537 | 0.0165 | 0.8971 | 93.67 ns |
+
+Cost is linear with no meaningful fixed component: **~23 ms per loglet, i.e. 43
+loglets/s ≈ 87 MB/s**, matching the 85 MB/s measured for the unbounded pass. The
+per-loglet figure drops toward 17 ms for later victims because those are the
+partly filled write heads, which hold less.
+
+**The full benefit costs 24% of the loglets and 34% of the time.** 20 victims
+reach 0.9047 and 30, 50 and 82 do not beat it — the whole-heap pass is in fact
+marginally *worse* (0.8971), consistent with the earlier mixedness finding that
+relocating pure-cold loglets achieves nothing, and suggesting that spreading hot
+items over more destinations dilutes them slightly. Unexplained; the 20/30/50
+plateau is stable enough to be real rather than noise.
+
+Note `-V 1` lands at 0.6764, a hair *below* the 0.6824 baseline. One relocated
+loglet is not worth doing, and may be marginally harmful.
+
+**Block execution time**: ~0.11 s for a 500 K-payment block (`block,` line).
+
+**What this means for the trigger.** One loglet costs 23 ms and ~20 are needed,
+so a single quiescent window would have to be ~500 ms to converge in one shot —
+implausible. But the layout is frozen (D2): this is a one-time fix, not
+maintenance. Spreading it at **one or two loglets per ledger close, converging in
+~10–20 closes**, costs 23–46 ms of idle time per block and is entirely
+practical. That is the flexkvs "one victim per tick" shape, arrived at
+independently from the cost side, and `max_victims` already implements it.
+
+**Caveat on the window itself.** The benchmark runs blocks back-to-back, so it
+cannot measure idle time — the gap is the close interval minus execution, and
+the close interval is a deployment parameter the bench does not model. What is
+measured here is the cost side; the window has to come from a real node.
+
+**A bug this measurement found.** The first sweep showed a one-victim pass
+costing 75 ms against a 16 ms marginal cost — a fixed overhead that should not
+exist. Cause: `measure_hotness()` ran on every loglet in the 32-loglet claim
+batch before the victim budget was checked, so a bounded pass paid to walk the
+item headers of 32 loglets to relocate one. Checking the budget first cut a
+one-victim pass 3.2× (75 → 24 ms) and the full pass 21% (1.71 → 1.35 s). A
+bounded pass that scans unboundedly is not bounded; the bound only became real
+once it was timed.
+
+### P2.1/P2.2 — the trigger works, and the layout converges then stops
+
+`Database::consolidate_incremental()` runs one bounded pass classified by the
+sketch, called at a quiescent point. `hogdb_bench -A N` calls it at every block
+boundary. 500 K accounts, θ=0.99, `-F 0.20 -A 2`, so 2 loglets per close:
+
+| block | 0 | 3 | 5 | 7 | 9 | 11 | 13 | 14+ |
+|---|---|---|---|---|---|---|---|---|
+| loglets moved | 2 | 2 | 2 | 2 | 2 | 2 | 2 | **0** |
+| hit rate | 0.6997 | 0.7824 | 0.8368 | 0.8873 | 0.9028 | 0.9026 | **0.9045** | 0.9045 |
+
+**It converges in 13 closes and then selects nothing at all.** From block 14
+onward every pass returns 0 and the hit rate holds at 0.9045 indefinitely — equal
+to the best single bounded pass (0.9047 at `-V 20`) and better than the unbounded
+one (0.8971). Cost: ~28 loglets relocated in total, ~60 ms per block boundary
+against a ~90 ms block.
+
+**That is the answer to 2.2, and it is the one §6 predicted.** The layout
+converges rather than consolidation fighting new writes, and the trigger goes
+quiet on its own — no stop condition had to be invented, because "nothing is
+mixed any more" is one. It is also the first result here measured over time
+instead of as a single before/after pair.
+
+`min_mixedness` at 0.10 and 0.20 behave identically (converge by block 13, then
+stop), so the gate is not sensitive in that range.
+
+#### Two things had to be fixed first, and both were found by measuring
+
+The trigger did not work when first wired. 40 loglets relocated across 20 closes
+reached hit 0.7534, against 0.9047 for 20 loglets in a single pass — more work
+for a worse layout.
+
+**(a) The destinations were abandoned between passes.** `consolidate()` flushed
+both relocation destinations to the compactor before returning — the BUG-3 fix,
+which was necessary because they lived in the calling thread's `thread_local`s.
+So every pass started a *fresh, nearly empty* hot loglet, and 20 passes spread the
+hot items over 20 sparse loglets where one pass packed them into a few. The flush
+that made small passes safe is what made them useless.
+
+Fixed properly rather than worked around: `CompactDests` moved into the
+`ItemAllocator` as a member. That is the correct lifetime — `Database` declares
+`loglet_allocator_` before `item_allocator_`, so the destinations are released
+while the loglet allocator is still alive, which is exactly what BUG-3 needed and
+what a caller thread's `thread_local` could never give. `compact_one` now takes
+which destination pair to use; null still means the calling thread's own, so the
+compaction path is unchanged. `flush_consolidation_dests()` ends a run, and the
+destructor calls it so a partly filled destination is never freed with live items
+in it.
+
+Worth **0.7624 → 0.7534**, i.e. almost nothing on its own. It was a real defect
+and fixing it was necessary, but it was not the cause.
+
+**(b) `min_mixedness = 0` makes a repeating trigger eat its own output.** A
+loglet that consolidation has already made homogeneous has mixedness 0, and
+`0 >= 0` is true, so it stays eligible forever. Each pass spent its two-loglet
+budget relocating loglets that earlier passes had already sorted. A single pass
+never notices because its output only returns to the candidate list after the
+budget is spent.
+
+| `min_mixedness` | hit rate after 20 closes |
+|---|---|
+| 0 | 0.7534 |
+| 0.01 | 0.8179 |
+| 0.05 | 0.8979 |
+| **0.10** | **0.9045**, then terminates |
+
+So the policy default is 0.1, not the 0 a one-shot pass uses. **The lesson is
+that a threshold which is merely a cost/benefit knob for a single pass becomes
+the termination condition for a repeating one** — the same parameter changes role
+entirely once the mechanism runs more than once.
+
+#### Why not `set_active()`, and what production still needs
+
+`set_active(false)` looked like the natural hook and is not, for two reasons.
+It calls `pool_.adjust_workers()`, so driving it per block would resize the
+worker pool on every close. And it is a *promise* about a window, not an event:
+notifying a background thread and letting it consolidate later would relocate
+items at some moment when writes may have resumed, breaking the precondition. So
+`consolidate_incremental()` is synchronous and runs on the committing thread,
+which is the only place the promise is still true.
+
+**Production is not wired, deliberately.** The hook belongs in
+`HogDBSchedRpc::commit_block` after the block tx is shut down, and it must be
+gated on `RPCContext::block_txes_` being empty — a viewing or sibling block still
+holding a reference means the store is not quiescent and the precondition fails.
+That is a change in the consensus RPC path and needs an owner's review rather
+than a guess from here. What is proven is the mechanism, the policy, and the
+convergence; what is missing is one call site and its emptiness check.
 
 ### BUG-3 — `consolidate()` freed loglets through a dangling allocator
 

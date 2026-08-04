@@ -203,14 +203,90 @@ public:
     return heat_ ? heat_->estimate(ScalableMap::hash_key(key)) : 0;
   }
 
+  // heat_threshold returns the access count that classifies roughly the hottest
+  // hot_fraction of tracked keys as hot, letting a caller size its hot set to a
+  // fast tier rather than pick a count. See HeatSketch::hot_threshold. Returns
+  // 1 when no sketch exists, i.e. any recorded access counts as hot.
+  uint8_t heat_threshold(double hot_fraction) const
+  {
+    return heat_ ? heat_->hot_threshold(hot_fraction) : 1;
+  }
+
   // consolidate reorganizes loglets so each holds items of a single
   // temperature. See ItemAllocator::consolidate. Must not overlap put()/
   // remove(): it relocates items, and does so outside the compactor's
   // memory-pressure trigger.
+  //
+  // The write heads are rolled over first, so the newest items -- which sit in
+  // partly filled heads that have never reached the compactable set -- are
+  // candidates like any others.
   size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
-                     float min_mixedness)
+                     float min_mixedness, size_t max_victims = 0)
   {
-    return item_allocator_.consolidate(is_hot, min_mixedness);
+    item_allocator_.roll_over_heads();
+    return item_allocator_.consolidate(is_hot, min_mixedness, max_victims);
+  }
+
+  // enable_auto_consolidation sets the policy consolidate_incremental() uses.
+  // hot_fraction sizes the hot set (see heat_threshold), max_victims bounds a
+  // single pass, and min_mixedness is the selection threshold. Requires the heat
+  // sketch: without it there is no classifier and nothing to route by.
+  //
+  // min_mixedness must be above zero for a repeating trigger, which is why the
+  // default is not the 0 that a one-shot pass uses. A loglet consolidation has
+  // already made homogeneous has mixedness 0 and would still satisfy `0 >= 0`,
+  // so each pass spends its budget relocating the output of earlier passes and
+  // the layout stops improving. Measured over 20 block boundaries at 2 loglets
+  // each: 0 reaches hit 0.7534, 0.05 reaches 0.8979, 0.10 reaches 0.9045 and
+  // then selects nothing further. A positive threshold is also what lets the
+  // trigger terminate, since "no loglet is mixed any more" is the stop
+  // condition.
+  void enable_auto_consolidation(double hot_fraction, size_t max_victims,
+                                 float min_mixedness = 0.1F)
+  {
+    auto_hot_fraction_ = hot_fraction;
+    auto_max_victims_ = max_victims;
+    auto_min_mixedness_ = min_mixedness;
+  }
+
+  // consolidate_incremental runs one bounded consolidation pass classified by
+  // the heat sketch, for a caller that has just reached a quiescent point and
+  // wants to spend it. Returns the loglets relocated, 0 if unconfigured.
+  //
+  // Deliberately synchronous rather than a wake-up for background_worker. The
+  // no-concurrent-write precondition holds only for as long as the caller keeps
+  // it holding, and a notified background thread would start relocating at some
+  // later moment when writes may have resumed. The caller's own thread is the
+  // only place the promise is still true.
+  //
+  // Bounded because the cost is ~23 ms per loglet: a caller spending the gap
+  // between ledger closes can afford one or two, and reaching a good layout is a
+  // matter of accumulating passes over successive closes rather than finishing
+  // one.
+  //
+  // PRECONDITION: as consolidate() -- no put()/remove() may overlap.
+  size_t consolidate_incremental()
+  {
+    if (auto_max_victims_ == 0 || !heat_)
+      return 0;
+
+    uint8_t thresh = heat_threshold(auto_hot_fraction_);
+    auto is_hot = [this, thresh](ItemHeader *item) {
+      return heat_->estimate(ScalableMap::hash_key(item->get_key())) >= thresh;
+    };
+    size_t moved = consolidate(is_hot, auto_min_mixedness_, auto_max_victims_);
+    consolidation_passes_.fetch_add(1, std::memory_order_relaxed);
+    consolidation_loglets_.fetch_add(moved, std::memory_order_relaxed);
+    return moved;
+  }
+
+  uint64_t consolidation_passes() const
+  {
+    return consolidation_passes_.load(std::memory_order_relaxed);
+  }
+  uint64_t consolidation_loglets() const
+  {
+    return consolidation_loglets_.load(std::memory_order_relaxed);
   }
 
   // sync writes pending items to disk. Any calls to put() or remove() performed
@@ -318,6 +394,15 @@ private:
   // compaction activity since recovery; written only by background_worker.
   std::atomic<uint64_t> compaction_passes_{0};
   std::atomic<uint64_t> compaction_bytes_reclaimed_{0};
+
+  // consolidate_incremental() policy and counters. max_victims of 0 disables it,
+  // which is the default: consolidation costs CPU at a quiescent point and no
+  // caller should get it without asking.
+  double auto_hot_fraction_{0.2};
+  size_t auto_max_victims_{0};
+  float auto_min_mixedness_{0.0F};
+  std::atomic<uint64_t> consolidation_passes_{0};
+  std::atomic<uint64_t> consolidation_loglets_{0};
 
   // periodically updated stats; registered in register_metrics().
   struct DbMetrics {

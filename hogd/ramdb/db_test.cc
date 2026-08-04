@@ -30,6 +30,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
+#include "hogd/ramdb/heat_sketch.h"
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
@@ -388,11 +389,9 @@ TEST_F(DatabaseTest, Compact)
 // trivially homogeneous.
 TEST_F(DatabaseTest, Consolidate)
 {
-  // Insert serially. consolidate() can only consider loglets already handed to
-  // the compactor, and a per-thread write head is handed over only when it
-  // fills. insert_n() spreads its writes across every core, so no single head
-  // gets near 2 MiB and nothing reaches the compactable set at all. One writer
-  // fills one head and rolls it over.
+  // Insert serially, so the candidate set is populated by heads filling and
+  // rolling over normally rather than by the rollover consolidate() forces. See
+  // ConsolidateWriteHeads for the other path.
   insert_serial(kInsertions);
   check_integrity();
 
@@ -426,6 +425,116 @@ TEST_F(DatabaseTest, ConsolidateAllCold)
   insert_serial(kInsertions);
   check_integrity();
   db_->consolidate([](ItemHeader *) { return false; }, 0.0F);
+  check_integrity();
+}
+
+// A write head reaches the compactable set only when it fills, so writes spread
+// across every core leave one partly filled head per writing thread that
+// consolidation could never select -- and that is where the newest items are.
+// consolidate() rolls the heads over first, so a parallel insert is reachable.
+TEST_F(DatabaseTest, ConsolidateWriteHeads)
+{
+  insert_n(kInsertions);
+  check_integrity();
+
+  size_t moved = db_->consolidate([](ItemHeader *) { return true; }, 0.0F);
+  EXPECT_GT(moved, 0U) << "write heads were not reachable by consolidation";
+  check_integrity();
+}
+
+// The trigger path: no caller-supplied classifier and no victim count. The
+// database has to build its own is_hot from the sketch, bound the pass to the
+// configured budget, and stay unconfigured -- doing nothing -- until asked.
+TEST_F(DatabaseTest, ConsolidateIncremental)
+{
+  db_->enable_heat_tracking(16, 4);
+  insert_serial(kInsertions);
+
+  // Make a tenth of the keys hot by reading them repeatedly, through the same
+  // accessor a real caller above a cache would use.
+  size_t i = 0;
+  for (const auto &[key, value] : oracle_) {
+    if (i++ % 10 != 0)
+      continue;
+    for (int r = 0; r < 8; ++r)
+      db_->record_heat(std::as_bytes(std::span(key)));
+  }
+  check_integrity();
+
+  // Unconfigured, it must be a no-op: this runs at a quiescent point in someone
+  // else's system and must not spend CPU nobody asked for.
+  EXPECT_EQ(db_->consolidate_incremental(), 0U);
+  EXPECT_EQ(db_->consolidation_passes(), 0U);
+
+  // min_mixedness 0 here on purpose: this test wants each pass to relocate
+  // something so the budget and counters can be checked. A real repeating
+  // trigger needs the nonzero default -- see enable_auto_consolidation.
+  db_->enable_auto_consolidation(0.10, 2, 0.0F);
+  EXPECT_GT(db_->heat_threshold(0.10), 1);
+
+  // Each call relocates at most the budget, and repeated calls keep making
+  // progress -- which is what converging over successive block boundaries means.
+  size_t total = 0;
+  for (int pass = 0; pass < 3; ++pass) {
+    size_t moved = db_->consolidate_incremental();
+    EXPECT_LE(moved, 2U);
+    total += moved;
+    check_integrity();
+  }
+  EXPECT_GT(total, 0U);
+  EXPECT_EQ(db_->consolidation_passes(), 3U);
+  EXPECT_EQ(db_->consolidation_loglets(), total);
+}
+
+// The adaptive threshold has to come out of the sketch's own count
+// distribution: given a hot set of known size, asking for that fraction back
+// must return a count that separates it from the cold keys.
+TEST(HeatSketchTest, HotThreshold)
+{
+  constexpr size_t kCold = 1000;
+  constexpr size_t kHot = 100;
+  HeatSketch sketch(16, 4);
+
+  for (size_t i = 0; i < kCold; ++i)
+    sketch.touch(i);
+  for (size_t i = kCold; i < kCold + kHot; ++i)
+    for (int j = 0; j < 20; ++j)
+      sketch.touch(i);
+
+  uint8_t thresh = sketch.hot_threshold(static_cast<double>(kHot) /
+                                        static_cast<double>(kCold + kHot));
+  EXPECT_GT(thresh, 1);
+  EXPECT_GE(sketch.estimate(kCold + 50), thresh);
+  EXPECT_LT(sketch.estimate(50), thresh);
+
+  // Asking for the whole population must not exclude the single-access keys,
+  // and asking for none of it must not include the hottest.
+  EXPECT_EQ(sketch.hot_threshold(1.0), 1);
+  EXPECT_GT(sketch.hot_threshold(0.0), 20);
+
+  // An untouched sketch has no distribution to read; it must not claim one.
+  EXPECT_EQ(HeatSketch(16, 4).hot_threshold(0.1), 1);
+}
+
+// A bounded pass relocates at most max_victims loglets and leaves the rest for
+// the next one, which is what lets consolidation be interleaved with serving
+// instead of run as a barrier.
+TEST_F(DatabaseTest, ConsolidateBounded)
+{
+  insert_serial(kInsertions);
+  check_integrity();
+
+  auto is_hot = [](ItemHeader *item) {
+    return (item->get_key()[0] & std::byte{1}) != std::byte{0};
+  };
+
+  size_t moved = db_->consolidate(is_hot, 0.0F, 1);
+  EXPECT_EQ(moved, 1U);
+  check_integrity();
+
+  // The loglets the bounded pass did not reach are still candidates, including
+  // the two destinations it just filled.
+  EXPECT_GT(db_->consolidate(is_hot, 0.0F), 0U);
   check_integrity();
 }
 

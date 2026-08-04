@@ -30,6 +30,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
@@ -85,6 +86,22 @@ bool bench_consolidate = false;
 
 // Minimum payee access count for the oracle classifier to call an item hot.
 int bench_hot_hits = 2;
+
+// When positive, the sketch classifier derives its own threshold so that this
+// fraction of tracked keys is hot, instead of using bench_hot_hits. The right
+// value is the fast tier's share of the working set, which is a property of the
+// machine rather than of the workload.
+double bench_hot_fraction = 0.0;
+
+// Loglets one consolidation pass may relocate, 0 for no bound. Bounding the
+// pass is what makes it interleavable with serving rather than a barrier.
+size_t bench_max_victims = 0;
+
+// When positive, run a bounded consolidation pass at every block boundary,
+// relocating at most this many loglets, instead of one pass at the end. This is
+// the trigger policy under test: the layout is meant to converge over successive
+// closes rather than in one shot.
+size_t bench_auto_victims = 0;
 
 // Minimum Loglet::mixedness for consolidate() to reorganize a loglet. Higher
 // values touch fewer loglets, so this is the cost/benefit knob for the pass.
@@ -539,12 +556,29 @@ Benchmark::run()
   if (auto ret = db_.write_dbtip(tip); !ret)
     fail(ret.error());
 
+  if (bench_auto_victims > 0) {
+    double frac = bench_hot_fraction > 0.0 ? bench_hot_fraction : 0.20;
+    // Leave min_mixedness at the policy default unless -m was given: a
+    // repeating trigger needs it above zero or it re-consolidates its own
+    // output, and 0 is the right default only for a single pass.
+    if (bench_min_mixedness > 0.0)
+      db_.get_ramdb().enable_auto_consolidation(
+          frac, bench_auto_victims, static_cast<float>(bench_min_mixedness));
+    else
+      db_.get_ramdb().enable_auto_consolidation(frac, bench_auto_victims);
+  }
+
   // Each round replays every payment as a fresh block. Repeating is what
   // pressures the heap: one pass writes a bounded amount and never reaches
   // kLowMemoryRatio, so the compactor -- the thing that actually relocates
   // items, and therefore the thing that determines steady-state layout --
   // never runs.
   for (int round = 0; round < bench_rounds; ++round) {
+    // Time each block. A consolidation pass triggered between ledger closes can
+    // only use the gap between blocks, and that gap is the close interval minus
+    // this -- so this is one of the two numbers that decides how much work a
+    // quiescence trigger can fit.
+    ElapsedTimer block_timer;
     PerThreadARC<BlockTX> block(
         db_, cost_model_, background_commit_worker, 1,
         BlockExecutionMode::kBlockExecutionModeProposal);
@@ -604,6 +638,24 @@ Benchmark::run()
       fail(ret.error());
 
     CHECK(block.initiate_shutdown());
+    double block_seconds = block_timer.elapsed();
+
+    // The quiescent point. The block is closed, committed and shut down, and no
+    // further writes happen until the next round opens a block -- which is the
+    // precondition consolidate_incremental() needs, held by this thread rather
+    // than promised to a background one.
+    double consolidate_seconds = 0.0;
+    size_t moved = 0;
+    if (bench_auto_victims > 0) {
+      ElapsedTimer t;
+      moved = db_.get_ramdb().consolidate_incremental();
+      consolidate_seconds = t.elapsed();
+    }
+
+    std::println("block,{},{},{:.4f},{},{:.4f}", round, ops_.size(),
+                 block_seconds, moved, consolidate_seconds);
+    if (bench_auto_victims > 0)
+      report_layout(std::format("auto{}", round));
   }
 }
 
@@ -622,9 +674,17 @@ Benchmark::consolidate()
     return it != payee_hits_.end() &&
            it->second >= static_cast<uint32_t>(bench_hot_hits);
   };
-  auto sketch_hot = [this](std::span<const std::byte> key) {
-    return db_.get_ramdb().heat_estimate(key) >=
-           static_cast<uint8_t>(bench_hot_hits);
+  // --hot-fraction lets the sketch choose its own threshold from the count
+  // distribution it already holds, so the hot set is sized to the fast tier
+  // instead of to an assumed access count.
+  auto sketch_thresh = static_cast<uint8_t>(bench_hot_hits);
+  if (bench_hot_fraction > 0.0) {
+    sketch_thresh = db_.get_ramdb().heat_threshold(bench_hot_fraction);
+    info("adaptive classifier: >= {} accesses for the hottest {:.1f}% of keys",
+         sketch_thresh, bench_hot_fraction * 100.0);
+  }
+  auto sketch_hot = [this, sketch_thresh](std::span<const std::byte> key) {
+    return db_.get_ramdb().heat_estimate(key) >= sketch_thresh;
   };
 
   // Score the sketch against the oracle over the payees it can be scored on:
@@ -655,9 +715,15 @@ Benchmark::consolidate()
     std::span<const std::byte> key = item->get_key();
     return bench_sketch_classifier ? sketch_hot(key) : oracle_hot(key);
   };
+  ElapsedTimer timer;
   size_t moved = db_.get_ramdb().consolidate(
-      is_hot, static_cast<float>(bench_min_mixedness));
-  std::println("consolidated,{},{:.2f}", moved, bench_min_mixedness);
+      is_hot, static_cast<float>(bench_min_mixedness), bench_max_victims);
+  double seconds = timer.elapsed();
+  // Seconds is the other half of the quiescence-budget question: loglets per
+  // second here, against the idle gap between ledger closes, is how many
+  // victims a triggered pass can afford.
+  std::println("consolidated,{},{:.2f},{},{:.4f}", moved, bench_min_mixedness,
+               sketch_thresh, seconds);
 }
 
 void
@@ -1307,6 +1373,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "consolidate (default: 0.0 = all)");
     std::println("  -K, --sketch           classify with the read-path heat "
                  "sketch instead of the oracle");
+    std::println("  -F, --hot-fraction <F> size the hot set to this share of "
+                 "tracked keys instead of --hot-hits");
+    std::println("  -V, --max-victims <N>  bound the loglets one consolidation "
+                 "pass relocates (default: 0 = all)");
+    std::println("  -A, --auto-consolidate <N>  relocate up to N loglets at "
+                 "every block boundary (trigger policy)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1343,6 +1415,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"mixedness", required_argument, nullptr, 'm'},
       {"sketch",    no_argument,       nullptr, 'K'},
       {"width",     required_argument, nullptr, 'W'},
+      {"hot-fraction", required_argument, nullptr, 'F'},
+      {"max-victims",  required_argument, nullptr, 'V'},
+      {"auto-consolidate", required_argument, nullptr, 'A'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1358,7 +1433,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:F:V:A:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1405,6 +1480,18 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'W':
       hogd::bench_sketch_width = std::stoi(optarg);
+      hogd::bench_sketch_classifier = true;
+      break;
+    case 'F':
+      hogd::bench_hot_fraction = std::stod(optarg);
+      hogd::bench_sketch_classifier = true;
+      break;
+    case 'V':
+      hogd::bench_max_victims = std::stoul(optarg, nullptr, 0);
+      break;
+    case 'A':
+      hogd::bench_auto_victims = std::stoul(optarg, nullptr, 0);
+      // The trigger classifies with the sketch, so it needs the sketch fed.
       hogd::bench_sketch_classifier = true;
       break;
     case 'h':

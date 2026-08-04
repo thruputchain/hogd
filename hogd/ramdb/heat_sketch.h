@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -73,6 +74,39 @@ public:
       best = std::min(best, counters_[slot(hash, r)].load(
                                 std::memory_order_relaxed));
     return best;
+  }
+
+  // hot_threshold returns the access count at which roughly the hottest
+  // hot_fraction of tracked keys are classified hot, so a caller can size its
+  // hot set to its fast tier instead of guessing a raw count.
+  //
+  // The table is its own count distribution: every key occupies one counter per
+  // row, so a histogram of the non-zero counters is a histogram of per-key
+  // access counts. Collisions merge keys and inflate a counter, which biases the
+  // threshold up and therefore selects fewer items, never more.
+  //
+  // The result is the lowest count whose hot set still reaches hot_fraction, so
+  // the selection errs over-inclusive by at most one histogram bin. That is the
+  // right direction: a hot set that is slightly too large still concentrates
+  // accesses, while one that is too small leaves hot items in the slow tier.
+  uint8_t hot_threshold(double hot_fraction) const
+  {
+    std::array<size_t, static_cast<size_t>(kMaxCount) + 1> hist{};
+    for (const std::atomic<uint8_t> &c : counters_)
+      ++hist[c.load(std::memory_order_relaxed)];
+
+    size_t tracked = counters_.size() - hist[0];
+    if (tracked == 0)
+      return 1;
+
+    auto want = static_cast<size_t>(hot_fraction * static_cast<double>(tracked));
+    size_t hot = 0;
+    for (size_t t = kMaxCount; t > 1; --t) {
+      hot += hist[t];
+      if (hot >= want)
+        return static_cast<uint8_t>(t);
+    }
+    return 1;
   }
 
   // halve ages every counter. Without it the sketch records "was ever hot"

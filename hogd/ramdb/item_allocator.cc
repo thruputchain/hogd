@@ -6,6 +6,7 @@
 #include <exception>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -24,25 +25,19 @@ namespace hogd {
 
 namespace {
 
-// The per-thread relocation destinations, one per temperature.
+// The per-thread relocation destinations, used by compaction on the WorkerPool.
 //
-// These deliberately outlive a single compact_one call so a partly filled
-// destination carries over. That is safe when the pass runs on the WorkerPool,
-// because Database destroys pool_ before loglet_allocator_, so a worker's
-// destinations are released while the allocator is still alive. It is *not* safe
-// for a pass running on an arbitrary caller thread: those thread_locals are
-// destroyed at thread exit, potentially long after the allocator, and freeing a
-// loglet through a dangling allocator aborts inside the allocator's mutex.
-// Any such pass must call flush_compact_dests() before returning.
-struct CompactDests {
-  UniqueLoglet cold;
-  UniqueLoglet hot;
-};
-
-CompactDests &
+// Safe there because Database destroys pool_ before loglet_allocator_, so a
+// worker's destinations are released while the loglet allocator is still alive.
+// It is *not* safe for a pass on an arbitrary caller thread: those thread_locals
+// are destroyed at thread exit, potentially long after the allocator, and
+// freeing a loglet through a dangling allocator aborts inside its mutex. That
+// was BUG-3, and it is why consolidation owns its destinations in the
+// ItemAllocator instead of borrowing this.
+detail::CompactDests &
 compact_dests()
 {
-  static thread_local CompactDests dests;
+  static thread_local detail::CompactDests dests;
   return dests;
 }
 
@@ -86,6 +81,15 @@ ItemHead::roll_over(ItemAllocator &allocator)
   if (head_)
     allocator_->give_to_compactor(std::move(head_));
   head_ = make_unique_loglet(allocator_->allocator_, LogletMode::kMemoryItems);
+}
+
+inline void
+ItemHead::release(ItemAllocator &allocator)
+{
+  if (!head_)
+    return;
+  allocator_ = &allocator;
+  allocator_->give_to_compactor(std::move(head_));
 }
 
 } // namespace detail
@@ -210,66 +214,117 @@ ItemAllocator::compact(float utilization_thresh)
   return free_bytes;
 }
 
+void
+ItemAllocator::flush_consolidation_dests()
+{
+  if (consolidate_dests_.cold)
+    give_to_compactor(std::move(consolidate_dests_.cold));
+  if (consolidate_dests_.hot)
+    give_to_compactor(std::move(consolidate_dests_.hot));
+}
+
+void
+ItemAllocator::roll_over_heads()
+{
+  std::unique_lock ul = head_.lock_threads();
+  head_.for_each(ul, [this](detail::ItemHead &h) { h.release(*this); });
+}
+
 size_t
 ItemAllocator::consolidate(const std::function<bool(ItemHeader *)> &is_hot,
-                           float min_mixedness)
+                           float min_mixedness, size_t max_victims)
 {
   ElapsedTimer timer;
 
-  // Claim victims by mixedness. Measuring hotness needs to happen while the
-  // loglet is held, so take everything under the lock first and measure after,
-  // returning the homogeneous ones. This is the opposite selection rule from
-  // compact(): fragmentation is irrelevant here, and a fully compacted loglet
-  // is a perfectly good victim.
-  std::vector<UniqueLoglet> claimed;
+  // Examine each loglet that was compactable when the pass started, once. The
+  // budget is fixed up front because non-victims go back on the end of the
+  // list: without it a pass would keep meeting the loglets it just returned.
+  size_t budget = 0;
   {
     std::scoped_lock guard(lock_);
-    claimed.swap(compactable_loglets_);
+    budget = compactable_loglets_.size();
   }
 
-  std::vector<UniqueLoglet> victims;
-  {
-    std::vector<UniqueLoglet> keep;
-    for (UniqueLoglet &ll : claimed) {
+  // Claim candidates a batch at a time rather than swapping the whole list out.
+  // Measuring hotness walks every item header, which is far too slow to do
+  // under lock_, but claiming everything leaves compactable_loglets_ empty for
+  // the duration -- a concurrent compact() would then find nothing, reclaim
+  // nothing, and background_worker would escalate. A batch bounds how much is
+  // invisible at once.
+  static constexpr size_t kClaimBatch = 32;
+
+  CompactionStats stats{};
+  size_t count = 0;
+  size_t examined = 0;
+  std::vector<UniqueLoglet> batch;
+  batch.reserve(kClaimBatch);
+
+  while (examined < budget && (max_victims == 0 || count < max_victims)) {
+    batch.clear();
+    {
+      std::scoped_lock guard(lock_);
+      size_t n = std::min(kClaimBatch, compactable_loglets_.size());
+      auto first = compactable_loglets_.begin();
+      auto last = first + static_cast<ptrdiff_t>(n);
+      batch.insert(batch.end(), std::make_move_iterator(first),
+                   std::make_move_iterator(last));
+      compactable_loglets_.erase(first, last);
+    }
+    if (batch.empty())
+      break;
+    examined += batch.size();
+
+    // Select by mixedness. This is the opposite rule from compact():
+    // fragmentation is irrelevant here, and a fully compacted loglet is a
+    // perfectly good victim.
+    //
+    // Relocation runs on this thread rather than the pool: consolidation is a
+    // background activity with no memory-pressure deadline behind it, and
+    // serial relocation keeps the two per-thread destinations from multiplying
+    // across workers and draining the compaction reserve.
+    for (UniqueLoglet &ll : batch) {
       if (!ll)
         continue;
+      // A loglet with nothing live in it has no layout to improve, and at
+      // min_mixedness 0 it would otherwise be selected and counted. Rolling the
+      // write heads over produces one of these per idle thread, which is enough
+      // to dominate the victim count. Reclaiming them is compact()'s job.
+      if (ll->live_size() == 0) {
+        give_to_compactor(std::move(ll));
+        continue;
+      }
+      // Check the budget before measuring rather than after. measure_hotness()
+      // walks every item header in the loglet, so it is the dominant cost of
+      // examining a candidate -- spending it on loglets this pass has already
+      // decided it cannot relocate turns a bounded pass into a full scan. At a
+      // 32-loglet batch that was most of the cost of a one-victim pass.
+      if (max_victims != 0 && count >= max_victims) {
+        give_to_compactor(std::move(ll));
+        continue;
+      }
       ll->measure_hotness(is_hot);
-      if (ll->mixedness() >= min_mixedness)
-        victims.emplace_back(std::move(ll));
-      else
-        keep.emplace_back(std::move(ll));
+      if (ll->mixedness() >= min_mixedness) {
+        stats += compact_one(std::move(ll), &is_hot, &consolidate_dests_);
+        ++count;
+      }
+      else {
+        give_to_compactor(std::move(ll));
+      }
     }
-    std::scoped_lock guard(lock_);
-    for (UniqueLoglet &ll : keep)
-      compactable_loglets_.emplace_back(std::move(ll));
   }
 
-  if (victims.empty()) {
+  if (count == 0) {
     info("consolidate: no loglets above mixedness {:.2f}", min_mixedness);
     return 0;
   }
 
-  // Relocate each victim's items into temperature-homogeneous destinations.
-  // Runs on this thread rather than the pool: consolidation is a background
-  // activity with no memory-pressure deadline behind it, and serial relocation
-  // keeps the two per-thread destinations from multiplying across workers and
-  // draining the compaction reserve.
-  CompactionStats stats{};
-  size_t count = victims.size();
-  for (UniqueLoglet &ll : victims)
-    stats += compact_one(std::move(ll), &is_hot);
-
-  // Hand both destinations back before returning. Required for correctness:
-  // this pass ran on the caller's thread, whose thread_locals outlive the
-  // allocator, so leaving a loglet in one would free it through a dangling
-  // pointer at thread exit. It also stops a partly filled destination from
-  // being stranded where nothing can reclaim it.
-  CompactDests &dests = compact_dests();
-  if (dests.cold)
-    give_to_compactor(std::move(dests.cold));
-  if (dests.hot)
-    give_to_compactor(std::move(dests.hot));
-
+  // Deliberately does *not* flush consolidate_dests_. A partly filled hot
+  // destination is what the next pass keeps packing into, and flushing it here
+  // is what made a sequence of small passes useless: each pass would start a
+  // fresh, nearly empty hot loglet, so 20 passes of 2 loglets spread the hot
+  // items over 20 sparse loglets where one pass of 40 packed them into a few.
+  // Measured: 40 loglets relocated that way reached hit 0.7624, against 0.9047
+  // for 20 in a single pass. See flush_consolidation_dests() for ending a run.
   auto seconds = timer.elapsed();
   info("consolidated {} loglets in {:.3f} seconds ({} items, {} live)", count,
        seconds, stats.items, stats.live_items);
@@ -278,8 +333,12 @@ ItemAllocator::consolidate(const std::function<bool(ItemHeader *)> &is_hot,
 
 detail::CompactionStats
 ItemAllocator::compact_one(UniqueLoglet &&src,
-                           const std::function<bool(ItemHeader *)> *is_hot)
+                           const std::function<bool(ItemHeader *)> *is_hot,
+                           detail::CompactDests *dests)
 {
+  if (dests == nullptr)
+    dests = std::addressof(compact_dests());
+
   CompactionStats stats{};
   size_t bytes_moved = 0;
   // set when the reserved pool runs dry mid-loglet, which leaves live items
@@ -320,7 +379,7 @@ ItemAllocator::compact_one(UniqueLoglet &&src,
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
         src_item->get_key(),
-        [this, alloc_loglet, src_item, is_hot, &bytes_moved, &stats,
+        [this, alloc_loglet, src_item, is_hot, dests, &bytes_moved, &stats,
          &exhausted](ItemHeader **hptr, size_t /* hash */) mutable {
           // modify_locked matched by key, not by pointer. A concurrent
           // different-sized put or remove+put may have already unlinked
@@ -333,18 +392,12 @@ ItemAllocator::compact_one(UniqueLoglet &&src,
           if (*hptr != src_item)
             return;
 
-          // Per-thread destinations. Keeping two of them, picked by
-          // temperature, is the entire mechanism: the relocation contract is
-          // unchanged and only the choice of which loglet receives the clone
-          // differs, so a freshly written loglet ends up homogeneous.
-          //
-          // These live as long as the thread, exactly as the single
-          // destination always has, and each is handed to the compactor when
-          // full.
-          CompactDests &dests = compact_dests();
+          // Pick the destination by temperature. Each carries over between
+          // calls and is handed to the compactor when it fills, exactly as the
+          // single destination always did.
           UniqueLoglet &dst = (is_hot != nullptr && (*is_hot)(src_item))
-                                  ? dests.hot
-                                  : dests.cold;
+                                  ? dests->hot
+                                  : dests->cold;
 
           // initialize the first use of the per-thread loglet. Leaving the
           // item where it is costs only a deferred relocation; dereferencing
