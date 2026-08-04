@@ -419,5 +419,59 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
   EXPECT_EQ(native_record, wasm_record);
 }
 
+TEST_F(DefaultWalletParityTest, EmptyCallList)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  expect_parity(wallet_calls_t{});
+}
+
+TEST_F(DefaultWalletParityTest, TooManyCalls)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  for (int i = 0; i < 17; ++i) {
+    calls.push_back(echo_call(4));
+  }
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, MaxCallsSucceeds)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  for (int i = 0; i < 16; ++i) {
+    // echo returns 11 bytes per call (CXS Vec<u8>: 1-byte prefix + 10 payload);
+    // item_len = 1 + 11 = 12; 16 calls: 1 + 16*12 = 193 bytes < kMaxReturnDataBytes
+    calls.push_back(echo_call(10));
+  }
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(1));
+  calls.push_back(echo_call(30));
+  calls.push_back(echo_call(0)); // zero-length echo: item is prefix-only
+
+  auto native =
+      run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
+  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
+  EXPECT_EQ(native, wasm);
+
+  // Absolute check against the reference encoding: success (root_success=1,
+  // commit=ExecResultOK) and the returned buffer decodes as the CXS encoding
+  // of Vec<WalletBytes> where item i is the callee's literal return bytes
+  // (echo's own CXS-encoded Vec<u8>: prefix || payload).
+  ASSERT_GE(native.size(), 2U);
+  EXPECT_EQ(native[0], 1);
+  EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
