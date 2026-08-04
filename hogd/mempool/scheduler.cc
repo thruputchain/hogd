@@ -124,7 +124,7 @@ Scheduler::write_all_average_hog_ages_to_db()
       ages += per_thread_ages;
     });
   }
-  CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
+  CHECK_EQ(co_await sharded_db_->write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
   co_return;
 }
@@ -268,8 +268,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
   ReadAverageHogAgesResult ret;
   ret.found.reserve(accounts.size());
 
-  HogAgeResults results =
-      co_await db_sched_client_->dbsched_get_hog_ages(accounts);
+  HogAgeResults results = co_await sharded_db_->read_hog_ages(accounts);
   CHECK_EQ(results.size(), accounts.size());
   for (size_t i = 0; i < results.size(); i++) {
     const HogAgeResult &res = results[i];
@@ -769,6 +768,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     CHECK(missing.empty());
   }
 
+  // Genesis is loaded shard-owner-only, so each block-0 delta arrives from one
+  // shard -- no dedup needed; block 0 takes the same path as every other block.
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;

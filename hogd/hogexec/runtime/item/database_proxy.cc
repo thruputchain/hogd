@@ -5,9 +5,12 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -19,11 +22,14 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
+#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
+#include "hogd/hogexec/runtime/item/shard_fanout.h" // pop_from_shards
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -146,38 +152,79 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
+size_t
+DatabaseProxy::look_up_shard(AddressAndKey const &key) const
+{
+  // Canonical key->shard routing lives in the shared shard-routing module.
+  return shard_of_key(key, clients_.size());
+}
+
+DatabaseProxy::client_t &
+DatabaseProxy::client_for(AddressAndKey const &key)
+{
+  return clients_[look_up_shard(key)];
+}
+
+DatabaseProxy::client_t &
+DatabaseProxy::client_for(ContractAddress const &addr)
+{
+  return clients_[shard_of_address(addr, clients_.size())];
+}
+
+DatabaseProxy::client_t &
+DatabaseProxy::client_for()
+{
+  // Primary shard: global/keyless requests (db tip, viewing snapshots) and
+  // content-addressed lookups (contracts) route here for now.
+  return clients_[kDefaultShard];
+}
+
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
-  : client_([&] -> client_t {
-      if (std::holds_alternative<LocalMockDB>(db_identifier)) {
-        auto mock_db = std::get<LocalMockDB>(db_identifier);
-        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            x23::HostPort{"localhost",
-                          x23::uformat("{}", mock_db.read_port_number_)},
-            false, *x23::single_bucket_map);
-        // Uses just one client for local mock testing.
-        // This avoids fd ulimit issues in sdk tests
+{
+  if (std::holds_alternative<LocalMockDB>(db_identifier)) {
+    auto mock_db = std::get<LocalMockDB>(db_identifier);
+    // A single client for local mock testing. Using one client avoids fd ulimit
+    // issues in sdk tests.
+    clients_.push_back(make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
+        x23::HostPort{"localhost",
+                      x23::uformat("{}", mock_db.read_port_number_)},
+        false, *x23::single_bucket_map));
+    return;
+  }
+  if (std::holds_alternative<ShardedDB>(db_identifier)) {
+    auto sharded_db = std::get<ShardedDB>(db_identifier);
+    assert(!sharded_db.shards_.empty());
+    // Bind clients by declared shard_id (fail-stop on a bad set, shared with
+    // the mempool) so client_for's routing matches how the mempool wrote.
+    auto order_result = order_shards_by_id(sharded_db.shards_);
+    if (!order_result) {
+      throw std::runtime_error(
+          std::format("db shard identity invalid: {}", order_result.error()));
+    }
+    std::vector<size_t> const &order = *order_result;
+    clients_.reserve(order.size());
+    // order is indexed by shard_id, so iterating it in order pushes clients in
+    // shard_id order: clients_[shard_id] ends up as that shard's client.
+    for (size_t card_index : order) {
+      ShardCard const &shard = sharded_db.shards_[card_index];
+      x23::HostPort hostport;
+      if (!hostport.parse(shard.address_for_exec)) {
+        throw std::runtime_error("Failed to parse database shard address");
       }
-      if (std::holds_alternative<ShardedDB>(db_identifier)) {
-        auto sharded_db = std::get<ShardedDB>(db_identifier);
-        assert(!sharded_db.shards_.empty());
-        if (sharded_db.shards_.size() > 1) {
-          panic("ShardedDB with more than one shard is not yet supported");
-        }
-        x23::HostPort hostport;
-        if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
-          panic("Failed to parse database shard address");
-        }
-        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                    false);
-      }
-      panic("unimplemented");
-    }())
-{}
+      clients_.push_back(
+          make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
+                                                               false));
+    }
+    return;
+  }
+  throw std::runtime_error("unimplemented");
+}
 
 SystemStatus<std::optional<WireStorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
-  auto res = client_.get_snapshot_item(block_id, addrkey);
+  auto &client = client_for(addrkey);
+  auto res = client.get_snapshot_item(block_id, addrkey);
   return to_system_error_code<std::nullopt>(
       res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
         return std::make_optional<WireStorageItem>(std::move(x));
@@ -187,7 +234,8 @@ DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 SystemStatus<std::optional<Contract>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  auto res = client_.get_contract(block_id, contract_hash);
+  auto &client = client_for();
+  auto res = client.get_contract(block_id, contract_hash);
   return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
     return std::make_optional<Contract>(std::move(x));
   });
@@ -196,7 +244,11 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  auto res = client_.get_deployment(block_id, addr);
+  // Deployment metadata is address-keyed, so read it from the owner shard, not
+  // the primary -- else a contract whose address isn't on shard 0 is
+  // uninvokable.
+  auto &client = client_for(addr);
+  auto res = client.get_deployment(block_id, addr);
   return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
     return std::make_optional<DeployedContractHash>(std::move(x));
   });
@@ -207,8 +259,9 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey const &addrkey,
                                                 uint64_t search_start_number)
 {
-  auto res = client_.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                      search_start_number);
+  auto &client = client_for(addrkey);
+  auto res = client.get_next_retrocausal_queue_block(block_id, addrkey,
+                                                     search_start_number);
   return to_system_error_code<std::nullopt>(res, [](RetrocausalQueueBlock &&x) {
     return std::make_optional<RetrocausalQueueBlock>(std::move(x));
   });
@@ -218,8 +271,9 @@ SystemStatus<std::optional<QueueEntry>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
+  auto &client = client_for(addrkey);
   auto res =
-      client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
+      client.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
   return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
@@ -229,37 +283,57 @@ SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
-  try {
-    auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
-    return to_system_error_code<VoidMarker{}>(res, [] {});
-  } catch (std::exception const &e) {
-    // commit_transaction runs on a detached executor worker; any escaping
-    // exception terminates hogexec. Contain every failure here and return a
-    // structured Unrecoverable result instead. This covers:
-    //   - x23::XdrBadInput   -- client-side, oversized new contract batch
-    //   - x23::XdrCallFailed -- server-side SYSTEM_ERR (e.g. HogDB's contract
-    //                           rehash throwing while re-serializing a
-    //                           Contract)
-    //   - std::bad_alloc     -- local OOM, e.g. while serializing the request
-    // The diagnostic itself allocates while formatting and can throw again
-    // under the same memory pressure, so guard it and fall back to the
-    // no-allocation reporter before returning (cf. syscall_invoke.cc, #2719).
+  // Fan out commit to every shard (2PC commit phase). New contracts are
+  // content-addressed (primary shard); others commit only their own deltas.
+  static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+  static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+  static const BorrowedContractBatch kEmptyBatch(kEmptyHashes, kEmptyContracts);
+  // Visit ALL shards and return the first error: stopping early would leave
+  // some shards committed and others only prepared -- abort can't undo the
+  // committed ones, so they'd diverge permanently. The try/catch is per-shard
+  // so a throw on one shard still commits the rest (this runs on a detached
+  // executor worker, where an escaping exception terminates hogexec -- contain
+  // XdrBadInput / XdrCallFailed / bad_alloc here).
+  SystemStatus<void> first_error{};
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
     try {
-      error("Unrecoverable: commit_transaction failed "
-            "(transport/serialization/allocation failure): {}",
-            e.what());
-    } catch (...) {
-      report_dropped_log("commit_transaction failure diagnostic");
+      auto res = clients_[shard].commit_transaction(block_id, tx_id,
+                                                    shard == 0 ? new_contracts
+                                                               : kEmptyBatch);
+      auto status = to_system_error_code<VoidMarker{}>(res, [] {});
+      if (!status.has_value() && first_error.has_value()) {
+        first_error = status;
+      }
+    } catch (std::exception const &e) {
+      // The diagnostic can throw again under memory pressure, so guard it.
+      try {
+        error("Unrecoverable: commit_transaction failed on shard {}: {}", shard,
+              e.what());
+      } catch (...) {
+        report_dropped_log("commit_transaction failure diagnostic");
+      }
+      if (first_error.has_value()) {
+        first_error = SystemError{SystemErrorCode::Unrecoverable};
+      }
     }
-    return SystemError{SystemErrorCode::Unrecoverable};
   }
+  return first_error;
 }
 
 SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  auto res = client_.abort_transaction(block_id, tx_id);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  // Visit ALL shards and return the first error: stopping early would leak the
+  // open transaction on shards past the failing one.
+  SystemStatus<void> first_error{};
+  for (auto &client : clients_) {
+    auto res = client.abort_transaction(block_id, tx_id);
+    auto status = to_system_error_code<VoidMarker{}>(res, [] {});
+    if (!status.has_value() && first_error.has_value()) {
+      first_error = status;
+    }
+  }
+  return first_error;
 }
 
 // A transaction's r/w footprint must never encode to a StorageDeltaBatch push
@@ -438,23 +512,48 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    auto res =
-        client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-    switch (res.error()) {
-    case RPCError::kRPCNone:
-      return true;
-    case RPCError::kRPCStorageWriteFailed:
-      if (conflict_out != nullptr) {
-        *conflict_out = std::move(res.conflict());
+    // Split the batch so each shard receives only the deltas for the keys it
+    // owns, via the shared cross-shard batch core. Every shard gets a
+    // (possibly empty) subtransaction so all shards' savepoint stacks stay
+    // aligned for pop_subtransactions. This is the prepare phase of the
+    // cross-shard 2PC.
+    auto split = split_by_shard(delta_batch, clients_.size(),
+                                [](auto const &delta, size_t n) {
+                                  return shard_of_key(delta.addrkey, n);
+                                });
+    for (size_t shard = 0; shard < clients_.size(); ++shard) {
+      auto res =
+          clients_[shard].try_push_new_subtransaction(block_id, tx_id,
+                                                      split.shard_view(shard));
+      switch (res.error()) {
+      case RPCError::kRPCNone:
+        break;
+      case RPCError::kRPCStorageWriteFailed:
+      {
+        if (conflict_out != nullptr) {
+          *conflict_out = std::move(res.conflict());
+        }
+        // A failed push must leave every shard at its start depth (so `false`
+        // means "nothing pushed"). The conflicting shard already rolled itself
+        // back; pop the subtransaction each earlier shard accepted. pop_from_
+        // shards visits ALL of them even if one pop fails, keeping the stacks
+        // aligned; any failure here is unrecoverable.
+        RPCError undo_err = pop_from_shards(std::span(clients_).first(shard),
+                                            block_id, tx_id, /*count=*/1);
+        if (undo_err != RPCError::kRPCNone) {
+          return SystemError{SystemErrorCode::Unrecoverable};
+        }
+        return false;
       }
-      return false;
-    case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::Abandon};
-    default:
-      error("Unrecoverable: Received unhandled error type from RPC: {}",
-            res.error());
-      return SystemError{SystemErrorCode::Unrecoverable};
+      case RPCError::kRPCBadBlockID:
+        return SystemError{SystemErrorCode::Abandon};
+      default:
+        error("Unrecoverable: Received unhandled error type from RPC: {}",
+              res.error());
+        return SystemError{SystemErrorCode::Unrecoverable};
+      }
     }
+    return SystemStatus<bool>{true};
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
     // worker, so contain every failure -- XdrBadInput (oversized delta batch),
@@ -477,14 +576,18 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  auto res = client_.pop_subtransactions(block_id, tx_id, count);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  // Pop `count` from every shard's (aligned) savepoint stack. pop_from_shards
+  // visits ALL shards and returns the first error: stopping early would desync
+  // the stacks.
+  RPCError err = pop_from_shards(std::span(clients_), block_id, tx_id, count);
+  return to_system_error_code<VoidMarker{}>(err, [] {});
 }
 
 SystemStatus<DbTip>
 DatabaseProxy::get_db_tip(BlockID block_id)
 {
-  auto res = client_.get_db_tip(block_id);
+  auto &client = client_for();
+  auto res = client.get_db_tip(block_id);
   return to_system_error_code<NotFoundIsUnrecoverableError{}>(
       res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
         if (x.id == block_id) {
@@ -500,7 +603,14 @@ DatabaseProxy::get_db_tip(BlockID block_id)
 SystemStatus<ViewingSnapshot>
 DatabaseProxy::open_viewing_snapshot()
 {
-  auto res = client_.open_viewing_snapshot();
+  // TODO(sharding): opens on the primary only, but snapshot-scoped reads route
+  // by address to the owner shard, which never opened this snapshot (each shard
+  // mints its own id) -- so with >1 shard, non-primary accounts are unreadable
+  // via the view gateway. Latent (read path unexercised, single-shard fine).
+  // Fix: open on every shard, thread one id per shard through ViewState/reads,
+  // and fan out close.
+  auto &client = client_for();
+  auto res = client.open_viewing_snapshot();
   return to_system_error_code<NotFoundIsUnrecoverableError{}>(
       res,
       [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
@@ -509,7 +619,10 @@ DatabaseProxy::open_viewing_snapshot()
 SystemStatus<void>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
-  auto res = client_.close_viewing_snapshot(block_id);
+  // TODO(sharding): primary-shard only; must fan out to every shard once
+  // viewing snapshots are sharded (see open_viewing_snapshot).
+  auto &client = client_for();
+  auto res = client.close_viewing_snapshot(block_id);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 

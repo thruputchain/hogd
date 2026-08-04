@@ -330,7 +330,23 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           // case though.
           ParallelBatch response;
           co_await t_to_parallel_batch(*txs, response);
-          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+          try {
+            co_await coord.coord_client_->coordscheduler_notify_vetted(
+                response);
+          } catch (const x23::XdrException &e) {
+            // A closed/failed coordinator connection resolves this in-flight
+            // call with an empty reply, so deserializing it throws
+            // [x23::XdrBadInput]. Mirror
+            // [AuthChangeSubscriptionManager::publish_auth_changes]: log and
+            // drop the notification rather than let the exception escape this
+            // detached coroutine and [terminate()] the whole mempool.
+            error("coordscheduler_notify_vetted failed: {}. Dropping vetted-tx "
+                  "notification.",
+                  e.what());
+          }
+          // [fetch_sub] must run on both the success and failure paths, else a
+          // failed notify would leak [pending_detached_coroutines_] and hang
+          // the destructor drain in [rpc_from_coord.h].
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
         }(*this, txs);
@@ -491,7 +507,7 @@ x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
-  co_return co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
+  co_return co_await sharded_db_sched_client_->create_snapshot(prev_block_id,
                                                                block_id, mode);
 }
 
@@ -504,7 +520,7 @@ MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
-  co_return co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
+  co_return co_await sharded_db_sched_client_->abandon_snapshot(block_id);
 }
 
 x23::Async<RPCError>
@@ -516,10 +532,10 @@ MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
-  co_return co_await db_sched_client_->dbsched_close_snapshot(block_id);
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
+  co_return co_await sharded_db_sched_client_->close_snapshot(block_id);
 }
 
 x23::Async<RPCError>
@@ -539,7 +555,7 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  co_return co_await sharded_db_sched_client_->commit_snapshot(block_id, value);
 }
 
 x23::Async<void>

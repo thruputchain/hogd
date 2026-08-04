@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/mempool/sharded_db_sched.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "transaction.hh"
@@ -27,9 +28,8 @@ namespace hogd {
 class Scheduler {
 public:
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<db_sched_client_t> db_sched_client)
-    : current_block_(current_block),
-      db_sched_client_(std::move(db_sched_client))
+            std::shared_ptr<ShardedDbSched> sharded_db)
+    : current_block_(current_block), sharded_db_(std::move(sharded_db))
   {}
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
@@ -174,6 +174,33 @@ public:
   x23::CoroLock pending_hog_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
+  // Called once per shard per committed block; returns true only when the LAST
+  // shard reports `block`, so the caller advances [transfer_finished_] only
+  // once all shards' block-N deltas are applied. Shards emit blocks in commit
+  // order, so heights complete in order. Serialized by scheduler_lock_.
+  bool record_shard_transfer_finished(BlockHeight block)
+  {
+    size_t const shards = sharded_db_->shard_count();
+    uint32_t const seen = ++transfer_reports_[block];
+    // A shard reports each block at most once; exceeding shard_count is a bug.
+    CHECK_LE(static_cast<size_t>(seen), shards);
+    if (static_cast<size_t>(seen) < shards) {
+      return false;
+    }
+    transfer_reports_.erase(block);
+    return true;
+  }
+
+  // Barrier raised once genesis has loaded on every db shard; [handle_transfer]
+  // waits on it before reading hog ages, since the first shard's block-0 deltas
+  // route to accounts on shards that have not run genesis yet.
+  x23::CoroFutex<bool> all_shards_genesis_ready_{false};
+
+  // One-way latch set (with [all_shards_genesis_ready_]) if the genesis fan-out
+  // fails on a shard: [handle_transfer] then drops the transfer instead of
+  // reading a half-initialized db or hanging on the barrier. Aborts the run.
+  std::atomic<bool> genesis_load_failed_{false};
+
   x23::CoroLock global_lock_;
 
 private:
@@ -314,10 +341,13 @@ private:
   std::atomic<ssize_t> size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  // The RPC client that the scheduler uses to talk to the database. The
-  // scheduler uses this to read/write the number of hogs and hog ages for
-  // accounts.
-  std::shared_ptr<db_sched_client_t> db_sched_client_;
+  // Reads/writes hog ages, routed to the shard that owns each account. See
+  // ShardedDbSched.
+  std::shared_ptr<ShardedDbSched> sharded_db_;
+
+  // height -> shards that have reported it, erased once complete. See
+  // record_shard_transfer_finished.
+  std::unordered_map<BlockHeight, uint32_t> transfer_reports_;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };

@@ -24,6 +24,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -326,6 +327,9 @@ private:
     std::string auth_address = make_address(kAddress, db_auth_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
+                                .shard_id = 0,
+                                .total_shards = 1,
+                                .shard_function_id = kShardFunctionId,
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str(),
                                 .address_for_auth = auth_address.c_str()})();

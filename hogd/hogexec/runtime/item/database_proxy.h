@@ -99,7 +99,24 @@ public:
 private:
   using base_client_t = x23::SRpcMulticlient<x23::RpcLogger>::ClientRef;
   using client_t = DatabaseToExecutorInterfaceV1::client<base_client_t>;
-  client_t client_;
+
+  // Runtime shard selection: returns the index of the shard that owns `key`.
+  // Routes by account address so all of an address's items co-locate. With a
+  // single shard this is always 0.
+  size_t look_up_shard(AddressAndKey const &key) const;
+
+  // The client for the shard that owns `key` (per-key routing, by address).
+  client_t &client_for(AddressAndKey const &key);
+  // The client for the shard that owns `addr` (routing by account address).
+  // Address-keyed records (e.g. deployment metadata) must be read from the same
+  // shard try_push_new_subtransaction wrote them to.
+  client_t &client_for(ContractAddress const &addr);
+  // The client for the primary shard (shard 0). Used by global/keyless requests
+  // (db tip, viewing snapshots) and content-addressed lookups (contracts).
+  client_t &client_for();
+
+  // One client per discovered db shard (see ShardedDB::shards_).
+  std::vector<client_t> clients_;
 };
 
 // A DatabaseProxy that is scoped to a single transaction.

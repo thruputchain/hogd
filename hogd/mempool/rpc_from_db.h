@@ -65,6 +65,25 @@ public:
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
     CHECK_PTR(scheduler_.get());
+
+    // Wait until every db shard has loaded genesis before reading hog ages:
+    // the first shard's block-0 deltas route to accounts on shards that have
+    // not run genesis yet, which would otherwise read an empty shard and fail.
+    // The barrier stays open once set, so steady-state blocks do not wait.
+    while (!scheduler_->all_shards_genesis_ready_.load()) {
+      co_await scheduler_->all_shards_genesis_ready_.wait(false);
+    }
+
+    // The barrier also opens if the genesis fan-out *failed* on a shard (so we
+    // do not hang forever); the db is then half-initialized, so drop the
+    // transfer rather than trip the missing-hog-age CHECK. The run is aborting.
+    if (scheduler_->genesis_load_failed_.load(std::memory_order_acquire)) {
+      info("[MempoolDbRpc::handle_transfer] genesis load failed on a shard; "
+           "dropping transfer for block {} (run is aborting).",
+           transfers.block);
+      co_return;
+    }
+
     co_await scheduler_->process_transfers(transfers);
 
     // We write the hog ages to the database down here because we need to update
@@ -85,8 +104,17 @@ public:
     // commit either.
     co_await scheduler_->write_all_average_hog_ages_to_db();
 
-    scheduler_->transfer_finished_.store(transfers.block);
-    scheduler_->transfer_finished_.broadcast(&default_threadpool());
+    // scheduler_lock_ is still held here: `cg` was moved in from
+    // scheddb_hogs_transferred and is released only at the end of this
+    // function, so every shard's handle_transfer runs serially. That is what
+    // serializes record_shard_transfer_finished (and the transfer_finished_
+    // update below) across shards -- do not release cg earlier without adding a
+    // lock here. Apply each shard's slice above as it arrives, but advance the
+    // barrier only once every shard has reported this block.
+    if (scheduler_->record_shard_transfer_finished(transfers.block)) {
+      scheduler_->transfer_finished_.store(transfers.block);
+      scheduler_->transfer_finished_.broadcast(&default_threadpool());
+    }
     // @geoff to @jhumphri: Do we need the cg = nullptr here? The cg gets
     // dropped automatically by going out of scope at the end of the function
     // body
@@ -109,27 +137,6 @@ public:
 
     CHECK_PTR(scheduler_.get());
     scheduler_.reset();
-  }
-
-  static x23::Async<x23::Vec<db_sched_client_t>> get_clients()
-  {
-    x23::XdrVec<ShardCard> cards;
-    Registration::registration().shards_registered(&cards);
-
-    x23::Vec<db_sched_client_t> ret;
-    ret.reserve(cards.size());
-
-    for (const ShardCard &card : cards) {
-      auto client = co_await create_client<DbSched1>(
-          server_address_to_sockaddr(card.address_for_sched),
-          /*retry=*/false,
-          /*max_message_size=*/kBulkRpcMaxMessageSize);
-      if (!client)
-        panic("rpc_from_db get_clients connect failed: {}",
-              client.error().error_code().message());
-      ret.push_back(std::move(*client));
-    }
-    co_return ret;
   }
 
   void shut_down()
