@@ -842,6 +842,24 @@ TEST_F(Erc20ParityTest, HugeAmountTransferParity)
   EXPECT_EQ(native_record, wasm_record)
       << "native precompile and WASM itc_erc20 diverged on amount > "
          "INT128_MAX";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+}
+
+// amount > INT128_MAX → both backends abort with TooLarge at the conversion,
+// before the allowance debit.
+TEST_F(Erc20ParityTest, HugeAmountTransferFromParity)
+{
+  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+      /*owner_balance=*/1'000, /*allowance=*/1'000,
+      /*transfer_amount=*/uint128_t{1} << 127);
+  EXPECT_EQ(native_record, wasm_record)
+      << "native precompile and WASM itc_erc20 diverged on transfer_from "
+         "amount > INT128_MAX";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
 // transfer_from with sufficient balance but insufficient allowance. The
