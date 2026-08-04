@@ -85,8 +85,10 @@ using CapturedRecord = std::vector<uint8_t>;
 // like itc_erc20, returning ERC20Error::TooLarge when amount > available.
 // The *Parity tests guard all of these behaviors. The remaining divergence
 // test covers the delegated self-transfer (transfer_from with owner == receiver)
-// where the same-key debit and credit net to zero -- that gap is inherent to
-// the genesis token-claim seam and is exercised separately.
+// where the same-key debit and credit net to zero: transfer's balance check is
+// strict and parity-tested; transfer_from's delegated self-transfer is still
+// deferred-netting pending the transfer_from strictness change (see
+// OverBalanceTransferFromSelfDiverges).
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Erc20ParityTest : public ::testing::Test,
                         public NativeContractTestFramework {
@@ -155,8 +157,8 @@ protected:
     // "balance" in ASCII/UTF-8
     static constexpr std::array<uint8_t, 7> kTag = {
         0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65};
-    std::copy(kTag.begin(), kTag.end(), preimage.begin());
-    std::copy(addr.begin(), addr.end(), preimage.begin() + 7);
+    std::ranges::copy(kTag, preimage.begin());
+    std::ranges::copy(addr, preimage.begin() + 7);
     return StorageKeyContractData{sha256(
         std::span<const uint8_t>(preimage.data(), preimage.size()))};
   }
