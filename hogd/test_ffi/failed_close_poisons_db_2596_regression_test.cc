@@ -3,7 +3,7 @@
 // close_syscall_handler() takes ownership of the handler and aborts its
 // still-open transaction. If that implicit abort fails, the function returns
 // kTestFFIErrorCodeUnrecoverableError -- but the handler is still destroyed,
-// which drops the DBContext open-handler guard even though the HogDB InvokeTX
+// which drops the DBContext open-handler guard even though the HogDb InvokeTX
 // may not have been closed. advance_new_block() then saw has_open_handlers()
 // == false and proceeded into the scheduler over orphaned transaction state.
 //

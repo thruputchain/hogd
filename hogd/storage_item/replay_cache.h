@@ -12,7 +12,7 @@ namespace hogd {
 // Address of the initial token claim precompile. The replay cache is disabled
 // for it: it manages replay protection itself, via the exclusive deletes of its
 // stored claim entries, so the executor consumes no uniquifier for a
-// transaction rooted at this address, and HogDB rejects any replay-cache delta
+// transaction rooted at this address, and HogDb rejects any replay-cache delta
 // keyed here as invalid executor behavior. (A replay cache here would also be a
 // DoS vector, since anyone could fill it with failing transactions, which the
 // contract could not prevent.) This mirrors GenesisConfigurationLoader's

@@ -9,10 +9,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
@@ -29,14 +29,14 @@ run_gas_usage_metric(uint32_t num_accounts)
   // Set up test framework (spins up DB server, executor, etc. in-process)
   NativeContractTestFramework framework(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDB, false);
+      TestDB::kHogDb, false);
 
   // Create ERC20 experiment
   auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
       .num_addresses = num_accounts,
   });
 
-  auto context = make_hogexec_context();
+  auto context = make_hog_exec_context();
 
   // Generate experiment (creates genesis configuration and init txs)
   auto init_result = exp.generate_experiment()();
@@ -124,7 +124,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // The commit path (HogexecMetrics::mark_tx_success) increments the executor
   // metric counters unconditionally, so they must be registered first.
-  hogd::init_hogexec_metrics();
+  hogd::init_hog_exec_metrics();
 
   uint32_t num_accounts = 2; // default
 

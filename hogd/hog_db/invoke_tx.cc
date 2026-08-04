@@ -1,0 +1,781 @@
+#include "hogd/hog_db/invoke_tx.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <exception>
+#include <expected>
+#include <optional>
+#include <random>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "address_auth.hh"
+#include "auth_claim.hh"
+#include "contract.hh"
+#include "db_conflict.hh"
+#include "hog_exec_constants.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
+#include "hogd/base/span.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/hog_db/block_tx.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/item_change.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/common/limits.h"
+#include "retrocausal_queue.hh"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/format.h"
+#include "x23/serialize.h"
+
+namespace hogd {
+
+BlockTXRef::~BlockTXRef()
+{
+  if (!active_) {
+    return;
+  }
+  if (arc_->release_reference() && gc_ctx_ != nullptr) {
+    gc_ctx_->remove_shutdown_block_tx(bid_);
+  }
+}
+
+HogDbStatus<int128_t>
+InvokeTX::read_nnint128(const ItemKey &key)
+{
+  const ItemChange *change = read_change(key);
+  if (!change)
+    return block_.get().get_db().read_nnint128(key);
+  if (change->is_deletion())
+    return HogDbError(HogDbCode::kNotFound);
+  std::optional ret = change->to_nnint128();
+  if (!ret)
+    return HogDbError(HogDbCode::kTypeMismatch);
+  return *ret;
+}
+
+HogDbStatus<OwningSpan<const std::byte>>
+InvokeTX::read_bytes(const ItemKey &key)
+{
+  const ItemChange *change = read_change(key);
+  if (!change)
+    return block_.get().get_db().read_bytes(key);
+  if (change->is_deletion())
+    return HogDbError(HogDbCode::kNotFound);
+  OwningSpan<const std::byte> ret = change->to_bytes();
+  if (!ret)
+    return HogDbError(HogDbCode::kTypeMismatch);
+  return ret;
+}
+
+HogDbStatus<Balance>
+InvokeTX::get_storage_balance_change(Address const &addr) const
+{
+  auto bal_it = balance_deltas_.find(addr);
+
+  int128_t delta = 0;
+  if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
+    auto const &bal = bal_it->second;
+    auto [ign, of] = overflowing_sub(bal.back().manual_transfer_amount,
+                                     bal.back().total_locked_storage_amount);
+    if (of) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        trace(
+            "subtraction overflow when computing balance change for address {}",
+            x23::show(contract_addr));
+      }
+      return HogDbError(HogDbCode::kOverflow);
+    }
+    delta = ign;
+  }
+
+  return Balance(delta);
+}
+
+// Is only responsible for updating the lock on the balance item;
+// not for updating anything else
+HogDbStatus<void>
+InvokeTX::update_balance_lock(Address const &addr)
+{
+  last_conflict_reason_.reset();
+
+  // Combines the manual balance transfers with the up-to-now storage cost
+  // to create/apply/update one balance nnint delta.
+  auto storage_change_res = get_storage_balance_change(addr);
+  if (!storage_change_res) {
+    return storage_change_res.error();
+  }
+  auto storage_change = storage_change_res.value();
+  auto new_item = ItemChange(std::move(storage_change));
+
+  auto key = make_address_balance_item_key(addr);
+  auto &change = changes_[key];
+  if (change.empty()) {
+
+    auto status = block_.get().lock(key, new_item, &last_conflict_reason_);
+    if (!status) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        assert(new_item.is_balance());
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
+        trace("failed to lock balance item for address {}: {}",
+              x23::show(contract_addr), *new_item.to_balance());
+        // NOLINTEND(bugprone-unchecked-optional-access)
+      }
+      return status.error();
+    }
+
+    change.emplace_back(std::move(new_item), tx_depth_);
+    return {};
+  }
+
+  auto const &last = change.back();
+  assert(last.tx_depth <= tx_depth_);
+  assert(last.change.is_balance());
+  if (auto r = new_item.narrow(last.change); !r)
+    return r.error();
+
+  assert(last.change.is_balance());
+  assert(new_item.is_balance());
+  assert(new_item.to_balance());
+  assert(last.change.to_balance());
+
+  // Check if the new item is the same as the previous storage lock.
+  // If so, no need to update the lock.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  if (*last.change.to_balance() == *new_item.to_balance()) {
+    return {};
+  }
+
+  auto status = block_.get().modify_lock(key, last.change, new_item,
+                                         &last_conflict_reason_);
+  if (!status) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      // NOLINTBEGIN(bugprone-unchecked-optional-access)
+      auto i = last.change.get_raw_nnint128();
+      if (i)
+        trace("failed to modify lock for address {}: {}",
+              x23::show(contract_addr), *i);
+      else
+        trace("failed to modify lock for address {}: nullopt",
+              x23::show(contract_addr));
+      // NOLINTEND(bugprone-unchecked-optional-access)
+    }
+    return status.error();
+  }
+  assert(last.tx_depth < tx_depth_);
+  change.emplace_back(std::move(new_item), tx_depth_);
+  return {};
+}
+
+void
+InvokeTX::lock_storage(Address const &addr, int128_t cost)
+{
+  auto &bal_stats = balance_deltas_[addr];
+  if (bal_stats.empty()) {
+    bal_stats.emplace_back(
+        StorageBalanceVersion{.manual_transfer_amount = 0,
+                              .total_locked_storage_amount = 0,
+                              .tx_depth = tx_depth_});
+  }
+  else if (bal_stats.back().tx_depth < tx_depth_) {
+    // setup the back with a copy of the current state
+    auto back = bal_stats.back();
+    bal_stats.emplace_back(StorageBalanceVersion{
+        .manual_transfer_amount = back.manual_transfer_amount,
+        .total_locked_storage_amount = back.total_locked_storage_amount,
+        .tx_depth = tx_depth_});
+  }
+  assert(!bal_stats.empty());
+  assert(bal_stats.back().tx_depth == tx_depth_);
+
+  bal_stats.back().total_locked_storage_amount += cost;
+}
+
+HogDbStatus<void>
+InvokeTX::commit()
+{
+  assert_is_valid();
+
+  // Phase 1: commit balance keys first, finalizing their locks so that
+  // release_balance (called in phase 2) can apply post-commit credit.
+  // TODO(geoff): Balance keys currently never produce refunds
+  // (BalanceLock::commit_change returns 0, locked_storage_cost is 0).
+  // Account deletion will break this invariant — when it lands, this
+  // loop will need refund handling and release_balance will need to
+  // handle the case where the balance lock is not yet finalized.
+  HogDbError commit_error{HogDbCode::kInternal};
+  bool failed = false;
+
+  for (auto &[key, vec] : changes_) {
+    if (!vec.empty() && key.is_address_balance()) {
+      auto cost_change =
+          block_.get().commit_change(key, std::move(vec.back().change));
+      if (!cost_change.has_value()) {
+        commit_error = cost_change.error();
+        failed = true;
+        break;
+      }
+      CHECK_EQ(*cost_change, 0);
+      CHECK_EQ(vec.back().locked_storage_cost, 0);
+    }
+  }
+
+  // Phase 2: commit non-balance keys. These may produce storage refunds
+  // that are credited to the (now-finalized) balance locks.
+  if (!failed) {
+    for (auto &[key, vec] : changes_) {
+      if (!vec.empty() && !key.is_address_balance()) {
+        auto cost_change =
+            block_.get().commit_change(key, std::move(vec.back().change));
+        if (!cost_change.has_value()) {
+          commit_error = cost_change.error();
+          failed = true;
+          break;
+        }
+        CHECK_LE(*cost_change, vec.back().locked_storage_cost);
+        // NONDETERMINISTIC: Compute the amount of storage tokens that can be
+        // released after this transaction commits.
+        int128_t released_cost = vec.back().locked_storage_cost - *cost_change;
+        CHECK_GE(released_cost, 0);
+
+        if (released_cost > 0) {
+          block_.get().release_balance(key.get_address(), released_cost);
+        }
+      }
+    }
+  }
+
+  changes_.clear();
+  balance_deltas_.clear();
+
+  if (failed) {
+    block_.get().poison();
+    return commit_error;
+  }
+  return {};
+}
+
+void
+InvokeTX::abort()
+{
+  assert_is_valid();
+
+  for (auto &[key, vec] : changes_) {
+    if (!vec.empty()) {
+      block_.get().unlock(key, vec.back().change);
+    }
+  }
+  changes_.clear();
+  balance_deltas_.clear();
+}
+
+void
+InvokeTX::rollback_to_savepoint(int depth)
+{
+  tx_depth_ = depth;
+  for (auto &[key, vec] : changes_) {
+    // skip if no changes made after savepoint.
+    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
+      continue;
+
+    // revert and erase the history of changes made after savepoint.
+    ItemChange tmp{std::move(vec.back().change)};
+    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
+                                       &ItemVersion::tx_depth),
+              vec.end());
+    if (!vec.empty()) {
+      HogDbStatus<int128_t> ret =
+          block_.get().modify_lock(key, tmp, vec.back().change);
+      if (!ret) [[unlikely]] {
+        // modify_lock only fails here when a committed sibling block pruned
+        // DAO state this restored change depends on (e.g. an RCQ consume's
+        // past block), which also invalidated this block -- so the error is
+        // always kStaleBlock. The block is doomed; stop rolling back and let
+        // the caller observe kStaleBlock on its next locked operation. We leave
+        // both changes_/balance_deltas_ partially rolled back AND the failing
+        // item's lock still holding tmp (the post-savepoint change) while
+        // vec.back() is now the pre-savepoint change -- so ~InvokeTX()->abort()
+        // later unlocks with the "wrong" change. All of this is harmless on a
+        // block that can never commit: get_meta() is cached (the unlock takes
+        // no live DAO read), every sibling tx sharing this lock is also
+        // invalidated, and assert_is_valid() short-circuits once invalidated.
+        // A non-stale failure would be a real invariant violation.
+        assert(ret.error() == HogDbError{HogDbCode::kStaleBlock});
+        return;
+      }
+      assert(vec.back().locked_storage_cost >= *ret);
+      continue;
+    }
+    block_.get().unlock(key, tmp);
+  }
+
+  for (auto &[addr, vec] : balance_deltas_) {
+    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
+                                       &StorageBalanceVersion::tx_depth),
+              vec.end());
+  }
+  assert_is_valid();
+}
+
+void
+InvokeTX::release_savepoint(int depth)
+{
+  assert_is_valid();
+
+  tx_depth_ = std::max(depth - 1, 0);
+  for (auto &[key, vec] : changes_) {
+    // skip if no changes made after savepoint.
+    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
+      continue;
+
+    // retain latest change but erase any history after savepoint.
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_);
+    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
+                                       &ItemVersion::tx_depth),
+              vec.end());
+    if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
+      vec.back().change = std::move(tmp.change);
+      // TODO(geoff): abelay had left this as return; that seems incorrect.
+      continue;
+    }
+    vec.push_back(std::move(tmp));
+  }
+
+  panic("not implemented releasing balance versions");
+}
+
+void
+InvokeTX::request_balance_change(Address const &addr, int128_t delta)
+{
+  auto &bal = balance_deltas_[addr];
+  if (bal.empty()) {
+    bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta,
+                                           .total_locked_storage_amount = 0,
+                                           .tx_depth = tx_depth_});
+  }
+  else if (bal.back().tx_depth < tx_depth_) {
+    bal.emplace_back(
+        StorageBalanceVersion{.manual_transfer_amount = delta,
+                              .total_locked_storage_amount =
+                                  bal.back().total_locked_storage_amount,
+                              .tx_depth = tx_depth_});
+  }
+  else {
+    assert(bal.back().tx_depth == tx_depth_);
+    bal.back().manual_transfer_amount = delta;
+  }
+
+  assert(!bal.empty());
+  assert(bal.back().tx_depth == tx_depth_);
+}
+
+HogDbStatus<void>
+InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
+{
+  last_conflict_reason_.reset();
+
+  assert(!key.is_address_balance());
+  auto it = changes_.try_emplace(key).first;
+  std::vector<ItemVersion> &v = it->second;
+
+  // this is the first change for this key; try to acquire a lock on the item.
+  if (v.empty()) {
+    HogDbStatus<int128_t> ret =
+        block_.get().lock(key, change, &last_conflict_reason_);
+    if (!ret) {
+      // A failed first-time admission must not leave a retained empty entry
+      // behind: rollback_to_savepoint() skips empty vectors and would never
+      // prune it (#3111). Erase through the iterator we already hold -- no
+      // extra hash lookup -- so the hot path stays a single map operation.
+      changes_.erase(it);
+      return ret.error();
+    }
+
+    assert(*ret >= 0 || change.is_permanent_exclusive());
+    int128_t marginal_storage = *ret;
+
+    v.emplace_back(std::move(change), tx_depth_);
+    // now lock the storage
+    if (marginal_storage != 0) {
+      lock_storage(key.get_address(), marginal_storage);
+      v.back().locked_storage_cost = marginal_storage;
+    }
+
+    return {};
+  }
+
+  // otherwise it is an existing change, so the item is already locked.
+  ItemVersion &item = v.back();
+  if (auto r = change.narrow(item.change); !r)
+    return r.error();
+  HogDbStatus<int128_t> ret = block_.get().modify_lock(key, item.change, change,
+                                                       &last_conflict_reason_);
+  if (!ret) {
+    return ret.error();
+  }
+
+  int128_t previous_locked_storage = item.locked_storage_cost;
+
+  assert(*ret >= 0 || change.is_permanent_exclusive());
+  int128_t marginal_storage = *ret - previous_locked_storage;
+
+  if (item.tx_depth == tx_depth_) {
+    item.change = std::move(change);
+  }
+  else {
+    assert(item.tx_depth < tx_depth_);
+    v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
+  }
+
+  // It's ok if marginal storage is negative;
+  // that means we're releasing storage costs relative to the prior locked
+  // storage. Note that locking a positive value in a balance does NOT make that
+  // balance immediately available to other transactions, so this is safe to do.
+  // Additionally, the NNInt item preserves (via narrow()) the invariant that
+  // we'll always be able to rollback to a prior saved state, so releasing
+  // storage costs that were locked earlier in the tx is safe. Because *ret >=
+  // 0, we won't ever release storage costs that we didn't lock up in this
+  // transaction.
+
+  // now to lock the storage
+  if (marginal_storage != 0) {
+    lock_storage(key.get_address(), marginal_storage);
+    v.back().locked_storage_cost = *ret;
+  }
+
+  return {};
+}
+
+HogDbStatus<void>
+InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
+                           StorageDeltaFlagSet flags)
+{
+  assert(!key.is_address_balance());
+  // validate the nnint128. We can't assume it's in a valid state even if there
+  // is not a conflict with another change because the executor may not know
+  // the current base value.
+  auto [sum, of] = overflowing_add(base, delta);
+  if (of) [[unlikely]] {
+    return HogDbError(HogDbCode::kOverflow);
+  }
+  if (sum < std::min<int128_t>(base, 0)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
+    return HogDbError(HogDbCode::kConflict);
+  }
+
+  // nnint128 is valid; now try to request the change.
+  auto change = ItemChange(NNInt128{base, delta});
+  if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
+}
+
+HogDbStatus<void>
+InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
+                           StorageDeltaFlagSet flags)
+{
+  if (key.is_address_balance()) {
+    if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
+      return HogDbError(HogDbCode::kConflict);
+    }
+    request_balance_change(key.get_address(), delta);
+    return {};
+  }
+  assert(!key.is_address_balance());
+
+  HogDbStatus<int128_t> base = block_.get().read_nnint128_base(key);
+  if (!base) {
+    assert(base.error() != HogDbCode::kTypeMismatch &&
+           base.error() != HogDbCode::kNotFound);
+    return base.error();
+  }
+  return request_nnint128(key, *base, delta, flags);
+}
+
+HogDbStatus<void>
+InvokeTX::request_auth_data(Address const &addr,
+                            const AuthDataChangeArgs &auth_data_change,
+                            StorageDeltaFlagSet flags)
+{
+  auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
+  if (!base_auth_data) {
+    if (base_auth_data.error() != HogDbCode::kNotFound) {
+      return base_auth_data.error();
+    }
+    base_auth_data = AddressAuthData{};
+  }
+
+  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
+  for (const auto &signer : auth_data_change.auth_data_change_signers) {
+    if (signer.public_key_id >= kMaxSigners) {
+      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
+      return HogDbError(HogDbCode::kConflict);
+    }
+    auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
+  }
+  if (auth_data_change.new_required_weight) {
+    auth_data_item.set_new_required_weight(
+        *auth_data_change.new_required_weight);
+  }
+  auto change = ItemChange(std::move(auth_data_item));
+  if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  // request_change can fail with kConflict (lock contention from another tx
+  // in the same block) or kStaleBlock (a sibling block committed and changed
+  // the auth base out from under us, detected in AuthDataItem::narrow()).
+  auto ret =
+      request_change(make_address_auth_data_item_key(addr), std::move(change));
+  if (!ret) {
+    CHECK(ret.error().code() == HogDbCode::kStaleBlock ||
+          ret.error().code() == HogDbCode::kConflict);
+  }
+  return ret;
+}
+
+HogDbStatus<void>
+InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
+                                     StorageDeltaFlagSet flags)
+{
+  // We do not support setting exclusive locks on replay cache items;
+  // consuming a nonce is already a unique event.
+  if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
+    return HogDbError(HogDbCode::kConflict);
+  }
+
+  return request_change(make_replay_cache_item_key(addr),
+                        ReplayCacheIt{uniquifier});
+}
+
+HogDbStatus<void>
+InvokeTX::request_retrocausal_queue(const ItemKey &key,
+                                    RetrocausalQueueDelta &&delta,
+                                    StorageDeltaFlagSet flags)
+{
+  auto change = ItemChange(RetrocausalQueueIt(std::move(delta)));
+  if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
+}
+
+DbConflictCode
+InvokeTX::conflict_reason_for(HogDbCode code) const
+{
+  if (code == HogDbCode::kOverflow) {
+    return DbConflictCode::kDbConflictOverflow;
+  }
+  CHECK(code == HogDbCode::kConflict);
+  // CHECK below guarantees last_conflict_reason_ has a value.
+  CHECK(last_conflict_reason_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return *last_conflict_reason_;
+}
+
+HogDbStatus<void>
+InvokeTX::sync_balance_locks(ContractAddress *first_conflicting_addr,
+                             std::vector<BalanceConflict> *all_conflicts)
+{
+  std::optional<HogDbError> first_error;
+
+  if constexpr (is_debug_build()) {
+    std::vector<const Address *> addrs;
+    for (const auto &[addr, vec] : balance_deltas_) {
+      if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
+        addrs.push_back(&addr);
+      }
+    }
+    std::shuffle(addrs.begin(), addrs.end(),
+                 std::mt19937{std::random_device{}()});
+    for (const auto *addr : addrs) {
+      auto status = update_balance_lock(*addr);
+      if (!status) {
+        HogDbCode code = status.error().code();
+        if (all_conflicts != nullptr &&
+            (code == HogDbCode::kConflict || code == HogDbCode::kOverflow)) {
+          all_conflicts->push_back(
+              BalanceConflict{.addr = addr->get_raw(),
+                              .reason = conflict_reason_for(code)});
+          if (!first_error.has_value()) {
+            first_error = status.error();
+          }
+          continue;
+        }
+        if (first_conflicting_addr != nullptr) {
+          *first_conflicting_addr = addr->get_raw();
+        }
+        return status.error();
+      }
+    }
+  }
+  else {
+    for (const auto &[addr, vec] : balance_deltas_) {
+      if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
+        auto status = update_balance_lock(addr);
+        if (!status) {
+          HogDbCode code = status.error().code();
+          if (all_conflicts != nullptr &&
+              (code == HogDbCode::kConflict || code == HogDbCode::kOverflow)) {
+            all_conflicts->push_back(
+                BalanceConflict{.addr = addr.get_raw(),
+                                .reason = conflict_reason_for(code)});
+            if (!first_error.has_value()) {
+              first_error = status.error();
+            }
+            continue;
+          }
+          if (first_conflicting_addr != nullptr) {
+            *first_conflicting_addr = addr.get_raw();
+          }
+          return status.error();
+        }
+      }
+    }
+  }
+
+  if (first_error.has_value()) {
+    return std::unexpected{*first_error};
+  }
+
+  assert_is_valid();
+  return {};
+}
+
+void
+InvokeTX::assert_is_valid() const noexcept
+{
+  // A block invalidated by a committed sibling can be left with intentionally
+  // inconsistent internal accounting: rollback_to_savepoint bails out early
+  // when restoring a change fails against now-pruned DAO state, partially
+  // rolling back changes_/balance_deltas_. Such a block is discarded without
+  // committing, so its accounting invariants no longer need to hold.
+  if (block_.get().is_invalidated()) {
+    return;
+  }
+  assert(tx_depth_ >= 0);
+  assert(tx_depth_ <= kMaxSavepointDepth);
+  if constexpr (is_debug_build()) {
+    try {
+      std::unordered_map<Address, int128_t> balance_deltas;
+      for (const auto &[key, vec] : changes_) {
+        [[maybe_unused]] unsigned int depth = 0;
+        for (const ItemVersion &item : vec) {
+          assert(item.tx_depth >= depth);
+          assert(item.tx_depth <= tx_depth_);
+          depth = item.tx_depth + 1;
+        }
+        if (!vec.empty()) {
+          balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+        }
+      }
+      for (const auto &[addr, vec] : balance_deltas_) {
+        if (!vec.empty()) {
+          assert(vec.back().total_locked_storage_amount ==
+                 balance_deltas[addr]);
+        }
+        else {
+          assert(balance_deltas[addr] == 0);
+        }
+      }
+
+      // Verify that balance changes in changes_ match what's expected from
+      // balance_deltas_
+      for (const auto &[key, vec] : changes_) {
+        if (key.is_address_balance() && !vec.empty()) {
+          const ItemVersion &item = vec.back();
+          assert(item.change.is_balance());
+          [[maybe_unused]]
+          auto balance = item.change.to_balance();
+          assert(balance);
+
+          Address addr = key.get_address();
+          auto bal_it = balance_deltas_.find(addr);
+          if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
+            const auto &bal = bal_it->second.back();
+            [[maybe_unused]]
+            const int128_t expected_delta =
+                bal.manual_transfer_amount - bal.total_locked_storage_amount;
+            assert(balance->delta() == expected_delta);
+          }
+          else {
+            // No balance_deltas_ entry means no storage costs or transfers
+            assert(balance->delta() == 0);
+          }
+        }
+      }
+
+      // Verify the reverse: for every address in balance_deltas_, there should
+      // be a corresponding balance item in changes_ with the correct delta
+      for (const auto &[addr, vec] : balance_deltas_) {
+        if (!vec.empty()) {
+          auto key = make_address_balance_item_key(addr);
+          auto it = changes_.find(key);
+          if (it == changes_.end() || it->second.empty()) {
+            [[maybe_unused]]
+            auto const &bal = vec.back();
+            assert(bal.manual_transfer_amount -
+                       bal.total_locked_storage_amount ==
+                   0);
+            continue;
+          }
+          assert(it != changes_.end());
+          assert(!it->second.empty());
+
+          const ItemVersion &item = it->second.back();
+          assert(item.change.is_balance());
+          [[maybe_unused]]
+          auto balance = item.change.to_balance();
+          assert(balance);
+
+          const auto &bal = vec.back();
+          [[maybe_unused]]
+          const int128_t expected_delta =
+              bal.manual_transfer_amount - bal.total_locked_storage_amount;
+          assert(balance->delta() == expected_delta);
+        }
+      }
+    } catch (...) {
+      std::terminate();
+    }
+  }
+}
+
+HogDbStatus<void>
+InvokeTX::request_new_contract(Contract contract)
+{
+  // hog_exec rejects attached contract blobs above kMaxContractSizeBytes in
+  // perform_initial_validation(), before execution, and storage stores any
+  // legal row (chunked across RAMDB items if necessary; see
+  // for_each_wasm_code_item). A serialized row above the bound here
+  // therefore means the executor is misbehaving, not that the contract is
+  // merely large. xdr_size computes the serialized length without
+  // allocating; it equals the byte count NewContractLock stages.
+  if (x23::xdr_size(contract) > kMaxSerializedContractBytes)
+    return HogDbError(HogDbCode::kInvalidExecutorBehavior);
+
+  // One-byte chunk indexes must cover the largest row hog_db accepts.
+  static_assert((kMaxSerializedContractBytes + kWasmCodeChunkPayloadSize - 1) /
+                    kWasmCodeChunkPayloadSize <=
+                255);
+
+  // hash is computed outside make_contract_code_item_key to dodge an
+  // observed gcc-CI miscompile.
+  auto hash = sha256(contract);
+  return request_change(make_contract_code_item_key(hash),
+                        NewContractData(std::move(contract)));
+}
+
+} // namespace hogd

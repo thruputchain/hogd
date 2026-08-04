@@ -8,20 +8,20 @@ HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 # loadgen_server="hog3"
 # chuckd_server="hog3"
 # mempool_server="hog3"
-# hogexec_servers=("hog1" "hog2")
+# hog_exec_servers=("hog1" "hog2")
 # event_server="hog1"
 # indexer_server="hog1"
-# hogdb_servers=("hog1")
+# hog_db_servers=("hog1")
 # auth_server="hog1"
 
 # CI configuration.
 loadgen_server="hog7"
 chuckd_server="hog4"
 mempool_server="hog10"
-hogexec_servers=("hog5" "hog6")
+hog_exec_servers=("hog5" "hog6")
 event_server="hog9"
 indexer_server="hog9"
-hogdb_servers=("hog11")
+hog_db_servers=("hog11")
 auth_server="hog8"
 logdir=/tmp/$(whoami)
 
@@ -75,17 +75,17 @@ CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
 CHUCKD_BINARY=${HOGD_BUILD_DIR}/chuckd.dev
 CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
 SCPD_BINARY=${HOGD_BUILD_DIR}/scpd.dev
-MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
-EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
-INDEXER_BINARY=${HOGD_BUILD_DIR}/hogd/indexer/indexer_exec
-HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
-HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
-AUTH_BINARY=${HOGD_BUILD_DIR}/hogd/auth/auth_exec
+MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/hog_mempool/hog-mempool
+EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/hog_event/hog-event
+INDEXER_BINARY=${HOGD_BUILD_DIR}/hogd/hog_indexer/hog-indexer
+HOG_EXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hog_exec/hog-exec
+HOG_DB_BINARY=${HOGD_BUILD_DIR}/hogd/hog_db/hog-db
+AUTH_BINARY=${HOGD_BUILD_DIR}/hogd/hog_auth/hog-auth
 
-procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "indexer_exec" "hogdb" "auth_exec")
+procs=("loadgen_server" "chuckd.dev" "scpd.dev" "hog-mempool" "hog-exec" "hog-event" "hog-indexer" "hog-db" "hog-auth")
 
-binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$INDEXER_BINARY" "$HOGDB_BINARY")
-all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "$indexer_server" "${hogdb_servers[@]}" "${auth_server}")
+binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOG_EXEC_BINARY" "$EVENT_BINARY" "$INDEXER_BINARY" "$HOG_DB_BINARY")
+all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hog_exec_servers[@]}" "$event_server" "$indexer_server" "${hog_db_servers[@]}" "${auth_server}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -240,10 +240,10 @@ echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" --bind-ip "$(hog_ip "$loadgen_server")" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
 
-# Start hogexec.
-echo "Start hogexec..."
-for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+# Start hog-exec.
+echo "Start hog-exec..."
+for s in "${hog_exec_servers[@]}"; do
+  remote_launch "$s" "$HOG_EXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 done
 
 # Start event.
@@ -259,15 +259,15 @@ fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
   --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
-# Start hogdb.
-echo "Start hogdb..."
-for s in "${hogdb_servers[@]}"; do
+# Start hog-db.
+echo "Start hog-db..."
+for s in "${hog_db_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
   if $delete_db; then
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hog-db.data"
   fi
-  remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+  remote_launch "$s" "$HOG_DB_BINARY" \
+    --db-path "$logdir/hog-db.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 done
 
 # Start auth.
@@ -281,7 +281,7 @@ remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   --bind-ip "$(hog_ip "$mempool_server")" \
   --metrics-port $MEMPOOL_HTTP_PORT \
   --network-hash 0000000000000000000000000000000000000000000000000000000000000000 \
-  --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
+  --num-db-shards ${#hog_db_servers[@]} --num-exec-shards ${#hog_exec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
 
 # Launch chuckd.
@@ -317,8 +317,8 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
 # [$LOADGEN_HTTP_PORT].
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$loadgen_server")" $LOADGEN_HTTP_PORT
 
-# Wait for hogexec.
-for s in "${hogexec_servers[@]}"; do
+# Wait for hog-exec.
+for s in "${hog_exec_servers[@]}"; do
   "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $EXECUTOR_MEMPOOL_PORT
   "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $EXECUTOR_HTTP_PORT
 done
@@ -334,8 +334,8 @@ done
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
 
-# Wait for hogdb.
-for s in "${hogdb_servers[@]}"; do
+# Wait for hog-db.
+for s in "${hog_db_servers[@]}"; do
   "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_EXECUTOR_PORT
   "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_MEMPOOL_PORT
   "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$s")" $DB_AUTH_PORT
@@ -376,26 +376,26 @@ else
     sed "s/^/[${chuckd_server}\/scpd] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
-    "tail -n +1 -f $logdir/mempool_exec.log" | sed "s/^/[${mempool_server}\/mempool] /" &
+    "tail -n +1 -f $logdir/hog-mempool.log" | sed "s/^/[${mempool_server}\/mempool] /" &
 
-  for s in "${hogexec_servers[@]}"; do
+  for s in "${hog_exec_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "tail -n +1 -f $logdir/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
+      "tail -n +1 -f $logdir/hog-exec.log" | sed "s/^/[${s}\/hog-exec] /" &
   done
 
   ssh "${COMMON_SSH_OPTS[@]}" "$event_server" \
-    "tail -n +1 -f $logdir/event_exec.log" | sed "s/^/[${event_server}\/event] /" &
+    "tail -n +1 -f $logdir/hog-event.log" | sed "s/^/[${event_server}\/event] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" \
-    "tail -n +1 -f $logdir/indexer_exec.log" | sed "s/^/[${indexer_server}\/indexer] /" &
+    "tail -n +1 -f $logdir/hog-indexer.log" | sed "s/^/[${indexer_server}\/indexer] /" &
 
-  for s in "${hogdb_servers[@]}"; do
+  for s in "${hog_db_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "tail -n +1 -f $logdir/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
+      "tail -n +1 -f $logdir/hog-db.log" | sed "s/^/[${s}\/hog-db] /" &
   done
 
   ssh "${COMMON_SSH_OPTS[@]}" "$auth_server" \
-    "tail -n +1 -f $logdir/auth_exec.log" | sed "s/^/[${auth_server}\/auth] /" &
+    "tail -n +1 -f $logdir/hog-auth.log" | sed "s/^/[${auth_server}\/auth] /" &
 fi
 
 ssh_pids=($(jobs -pr))

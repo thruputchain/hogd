@@ -24,5 +24,5 @@ runs:
       shell: bash
     - name: stop any running processes
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
       shell: bash

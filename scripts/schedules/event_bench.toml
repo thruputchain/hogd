@@ -18,12 +18,12 @@ source ./scripts/ci/prepare_env.sh
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
 
-echo 'clear hogdb file directory'
+echo 'clear hog-db file directory'
 rm -r ./ci_work_dir/ || true
 mkdir -p ci_work_dir/
 
 echo 'run bench server'
-./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
+./release/hogd/hog_exec/bench/control_server -p 11111 -w ci_work_dir/
 
 """
 
@@ -74,7 +74,7 @@ echo 'commit metrics'
 after = """
 
 echo 'shut down bench server'
-./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+./release/hogd/hog_exec/bench/control_cli hog11 11111 shutdown
 
 """
 

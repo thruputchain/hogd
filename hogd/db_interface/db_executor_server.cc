@@ -27,7 +27,7 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
   if constexpr (is_debug_build()) {
     check_delta_type(addrkey.key.key_type(), delta.type());
   }
-  // Reject exclusive locks on replay cache items (match HogDB behavior).
+  // Reject exclusive locks on replay cache items (match HogDb behavior).
   if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier &&
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
     return false;
@@ -35,11 +35,11 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
   // MockInMemory does not implement the replay cache (it is being removed).
   // Accept-and-drop consume-uniquifier deltas so a transaction that consumes
   // its nonce still commits against the mock; replay semantics (dedup, expiry,
-  // capacity) are verified against HogDB only.
+  // capacity) are verified against HogDb only.
   if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier) {
     return true;
   }
-  // Reject exclusive locks on balance keys (match HogDB behavior).
+  // Reject exclusive locks on balance keys (match HogDb behavior).
   if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance &&
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
     return false;
@@ -85,7 +85,7 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   block_data->push_subtransaction(tx);
 
   if constexpr (is_debug_build()) {
-    // Invariant: hogexec sends at most one delta per key per subtransaction.
+    // Invariant: hog_exec sends at most one delta per key per subtransaction.
     std::set<AddressAndKey> seen_keys;
     for (auto const &delta : batch) {
       auto [_, inserted] = seen_keys.insert(delta.addrkey);

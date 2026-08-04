@@ -13,7 +13,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/test_main.h"
+#include "hogd/hog_exec/test_main.h"
 #include "types.hh"
 
 namespace hogd {
@@ -243,5 +243,5 @@ TEST_F(GenesisBlockTest, MultipleEntries)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  return hogd::run_hogexec_tests(argc, argv);
+  return hogd::run_hog_exec_tests(argc, argv);
 }

@@ -24,10 +24,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -138,11 +138,11 @@ lazy_init() noexcept
     static std::mutex init_mutex;
     std::lock_guard lock(init_mutex);
     static bool initialized = false;
-    // init_hogexec_metrics() registers several metrics and is not atomic: if it
-    // throws partway (e.g. bad_alloc mid-registration) it leaves the executor
-    // component partially populated with done_with_init still false. A naive
-    // retry would re-register a duplicate name and trip init_metric()'s CHECK
-    // (an abort, defeating this noexcept initializer's structured-error
+    // init_hog_exec_metrics() registers several metrics and is not atomic: if
+    // it throws partway (e.g. bad_alloc mid-registration) it leaves the
+    // executor component partially populated with done_with_init still false. A
+    // naive retry would re-register a duplicate name and trip init_metric()'s
+    // CHECK (an abort, defeating this noexcept initializer's structured-error
     // contract). Latch that as a permanent failure and keep reporting it
     // instead of retrying into the abort.
     static bool metrics_init_failed = false;
@@ -162,12 +162,12 @@ lazy_init() noexcept
       // (HogexecMetrics::mark_tx_*), so a committing entry point trips Metrics'
       // done_with_init CHECK unless those metrics are registered first. Guarded
       // because a host that already initialized them (e.g. a test main calling
-      // init_hogexec_metrics()) must not double-initialize: init_metric()
+      // init_hog_exec_metrics()) must not double-initialize: init_metric()
       // asserts the component is not yet marked done.
       if (!Metrics::instance().done_with_init(
               Metrics::ComponentName::kExecutor)) {
         metrics_init_failed = true; // pessimistic; cleared only on full success
-        init_hogexec_metrics();
+        init_hog_exec_metrics();
         metrics_init_failed = false;
       }
       initialized = true;
@@ -377,7 +377,7 @@ advance_new_block(void *db) noexcept
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // A prior close_syscall_handler() failed to confirm closure of its HogDB
+  // A prior close_syscall_handler() failed to confirm closure of its HogDb
   // transaction and poisoned this DB (issue #2596). The open-handler guard is
   // gone, but an orphaned InvokeTX may still hold a BlockTX open, so advancing
   // (which closes/commits the current snapshot and opens a new one) is unsafe.
@@ -410,11 +410,11 @@ open_runtime_context() noexcept
   }
   try {
     // Own the wrapper slot via unique_ptr until construction fully succeeds, so
-    // a throw from make_shared() (or make_hogexec_context()) after the slot is
+    // a throw from make_shared() (or make_hog_exec_context()) after the slot is
     // allocated does not leak it. The honest C caller gets a null handle on
     // failure and has no way to free the slot itself (issue #2506).
     auto out = std::make_unique<std::shared_ptr<hogd::MockRuntimeContext>>();
-    *out = std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+    *out = std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
     CHECK(*out != nullptr);
     return {.context = out.release(), .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
@@ -611,7 +611,7 @@ close_syscall_handler(void *syscall_handler) noexcept
 
   // Reference the borrowed DB before taking ownership: if the implicit abort
   // below fails (or throws), the handler -- and with it its open-handler guard
-  // -- is destroyed, but the HogDB InvokeTX may still be open. Poison the DB's
+  // -- is destroyed, but the HogDb InvokeTX may still be open. Poison the DB's
   // lifecycle through this reference so advance_new_block() cannot proceed past
   // the now-absent guard into the scheduler over orphaned transaction state
   // (issue #2596). The DBContext is owned by the caller and outlives the
