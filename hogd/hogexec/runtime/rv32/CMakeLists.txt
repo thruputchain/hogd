@@ -33,12 +33,16 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
+# x23 is for CHECK() in artifact.cc (hogd/base/log.h -> x23::panic): a digest
+# that cannot be computed must stop the node, not become an artifact-level
+# error. The dependency-narrow rule above binds rv32_isa_core, not this target.
 target_link_libraries(
   rv32_vm
   PUBLIC
   rv32_isa_core
   PRIVATE
   OpenSSL::Crypto
+  x23
 )
 
 add_library(
@@ -374,6 +378,7 @@ if(BUILD_FUZZERS)
     rv32_isa_core_fuzz
     PRIVATE
     OpenSSL::Crypto
+    x23
   )
   target_compile_options(rv32_vm_fuzz PRIVATE
     -fsanitize=fuzzer-no-link,address)

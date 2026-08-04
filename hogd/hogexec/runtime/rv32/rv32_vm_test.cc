@@ -7,7 +7,6 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <random>
 #include <span>
 #include <string>
@@ -261,14 +260,11 @@ TEST(Rv32MachineYieldApi, startResumeMatchesRunForSameHost)
 }
 
 std::string
-digest_hex(const std::optional<ArtifactDigest> &digest)
+digest_hex(const ArtifactDigest &digest)
 {
-  if (!digest.has_value()) {
-    return "<digest computation failed>";
-  }
   static constexpr std::string_view kHex = "0123456789abcdef";
   std::string out;
-  for (const uint8_t byte : *digest) {
+  for (const uint8_t byte : digest) {
     out += kHex[byte >> 4U];
     out += kHex[byte & 0x0FU];
   }
@@ -285,8 +281,8 @@ ascii_bytes(std::string_view text)
 // consensus-visible: every validator must derive the same bytes from the same
 // section, or the same artifact is admitted on some nodes and rejected on
 // others. Pin artifact_digest() to the published SHA-256 vectors so a swap of
-// the underlying digest call that changes those bytes -- or silently fails to
-// produce them -- fails here instead of in consensus. Regression test for hogd
+// the underlying digest call that changes those bytes fails here instead of in
+// consensus. Regression test for hogd
 // issue #2696, where a failing one-shot OpenSSL SHA256() left the digest all
 // zeros and so admitted artifacts carrying all-zero section digests.
 TEST(Rv32ArtifactTest, computesCanonicalSha256SectionDigests)
@@ -496,8 +492,7 @@ TEST(Rv32ArtifactTest, rejectsDigestAndProgramErrors)
     const auto code =
         std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
                                                    code_size);
-    store_digest_at(artifact, kArtifactCodeDigestOffset,
-                    test_artifact::require_digest(code));
+    store_digest_at(artifact, kArtifactCodeDigestOffset, artifact_digest(code));
     expect_artifact_error(std::move(artifact), ArtifactError::kInvalidProgram);
   }
   {

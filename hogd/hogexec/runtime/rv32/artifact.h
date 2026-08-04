@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <optional>
 #include <span>
 #include <vector>
 
@@ -313,11 +312,11 @@ struct ThreadedArtifactImage {
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
-// Canonical SHA-256 over one artifact section. nullopt means the digest could
-// not be computed at all; callers must treat that as a parse failure, never as
-// a digest value (hogd issue #2696).
+// Canonical SHA-256 over one artifact section. Infallible by construction:
+// if the underlying digest cannot be computed the process dies rather than
+// returning a value the caller might mistake for a real digest (hogd #2696).
 [[nodiscard]]
-std::optional<ArtifactDigest> artifact_digest(std::span<const uint8_t> bytes);
+ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
