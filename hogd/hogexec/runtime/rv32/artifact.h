@@ -312,6 +312,9 @@ struct ThreadedArtifactImage {
   uint32_t memory_bytes = kMaxMemoryBytes;
 };
 
+// Canonical SHA-256 over one artifact section. Infallible by construction:
+// if the underlying digest cannot be computed the process dies rather than
+// returning a value the caller might mistake for a real digest (hogd #2696).
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
