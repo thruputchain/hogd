@@ -624,8 +624,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
 // mirroring itc_erc20's try_strict_inc. The allowance is checked against its
 // committed snapshot value at the point of the add (not deferred to commit),
 // so an increment that would push the committed allowance above INT128_MAX is
-// aborted immediately and leaves the prior allowance intact. (Balance, unlike
-// allowance, stays deferred -- see erc20_parity_test.cc for that gap.)
+// aborted immediately and leaves the prior allowance intact. (Balance checks
+// are also strict; see erc20_parity_test.cc for parity coverage.)
 TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(190);

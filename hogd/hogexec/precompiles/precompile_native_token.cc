@@ -174,7 +174,7 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     return false;
   }
   int128_t new_add = output_add + amount;
-  // Strict non-negativity on the committed base + accumulated increments.
+  // Strict non-negativity on the committed base + net in-tx delta.
   if (integer_add_overflow(output_set, new_add) || (output_set + new_add) < 0) {
     return false;
   }
@@ -225,7 +225,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
 
   // Strict per-debit check mirroring itc_erc20's add_to_balance /
   // non_negative_int_try_strict_inc: the running balance (committed base +
-  // in-tx increments) may not go below zero. A debit landing exactly at
+  // net in-tx delta) may not go below zero. A debit landing exactly at
   // zero is accepted -- the reference's only rejection is `total < 0`.
   auto owner_avail = ctx.handler().get_native_token_balance(*owner);
   if (!owner_avail.has_value()) {
@@ -241,27 +241,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  // Credit-leg overflow, mirroring the reference's checked add on the
-  // receiver's running balance. The reference evaluates it after the debit,
-  // so a self-transfer checks against the post-debit value. Unreachable
-  // while the total supply fits in int128_t; kept for exactness.
-  int128_t receiver_avail{};
-  if (receiver == *owner) {
-    receiver_avail = owner_avail.value().value() - amount_signed_int;
-  }
-  else {
-    auto r_avail = ctx.handler().get_native_token_balance(receiver);
-    if (!r_avail.has_value()) {
-      return r_avail.error().to_invoke_error();
-    }
-    if (!r_avail.value().has_value()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    receiver_avail = r_avail.value().value();
-  }
-  if (integer_add_overflow(receiver_avail, amount_signed_int)) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
+  // No credit-side overflow check: total supply (~2^59) keeps any reachable
+  // receiver balance + amount far below INT128_MAX, so the reference's
+  // checked add on the credit leg cannot fire. HogDB's commit-time
+  // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved = native_token_unchecked_transfer(ctx.handler(), *owner,
                                                    receiver, amount_signed_int);
@@ -328,7 +311,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
 
   // Strict per-debit balance check; see transfer_impl for the semantics
-  // (fail iff amount > committed base + in-tx increments; exact-zero
+  // (fail iff amount > committed base + net in-tx delta; exact-zero
   // landings succeed).
   auto owner_avail = ctx.handler().get_native_token_balance(owner);
   if (!owner_avail.has_value()) {
@@ -344,25 +327,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  // Credit-leg overflow; self-transfer checks the post-debit value. See
-  // transfer_impl.
-  int128_t receiver_avail{};
-  if (receiver == owner) {
-    receiver_avail = owner_avail.value().value() - amount_signed_int;
-  }
-  else {
-    auto r_avail = ctx.handler().get_native_token_balance(receiver);
-    if (!r_avail.has_value()) {
-      return r_avail.error().to_invoke_error();
-    }
-    if (!r_avail.value().has_value()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    receiver_avail = r_avail.value().value();
-  }
-  if (integer_add_overflow(receiver_avail, amount_signed_int)) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
+  // No credit-side overflow check: total supply (~2^59) keeps any reachable
+  // receiver balance + amount far below INT128_MAX, so the reference's
+  // checked add on the credit leg cannot fire. HogDB's commit-time
+  // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
                                                    receiver, amount_signed_int);
@@ -485,7 +453,9 @@ native_token_unchecked_transfer(SystemCallHandler &handler,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
 {
-  CHECK(amount >= 0);
+  if (amount < 0) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
   auto r1 = handler.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
